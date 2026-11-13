@@ -1,0 +1,10 @@
+{
+  "_about": "Made-up companies for the page tests, in the shape the snl-filings function answers {action: \"resolve\"} with.",
+  "query": "Calloway",
+  "matches": [
+    { "companyId": "4000001", "companyName": "Calloway Insurance Co", "naicCompanyCode": "90001", "institutionId": "5000001", "spStatEntityId": "C90001", "naicGroupCode": "9001", "naicGroupName": "Calloway Group" },
+    { "companyId": "4000002", "companyName": "Calloway Home Co", "naicCompanyCode": "90002", "institutionId": null, "spStatEntityId": "C90002", "naicGroupCode": "9001", "naicGroupName": "Calloway Group" },
+    { "companyId": "4000009", "companyName": "Calloway <script>window.__xss=1</script> Co", "naicCompanyCode": null, "institutionId": null, "spStatEntityId": null, "naicGroupCode": null, "naicGroupName": null }
+  ],
+  "note": null
+}

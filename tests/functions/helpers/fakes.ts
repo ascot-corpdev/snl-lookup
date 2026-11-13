@@ -1,0 +1,245 @@
+// Stand-ins the function tests share: an in-memory database, a fake S&P API, a fake Snowflake and a fake
+// Anthropic API. Nothing here touches a real service, and every company, filing and figure is made up.
+
+import type { Db, Entity, Job, JobPatch, JobStatus, StoreKind, StoreRow } from "../../../supabase/functions/_shared/db.ts";
+
+export const read = (name: string) => JSON.parse(Deno.readTextFileSync(new URL(`../../fixtures/${name}`, import.meta.url)));
+export const J = (o: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", ...headers } });
+
+/** A clock tests control. sleep() moves it forward instead of waiting. */
+export function fakeClock(start = "2026-11-13T12:00:00Z") {
+  const c = { now: Date.parse(start), slept: [] as number[], fn: () => c.now, sleep: async (ms: number) => { c.slept.push(ms); c.now += ms; } };
+  return c;
+}
+export type Clock = ReturnType<typeof fakeClock>;
+
+/** The same rules as migration 0001 (snl_take_slot, the tables and who can change a job), held in memory. */
+export function memoryDb(clock: Clock) {
+  const store = new Map<string, StoreRow>(), settings = new Map<string, Record<string, unknown>>();
+  const jobs = new Map<string, Job>(), states = new Map<string, { state: Record<string, unknown>; updated_at: string }>();
+  const usage = new Map<string, number>();
+  let nextAt = 0, jobSeq = 0;
+  const iso = () => new Date(clock.now).toISOString();
+  const hour = () => "hour:" + iso().slice(0, 13), day = () => "day:" + iso().slice(0, 10);
+  const db: Db & { store: typeof store; settings: typeof settings; jobs: typeof jobs; states: typeof states; slots: number[]; stateWrites: number } = {
+    store, settings, jobs, states, slots: [], stateWrites: 0,
+    async takeSlot(limits) {
+      const h = usage.get(hour()) ?? 0, d = usage.get(day()) ?? 0;
+      if (h >= limits.hour || d >= limits.day) return { allowed: false, waitMs: 0, hour: h, day: d };
+      const slot = Math.max(nextAt, clock.now);
+      nextAt = slot + 1000;
+      usage.set(hour(), h + 1); usage.set(day(), d + 1);
+      db.slots.push(slot);
+      return { allowed: true, waitMs: slot - clock.now, hour: h + 1, day: d + 1 };
+    },
+    async usage() { return { hour: usage.get(hour()) ?? 0, day: usage.get(day()) ?? 0 }; },
+    async getStore(id) { const r = store.get(id); return r ? structuredClone(r) : null; },
+    async putStore(row) { store.set(row.id, { id: row.id, kind: row.kind, label: row.label ?? "", doc: structuredClone(row.doc), fetched_at: iso() }); return true; },
+    async lastFetched() {
+      const out: Partial<Record<StoreKind, string>> = {};
+      for (const r of store.values()) if (!out[r.kind] || out[r.kind]! < r.fetched_at) out[r.kind] = r.fetched_at;
+      return out;
+    },
+    async findEntities(q, limit) {
+      const t = q.trim().toLowerCase();
+      return [...store.values()].filter((r) => r.kind === "entity").map((r) => r.doc as unknown as Entity)
+        .filter((e) => /^\d+$/.test(t) ? [e.naicCompanyCode, e.companyId, e.institutionId].includes(t) : t.length >= 2 && e.companyName.toLowerCase().includes(t)).slice(0, limit);
+    },
+    async putEntities(entities) { for (const e of entities) store.set(`entity:${e.companyId}`, { id: `entity:${e.companyId}`, kind: "entity", label: e.companyName, doc: e as unknown as Record<string, unknown>, fetched_at: iso() }); },
+    async getSetting(id) { return settings.get(id) ?? null; },
+    async createJob(owner, question) {
+      const id = `00000000-0000-4000-8000-${String(++jobSeq).padStart(12, "0")}`;
+      jobs.set(id, { id, owner, status: "queued", question, progress: [], partial: "", result: null, error: null, segments: 0, created_at: iso(), updated_at: iso(), heartbeat_at: iso() });
+      return id;
+    },
+    async getJob(id) { const j = jobs.get(id); return j ? structuredClone(j) : null; },
+    async updateJob(id, patch: JobPatch) { const j = jobs.get(id); if (j) Object.assign(j, structuredClone(patch), { updated_at: iso(), heartbeat_at: iso() }); },
+    async claimJob(id, from: JobStatus[], staleMs) {
+      const j = jobs.get(id);
+      if (!j || !from.includes(j.status)) return false;
+      if (staleMs !== undefined && !(Date.parse(j.heartbeat_at) < clock.now - staleMs)) return false;
+      Object.assign(j, { status: "running", updated_at: iso(), heartbeat_at: iso() });
+      return true;
+    },
+    async getJobState(id) { const s = states.get(id); return s ? JSON.parse(JSON.stringify(s.state)) : null; },
+    async putJobState(id, state) { db.stateWrites++; states.set(id, { state: JSON.parse(JSON.stringify(state)), updated_at: iso() }); },
+    async dropJobState(id) { states.delete(id); },
+    async activeJob(owner, since) { return [...jobs.values()].find((j) => j.owner === owner && ["queued", "running", "paused"].includes(j.status) && j.heartbeat_at >= since)?.id ?? null; },
+    async dropOldJobs(before) { for (const [id, j] of jobs) if (["done", "error"].includes(j.status) && j.created_at < before) jobs.delete(id); },
+    async oldJobStates(before, limit) { return [...states.entries()].filter(([, s]) => s.updated_at < before).slice(0, limit).map(([jobId, s]) => ({ jobId, state: structuredClone(s.state) })); },
+  };
+  return db;
+}
+export type MemoryDb = ReturnType<typeof memoryDb>;
+
+// ---------- fake S&P ----------
+
+const SPGMI = "https://api-ciq.marketintelligence.spglobal.com";
+export const PDF = (pagesText: string) => new TextEncoder().encode(`%PDF-1.4\n% made-up test document\n${pagesText}\n%%EOF\n`);
+
+export type SpCall = { path: string; method: string; query: Record<string, string>; body: any; auth: string | null; at: number };
+
+/** S&P's token endpoint and Physical Documents API, shaped as S&P's documents describe them. */
+export function fakeSpgmi(clock: Clock, opts: { username?: string; password?: string; documents?: Record<string, { bytes: Uint8Array; type?: string; name?: string }> } = {}) {
+  const search = read("spgmi_search.json"), refs = read("spgmi_reference.json");
+  const col = (name: string) => search.headers.indexOf(name);
+  const state = {
+    log: [] as SpCall[], tokens: 0, valid: new Set<string>(),
+    /** Answer the next n data calls with this status (and body), before normal handling. */
+    failNext: [] as { status: number; body?: unknown; headers?: Record<string, string> }[],
+    /** Leave totalPages and the paging fields out of search responses. */
+    noTotalPages: false,
+    expireTokens() { state.valid.clear(); },
+    calls: (path: string) => state.log.filter((c) => c.path === path),
+  };
+  const err = (status: number, error: string, message: string) => J({ status, timestamp: new Date(clock.now).toISOString(), requestId: "req-" + (state.log.length + 100), error, message }, status);
+  const fetch = (async (input: string | URL | Request, init: RequestInit = {}) => {
+    const url = new URL(String(input instanceof Request ? input.url : input));
+    const method = init.method ?? "GET", headers = new Headers(init.headers);
+    const auth = headers.get("authorization");
+    const raw = typeof init.body === "string" ? init.body : "";
+    const path = url.href.startsWith(SPGMI) ? url.pathname : url.href;
+    if (path === "/gdsapi/rest/authenticate/api/v1/token") {
+      state.log.push({ path, method, query: {}, body: Object.fromEntries(new URLSearchParams(raw)), auth, at: clock.now });
+      const form = new URLSearchParams(raw);
+      if (headers.get("content-type") !== "application/x-www-form-urlencoded" || form.get("username") !== (opts.username ?? "api-user") || form.get("password") !== (opts.password ?? "api-pass"))
+        return err(401, "Unauthorized", "Invalid credentials.");
+      const token = `tok-${++state.tokens}`;
+      state.valid.add(token);
+      return J({ access_token: token, token_type: "Bearer" });
+    }
+    const body = raw ? JSON.parse(raw) : undefined;
+    const call: SpCall = { path: path.replace("/gds/documents", ""), method, query: Object.fromEntries(url.searchParams), body, auth, at: clock.now };
+    state.log.push(call);
+    if (!path.startsWith("/gds/documents/")) return err(404, "Not Found", "Invalid endpoint");
+    if (!auth || !state.valid.has(auth.replace(/^Bearer /, ""))) return err(401, "Unauthorized", "Token is invalid or has expired.");
+    if (url.searchParams.get("docType") !== "INSPRODFILINGS_DOCUMENTS_API") return err(400, "Bad Request", "Missing parameters: docType");
+    const forced = state.failNext.shift();
+    if (forced) return forced.body !== undefined ? J(forced.body, forced.status, forced.headers) : new Response(JSON.stringify({ status: forced.status, timestamp: new Date(clock.now).toISOString(), requestId: "req-forced", error: "Error", message: forced.status === 403 ? "Entitlement needed" : forced.status === 429 ? "Too many requests" : "Unknown Error" }), { status: forced.status, headers: { "content-type": "application/json", ...(forced.headers ?? {}) } });
+
+    if (call.path === "/api/v1/reference" && method === "GET") {
+      const list = refs[url.searchParams.get("referenceField") ?? ""];
+      if (!list) return err(400, "Bad Request", "Invalid value: referenceField");
+      return J({ numCols: list.headers.length, numRows: list.rows.length, headers: list.headers, rows: list.rows.map((row: unknown[]) => ({ row })) });
+    }
+    if (call.path === "/api/v1/search" && method === "POST") {
+      const p = body?.properties;
+      if (!p || Array.isArray(p)) return err(400, "Bad Request", "Invalid data type: properties");
+      const ids = [...(p.companyId ?? []), ...(p.institutionId ?? [])];
+      if (!ids.length || (p.companyId ?? []).length > 10 || (p.institutionId ?? []).length > 10) return err(400, "Bad Request", "Invalid range: companyId/institutionId (limit 10)");
+      if (!p.minPublishDate || !p.maxPublishDate || !Array.isArray(p.serffFilingStateId) || !Array.isArray(p.filingStatusId)) return err(400, "Bad Request", "Missing parameters");
+      if ((Date.parse(p.maxPublishDate) - Date.parse(p.minPublishDate)) / 86_400_000 > 365) return err(400, "Bad Request", "Invalid range: limitation 365 days per request");
+      const hit = search.rows.filter((r: any[]) =>
+        ((p.companyId ?? []).includes(r[col("companyId")]) || (p.institutionId ?? []).includes(r[col("institutionId")]))
+        && p.serffFilingStateId.includes(r[col("serffFilingStateId")]) && p.filingStatusId.includes(r[col("filingStatusId")])
+        && r[col("publishDate")] >= p.minPublishDate && r[col("publishDate")] <= p.maxPublishDate
+        && (!p.typeOfInsuranceId || p.typeOfInsuranceId.includes(r[col("typeOfInsuranceId")]))
+        && (!p.serffFilingTypeId || p.serffFilingTypeId.includes(r[col("serffFilingTypeId")]))
+        && (!p.trackingNumber || p.trackingNumber.includes(r[col("trackingNumber")])));
+      const size = p.pageSize ?? 500, page = p.pageNumber ?? 1, slice = hit.slice((page - 1) * size, page * size);
+      return J({ numCols: search.headers.length, numRows: slice.length, ...(state.noTotalPages ? {} : { currentPageSize: slice.length, currentPage: page, totalPages: Math.max(1, Math.ceil(hit.length / size)) }),
+        headers: search.headers, rows: slice.map((row: unknown[]) => ({ row })) });
+    }
+    if (call.path === "/api/v1/download" && method === "POST") {
+      const p = body?.properties ?? {};
+      const doc = opts.documents?.[String(p.documentId ?? p.filingVersionId)];
+      if (!doc) return err(404, "Not Found", "Resource not found");
+      return new Response(doc.bytes as unknown as BodyInit, { status: 200, headers: { "content-type": doc.type ?? "application/pdf", "content-disposition": `attachment; filename="${doc.name ?? "filing.pdf"}"`, "content-length": String(doc.bytes.length) } });
+    }
+    return err(405, "Method Not Allowed", "Method Not Allowed");
+  }) as typeof globalThis.fetch;
+  return Object.assign(state, { fetch });
+}
+
+// ---------- fake Anthropic ----------
+
+type Block = Record<string, any>;
+export type Reply = { content: Block[]; stop_reason?: string; model?: string; usage?: Record<string, number> } | { error: { status: number; type: string; message: string } };
+export type ClaudeCall = { body: any; betas: string | null; stream: boolean };
+
+/** Turns a finished message into the server-sent events the Messages API streams. */
+export function sse(message: Record<string, any>): string {
+  const ev = (type: string, data: Record<string, unknown>) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+  let out = ev("message_start", { message: { ...message, content: [], stop_reason: null, stop_sequence: null, usage: { ...message.usage, output_tokens: 0 } } });
+  message.content.forEach((b: Block, index: number) => {
+    if (b.type === "text") {
+      out += ev("content_block_start", { index, content_block: { type: "text", text: "", citations: b.citations ? [] : null } });
+      for (const c of b.citations ?? []) out += ev("content_block_delta", { index, delta: { type: "citations_delta", citation: c } });
+      const mid = Math.ceil(b.text.length / 2);
+      for (const part of [b.text.slice(0, mid), b.text.slice(mid)]) if (part) out += ev("content_block_delta", { index, delta: { type: "text_delta", text: part } });
+    } else if (b.type === "tool_use") {
+      out += ev("content_block_start", { index, content_block: { type: "tool_use", id: b.id, name: b.name, input: {} } });
+      out += ev("content_block_delta", { index, delta: { type: "input_json_delta", partial_json: JSON.stringify(b.input) } });
+    } else if (b.type === "thinking") {
+      out += ev("content_block_start", { index, content_block: { type: "thinking", thinking: "", signature: "" } });
+      out += ev("content_block_delta", { index, delta: { type: "signature_delta", signature: b.signature ?? "sig" } });
+    } else out += ev("content_block_start", { index, content_block: b });
+    out += ev("content_block_stop", { index });
+  });
+  out += ev("message_delta", { delta: { stop_reason: message.stop_reason, stop_sequence: null }, usage: { output_tokens: message.usage.output_tokens } });
+  return out + ev("message_stop", {});
+}
+
+/** The Messages API and Files API. Each call to /v1/messages takes the next reply from the script; a reply can
+    be a function of the request body, so a test can check what Claude was sent before answering. */
+export function fakeAnthropic(script: (Reply | ((body: any, n: number) => Reply))[]) {
+  const state = { calls: [] as ClaudeCall[], uploads: [] as { id: string; size: number; type: string }[], deleted: [] as string[], left: [...script] };
+  const fetch = (async (input: string | URL | Request, init: RequestInit = {}) => {
+    const url = new URL(String(input instanceof Request ? input.url : input));
+    const method = init.method ?? "GET", headers = new Headers(init.headers);
+    if (url.pathname === "/v1/files" && method === "POST") {
+      const form = init.body as FormData;
+      const file = form.get("file") as File;
+      const id = `file_test${state.uploads.length + 1}`;
+      state.uploads.push({ id, size: file.size, type: file.type });
+      return J({ id, type: "file", filename: file.name, mime_type: file.type, size_bytes: file.size, created_at: "2026-11-13T12:00:00Z", downloadable: false });
+    }
+    if (url.pathname.startsWith("/v1/files/") && method === "DELETE") {
+      const id = url.pathname.split("/").pop()!;
+      state.deleted.push(id);
+      return J({ id, type: "file_deleted" });
+    }
+    if (url.pathname === "/v1/messages" && method === "POST") {
+      const body = JSON.parse(String(init.body));
+      state.calls.push({ body, betas: headers.get("anthropic-beta"), stream: body.stream === true });
+      const next = state.left.shift();
+      if (!next) return J({ type: "error", error: { type: "invalid_request_error", message: "the test script has no more replies" } }, 400);
+      const reply = typeof next === "function" ? next(body, state.calls.length) : next;
+      if ("error" in reply) return J({ type: "error", error: { type: reply.error.type, message: reply.error.message } }, reply.error.status, { "x-should-retry": "false" });
+      const message = { id: `msg_test${state.calls.length}`, type: "message", role: "assistant", model: reply.model ?? body.model, content: reply.content,
+        stop_reason: reply.stop_reason ?? (reply.content.some((b) => b.type === "tool_use") ? "tool_use" : "end_turn"), stop_sequence: null,
+        usage: { input_tokens: 1000, output_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, ...(reply.usage ?? {}) } };
+      if (!body.stream) return J(message);
+      return new Response(sse(message), { status: 200, headers: { "content-type": "text/event-stream" } });
+    }
+    return J({ type: "error", error: { type: "not_found_error", message: `no fake for ${method} ${url.pathname}` } }, 404);
+  }) as typeof globalThis.fetch;
+  return Object.assign(state, { fetch });
+}
+
+export const toolUse = (id: string, name: string, input: Record<string, unknown>): Block => ({ type: "tool_use", id, name, input });
+export const thinking = (): Block => ({ type: "thinking", thinking: "", signature: "sig-test" });
+export const say = (text: string, citations?: Block[]): Block => ({ type: "text", text, ...(citations ? { citations } : {}) });
+export const pageCite = (document_index: number, start: number, endExclusive: number, cited_text: string, document_title = "doc"): Block =>
+  ({ type: "page_location", cited_text, document_index, document_title, start_page_number: start, end_page_number: endExclusive, file_id: null });
+
+/** The tool results Claude was sent in a request, by tool_use id, parsed back from JSON. */
+export function toolResults(body: any): Record<string, { value: any; isError: boolean }> {
+  const out: Record<string, { value: any; isError: boolean }> = {};
+  for (const m of body.messages) if (m.role === "user" && Array.isArray(m.content)) for (const b of m.content)
+    if (b.type === "tool_result") out[b.tool_use_id] = { value: JSON.parse(typeof b.content === "string" ? b.content : JSON.stringify(b.content)), isError: b.is_error === true };
+  return out;
+}
+export const documentsIn = (body: any): Block[] => body.messages.flatMap((m: any) => (Array.isArray(m.content) ? m.content.filter((b: Block) => b.type === "document") : []));
+
+export const env = (o: Record<string, string>) => (k: string) => o[k];
+export const req = (fn: string, body: unknown, method = "POST", headers: Record<string, string> = {}) =>
+  new Request(`https://x.supabase.co/functions/v1/${fn}`, { method, headers: { Authorization: "Bearer u", apikey: "k", ...headers }, body: method === "POST" ? JSON.stringify(body) : undefined });
+export const corpdev = async () => ({ id: "user-1", role: "corpdev" }), reader = async () => ({ id: "user-2", role: "reader" }), nobody = async () => null;
+
+export function checks() {
+  let pass = 0, fail = 0;
+  const ok = (name: string, cond: boolean, detail?: unknown) => { if (cond) pass++; else { fail++; console.log("FAIL " + name, JSON.stringify(detail)); } };
+  const done = () => { console.log(`${pass} passed, ${fail} failed`); if (fail) Deno.exit(1); };
+  return { ok, done };
+}

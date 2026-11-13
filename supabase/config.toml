@@ -1,0 +1,18 @@
+# Each function checks the caller's login itself (supabase.auth.getUser with the caller's own token),
+# so the gateway's legacy JWT check is off. This is needed with the new publishable/secret API keys.
+
+# Filing search and documents. The S&P API credentials stay in its secrets.
+[functions.snl-filings]
+verify_jwt = false
+
+# Statutory financials from Snowflake. Answers "not set up yet" until the Snowflake secrets are set.
+[functions.snl-statutory]
+verify_jwt = false
+
+# Claude with the two functions above as tools. Runs answers as background tasks (see README, Supabase limits).
+[functions.snl-chat]
+verify_jwt = false
+
+# Lets background tasks run under `supabase functions serve` on your own machine.
+[edge_runtime]
+policy = "per_worker"

@@ -1,0 +1,81 @@
+{
+  "_about": "Made-up filings for the page tests, in the shape the snl-filings function answers {action: \"search\"} with. Every company, NAIC code, id, tracking number and description is invented. Row 5 carries hostile text on purpose: the page must show it as text.",
+  "params": { "companyIds": [4000001, 4000002, 4000107], "institutionIds": [], "states": ["FL", "GA"], "filingStatusIds": [], "typeOfInsuranceIds": [101], "filingTypeIds": [], "spStatEntityIds": [], "trackingNumbers": [], "from": "2021-01-01", "to": "2026-11-13", "allStatuses": true },
+  "rows": [
+    {
+      "serffFilingEntityEventId": 70000001, "serffFilingEventId": 60000001, "trackingNumber": "CALL-134000001", "sfcNumber": "SFC-0001", "institutionId": 5000001, "spStatEntityId": "C90001",
+      "naicCompanyCode": "90001", "companyId": 4000001, "companyName": "Calloway Insurance Co", "naicGroupCode": "9001", "naicGroupName": "Calloway Group",
+      "serffFilingStateId": "FL", "serffFilingState": "Florida", "typeOfInsuranceId": 101, "typeOfInsurance": "Homeowners", "subTypeOfInsurance": "HO-3 middle market",
+      "dateSubmitted": "2026-03-04", "publishDate": "2026-03-09T00:00:00", "renewBusReqEffDate": "2026-02-01", "newBusReqEffDate": "2026-01-01",
+      "filingStatusId": 1, "filingStatus": "Approved", "serffFilingTypeId": 11, "serffFilingType": "Form", "overallRateImpact": null, "dispOverallRateImpact": null,
+      "filingDescription": "New homeowners policy form CAL-HO3-MM (06 25) for the Calloway middle market program. Replaces form CAL-HO3 (01 19) for new business and renewals, adds a water damage sublimit endorsement and updates the hurricane deductible wording.",
+      "documentId": 880001, "filingVersionId": "fv-00000001", "pages": 42,
+      "companies": [{ "companyId": 4000001, "companyName": "Calloway Insurance Co", "naicCompanyCode": "90001" }, { "companyId": 4000002, "companyName": "Calloway Home Co", "naicCompanyCode": "90002" }]
+    },
+    {
+      "serffFilingEntityEventId": 70000002, "serffFilingEventId": 60000002, "trackingNumber": "CALL-134000002", "sfcNumber": null, "institutionId": 5000001, "spStatEntityId": "C90002",
+      "naicCompanyCode": "90002", "companyId": 4000002, "companyName": "Calloway Home Co", "naicGroupCode": "9001", "naicGroupName": "Calloway Group",
+      "serffFilingStateId": "FL", "serffFilingState": "Florida", "typeOfInsuranceId": 101, "typeOfInsurance": "Homeowners", "subTypeOfInsurance": "Private client",
+      "dateSubmitted": "2025-08-20", "publishDate": "2025-09-02", "renewBusReqEffDate": null, "newBusReqEffDate": "2025-10-01",
+      "filingStatusId": 2, "filingStatus": "Pending", "serffFilingTypeId": 11, "serffFilingType": "Form", "overallRateImpact": null, "dispOverallRateImpact": null,
+      "filingDescription": "Private client homeowners form CAL-HO5-PC (03 25).",
+      "documentId": 880002, "filingVersionId": "fv-00000002", "pages": 18,
+      "companies": [{ "companyId": 4000002, "companyName": "Calloway Home Co", "naicCompanyCode": "90002" }]
+    },
+    {
+      "serffFilingEntityEventId": 70000003, "serffFilingEventId": 60000003, "trackingNumber": "CALL-134000003", "sfcNumber": null, "institutionId": 5000001, "spStatEntityId": "C90001",
+      "naicCompanyCode": "90001", "companyId": 4000001, "companyName": "Calloway Insurance Co", "naicGroupCode": "9001", "naicGroupName": "Calloway Group",
+      "serffFilingStateId": "FL", "serffFilingState": "Florida", "typeOfInsuranceId": 101, "typeOfInsurance": "Homeowners", "subTypeOfInsurance": null,
+      "dateSubmitted": "2024-05-10", "publishDate": "2024-05-17", "renewBusReqEffDate": "2024-08-01", "newBusReqEffDate": "2024-07-01",
+      "filingStatusId": 1, "filingStatus": "Approved", "serffFilingTypeId": 12, "serffFilingType": "Rate", "overallRateImpact": 6.5, "dispOverallRateImpact": "+6.5%",
+      "filingDescription": "Homeowners base rate change.",
+      "documentId": 880003, "filingVersionId": "fv-00000003", "pages": 1,
+      "companies": [{ "companyId": 4000001, "companyName": "Calloway Insurance Co", "naicCompanyCode": "90001" }]
+    },
+    {
+      "serffFilingEntityEventId": 70000004, "serffFilingEventId": 60000004, "trackingNumber": "TARR-134000777", "sfcNumber": null, "institutionId": 5000107, "spStatEntityId": "C90107",
+      "naicCompanyCode": "90107", "companyId": 4000107, "companyName": "Tarrow Mutual Insurance Co", "naicGroupCode": null, "naicGroupName": null,
+      "serffFilingStateId": "FL", "serffFilingState": "Florida", "typeOfInsuranceId": 101, "typeOfInsurance": "Homeowners", "subTypeOfInsurance": "HO-3",
+      "dateSubmitted": "2023-11-28", "publishDate": "2023-12-05", "renewBusReqEffDate": "2024-03-01", "newBusReqEffDate": "2024-03-01",
+      "filingStatusId": 1, "filingStatus": "Approved", "serffFilingTypeId": 12, "serffFilingType": "Rate", "overallRateImpact": -2.4, "dispOverallRateImpact": null,
+      "filingDescription": "Homeowners rate decrease after the reinsurance renewal.",
+      "documentId": null, "filingVersionId": "fv-00000004", "pages": 27,
+      "companies": [{ "companyId": 4000107, "companyName": "Tarrow Mutual Insurance Co", "naicCompanyCode": "90107" }]
+    },
+    {
+      "serffFilingEntityEventId": 70000005, "serffFilingEventId": 60000005, "trackingNumber": null, "sfcNumber": null, "institutionId": 5000107, "spStatEntityId": null,
+      "naicCompanyCode": null, "companyId": 4000107, "companyName": "Tarrow <script>window.__xss=1</script> Exchange", "naicGroupCode": null, "naicGroupName": null,
+      "serffFilingStateId": "FL", "serffFilingState": "Florida", "typeOfInsuranceId": null, "typeOfInsurance": null, "subTypeOfInsurance": null,
+      "dateSubmitted": "not a date", "publishDate": null, "renewBusReqEffDate": null, "newBusReqEffDate": "2022-13-45",
+      "filingStatusId": null, "filingStatus": null, "serffFilingTypeId": 11, "serffFilingType": "Form", "overallRateImpact": null, "dispOverallRateImpact": null,
+      "filingDescription": "=HYPERLINK(\"http://example.invalid\",\"x\") <img src=x onerror=\"window.__xss=1\">",
+      "documentId": null, "filingVersionId": null, "pages": null,
+      "companies": [{ "companyId": 4000107, "companyName": "Tarrow <script>window.__xss=1</script> Exchange", "naicCompanyCode": null }]
+    },
+    {
+      "serffFilingEntityEventId": 70000006, "serffFilingEventId": 60000006, "trackingNumber": "CALL-134000006", "sfcNumber": null, "institutionId": 5000001, "spStatEntityId": "C90001",
+      "naicCompanyCode": "90001", "companyId": 4000001, "companyName": "Calloway Insurance Co", "naicGroupCode": "9001", "naicGroupName": "Calloway Group",
+      "serffFilingStateId": "FL", "serffFilingState": "Florida", "typeOfInsuranceId": 101, "typeOfInsurance": "Homeowners", "subTypeOfInsurance": "Group rule manual",
+      "dateSubmitted": "2021-02-01", "publishDate": "2021-02-10", "renewBusReqEffDate": "2021-04-01", "newBusReqEffDate": "2021-04-01",
+      "filingStatusId": 3, "filingStatus": "Withdrawn", "serffFilingTypeId": 13, "serffFilingType": "Rule", "overallRateImpact": 0, "dispOverallRateImpact": null,
+      "filingDescription": "Rule manual update for all group companies.",
+      "documentId": 880006, "filingVersionId": "fv-00000006", "pages": 9,
+      "companies": [
+        { "companyId": 4000001, "companyName": "Calloway Insurance Co", "naicCompanyCode": "90001" }, { "companyId": 4000002, "companyName": "Calloway Home Co", "naicCompanyCode": "90002" },
+        { "companyId": 4000003, "companyName": "Calloway Coastal Co", "naicCompanyCode": "90003" }, { "companyId": 4000004, "companyName": "Calloway Specialty Co", "naicCompanyCode": "90004" },
+        { "companyId": 4000005, "companyName": "Calloway Lloyds", "naicCompanyCode": "90005" }
+      ]
+    }
+  ],
+  "total": 6, "requests": 12, "capped": false,
+  "byState": [{ "state": "FL", "rows": 6 }, { "state": "GA", "rows": 0 }],
+  "byCompany": [
+    { "kind": "companyId", "id": 4000001, "name": "Calloway Insurance Co", "rows": 3 },
+    { "kind": "companyId", "id": 4000002, "name": "Calloway Home Co", "rows": 3 },
+    { "kind": "companyId", "id": 4000107, "name": "Tarrow Mutual Insurance Co", "rows": 2 }
+  ],
+  "notes": ["S&P returned no filings for GA in this search. That means none are in S&P's data for these companies, dates and filters. It doesn't prove that none were filed."],
+  "source": "S&P Global Market Intelligence, SNL Insurance Product Filings",
+  "fetchedAt": "2026-11-13T12:00:00Z", "fromStore": false, "saved": true,
+  "used": { "hour": 24, "day": 52 }, "limits": { "hour": 500, "day": 12000 }, "account": "trial"
+}

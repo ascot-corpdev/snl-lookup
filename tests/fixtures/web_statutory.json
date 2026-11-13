@@ -1,0 +1,106 @@
+{
+  "_about": "Made-up statutory data for the page tests, in the shapes the snl-statutory function answers with. The companies, NAIC codes, view names and figures are invented.",
+  "statusOff": {
+    "configured": false, "mapped": false,
+    "message": "Statutory data isn't set up yet. It needs a Snowflake reader account from S&P. When that exists, the owner sets the SNOWFLAKE secrets on Supabase (README, step 7) and this view goes live.",
+    "fields": []
+  },
+  "statusUnmapped": {
+    "configured": true, "mapped": false, "message": "Snowflake is connected, but the statutory fields aren't mapped to S&P's views yet. A Corp Dev login can do this once on the Statutory view.",
+    "fields": [
+      { "id": "dpw_by_line", "label": "Direct premiums written by line", "unit": "usd", "by": "line", "mapped": false },
+      { "id": "surplus", "label": "Policyholder surplus", "unit": "usd", "by": "year", "mapped": false },
+      { "id": "combined_ratio", "label": "Combined ratio", "unit": "pct", "by": "year", "mapped": false }
+    ]
+  },
+  "statusMapped": {
+    "configured": true, "mapped": true, "message": null,
+    "fields": [
+      { "id": "dpw_by_line", "label": "Direct premiums written by line", "unit": "usd", "by": "line", "mapped": true },
+      { "id": "dpw_by_state", "label": "Direct premiums written by state", "unit": "usd", "by": "state", "mapped": true },
+      { "id": "npw_by_line", "label": "Net premiums written by line", "unit": "usd", "by": "line", "mapped": true },
+      { "id": "surplus", "label": "Policyholder surplus", "unit": "usd", "by": "year", "mapped": true },
+      { "id": "loss_ratio", "label": "Loss ratio", "unit": "pct", "by": "year", "mapped": true },
+      { "id": "expense_ratio", "label": "Expense ratio", "unit": "pct", "by": "year", "mapped": false },
+      { "id": "combined_ratio", "label": "Combined ratio", "unit": "pct", "by": "year", "mapped": true }
+    ]
+  },
+  "query": {
+    "kind": "company", "codes": ["90001", "90107"], "fromYear": 2021, "toYear": 2025,
+    "entities": [{ "code": "90001", "name": "Calloway Insurance Co" }, { "code": "90107", "name": "Tarrow Mutual Insurance Co" }],
+    "fields": [
+      {
+        "id": "dpw_by_line", "label": "Direct premiums written by line", "unit": "usd", "by": "line", "mapped": true, "error": null,
+        "rows": [
+          { "code": "90001", "year": 2024, "line": "Homeowners", "state": null, "value": 310400000 },
+          { "code": "90001", "year": 2025, "line": "Homeowners", "state": null, "value": 342100000 },
+          { "code": "90001", "year": 2024, "line": "Private passenger auto", "state": null, "value": 512000000 },
+          { "code": "90001", "year": 2025, "line": "Private passenger auto", "state": null, "value": 498700000 },
+          { "code": "90001", "year": 2025, "line": "Inland marine", "state": null, "value": 7300000 },
+          { "code": "90107", "year": 2025, "line": "Homeowners", "state": null, "value": 88400000 },
+          { "code": "90107", "year": 2025, "line": "Dwelling fire", "state": null, "value": 12900000 }
+        ]
+      },
+      {
+        "id": "dpw_by_state", "label": "Direct premiums written by state", "unit": "usd", "by": "state", "mapped": true, "error": null,
+        "rows": [
+          { "code": "90001", "year": 2025, "line": null, "state": "FL", "value": 421000000 },
+          { "code": "90001", "year": 2025, "line": null, "state": "TX", "value": 1234500000 },
+          { "code": "90107", "year": 2025, "line": null, "state": "FL", "value": 101300000 }
+        ]
+      },
+      { "id": "npw_by_line", "label": "Net premiums written by line", "unit": "usd", "by": "line", "mapped": true, "error": null, "rows": [] },
+      {
+        "id": "surplus", "label": "Policyholder surplus", "unit": "usd", "by": "year", "mapped": true, "error": null,
+        "rows": [
+          { "code": "90001", "year": 2021, "line": null, "state": null, "value": 412300000 },
+          { "code": "90001", "year": 2022, "line": null, "state": null, "value": 455100000 },
+          { "code": "90001", "year": 2023, "line": null, "state": null, "value": 8400000 },
+          { "code": "90001", "year": 2024, "line": null, "state": null, "value": null },
+          { "code": "90001", "year": 2025, "line": null, "state": null, "value": -3200000 },
+          { "code": "90107", "year": 2021, "line": null, "state": null, "value": 1234500000 },
+          { "code": "90107", "year": 2025, "line": null, "state": null, "value": 0 }
+        ]
+      },
+      { "id": "loss_ratio", "label": "Loss ratio", "unit": "pct", "by": "year", "mapped": true, "error": "Snowflake couldn't find the column LOSS_RATIO in STAT_FINANCIALS. Check the mapping.", "rows": [] },
+      { "id": "expense_ratio", "label": "Expense ratio", "unit": "pct", "by": "year", "mapped": false, "error": null, "rows": [] },
+      {
+        "id": "combined_ratio", "label": "Combined <b>ratio</b>", "unit": "pct", "by": "year", "mapped": true, "error": null,
+        "rows": [
+          { "code": "90001", "year": 2021, "line": null, "state": null, "value": 95.3 },
+          { "code": "90001", "year": 2022, "line": null, "state": null, "value": 101.2 },
+          { "code": "90001", "year": 2025, "line": null, "state": null, "value": 98 },
+          { "code": "90107", "year": 2021, "line": null, "state": null, "value": -1.5 },
+          { "code": "90107", "year": 2025, "line": null, "state": null, "value": 104.75 }
+        ]
+      }
+    ],
+    "loaded": [{ "view": "STAT_PREMIUMS_BY_LINE", "at": "2026-10-28" }, { "view": "STAT_FINANCIALS", "at": "2025-12-30T04:00:00Z" }],
+    "truncated": false,
+    "source": "S&P Global Market Intelligence statutory data, through Snowflake",
+    "fetchedAt": "2026-11-12T10:00:00Z", "fromStore": true, "saved": true
+  },
+  "views": {
+    "views": [
+      { "name": "STAT_PREMIUMS_BY_LINE", "type": "VIEW", "comment": "Premiums written by line of business" },
+      { "name": "STAT_FINANCIALS", "type": "VIEW", "comment": null },
+      { "name": "STAT_<img src=x onerror=\"window.__xss=1\">", "type": "VIEW", "comment": "<script>window.__xss=1</script>" }
+    ],
+    "fetchedAt": "2026-11-13T12:00:00Z", "fromStore": false
+  },
+  "columns": {
+    "view": "STAT_PREMIUMS_BY_LINE",
+    "columns": [
+      { "name": "DIRECT_PREMIUMS_WRITTEN", "type": "NUMBER", "position": 4, "comment": "US dollars" },
+      { "name": "NAIC_COMPANY_CODE", "type": "TEXT", "position": 1, "comment": "NAIC company code" },
+      { "name": "FISCAL_YEAR", "type": "NUMBER", "position": 2, "comment": null },
+      { "name": "LINE_OF_BUSINESS", "type": "TEXT", "position": 3, "comment": "<script>window.__xss=1</script>" }
+    ],
+    "fetchedAt": "2026-11-13T12:00:00Z", "fromStore": false
+  },
+  "mapping": {
+    "fields": {
+      "surplus": { "view": "STAT_FINANCIALS", "entity": { "company": "NAIC_COMPANY_CODE", "group": "NAIC_GROUP_CODE", "name": "COMPANY_NAME" }, "year": "FISCAL_YEAR", "value": "POLICYHOLDER_SURPLUS" }
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "_about": "Made-up reference lists for the page tests, in the shape the snl-filings function answers {action: \"reference\"} with. The ids are invented.",
+  "lists": {
+    "typeOfInsurance": {
+      "field": "typeOfInsurance",
+      "options": [
+        { "id": 101, "name": "Homeowners" }, { "id": 102, "name": "Private passenger auto" }, { "id": 103, "name": "Commercial property" },
+        { "id": 104, "name": "Commercial auto" }, { "id": 105, "name": "General liability" }, { "id": 106, "name": "Workers' compensation" },
+        { "id": 107, "name": "Inland marine" }, { "id": 108, "name": "Personal umbrella" }, { "id": 109, "name": "Dwelling fire" },
+        { "id": 110, "name": "Farmowners" }, { "id": 111, "name": "Medical professional liability" }, { "id": 112, "name": "Surety" },
+        { "id": 113, "name": "Flood" }, { "id": 114, "name": "Cyber liability" }
+      ],
+      "headers": ["typeOfInsuranceId", "typeOfInsurance"], "rows": [], "fetchedAt": "2026-11-05T09:30:00Z", "fromStore": true
+    },
+    "filingStatus": {
+      "field": "filingStatus",
+      "options": [{ "id": 1, "name": "Approved" }, { "id": 2, "name": "Pending" }, { "id": 3, "name": "Withdrawn" }, { "id": 4, "name": "Disapproved" }],
+      "headers": ["filingStatusId", "filingStatus"], "rows": [], "fetchedAt": "2026-11-05T09:30:00Z", "fromStore": true
+    },
+    "serffFilingState": {
+      "field": "serffFilingState",
+      "options": [{ "id": "CA", "name": "California" }, { "id": "FL", "name": "Florida" }, { "id": "GA", "name": "Georgia" }, { "id": "NY", "name": "New York" }, { "id": "SC", "name": "South Carolina" }, { "id": "TX", "name": "Texas" }],
+      "headers": ["serffFilingStateId", "serffFilingState"], "rows": [], "fetchedAt": "2026-11-05T09:30:00Z", "fromStore": true
+    },
+    "serffFilingType": {
+      "field": "serffFilingType",
+      "options": [{ "id": 11, "name": "Form" }, { "id": 12, "name": "Rate" }, { "id": 13, "name": "Rule" }, { "id": 14, "name": "Rate and rule" }],
+      "headers": ["serffFilingTypeId", "serffFilingType"], "rows": [], "fetchedAt": "2026-11-05T09:30:00Z", "fromStore": true
+    }
+  },
+  "missing": [],
+  "message": null,
+  "used": { "hour": 12, "day": 40 }, "limits": { "hour": 500, "day": 12000 }, "account": "trial"
+}

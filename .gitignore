@@ -1,0 +1,14 @@
+node_modules/
+.env
+.env.*
+supabase/.temp/
+.DS_Store
+
+# Private keys and certificates (for example the Snowflake key pair) must never be committed
+*.pem
+*.key
+*.p8
+
+# Test output (screenshots)
+tests/out/
+deno.lock
