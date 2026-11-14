@@ -12,6 +12,7 @@
     "@supabase/supabase-js": "2.119.0"
   },
   "devDependencies": {
+    "jszip": "3.10.1",
     "playwright": "1.63.0"
   }
 }
