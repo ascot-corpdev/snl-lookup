@@ -128,6 +128,21 @@ label.f em,.f em{font-weight:normal;font-style:normal;color:var(--muted)}
 .matches li{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;justify-content:space-between;padding:8px 10px;min-width:0}
 .matches li+li{border-top:1px solid var(--grid)}
 .matches li>div{min-width:0;flex:1 1 220px;overflow-wrap:anywhere}
+/* Recent searches: a compact bar above the form, opening to a list of saved searches that reopen in a click */
+.recent{border:1px solid var(--grid);background:var(--alt);padding:8px 12px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.recent-h{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;min-width:0}
+.recent-h .t2{flex:1 1 240px;min-width:0}
+.recent-t{all:unset;cursor:pointer;font-weight:bold;display:inline-flex;align-items:center;gap:6px}
+.recent-t:hover{text-decoration:underline}
+.recent-t:focus-visible{outline:2px solid var(--magenta);outline-offset:2px}
+.recent-t .ar{font-size:10px}
+.recent ul{list-style:none;margin:0;padding:0;border:1px solid var(--grid);background:var(--surface)}
+.recent li+li{border-top:1px solid var(--grid)}
+.recent-i{all:unset;box-sizing:border-box;display:block;width:100%;cursor:pointer;padding:7px 10px;min-width:0;overflow-wrap:anywhere}
+.recent-i:hover{background:var(--tile)}
+.recent-i:focus-visible{outline:2px solid var(--magenta);outline-offset:-2px}
+.recent-i:disabled{cursor:not-allowed;opacity:.6}
+.recent-i .t1{color:var(--blue)}
 
 /* Tables */
 .tbl-wrap{overflow-x:auto;border:1px solid var(--grid);max-width:100%}
@@ -583,10 +598,11 @@ function filingsFormHTML(){
       <button type="button" class="btn sm ghost" data-act="refs-refresh" ${S.refsLoading?"disabled":""} title="Fetches S&amp;P's lists of states, types of insurance, filing types and statuses again (four S&amp;P requests)">${S.refsLoading?"Refreshing lists…":"Refresh lists"}</button></div>
   </form>`;
 }
-async function runSearch(refresh){
+async function runSearch(refresh, given){
   const f=S.f; if(f.busy) return;
   let payload;
   if(refresh){ if(!f.last) return; payload={...f.last, refresh:true}; }
+  else if(given){ payload=given; f.last=payload; f.res=null; }   // a recent search, sent exactly as it was saved
   else{
     const problem=searchProblem();
     if(problem){ f.formErr=problem; render(); document.getElementById("formErr")?.scrollIntoView({block:"nearest"}); return; }
@@ -599,7 +615,7 @@ async function runSearch(refresh){
   if(r.data){
     f.res=r.data; f.shown=PAGE; f.filter=""; f.openDesc={}; f.openCo={}; takeUsage(r.data);
     for(const c of (r.data.byCompany||[])){ const chip=f.chips.find(x=>x.kind===c.kind && x.id===String(c.id)); if(chip && !chip.name && c.name) chip.name=c.name; }
-    loadStatus();
+    loadStatus(); recentAfterSearch(r.data);
   } else if(r.err!=="signin") f.err=r;
   render();
 }
@@ -681,7 +697,7 @@ function filingsResultsHTML(){
 function renderFilings(){
   return `<div><h2 class="action-title">Search rate, rule and form filings</h2>
     <p class="sub">S&amp;P's SNL Insurance Product Filings by company, state, type of insurance, filing type and date. Open any filing's original document.</p></div>
-    ${filingsFormHTML()}<div id="results" style="display:flex;flex-direction:column;gap:14px;min-width:0" aria-live="polite">${filingsResultsHTML()}</div>`;
+    ${recentHTML()}${filingsFormHTML()}<div id="results" style="display:flex;flex-direction:column;gap:14px;min-width:0" aria-live="polite">${filingsResultsHTML()}</div>`;
 }
 function filingsExport(){
   const cols=["Company","NAIC company code","S&P company id","All companies on the filing","NAIC group","State","Filing type","Type of insurance","Sub-type of insurance","Status","Date submitted","Date published","Effective date, new business","Effective date, renewals","Rate impact","Rate impact (number)","Description","Tracking number","SFC number","Document id","Filing version id","Pages"];
@@ -689,6 +705,116 @@ function filingsExport(){
     return [c.companyName, c.naicCompanyCode, c.companyId, cos.map(x=>x.companyName).filter(x=>!blank(x)).join("; "), r.naicGroupName, r.serffFilingStateId||r.serffFilingState, r.serffFilingType, r.typeOfInsurance, r.subTypeOfInsurance, r.filingStatus,
       dayOut(r.dateSubmitted), dayOut(r.publishDate), dayOut(r.newBusReqEffDate), dayOut(r.renewBusReqEffDate), rateImpact(r), isNum(r.overallRateImpact)?+r.overallRateImpact:null, r.filingDescription, r.trackingNumber, r.sfcNumber, r.documentId, r.filingVersionId, isNum(r.pages)?+r.pages:null]; });
   return {name:`snl-filings-${TODAY()}`, sheet:"Filings", cols, rows};
+}
+
+/* ---------- Filings: recent searches, read straight from the saved results ---------- */
+/* Every search anyone has run is saved in snl_store. The list reads only what it needs: a saved search's doc also
+   holds every row, which can run to megabytes. Reopening one sends the same search without refresh, so it opens
+   from the saved result and costs no S&P request. */
+const RECENT_COLS = "id,fetched_at,params:doc->params,total:doc->total,byCompany:doc->byCompany,capped:doc->capped";
+const RECENT_PAGE = 10;
+// kept on S.f, so signing out forgets it along with the rest of the view
+const recentOf = () => S.f.recent || (S.f.recent={open:false, list:null, more:false, loading:false, again:false, err:"", limit:RECENT_PAGE});
+const recentIds = a => (Array.isArray(a)?a:[]).map(Number).filter(Number.isInteger);
+const recentStrs = a => (Array.isArray(a)?a:[]).filter(x=>!blank(x)).map(String);
+function recentUsable(r){
+  const p=r&&r.params;
+  return !!p && typeof p==="object" && recentIds(p.companyIds).length+recentIds(p.institutionIds).length>0 && recentStrs(p.states).length>0 && !blank(p.from) && !blank(p.to);
+}
+async function loadRecent(){
+  const R=recentOf(), f=S.f;
+  if(R.loading){ R.again=true; return; }
+  R.loading=true; R.again=false; R.err=""; render();
+  let data=null, error=null;
+  try{ ({data, error}=await S.sb.from("snl_store").select(RECENT_COLS).eq("kind","search").order("fetched_at",{ascending:false}).limit(R.limit+1)); }catch(e){ error=e||{}; }
+  if(!S.session || S.f!==f) return;   // signed out while it loaded
+  R.loading=false;
+  if(error || !Array.isArray(data)){
+    const m=String((error&&error.message)||"").trim();
+    R.err = !m || /fetch|network|load failed/i.test(m) ? "The page couldn't reach the database. Check your connection and try again." : `The database answered: ${m.replace(/\.$/,"")}.`;
+  } else { R.more=data.length>R.limit; R.list=data.slice(0, R.limit).filter(recentUsable); }
+  render();
+  if(R.again) loadRecent();
+}
+/* After a search that asked S&P (a new search or a Refresh), the list is out of date: reload it now if it is open,
+   otherwise the next time it opens. A search that opened from a saved result changes nothing. */
+function recentAfterSearch(res){
+  if(!res || res.fromStore) return;
+  const R=recentOf();
+  if(R.open) loadRecent(); else R.list=null;
+}
+// "A, B and C", or the first few and "and N more"
+function andList(a, max){
+  if(a.length>max) return a.slice(0,max).join(", ")+` and ${a.length-max} more`;
+  return a.length<2 ? a.join("") : a.slice(0,-1).join(", ")+" and "+a[a.length-1];
+}
+/* The companies a saved search ran for, in the order it ran them, each with its name from the results when S&P gave one. */
+function recentCompanies(r){
+  const bc=Array.isArray(r.byCompany)?r.byCompany:[], p=r.params;
+  return [...recentIds(p.companyIds).map(id=>["companyId",id]), ...recentIds(p.institutionIds).map(id=>["institutionId",id])].map(([kind,id])=>{
+    const hit=bc.find(c=>c && c.kind===kind && String(c.id)===String(id));
+    return {kind, id:String(id), name: hit && !blank(hit.name) ? String(hit.name) : ""};
+  });
+}
+/* What a saved search was, in plain words: who, then where, when, which filters, what came back and when. */
+function recentWords(r){
+  const p=r.params, cos=recentCompanies(r);
+  const who=andList(cos.map(c=>c.name || `${c.kind==="companyId"?"company":"institution"} id ${c.id}`), 3);
+  const named=(field, ids, one, many)=>{ if(!ids.length) return "";
+    const names=ids.map(id=>{ const o=refOptions(field).find(x=>String(x.id)===String(id)); return o&&!blank(o.name) ? String(o.name) : `id ${id}`; });
+    return `${ids.length===1?one:many}: ${andList(names, 3)}`; };
+  const tn=recentStrs(p.trackingNumbers), se=recentStrs(p.spStatEntityIds), total=isNum(r.total)?+r.total:null, st=recentStrs(p.states).map(s=>s.toUpperCase());
+  const parts=[
+    `in ${st.slice(0,8).join(", ")}${st.length>8?` and ${st.length-8} more`:""}`,   // as the results summary writes them
+    `${fmtDay(p.from)} to ${fmtDay(p.to)}`,
+    named("typeOfInsurance", recentIds(p.typeOfInsuranceIds), "type of insurance", "types of insurance"),
+    named("serffFilingType", recentIds(p.filingTypeIds), "filing type", "filing types"),
+    p.allStatuses ? "" : named("filingStatus", recentIds(p.filingStatusIds), "status", "statuses"),
+    tn.length ? `${tn.length===1?"tracking number":"tracking numbers"} ${andList(tn, 3)}` : "",
+    se.length ? `${se.length===1?"statutory entity id":"statutory entity ids"} ${andList(se, 3)}` : "",
+    (total===0 ? "S&P returned nothing" : total===null ? "filings: n/d" : plural(total,"filing")) + (r.capped ? ", incomplete" : ""),
+    `fetched ${fmtAt(r.fetched_at)}`
+  ].filter(Boolean);
+  return {who, detail:parts.join(" · ")};
+}
+function recentHTML(){
+  const R=recentOf();
+  const head=`<div class="recent-h"><button type="button" class="recent-t" id="recentToggle" data-act="recent-toggle" aria-expanded="${R.open}" aria-controls="recentBody"><span class="ar" aria-hidden="true">${R.open?"▼":"▶"}</span>Recent searches</button>
+    <span class="t2">Searches anyone on the team has run. Reopening one uses no S&amp;P requests.</span></div>`;
+  if(!R.open) return `<section class="recent" id="recent" aria-label="Recent searches">${head}</section>`;
+  let body="";
+  if(R.err) body+=`<div class="banner" id="recentErr" role="alert"><span><b>Couldn't load recent searches.</b> ${esc(R.err)}</span><button type="button" class="btn sm" data-act="recent-retry">Try again</button></div>`;
+  if(R.list===null){ if(!R.err) body+=`<p class="t2" id="recentLoading" role="status">Loading recent searches…</p>`; }
+  else if(!R.list.length && !R.more) body+=`<p class="t2" id="recentNone">No searches have been run yet. When anyone on the team runs one, it shows here and opens again without using S&amp;P requests.</p>`;
+  else{
+    body+=`<ul id="recentList" aria-label="Recent searches, newest first">${R.list.map((r,i)=>{ const w=recentWords(r);
+      return `<li><button type="button" class="recent-i" data-act="recent-open" data-i="${i}" ${S.f.busy?"disabled":""}><span class="t1" style="display:block">${esc(w.who)}</span><span class="t2" style="display:block">${esc(w.detail)}</span></button></li>`; }).join("")}</ul>`;
+    if(R.more) body+=`<div class="inline"><button type="button" class="btn sm" id="recentMore" data-act="recent-more" ${R.loading?"disabled":""}>${R.loading?"Loading…":"Show more"}</button></div>`;
+  }
+  return `<section class="recent" id="recent" aria-label="Recent searches">${head}<div id="recentBody" style="display:flex;flex-direction:column;gap:8px;min-width:0">${body}</div></section>`;
+}
+function toggleRecent(){
+  const R=recentOf(); R.open=!R.open;
+  if(R.open && R.list===null && !R.loading) loadRecent(); else render();
+}
+/* Fills the form with a saved search and opens it. The search is sent exactly as it was saved, so it finds the same
+   saved result: with every status when none was chosen (the function filled them in), no status ids are sent. */
+function reopenRecent(i){
+  const f=S.f, R=recentOf(), r=R.list&&R.list[i];
+  if(!r || f.busy) return;
+  const p=r.params, statuses=p.allStatuses ? [] : recentIds(p.filingStatusIds), toi=recentIds(p.typeOfInsuranceIds), ftype=recentIds(p.filingTypeIds), tn=recentStrs(p.trackingNumbers), se=recentStrs(p.spStatEntityIds);
+  f.chips=recentCompanies(r).slice(0, MAX_COMPANIES);
+  f.states=[...new Set(recentStrs(p.states).map(s=>s.toUpperCase()))]; f.from=String(p.from); f.to=String(p.to);
+  f.toi=toi.map(String); f.ftype=ftype.map(String); f.fstatus=statuses.map(String); f.toiFilter=""; f.tracking=tn.join(", ");
+  f.q=""; f.matches=null; f.resolveNote=""; f.resolveErr=""; f.formErr="";
+  const payload={action:"search", companyIds:recentIds(p.companyIds), institutionIds:recentIds(p.institutionIds), states:[...f.states].sort(), from:f.from, to:f.to};
+  if(statuses.length) payload.filingStatusIds=statuses;
+  if(toi.length) payload.typeOfInsuranceIds=toi;
+  if(ftype.length) payload.filingTypeIds=ftype;
+  if(tn.length) payload.trackingNumbers=tn;
+  if(se.length) payload.spStatEntityIds=se;
+  runSearch(false, payload);
+  document.getElementById("results")?.scrollIntoView({block:"start"});
 }
 
 /* ---------- documents: fetched once with the login, then opened from memory ---------- */
@@ -1259,6 +1385,10 @@ document.addEventListener("click", e=>{
     case "co-toggle": f.openCo[t.dataset.key]=!f.openCo[t.dataset.key]; render(); break;
     case "open-doc": openDoc(t.dataset.doc, t.dataset.page); break;
     case "export": exportTable(exportOf(t), t.dataset.fmt); break;
+    case "recent-toggle": toggleRecent(); break;
+    case "recent-open": reopenRecent(+t.dataset.i); break;
+    case "recent-more": { const R=recentOf(); R.limit+=RECENT_PAGE; loadRecent(); break; }
+    case "recent-retry": loadRecent(); break;
 
     case "ask-open": openAsk(); break;
     case "ask-close": closeAsk(); break;
