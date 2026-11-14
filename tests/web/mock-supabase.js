@@ -43,6 +43,41 @@
     fire(event){ authCbs.forEach(cb => cb(event, event==="SIGNED_OUT" ? null : session())); }
   };
 
+  // Storage (the PowerPoint template): storage.from(bucket).list/download/upload against in-memory buckets, answering
+  // with errors shaped like supabase-js's StorageApiError. Options: template: {text, updated_at} starts the
+  // "snl-template" bucket with template.pptx; noBucket: true starts with no such bucket (the migration not run).
+  // Switches on __mock.storage: noBucket, refuse (true: reads and writes refused, as a policy would), netFail (true:
+  // every call fails as with no connection), delay (milliseconds before each answer). Records: calls [{op, bucket,
+  // path, opts}], uploads [{bucket, path, size, type, opts, text}].
+  const enc = s => Array.from(new TextEncoder().encode(String(s)));
+  M.storage = {buckets:{"snl-template":{}}, noBucket:!!O.noBucket, refuse:false, netFail:false, delay:0, calls:[], uploads:[]};
+  if(O.template) M.storage.buckets["snl-template"]["template.pptx"] = {bytes:enc(O.template.text||"PK made-up template"), updated_at:O.template.updated_at||"2026-11-05T09:30:00Z"};
+  const sErr = (message, statusCode, status) => ({name:"StorageApiError", message, statusCode, status});
+  function bucket(name){
+    const gate = async (op, path, opts) => {
+      M.storage.calls.push({op, bucket:name, path, opts:opts?clone(opts):null});
+      if(M.storage.delay) await new Promise(r=>setTimeout(r, M.storage.delay));
+      if(M.storage.netFail) return {name:"StorageUnknownError", message:"Failed to fetch"};
+      if(M.storage.noBucket || !M.storage.buckets[name]) return sErr("Bucket not found", "404", 400);
+      if(M.storage.refuse) return op==="upload" ? sErr("new row violates row-level security policy", "403", 400) : op==="download" ? sErr("Object not found", "404", 400) : null;
+      return null;
+    };
+    return {
+      async list(prefix, opts){ const e=await gate("list", prefix, opts); if(e) return {data:null, error:e};
+        if(M.storage.refuse) return {data:[], error:null};   // a policy hides what it doesn't allow
+        const s=opts&&opts.search||""; const B=M.storage.buckets[name];
+        return {data:Object.keys(B).filter(k=>k.includes(s)).map(k=>({name:k, id:"obj-"+k, updated_at:B[k].updated_at, created_at:B[k].updated_at, last_accessed_at:null, metadata:{size:B[k].bytes.length, mimetype:"application/vnd.openxmlformats-officedocument.presentationml.presentation"}})), error:null}; },
+      async download(path){ const e=await gate("download", path); if(e) return {data:null, error:e};
+        const o=M.storage.buckets[name][path]; if(!o) return {data:null, error:sErr("Object not found", "404", 400)};
+        return {data:new Blob([new Uint8Array(o.bytes)]), error:null}; },
+      async upload(path, body, opts){ const e=await gate("upload", path, opts); if(e) return {data:null, error:e};
+        const B=M.storage.buckets[name]; if(B[path] && !(opts&&opts.upsert)) return {data:null, error:sErr("The resource already exists", "409", 400)};
+        const bytes=Array.from(new Uint8Array(await body.arrayBuffer()));
+        M.storage.uploads.push({bucket:name, path, size:bytes.length, type:body.type||"", opts:opts?clone(opts):null, text:new TextDecoder().decode(new Uint8Array(bytes.slice(0,64)))});
+        B[path]={bytes, updated_at:new Date().toISOString()}; return {data:{path, id:"obj-"+path, fullPath:name+"/"+path}, error:null}; }
+    };
+  }
+
   function query(table){
     const st = {op:"select", eqs:[], ins:[], ord:null, lim:null, single:false, vals:null, cols:null, gtes:[], lts:[], range:null};
     const b = {
@@ -107,6 +142,7 @@
 
   const client = {
     from: query,
+    storage: { from: bucket },
     auth: {
       async getSession(){ return {data:{session: M.signedOut ? null : session()}}; },
       async signInWithPassword(c){
