@@ -200,6 +200,9 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   await p.setViewportSize({width:390,height:844}); await p.waitForTimeout(150);
   ok("phone: no sideways scroll on the figures; tables scroll inside their own box", await t.noScroll() && await p.$eval('.statblk[data-field="surplus"] .tbl-wrap',e=>e.scrollWidth>e.clientWidth), await p.evaluate(()=>document.documentElement.scrollWidth));
   await p.screenshot({path:OUTDIR+"/statutory-results-390.png",fullPage:true});
+  await p.evaluate(()=>window.scrollTo(0, document.documentElement.scrollHeight)); await p.waitForTimeout(80);
+  ok("phone: the Ask Claude button is there, and the last figures scroll clear of it", (await t.txt("#askFab"))==="Ask Claude" && await p.evaluate(()=>{ const a=document.getElementById("askFab").getBoundingClientRect(), last=document.getElementById("statSource").getBoundingClientRect(); return last.bottom<=a.top && a.right<=innerWidth; }));
+  await p.evaluate(()=>window.scrollTo(0,0));
   t.query=()=>({status:200, body:{...copy(STAT.query), loaded:[{view:"STAT_INSURANCE_REGULATORY_PREMIUMS_BY_LINE_OF_BUSINESS_AND_STATE_DETAIL", at:"2026-11-01T04:00:00"}]}});
   await p.click('button[data-act="stat-search"]'); await p.waitForTimeout(400);
   ok("phone: a very long view name in the source line wraps too", (await t.txt("#statSource")).includes("STAT_INSURANCE_REGULATORY_PREMIUMS_BY_LINE_OF_BUSINESS_AND_STATE_DETAIL") && await t.noScroll(), await p.evaluate(()=>document.documentElement.scrollWidth));

@@ -1,6 +1,7 @@
-// End to end, against made-up fixtures: one question asked in the Ask view and followed to its answer, comparison
-// table, page citations and export; then the same search run by hand in the Filings view, where one state returns
-// nothing and the page says so plainly. The functions are faked here; the page is the real one.
+// End to end, against made-up fixtures: one question asked in the Ask Claude panel and followed to its answer,
+// comparison table, page citations and export; then, with the panel still open beside it, the same search run by
+// hand in the Filings view, where one state returns nothing and the page says so plainly; then a follow-up that
+// tells Claude what is on screen. The functions are faked here; the page is the real one.
 const OUTDIR=require("path").join(__dirname,"../out"); require("fs").mkdirSync(OUTDIR,{recursive:true});
 const { chromium } = require("playwright"); const fs=require("fs"); const path=require("path");
 const WEB=path.join(__dirname,"../../web"); const MOCK=fs.readFileSync(__dirname+"/mock-supabase.js","utf8"); const BASE="http://localhost:8123/";
@@ -40,7 +41,7 @@ function fakeSearch(body){
       if(fn==="snl-filings" && body.action==="resolve") return J(200,/calloway/i.test(body.q)?{...RESOLVE,query:body.q}:{query:body.q,matches:[],note:"No saved company matches."});
       if(fn==="snl-filings" && body.action==="search"){ const a=fakeSearch(body); used=a.used; return J(200,a); }
       if(fn==="snl-filings" && body.action==="document") return r.fulfill({status:200,contentType:"application/pdf",headers:{"access-control-allow-origin":"*"},body:"%PDF-1.4 made-up "+(body.documentId||body.filingVersionId)});
-      if(fn==="snl-chat" && body.action==="ask") return J(202,{jobId:"job-e2e"});
+      if(fn==="snl-chat" && body.action==="ask") return J(202,{jobId:of("ask").length===1?"job-e2e":"job-e2e-"+of("ask").length});
       if(fn==="snl-chat" && body.action==="continue") return J(202,{jobId:body.jobId,resumed:true});
       return J(400,{error:"bad",message:"Unknown action."}); }
     if(/xlsx/.test(u)) return r.fulfill({contentType:"application/javascript",body:FAKE_XLSX});
@@ -50,14 +51,16 @@ function fakeSearch(body){
   await p.addInitScript(()=>{ window.__opened=[]; window.open=url=>{ const w={closed:false, opener:window, location:{href:url||""}, document:{title:"", body:{textContent:""}}, close(){ this.closed=true; }}; window.__opened.push(w); return w; }; });
   const txt=async sel=>((await p.textContent(sel).catch(()=>""))||"").replace(/\s+/g," ").trim();
   const all=async sel=>p.$$eval(sel,e=>e.map(x=>x.textContent.replace(/\s+/g," ").trim()));
-  const noScroll=async()=>p.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth);
-  const job=async patch=>{ await p.evaluate(pa=>{ __mock.setJob("job-e2e",pa); },patch); await p.waitForTimeout(280); };
+  const noScroll=async()=>p.evaluate(()=>{ const b=document.getElementById("askBody"); return document.documentElement.scrollWidth<=window.innerWidth && (!b || b.scrollWidth<=b.clientWidth); });
+  const job=async(patch,id="job-e2e")=>{ await p.evaluate(([i,pa])=>{ __mock.setJob(i,pa); },[id,patch]); await p.waitForTimeout(280); };
   const download=async click=>{ const [d]=await Promise.all([p.waitForEvent("download"), click()]); return {name:d.suggestedFilename(), text:fs.readFileSync(await d.path(),"utf8")}; };
 
-  // ===== 1. the question, in the Ask view =====
-  await p.goto(BASE+"#ask"); await p.waitForTimeout(400); await p.evaluate(()=>{ TIMING.poll=100; });
+  // ===== 1. the question, in the Ask Claude panel, before anything is on screen =====
+  await p.goto(BASE+"#filings"); await p.waitForTimeout(400); await p.evaluate(()=>{ TIMING.poll=100; });
+  await p.click("#askFab"); await p.waitForTimeout(150);
+  ok("Ask Claude opens beside the Filings view", await p.isVisible("#askPanel") && await p.isVisible("#searchForm") && (await txt("#askTold"))==="Nothing is on screen yet, so Claude starts from your question alone.");
   await p.fill("#ask_input",JOB.question); await p.press("#ask_input","Enter"); await p.waitForTimeout(300);
-  ok("the question goes to the questions function", same(of("ask").map(c=>c.body),[{action:"ask",question:JOB.question}]) && of("ask")[0].fn==="snl-chat" && of("ask")[0].auth==="Bearer t");
+  ok("the question goes to the questions function, on its own", same(of("ask").map(c=>c.body),[{action:"ask",question:JOB.question}]) && of("ask")[0].fn==="snl-chat" && of("ask")[0].auth==="Bearer t");
   ok("the page waits, and says to keep the tab open", (await txt(".ccmsg.u"))===JOB.question && (await txt(".ccmsg.run")).includes("Keep this tab open until the answer finishes."));
   await job({status:"running", question:JOB.question, progress:JOB.progress.slice(0,1)});
   ok("first step: the search Claude ran", same(await all(".steps li"),["Searching S&P filings: 3 companies, FL, 2021 to 202612:00"]));
@@ -97,14 +100,14 @@ function fakeSearch(body){
   const xl=await download(()=>p.click('.anstable button[data-fmt="xlsx"]')); const wb=JSON.parse(xl.text);
   ok("and to XLSX", xl.name==="snl-answer-table-2026-11-13.xlsx" && same(wb.sheets[0].aoa.slice(0,4),[JOB.result.table.columns, ...JOB.result.table.rows]));
   ok("what it took is on the page", (await txt(".ccmsg.done .look")).endsWith("9 S&P requests. Claude read 48,210 tokens and wrote 1,432. Model: claude-example-1."));
-  await p.screenshot({path:OUTDIR+"/e2e-ask-1440.png",fullPage:true});
+  await p.$eval("#askBody",e=>{ e.scrollTop=0; });
+  await p.screenshot({path:OUTDIR+"/e2e-ask-1440.png"});
   await p.setViewportSize({width:390,height:844}); await p.waitForTimeout(150);
-  ok("phone: the whole answer fits with no sideways scroll", await noScroll(), await p.evaluate(()=>document.documentElement.scrollWidth));
-  await p.screenshot({path:OUTDIR+"/e2e-ask-390.png",fullPage:true});
+  ok("phone: the answer fills the screen as a sheet, with no sideways scroll", await noScroll() && await p.$eval("#askPanel",e=>{ const r=e.getBoundingClientRect(); return r.left===0 && r.width===390; }), await p.evaluate(()=>document.documentElement.scrollWidth));
+  await p.screenshot({path:OUTDIR+"/e2e-ask-390.png"});
   await p.setViewportSize({width:1440,height:900});
 
-  // ===== 2. the same search by hand, in the Filings view =====
-  await p.click('nav.tabs a[data-view="filings"]'); await p.waitForTimeout(400);
+  // ===== 2. the same search by hand, in the Filings view, with the answer still open beside it =====
   await p.fill("#f_q","Calloway"); await p.press("#f_q","Enter"); await p.waitForTimeout(250);
   await p.click('#matches li >> nth=0 >> button[data-kind="companyId"]'); await p.waitForTimeout(100);
   await p.fill("#f_q","Calloway"); await p.press("#f_q","Enter"); await p.waitForTimeout(250);
@@ -125,7 +128,18 @@ function fakeSearch(body){
   const nDocs=of("document").length;
   await p.click('#resTable tbody tr[data-key="vfv-00000001"] button[data-act="open-doc"]'); await p.waitForTimeout(250);
   ok("a document already opened from the answer costs no second S&P request here", of("document").length===nDocs && await p.evaluate(()=>/^blob:[^#]+$/.test(__opened[__opened.length-1].location.href)));
-  await p.screenshot({path:OUTDIR+"/e2e-filings-1440.png",fullPage:true});
+  ok("the answer and the results it rests on are on screen together", (await p.$$(".ccmsg.done")).length===1 && (await p.$$(".anstable tbody tr")).length===3 && await p.isVisible("#resTable") && await p.evaluate(()=>document.getElementById("results").getBoundingClientRect().right<=document.getElementById("askPanel").getBoundingClientRect().left) && await noScroll());
+  await p.screenshot({path:OUTDIR+"/e2e-filings-1440.png"});
+
+  // ===== 3. a follow-up, now that the search is on screen =====
+  ok("the panel says what Claude will now be told", (await txt("#askTold"))==="Claude will be told what is on screen: 3 filings for 3 companies in FL, GA, 1 Jan 2021 to 13 Nov.", await txt("#askTold"));
+  await p.fill("#ask_input","Which of these changed the hurricane deductible?"); await p.press("#ask_input","Enter"); await p.waitForTimeout(300);
+  const answerText=JOB.result.answer.map(s=>s.text).join("\n");
+  ok("the follow-up carries the first answer and the search on screen", same(of("ask")[1].body,{action:"ask",question:"Which of these changed the hurricane deductible?",history:[{question:JOB.question,answer:answerText}],
+    screen:{view:"filings",search:{companyIds:[4000001,4000002,4000107],institutionIds:[],states:["FL","GA"],from:"2021-01-01",to:"2026-11-13",typeOfInsuranceIds:[101],filingTypeIds:[11],filingStatusIds:[]},total:3,companies:["Calloway Insurance Co","Calloway Home Co","Tarrow Mutual Insurance Co"]}}), of("ask")[1].body);
+  await job({status:"running", progress:[{at:"2026-11-13T12:05:00Z", text:"Reading filing CALL-134000001 (42 pages)"}]},"job-e2e-2");
+  await p.click("#askClose"); await p.waitForTimeout(150);
+  ok("closed, the button says Claude is working while the results stay in use", (await txt("#askFab"))==="Claude is working…" && !(await p.$("#askPanel")) && (await p.$$("#resTable tbody tr")).length===3);
   await p.setViewportSize({width:390,height:844}); await p.waitForTimeout(150);
   ok("phone: the results fit with no sideways scroll", await noScroll(), await p.evaluate(()=>document.documentElement.scrollWidth));
   await p.setViewportSize({width:1440,height:900});
@@ -139,10 +153,14 @@ function fakeSearch(body){
   ok("phone: the empty result fits with no sideways scroll", await noScroll());
   await p.screenshot({path:OUTDIR+"/e2e-filings-empty-390.png",fullPage:true});
 
-  // back to Ask: the conversation is still there
+  // the follow-up finishes while the panel is closed; opening it shows both answers
   await p.setViewportSize({width:1440,height:900});
-  await p.click('nav.tabs a[data-view="ask"]'); await p.waitForTimeout(250);
-  ok("the answer is still there on returning to Ask", (await p.$$(".ccmsg.done")).length===1 && (await p.$$(".anstable tbody tr")).length===3);
+  await job({status:"done", result:{answer:[{text:"Only the middle market form did.", cites:[1]}], sources:[JOB.result.sources[0]], table:null, lookups:[], caps:[], model:"claude-example-1", usage:{inputTokens:5200, outputTokens:90, spRequests:1}}},"job-e2e-2");
+  ok("the button says the answer is ready", (await txt("#askFab"))==="Answer ready");
+  await p.click("#askFab"); await p.waitForTimeout(200);
+  ok("opening the panel shows the new answer under the first, and clears the mark", (await p.$$(".ccmsg.done")).length===2 && (await p.$$(".anstable tbody tr")).length===3 && (await txt("#turn-1 .ans"))==="Only the middle market form did. [1]" && (await txt("#turn-1 .told"))==="Claude was told what was on screen: 3 filings for 3 companies in FL, GA, 1 Jan 2021 to 13 Nov.");
+  await p.click("#askClose"); await p.waitForTimeout(150);
+  ok("and the button is back to Ask Claude", (await txt("#askFab"))==="Ask Claude");
 
   ok("no page errors", errs.length===0, errs);
   console.log(`${pass} passed, ${fail} failed`); await b.close(); process.exit(fail?1:0);

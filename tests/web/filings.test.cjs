@@ -381,6 +381,9 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   // ----- phone -----
   t=await open(); p=t.p; await p.setViewportSize({width:390,height:844}); await t.quick(["FL","GA"]);
   ok("phone: no sideways scroll on the results", await t.noScroll(), await p.evaluate(()=>document.documentElement.scrollWidth));
+  await p.evaluate(()=>window.scrollTo(0, document.documentElement.scrollHeight)); await p.waitForTimeout(80);
+  ok("phone: the Ask Claude button is there, and the last filing scrolls clear of it", (await t.txt("#askFab"))==="Ask Claude" && await p.evaluate(()=>{ const a=document.getElementById("askFab").getBoundingClientRect(), last=[...document.querySelectorAll("#results *")].pop().getBoundingClientRect(); return last.bottom<=a.top && a.right<=innerWidth; }));
+  await p.evaluate(()=>window.scrollTo(0,0));
   ok("phone: each filing is a card with labelled lines", await p.evaluate(()=>getComputedStyle(document.querySelector("#resTable thead")).display==="none" && getComputedStyle(document.querySelector("#resTable tbody tr")).display==="grid" && getComputedStyle(document.querySelector('#resTable td[data-label="Rate impact"]'),"::before").content==='"Rate impact"'));
   await p.click('#resTable tbody tr >> nth=0 >> button[data-act="desc-toggle"]'); await p.click('#resTable tbody tr >> nth=4 >> button[data-act="co-toggle"]'); await p.waitForTimeout(100);
   ok("phone: still no sideways scroll with a long description and every company open", await t.noScroll());
