@@ -13,6 +13,10 @@ verify_jwt = false
 [functions.snl-chat]
 verify_jwt = false
 
+# The daily watchlist check. Called by Supabase Cron with a shared secret header (no login), or by a Corp Dev login.
+[functions.snl-watch]
+verify_jwt = false
+
 # Lets background tasks run under `supabase functions serve` on your own machine.
 [edge_runtime]
 policy = "per_worker"
