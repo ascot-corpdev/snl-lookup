@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
-<title>Ascot SNL lookup</title>
+<title>SNL lookup</title>
 <style>
-/* Layout: Ascot template chrome (spectrum stripe, magenta action title, navy text, footer) over two views:
+/* Layout: house template chrome (spectrum stripe, magenta action title, navy text, footer) over two views:
    Filings (search and open S&P product filings) and Statutory (Snowflake). Ask Claude is a panel that opens beside
    either view from a button fixed at the bottom right, so a question never means leaving what is on screen. */
 :root{
@@ -57,6 +57,17 @@ nav.tabs a:hover{background:var(--alt)}
 .strip .wrap{display:flex;flex-wrap:wrap;gap:4px 22px;padding-block:7px}
 .strip .s-i{min-width:0;overflow-wrap:anywhere}
 .strip .s-i.warn{color:var(--magenta);font-weight:bold}
+/* S&P connection check: a small link in the strip, and its report just under the strip */
+.strip .s-conn{margin-left:auto;min-width:0}
+.strip .s-conn .lnk:disabled{color:var(--muted);text-decoration:none;cursor:default}
+#connRoot .wrap{padding-block:10px}
+.conn{font-size:13px}
+.conn>div{flex:1 1 100%;min-width:0;display:flex;flex-direction:column;gap:6px}
+.conn p{margin:0}
+.conn ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px}
+.conn .mk{font-weight:bold}
+.conn .mk.no{color:var(--magenta)}
+.conn textarea{min-height:140px;font-size:12px}
 
 main .wrap{padding-block:22px 28px;display:flex;flex-direction:column;gap:22px}
 footer.foot{border-top:1px solid var(--grid)}
@@ -128,6 +139,23 @@ label.f em,.f em{font-weight:normal;font-style:normal;color:var(--muted)}
 .matches li{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;justify-content:space-between;padding:8px 10px;min-width:0}
 .matches li+li{border-top:1px solid var(--grid)}
 .matches li>div{min-width:0;flex:1 1 220px;overflow-wrap:anywhere}
+/* Recent searches: a compact bar above the form, opening to a list of saved searches that reopen in a click */
+.recent{border:1px solid var(--grid);background:var(--alt);padding:8px 12px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.recent-h{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;min-width:0}
+.recent-h .t2{flex:1 1 240px;min-width:0}
+.recent-t{all:unset;cursor:pointer;font-weight:bold;display:inline-flex;align-items:center;gap:6px}
+.recent-t:hover{text-decoration:underline}
+.recent-t:focus-visible{outline:2px solid var(--magenta);outline-offset:2px}
+.recent-t .ar{font-size:10px}
+.recent ul{list-style:none;margin:0;padding:0;border:1px solid var(--grid);background:var(--surface)}
+.recent li+li{border-top:1px solid var(--grid)}
+.recent-i{all:unset;box-sizing:border-box;display:block;width:100%;cursor:pointer;padding:7px 10px;min-width:0;overflow-wrap:anywhere}
+.recent-i:hover{background:var(--tile)}
+.recent-i:focus-visible{outline:2px solid var(--magenta);outline-offset:-2px}
+.recent-i:disabled{cursor:not-allowed;opacity:.6}
+.recent-i .t1{color:var(--blue)}
+#st_named:empty{display:none}
+.noadd{max-width:44ch}
 
 /* Tables */
 .tbl-wrap{overflow-x:auto;border:1px solid var(--grid);max-width:100%}
@@ -200,6 +228,18 @@ body.signed footer.foot .wrap{padding-bottom:calc(68px + env(safe-area-inset-bot
 .blk{display:grid;gap:8px;min-width:0}
 .blk-h{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;justify-content:space-between;min-width:0}
 .blk-h>div{min-width:0}
+/* Past answers: the login's own questions from the last 30 days, under the start of an empty conversation */
+.past{display:grid;gap:8px;min-width:0;border-top:1px solid var(--grid);padding-top:12px}
+.pastlist{list-style:none;margin:0;padding:0;border:1px solid var(--grid);min-width:0}
+.pastlist li{min-width:0}
+.pastlist li+li{border-top:1px solid var(--grid)}
+.pastq{all:unset;box-sizing:border-box;cursor:pointer;display:grid;gap:2px;width:100%;padding:8px 10px;min-width:0;overflow-wrap:anywhere}
+.pastq:hover{background:var(--alt)}
+.pastq:focus-visible{outline:2px solid var(--magenta);outline-offset:-2px}
+.pastq[aria-disabled="true"]{cursor:default}
+.pastq .pq{font-weight:bold;color:var(--ink)}
+.pastq .stopped{color:var(--magenta)}
+.turn .asked{margin:0;justify-self:end;text-align:right;overflow-wrap:anywhere}
 
 /* Drawer (change password) */
 .scrim{position:fixed;inset:0;background:var(--overlay);z-index:40}
@@ -247,6 +287,13 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
   table.cards tbody tr:nth-child(even) td{background:transparent}
   table.cards td[data-label]::before{content:attr(data-label);display:block;font-size:11px;font-weight:bold;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin-bottom:2px}
 }
+/* Watchlist: a compact card above the search form */
+.watch{gap:10px}
+.watch .blk-h h3{color:var(--ink)}
+.watch .wlist{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;font-size:13px;min-width:0}
+.watch .wlist>b{font-size:12px}
+.watch .wmanage{border-top:1px solid var(--grid);padding-top:10px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.watch .pill.on{color:var(--teal)}.watch .pill.off{color:var(--muted)}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
@@ -273,9 +320,10 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
   </div>
 </header>
 <div class="strip" id="strip" hidden><div class="wrap" id="stripIn" role="status" aria-label="S&amp;P usage and data freshness"></div></div>
+<div id="connRoot"></div>
 
 <main><div class="wrap" id="view"></div></main>
-<footer class="foot"><div class="wrap"><span>2026 Ascot Group</span><span>Confidential: strategy and corporate development use only. Data: S&amp;P Global Market Intelligence.</span></div></footer>
+<footer class="foot"><div class="wrap"><span id="footOrg">2026</span><span>Confidential: strategy and corporate development use only. Data: S&amp;P Global Market Intelligence.</span></div></footer>
 
 <div id="askRoot"></div>
 <div id="drawerRoot"></div>
@@ -286,15 +334,21 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 /* ---------- settings and state ---------- */
 const CFG = Object.assign({}, window.SNL_CONFIG || {});
 if(CFG.supabaseUrl) CFG.supabaseUrl = String(CFG.supabaseUrl).trim().replace(/\/+$/,"").replace(/\/(rest|auth)\/v1$/,"");
+// The company's name is a setting (orgName, from the ORG_NAME repository variable), so the public code stays neutral.
+const ORG = String(CFG.orgName ?? "").trim();
+document.title = ORG ? `${ORG} SNL lookup` : "SNL lookup";
+{ const f = document.getElementById("footOrg"); if(f) f.innerHTML = ORG ? `2026 ${esc(ORG)}` : "2026"; }
 // How often the page checks a running answer, how old a heartbeat may get before the page asks the function to
 // pick the answer up again, and the shortest gap between two such requests (milliseconds).
 const TIMING = {poll:2000, stale:45000, again:30000};
 const VIEWS = ["filings","statutory"];
 const ROLES = {corpdev:"Corp Dev", reader:"Reader"};
 const FN = {"snl-filings":"the filings function", "snl-chat":"the questions function", "snl-statutory":"the statutory function"};
+FN["snl-watch"]="the watchlist function";
 const US_STATES = "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY".split(" ");
 const PAGE = 100, MAX_COMPANIES = 50, MAX_YEARS = 10, MAX_QUESTION = 4000, MAX_HISTORY = 6, MAX_HISTORY_ANSWER = 20000, MAX_CODES = 8, MAX_STAT_YEARS = 15;
 const XLSX_SRC = "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.mini.min.js";
+const DOCX_SRC = "https://cdn.jsdelivr.net/npm/docx@9.5.1/dist/index.iife.min.js";   // the Word export, loaded on the first click
 const JOB_COLS = "id,status,question,progress,partial,result,error,segments,created_at,updated_at,heartbeat_at";
 const EMPTY_RESULT = "S&P returned no filings for this search. That means none are in S&P's data for these companies, states, dates and filters. It doesn't prove that none were filed.";
 const DAY = 86400000;
@@ -323,6 +377,8 @@ const S = {
   status:null, statusErr:"", refs:null, refsLoading:false, refsMsg:"", refsErr:"",
   f:null, ask:freshAsk(), st:null, docs:{}
 };
+S.chatUse=null; S.chatUseAt=0;   // the login's questions today and their cost, from the questions function
+S.w=freshWatch();
 
 /* ---------- helpers ---------- */
 function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
@@ -430,7 +486,64 @@ function stripHTML(){
   items.push(`<span class="s-i" id="s_search">${rf.search?`Last search ${fmtAt(rf.search)}`:"No searches yet"}</span>`);
   items.push(`<span class="s-i" id="s_stat">${st.statutory&&st.statutory.configured ? (rf.statutory?`Statutory data refreshed ${fmtAt(rf.statutory)}`:"Statutory data: connected, nothing fetched yet") : "Statutory data: not set up yet"}</span>`);
   if(st.claude && st.claude.configured===false) items.push(`<span class="s-i" id="s_claude">Questions: not set up yet</span>`);
+  items.push(connButtonHTML());
   return items.join("");
+}
+
+/* ---------- S&P connection check: signs in, checks the entitlement and loads the four lists, then says what happened ---------- */
+function connButtonHTML(){
+  const busy=!!(S.conn&&S.conn.busy);
+  return `<span class="s-conn" id="s_conn"><button type="button" class="lnk" id="connBtn" data-act="conn-check" ${busy?"disabled":""} title="Signs in to S&amp;P and loads the four lists, to show whether the S&amp;P connection works (at most five S&amp;P requests)">${busy?"Checking S&amp;P connection…":"Check S&amp;P connection"}</button></span>`;
+}
+async function runConnCheck(){
+  if(S.conn&&S.conn.busy) return;
+  S.conn={busy:true}; render();
+  const r=await callFn("snl-filings",{action:"check"});
+  if(!S.session) return;
+  if(r.data){
+    S.conn={report:r.data, focus:true}; takeUsage(r.data);
+    if(r.data.configured){ loadStatus(); if((r.data.steps||[]).some(s=>s.ok&&(s.id==="states"||s.id==="lists"))){ S.refs=null; if(S.view==="filings") loadRefs(false); } }
+  } else if(r.err!=="signin") S.conn={err:errText(r), focus:true};
+  render();
+}
+// for the email to S&P: the full date and the time in UTC, since it is read somewhere else and later
+const connAt = s => { const d=new Date(s); return isNaN(d) ? "n/d" : `${d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:"UTC"})}, ${d.toISOString().slice(11,16)} UTC`; };
+const connRef = s => s.requestId && !String(s.detail||"").includes(s.requestId) ? ` S&P reference: ${s.requestId}.` : "";
+/* A short plain-text version for an email to S&P support. */
+function connText(r){
+  const lines=["S&P API connection check (SNL lookup)", `Checked: ${connAt(r.checkedAt)}`,
+    "Product: SNL Insurance Product Filings, Physical Documents API (docType INSPRODFILINGS_DOCUMENTS_API)",
+    `Account: ${r.account||"n/d"} (${count(r.limits&&r.limits.hour)} requests an hour, ${count(r.limits&&r.limits.day)} a day)`,
+    `Result: ${r.summary}`, ""];
+  (r.steps||[]).forEach((s,i)=>lines.push(`${i+1}. ${s.ok?"Done":"Failed"}: ${s.title}. ${s.detail}${connRef(s)}`));
+  return lines.join("\n");
+}
+function connHTML(){
+  const c=S.conn; if(!c||c.busy) return "";
+  const close=`<button type="button" class="btn sm ghost" data-act="conn-close">Close</button>`;
+  if(c.err) return `<div class="wrap"><div class="banner conn" id="connPanel" role="alert" tabindex="-1"><span><b>Couldn't run the S&amp;P connection check.</b> ${esc(c.err)}</span><span class="inline"><button type="button" class="btn sm" data-act="conn-check">Try again</button>${close}</span></div></div>`;
+  const r=c.report;
+  if(!r.configured) return `<div class="wrap"><div class="info conn" id="connPanel" role="status" tabindex="-1"><span>${esc(r.summary)}</span>${close}</div></div>`;
+  const bad=(r.steps||[]).some(s=>!s.ok);
+  const steps=(r.steps||[]).map(s=>`<li><span class="mk${s.ok?"":" no"}">${s.ok?"Done":"Failed"}:</span> <b>${esc(s.title)}.</b> ${esc(s.detail)}${esc(connRef(s))}</li>`).join("");
+  const acct=r.account==="production"?"Production":"Trial";
+  return `<div class="wrap"><div class="${bad?"banner":"info"} conn" id="connPanel" role="${bad?"alert":"status"}" tabindex="-1" aria-label="S&amp;P connection check"><div>
+    <p><b>${esc(r.summary)}</b></p>
+    <ol id="connSteps">${steps}</ol>
+    <p class="t2">${acct} account: ${count(r.limits&&r.limits.hour)} S&amp;P requests an hour and ${count(r.limits&&r.limits.day)} a day. This check used ${esc(plural(r.requests,"S&P request"))}. Checked ${fmtAt(r.checkedAt)} at ${esc(fmtTime(r.checkedAt))}.</p>
+    ${c.showText?`<label class="f">Select this and copy it into your email to S&amp;P<textarea id="connText" readonly>${esc(connText(r))}</textarea></label>`:""}
+    <div class="inline"><button type="button" class="btn sm" data-act="conn-copy">Copy for S&amp;P</button><button type="button" class="btn sm ghost" data-act="conn-check">Check again</button>${close}</div>
+  </div></div></div>`;
+}
+function renderConn(){
+  const root=document.getElementById("connRoot"), h=S.session?connHTML():"";
+  if(renderConn.shown!==h){ root.innerHTML=h; renderConn.shown=h; }   // redrawn only when it changes, so focus and selection stay
+  if(S.conn&&S.conn.focus){ S.conn.focus=false; document.getElementById("connPanel")?.focus({preventScroll:true}); }
+}
+async function copyConn(){
+  const r=S.conn&&S.conn.report; if(!r) return;
+  try{ await navigator.clipboard.writeText(connText(r)); toast("Copied. Paste it into your email to S&P support."); }
+  catch{ S.conn.showText=true; renderConn(); const t=document.getElementById("connText"); if(t){ t.focus(); t.select(); } toast("Couldn't copy here. Select the text below and copy it."); }
 }
 
 /* ---------- Filings: the search form ---------- */
@@ -514,6 +627,10 @@ function addAllMatches(){
   toast(full ? `Added ${added}. A search takes at most ${MAX_COMPANIES} companies, so the rest were left out.` : added ? `Added ${plural(added,"company","companies")}.` : "Those companies are already chosen.");
   document.getElementById("f_q")?.focus();
 }
+/* A match from the company list with no S&P id: shown, but it can't be added to a filing search. */
+function noFilingsHTML(m){
+  return `<span class="t2 noadd">Can't be added: the company list has no S&amp;P id for it, so its filings can't be searched.${!blank(m.naicCompanyCode)?" Its NAIC code works on the Statutory view.":""}</span>`;
+}
 const chipLabel = c => `${c.kind==="companyId"?"company":"institution"} id ${c.id}`;
 function companyPickerHTML(){
   const f=S.f, numeric=/^\d{1,12}$/.test((f.asked||"").trim()) && f.matches!==null;
@@ -525,7 +642,7 @@ function companyPickerHTML(){
       const meta=[!blank(m.naicCompanyCode)?`NAIC ${m.naicCompanyCode}`:"", hasCo?`S&P company id ${m.companyId}`:hasIn?`S&P institution id ${m.institutionId}`:"", !blank(m.naicGroupName)?`group ${m.naicGroupName}`:""].filter(Boolean).join(" · ");
       const add = hasCo ? `<button type="button" class="btn sm" data-act="co-add" data-kind="companyId" data-id="${esc(m.companyId)}" data-name="${esc(m.companyName)}">Add</button>
         ${hasIn?`<button type="button" class="btn sm ghost" data-act="co-add" data-kind="institutionId" data-id="${esc(m.institutionId)}" data-name="${esc(m.naicGroupName||m.companyName)}" title="Searches by the company's S&amp;P institution id instead">Add by institution id ${esc(m.institutionId)}</button>`:""}`
-        : hasIn ? `<button type="button" class="btn sm" data-act="co-add" data-kind="institutionId" data-id="${esc(m.institutionId)}" data-name="${esc(m.companyName)}">Add</button>` : "";
+        : hasIn ? `<button type="button" class="btn sm" data-act="co-add" data-kind="institutionId" data-id="${esc(m.institutionId)}" data-name="${esc(m.companyName)}">Add</button>` : noFilingsHTML(m);
       return `<li><div><div class="t1">${esc(m.companyName)}</div><div class="t2">${esc(meta)}</div></div><span class="inline">${add}</span></li>`; }).join("");
     const addable=f.matches.filter(m=>!blank(m.companyId)||!blank(m.institutionId)).length;
     const all = addable>1 ? `<p class="t2" id="addAll"><button type="button" class="btn sm" data-act="co-add-all">Add all ${addable}</button> to search a whole group at once.</p>` : "";
@@ -579,10 +696,11 @@ function filingsFormHTML(){
       <button type="button" class="btn sm ghost" data-act="refs-refresh" ${S.refsLoading?"disabled":""} title="Fetches S&amp;P's lists of states, types of insurance, filing types and statuses again (four S&amp;P requests)">${S.refsLoading?"Refreshing lists…":"Refresh lists"}</button></div>
   </form>`;
 }
-async function runSearch(refresh){
+async function runSearch(refresh, given){
   const f=S.f; if(f.busy) return;
   let payload;
   if(refresh){ if(!f.last) return; payload={...f.last, refresh:true}; }
+  else if(given){ payload=given; f.last=payload; f.res=null; }   // a recent search, sent exactly as it was saved
   else{
     const problem=searchProblem();
     if(problem){ f.formErr=problem; render(); document.getElementById("formErr")?.scrollIntoView({block:"nearest"}); return; }
@@ -595,7 +713,7 @@ async function runSearch(refresh){
   if(r.data){
     f.res=r.data; f.shown=PAGE; f.filter=""; f.openDesc={}; f.openCo={}; takeUsage(r.data);
     for(const c of (r.data.byCompany||[])){ const chip=f.chips.find(x=>x.kind===c.kind && x.id===String(c.id)); if(chip && !chip.name && c.name) chip.name=c.name; }
-    loadStatus();
+    loadStatus(); recentAfterSearch(r.data);
   } else if(r.err!=="signin") f.err=r;
   render();
 }
@@ -677,7 +795,8 @@ function filingsResultsHTML(){
 function renderFilings(){
   return `<div><h2 class="action-title">Search rate, rule and form filings</h2>
     <p class="sub">S&amp;P's SNL Insurance Product Filings by company, state, type of insurance, filing type and date. Open any filing's original document.</p></div>
-    ${filingsFormHTML()}<div id="results" style="display:flex;flex-direction:column;gap:14px;min-width:0" aria-live="polite">${filingsResultsHTML()}</div>`;
+    ${watchHTML()}
+    ${recentHTML()}${filingsFormHTML()}<div id="results" style="display:flex;flex-direction:column;gap:14px;min-width:0" aria-live="polite">${filingsResultsHTML()}</div>`;
 }
 function filingsExport(){
   const cols=["Company","NAIC company code","S&P company id","All companies on the filing","NAIC group","State","Filing type","Type of insurance","Sub-type of insurance","Status","Date submitted","Date published","Effective date, new business","Effective date, renewals","Rate impact","Rate impact (number)","Description","Tracking number","SFC number","Document id","Filing version id","Pages"];
@@ -685,6 +804,279 @@ function filingsExport(){
     return [c.companyName, c.naicCompanyCode, c.companyId, cos.map(x=>x.companyName).filter(x=>!blank(x)).join("; "), r.naicGroupName, r.serffFilingStateId||r.serffFilingState, r.serffFilingType, r.typeOfInsurance, r.subTypeOfInsurance, r.filingStatus,
       dayOut(r.dateSubmitted), dayOut(r.publishDate), dayOut(r.newBusReqEffDate), dayOut(r.renewBusReqEffDate), rateImpact(r), isNum(r.overallRateImpact)?+r.overallRateImpact:null, r.filingDescription, r.trackingNumber, r.sfcNumber, r.documentId, r.filingVersionId, isNum(r.pages)?+r.pages:null]; });
   return {name:`snl-filings-${TODAY()}`, sheet:"Filings", cols, rows};
+}
+
+/* ---------- Filings: recent searches, read straight from the saved results ---------- */
+/* Every search anyone has run is saved in snl_store. The list reads only what it needs: a saved search's doc also
+   holds every row, which can run to megabytes. Reopening one sends the same search without refresh, so it opens
+   from the saved result and costs no S&P request. */
+const RECENT_COLS = "id,fetched_at,params:doc->params,total:doc->total,byCompany:doc->byCompany,capped:doc->capped";
+const RECENT_PAGE = 10;
+// kept on S.f, so signing out forgets it along with the rest of the view
+const recentOf = () => S.f.recent || (S.f.recent={open:false, list:null, more:false, loading:false, again:false, err:"", limit:RECENT_PAGE});
+const recentIds = a => (Array.isArray(a)?a:[]).map(Number).filter(Number.isInteger);
+const recentStrs = a => (Array.isArray(a)?a:[]).filter(x=>!blank(x)).map(String);
+function recentUsable(r){
+  const p=r&&r.params;
+  return !!p && typeof p==="object" && recentIds(p.companyIds).length+recentIds(p.institutionIds).length>0 && recentStrs(p.states).length>0 && !blank(p.from) && !blank(p.to);
+}
+async function loadRecent(){
+  const R=recentOf(), f=S.f;
+  if(R.loading){ R.again=true; return; }
+  R.loading=true; R.again=false; R.err=""; render();
+  let data=null, error=null;
+  try{ ({data, error}=await S.sb.from("snl_store").select(RECENT_COLS).eq("kind","search").order("fetched_at",{ascending:false}).limit(R.limit+1)); }catch(e){ error=e||{}; }
+  if(!S.session || S.f!==f) return;   // signed out while it loaded
+  R.loading=false;
+  if(error || !Array.isArray(data)){
+    const m=String((error&&error.message)||"").trim();
+    R.err = !m || /fetch|network|load failed/i.test(m) ? "The page couldn't reach the database. Check your connection and try again." : `The database answered: ${m.replace(/\.$/,"")}.`;
+  } else { R.more=data.length>R.limit; R.list=data.slice(0, R.limit).filter(recentUsable); }
+  render();
+  if(R.again) loadRecent();
+}
+/* After a search that asked S&P (a new search or a Refresh), the list is out of date: reload it now if it is open,
+   otherwise the next time it opens. A search that opened from a saved result changes nothing. */
+function recentAfterSearch(res){
+  if(!res || res.fromStore) return;
+  const R=recentOf();
+  if(R.open) loadRecent(); else R.list=null;
+}
+// "A, B and C", or the first few and "and N more"
+function andList(a, max){
+  if(a.length>max) return a.slice(0,max).join(", ")+` and ${a.length-max} more`;
+  return a.length<2 ? a.join("") : a.slice(0,-1).join(", ")+" and "+a[a.length-1];
+}
+/* The companies a saved search ran for, in the order it ran them, each with its name from the results when S&P gave one. */
+function recentCompanies(r){
+  const bc=Array.isArray(r.byCompany)?r.byCompany:[], p=r.params;
+  return [...recentIds(p.companyIds).map(id=>["companyId",id]), ...recentIds(p.institutionIds).map(id=>["institutionId",id])].map(([kind,id])=>{
+    const hit=bc.find(c=>c && c.kind===kind && String(c.id)===String(id));
+    return {kind, id:String(id), name: hit && !blank(hit.name) ? String(hit.name) : ""};
+  });
+}
+/* What a saved search was, in plain words: who, then where, when, which filters, what came back and when. */
+function recentWords(r){
+  const p=r.params, cos=recentCompanies(r);
+  const who=andList(cos.map(c=>c.name || `${c.kind==="companyId"?"company":"institution"} id ${c.id}`), 3);
+  const named=(field, ids, one, many)=>{ if(!ids.length) return "";
+    const names=ids.map(id=>{ const o=refOptions(field).find(x=>String(x.id)===String(id)); return o&&!blank(o.name) ? String(o.name) : `id ${id}`; });
+    return `${ids.length===1?one:many}: ${andList(names, 3)}`; };
+  const tn=recentStrs(p.trackingNumbers), se=recentStrs(p.spStatEntityIds), total=isNum(r.total)?+r.total:null, st=recentStrs(p.states).map(s=>s.toUpperCase());
+  const parts=[
+    `in ${st.slice(0,8).join(", ")}${st.length>8?` and ${st.length-8} more`:""}`,   // as the results summary writes them
+    `${fmtDay(p.from)} to ${fmtDay(p.to)}`,
+    named("typeOfInsurance", recentIds(p.typeOfInsuranceIds), "type of insurance", "types of insurance"),
+    named("serffFilingType", recentIds(p.filingTypeIds), "filing type", "filing types"),
+    p.allStatuses ? "" : named("filingStatus", recentIds(p.filingStatusIds), "status", "statuses"),
+    tn.length ? `${tn.length===1?"tracking number":"tracking numbers"} ${andList(tn, 3)}` : "",
+    se.length ? `${se.length===1?"statutory entity id":"statutory entity ids"} ${andList(se, 3)}` : "",
+    (total===0 ? "S&P returned nothing" : total===null ? "filings: n/d" : plural(total,"filing")) + (r.capped ? ", incomplete" : ""),
+    `fetched ${fmtAt(r.fetched_at)}`
+  ].filter(Boolean);
+  return {who, detail:parts.join(" · ")};
+}
+function recentHTML(){
+  const R=recentOf();
+  const head=`<div class="recent-h"><button type="button" class="recent-t" id="recentToggle" data-act="recent-toggle" aria-expanded="${R.open}" aria-controls="recentBody"><span class="ar" aria-hidden="true">${R.open?"▼":"▶"}</span>Recent searches</button>
+    <span class="t2">Searches anyone on the team has run. Reopening one uses no S&amp;P requests.</span></div>`;
+  if(!R.open) return `<section class="recent" id="recent" aria-label="Recent searches">${head}</section>`;
+  let body="";
+  if(R.err) body+=`<div class="banner" id="recentErr" role="alert"><span><b>Couldn't load recent searches.</b> ${esc(R.err)}</span><button type="button" class="btn sm" data-act="recent-retry">Try again</button></div>`;
+  if(R.list===null){ if(!R.err) body+=`<p class="t2" id="recentLoading" role="status">Loading recent searches…</p>`; }
+  else if(!R.list.length && !R.more) body+=`<p class="t2" id="recentNone">No searches have been run yet. When anyone on the team runs one, it shows here and opens again without using S&amp;P requests.</p>`;
+  else{
+    body+=`<ul id="recentList" aria-label="Recent searches, newest first">${R.list.map((r,i)=>{ const w=recentWords(r);
+      return `<li><button type="button" class="recent-i" data-act="recent-open" data-i="${i}" ${S.f.busy?"disabled":""}><span class="t1" style="display:block">${esc(w.who)}</span><span class="t2" style="display:block">${esc(w.detail)}</span></button></li>`; }).join("")}</ul>`;
+    if(R.more) body+=`<div class="inline"><button type="button" class="btn sm" id="recentMore" data-act="recent-more" ${R.loading?"disabled":""}>${R.loading?"Loading…":"Show more"}</button></div>`;
+  }
+  return `<section class="recent" id="recent" aria-label="Recent searches">${head}<div id="recentBody" style="display:flex;flex-direction:column;gap:8px;min-width:0">${body}</div></section>`;
+}
+function toggleRecent(){
+  const R=recentOf(); R.open=!R.open;
+  if(R.open && R.list===null && !R.loading) loadRecent(); else render();
+}
+/* Fills the form with a saved search and opens it. The search is sent exactly as it was saved, so it finds the same
+   saved result: with every status when none was chosen (the function filled them in), no status ids are sent. */
+function reopenRecent(i){
+  const f=S.f, R=recentOf(), r=R.list&&R.list[i];
+  if(!r || f.busy) return;
+  const p=r.params, statuses=p.allStatuses ? [] : recentIds(p.filingStatusIds), toi=recentIds(p.typeOfInsuranceIds), ftype=recentIds(p.filingTypeIds), tn=recentStrs(p.trackingNumbers), se=recentStrs(p.spStatEntityIds);
+  f.chips=recentCompanies(r).slice(0, MAX_COMPANIES);
+  f.states=[...new Set(recentStrs(p.states).map(s=>s.toUpperCase()))]; f.from=String(p.from); f.to=String(p.to);
+  f.toi=toi.map(String); f.ftype=ftype.map(String); f.fstatus=statuses.map(String); f.toiFilter=""; f.tracking=tn.join(", ");
+  f.q=""; f.matches=null; f.resolveNote=""; f.resolveErr=""; f.formErr="";
+  const payload={action:"search", companyIds:recentIds(p.companyIds), institutionIds:recentIds(p.institutionIds), states:[...f.states].sort(), from:f.from, to:f.to};
+  if(statuses.length) payload.filingStatusIds=statuses;
+  if(toi.length) payload.typeOfInsuranceIds=toi;
+  if(ftype.length) payload.filingTypeIds=ftype;
+  if(tn.length) payload.trackingNumbers=tn;
+  if(se.length) payload.spStatEntityIds=se;
+  runSearch(false, payload);
+  document.getElementById("results")?.scrollIntoView({block:"start"});
+}
+
+/* ---------- Filings: the watchlist ----------
+   What is watched is the shared setting "watchlist" (snl_settings): every login reads it, Corp Dev edits it here.
+   The snl-watch function checks it every day and says what it found (status), or checks now (run). */
+const WATCH_BUDGET = 30, WATCH_SHOWN = 5, WATCH_CHIPS = 12, WATCH_MAX_RECIPIENTS = 10;
+function freshWatch(){ return {loaded:false, loading:false, doc:null, problems:[], readErr:"", status:null, statusErr:null, checking:false, saving:false, saveErr:"", recips:null, manage:false, showAll:false, allCos:false, runNote:null}; }
+const isEmailAddr = s => s.length<=254 && /^[A-Za-z0-9._%+'-]{1,64}@[A-Za-z0-9-]{1,63}(\.[A-Za-z0-9-]{1,63})*\.[A-Za-z]{2,24}$/.test(s);
+/* The saved document is typed by people: keep only what can be used, the same way the function reads it. */
+function cleanWatch(raw){
+  const d=raw && typeof raw==="object" && !Array.isArray(raw) ? raw : {}, problems=[], arr=v=>Array.isArray(v)?v:[];
+  const name=v=>(typeof v==="string"||typeof v==="number"?String(v):"").replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]+/g," ").replace(/\s+/g," ").trim().slice(0,120);
+  const companies=[];
+  for(const c of arr(d.companies)){
+    const o=c&&typeof c==="object"?c:{}, id=typeof o.id==="number"&&Number.isInteger(o.id)&&o.id>=0?String(o.id):typeof o.id==="string"?o.id.trim():"";
+    if(!["companyId","institutionId"].includes(o.kind) || !/^\d{1,12}$/.test(id)){ problems.push("company"); continue; }
+    const nid=String(Number(id)); if(!companies.some(x=>x.kind===o.kind&&x.id===nid)) companies.push({kind:o.kind, id:nid, name:name(o.name)});
+  }
+  const states=[]; for(const s of arr(d.states)){ const v=typeof s==="string"?s.trim().toUpperCase():""; if(!/^[A-Z]{2}$/.test(v)){ problems.push("state"); continue; } if(!states.includes(v)) states.push(v); }
+  const ids=v=>[...new Set(arr(v).map(x=>typeof x==="string"&&/^\d{1,12}$/.test(x.trim())?Number(x):x).filter(x=>typeof x==="number"&&Number.isInteger(x)&&x>=0&&x<1e12))];
+  const recipients=[]; for(const r of arr(d.recipients)){ const v=typeof r==="string"?r.trim().toLowerCase():""; if(!isEmailAddr(v)){ problems.push("email"); continue; } if(!recipients.includes(v)) recipients.push(v); }
+  return {list:{enabled:d.enabled===true, companies:companies.slice(0,500), states:states.slice(0,60), typeOfInsuranceIds:ids(d.typeOfInsuranceIds).slice(0,100), filingTypeIds:ids(d.filingTypeIds).slice(0,50), recipients:recipients.slice(0,WATCH_MAX_RECIPIENTS)}, problems};
+}
+function watchCostOf(l){ const n=k=>Math.ceil(l.companies.filter(c=>c.kind===k).length/10); return n("companyId")+n("institutionId")+2; }
+async function readWatchDoc(){
+  try{ const {data, error}=await S.sb.from("snl_settings").select("doc").eq("id","watchlist").maybeSingle(); if(error) return {error}; return cleanWatch(data&&data.doc); }
+  catch(e){ return {error:e}; }
+}
+async function loadWatch(){
+  const w=S.w; if(w.loading) return;
+  w.loading=true; render();
+  const [doc, st]=await Promise.all([readWatchDoc(), callFn("snl-watch",{action:"status"})]);
+  if(!S.session || S.w!==w) return;
+  w.loading=false; w.loaded=true;
+  if(doc.error) w.readErr="Couldn't read the watchlist: "+((doc.error&&doc.error.message)||"unknown error")+".";
+  else { w.doc=doc.list; w.problems=doc.problems; w.readErr=""; }
+  if(st.data){ w.status=st.data; w.statusErr=null; } else if(st.err!=="signin") w.statusErr=st;
+  render();
+}
+async function watchRefreshStatus(){
+  const w=S.w, st=await callFn("snl-watch",{action:"status"});
+  if(!S.session || S.w!==w) return;
+  if(st.data){ w.status=st.data; w.statusErr=null; } else if(st.err!=="signin") w.statusErr=st;
+  render();
+}
+/* Every change starts from what is saved now, so two people editing at once don't undo each other's changes. */
+async function changeWatch(change, done){
+  const w=S.w; if(w.saving) return;
+  w.saving=true; w.saveErr=""; render();
+  const cur=await readWatchDoc();
+  if(!S.session || S.w!==w) return;
+  if(cur.error){ w.saving=false; w.saveErr="Couldn't read the watchlist: "+((cur.error&&cur.error.message)||"unknown error")+". Nothing was changed."; render(); return; }
+  const next=change(JSON.parse(JSON.stringify(cur.list)));
+  if(!next){ w.saving=false; render(); return; }
+  let error=null;
+  try{ ({error}=await S.sb.from("snl_settings").upsert({id:"watchlist", doc:next})); }catch(e){ error=e; }
+  w.saving=false;
+  if(error){ w.saveErr = /42501|row-level security|permission/i.test(`${error.code||""} ${error.message||""}`) ? "Only Corp Dev logins can change the watchlist." : "Couldn't save the watchlist: "+(error.message||"unknown error")+". Nothing was changed."; render(); return; }
+  w.doc=next; w.problems=[]; render();
+  if(done) toast(typeof done==="function" ? done() : done);
+  watchRefreshStatus();
+}
+function watchAddFromForm(){
+  const f=S.f;
+  if(!f.chips.length || !f.states.length){ S.w.saveErr="Choose companies and states in the search form below first, then add them."; render(); return; }
+  let cos=0, sts=0, switched=false;
+  changeWatch(l=>{
+    const was=!l.companies.length;
+    for(const c of f.chips) if(!l.companies.some(x=>x.kind===c.kind && x.id===c.id)){ l.companies.push({kind:c.kind, id:c.id, name:c.name||""}); cos++; }
+    for(const s of f.states) if(!l.states.includes(s)){ l.states.push(s); sts++; }
+    if(!cos && !sts) return null;
+    if(was && !l.enabled){ l.enabled=true; switched=true; }
+    return l;
+  }, ()=>`Added ${[cos?plural(cos,"company","companies"):"", sts?plural(sts,"state"):""].filter(Boolean).join(" and ")} to the watchlist.${switched?" It is switched on.":""}`)
+  .then(()=>{ if(!cos && !sts && !S.w.saveErr) toast("Those companies and states are already watched."); });
+}
+function watchSaveRecipients(){
+  const w=S.w, list=[...new Set(String(w.recips??"").split(/[\s,;]+/).map(s=>s.trim().toLowerCase()).filter(Boolean))];
+  const bad=list.find(s=>!isEmailAddr(s));
+  if(bad){ w.saveErr=`"${bad}" isn't an email address. Separate addresses with commas.`; render(); return; }
+  if(list.length>WATCH_MAX_RECIPIENTS){ w.saveErr=`Add at most ${WATCH_MAX_RECIPIENTS} email recipients.`; render(); return; }
+  changeWatch(l=>{ l.recipients=list; return l; }, list.length?`Email recipients saved (${list.length}).`:"Email recipients removed.").then(()=>{ if(!S.w.saveErr) S.w.recips=null; });
+}
+async function watchCheckNow(){
+  const w=S.w; if(w.checking) return;
+  w.checking=true; w.runNote=null; render();
+  const r=await callFn("snl-watch",{action:"run"});
+  if(!S.session || S.w!==w) return;
+  w.checking=false;
+  if(r.data && r.data.run){ w.runNote=r.data.run; takeUsage(r.data); loadStatus(); }
+  else if(r.err!=="signin") w.runNote={status:r.err==="busy"?"busy":"error", message:errText(r)};
+  render(); watchRefreshStatus();
+}
+const whenAt = s => blank(s) ? "n/d" : `${fmtAt(s)}${fmtTime(s)?` at ${fmtTime(s)}`:""}`;
+/* A found filing in the shape the results table reads, so it shows and opens the same way. */
+const watchRow = r => ({companies:(Array.isArray(r.companies)?r.companies:[]).map(n=>({companyName:n})), serffFilingStateId:r.state, serffFilingState:r.state_name, serffFilingType:r.filing_type,
+  typeOfInsurance:r.type_of_insurance, subTypeOfInsurance:r.sub_type_of_insurance, filingStatus:r.filing_status, dateSubmitted:r.date_submitted, publishDate:r.publish_date,
+  newBusReqEffDate:r.effective_new, renewBusReqEffDate:r.effective_renewal, dispOverallRateImpact:r.rate_impact, filingDescription:r.description, trackingNumber:r.tracking_number,
+  documentId:r.document_id, filingVersionId:r.filing_version_id});
+function watchFoundHTML(st){
+  const w=S.w, found=(Array.isArray(st.found)?st.found:[]).filter(r=>r&&!blank(r.filing_version_id)), last=st.lastCheck;
+  let h="";
+  if(!last) h+=`<p class="t2" id="wNever">${st.configured===false?"":"Not checked yet. "}The first check records the filings already there as the starting point; after that, new filings show here.</p>`;
+  else if(last.baseline) h+=`<p class="t2" id="wBaseline">The first check, on ${esc(whenAt(last.started_at))}, recorded ${plural(last.found,"filing")} as the starting point. Filings that appear after it show here as new.</p>`;
+  else if(!(+last.new_count)) h+=`<p id="wNothing" style="margin:0"><b>Nothing new since the last check</b> <span class="t2">on ${esc(whenAt(last.started_at))}.</span></p>`;
+  else h+=`<p id="wNew" style="margin:0"><b>The last check, on ${esc(whenAt(last.started_at))}, found ${plural(last.new_count,"new filing")}.</b></p>`;
+  if(!found.length) return h;
+  const shown=w.showAll?found:found.slice(0,WATCH_SHOWN);
+  h+=`<div class="t2">New filings found in the last ${count(st.keepDays||90)} days, the latest found first:</div>
+    <div class="tbl-wrap cardwrap" id="watchWrap" data-keep><table class="cards filings" id="watchTable"><thead><tr><th>Company</th><th>State</th><th>Filing type</th><th>Type of insurance</th><th>Status</th><th>Dates</th><th class="num">Rate impact</th><th>Description</th><th>Tracking number</th><th>Document</th></tr></thead>
+    <tbody>${shown.map(r=>filingRowHTML({r:watchRow(r), key:"w"+r.filing_version_id})).join("")}</tbody></table></div>`;
+  if(found.length>WATCH_SHOWN) h+=`<div class="inline"><button type="button" class="btn sm" data-act="w-all">${w.showAll?"Show fewer":`Show all ${count(found.length)}`}</button></div>`;
+  return h+`<p class="source">Source: S&amp;P Global Market Intelligence, SNL Insurance Product Filings, found by the watchlist check. Opening a document uses one S&amp;P request the first time.</p>`;
+}
+function watchManageHTML(l, st, empty){
+  const w=S.w, recips=w.recips===null ? l.recipients.join(", ") : w.recips, cost=watchCostOf(l);
+  return `<div class="wmanage" id="wManage">
+    <div class="toolbar">${empty?"":`<button type="button" class="btn" data-act="w-add" ${w.saving?"disabled":""}>Add the companies and states chosen below</button>`}
+      <button type="button" class="btn" data-act="w-toggle" ${w.saving||!l.companies.length?"disabled":""}>${l.enabled?"Switch off":"Switch on"}</button></div>
+    ${l.companies.length?`<p class="t2" id="wCost">Each check uses about ${plural(cost,"S&amp;P request")} (one for each batch of 10 companies, plus 2), more if S&amp;P has many results. A check may use at most ${WATCH_BUDGET}.</p>`:""}
+    <label class="f"><span>Email the new filings to <em>optional; up to ${WATCH_MAX_RECIPIENTS} addresses, separated with commas</em></span>
+      <div class="toolbar"><div class="grow"><input type="text" id="w_recips" data-bind="w.recips" value="${esc(recips)}" autocomplete="off" spellcheck="false" placeholder="For example corpdev1@yourco.com"></div>
+      <button type="button" class="btn sm" data-act="w-recips-save" ${w.saving?"disabled":""}>Save recipients</button></div></label>
+    <p class="t2" id="wEmailNote">${st&&st.emailConfigured===false?"Email isn't set up for the app yet, so nobody is emailed. ":""}An email lists only the company, state, filing type, a line of description and the tracking number of each new filing, with a link here. Everything shows on this page either way.</p>
+  </div>`;
+}
+function watchHTML(){
+  const w=S.w, cd=isCorpDev(), st=w.status, l=w.doc;
+  const head=(extra)=>`<div class="blk-h"><div><h3>Watchlist</h3><p class="t2" id="wSummary">${extra}</p></div>
+    <span class="inline">${cd?`<button type="button" class="btn sm" data-act="w-manage" aria-expanded="${w.manage}">${w.manage?"Done":"Manage"}</button>`:""}</span></div>`;
+  if(!w.loaded) return `<section class="tcard watch" id="watch" aria-label="Watchlist">${head("Loading the watchlist…")}</section>`;
+  if(w.readErr && !l) return `<section class="tcard watch" id="watch" aria-label="Watchlist">${head("")}<div class="banner" role="alert" id="wReadErr"><span>${esc(w.readErr)}</span><button class="btn sm" data-act="w-retry">Try again</button></div></section>`;
+  const list=l||{enabled:false, companies:[], states:[], typeOfInsuranceIds:[], filingTypeIds:[], recipients:[]}, empty=!list.companies.length||!list.states.length;
+  const running=w.checking || !!(st&&st.running);
+  const summary = empty ? "Name companies and states once; a daily check shows any new rate, rule or form filing here."
+    : `${list.enabled?`<span class="pill on">On</span> Checked every day for filings published in the last ${count(st&&st.windowDays||14)} days.`:`<span class="pill off">Off</span> Not being checked.`}${st&&st.lastRun?` Last checked ${esc(whenAt(st.lastRun.started_at))}.`:""}`;
+  let h=`<section class="tcard watch" id="watch" aria-label="Watchlist">${head(summary)}`;
+  if(w.runNote){ const n=w.runNote, bad=n.status==="failed"||n.status==="error";
+    h+=`<div class="${bad?"banner":"info"}" id="wRun" role="${bad?"alert":"status"}"><span>${bad?"<b>The check didn't finish.</b> ":""}${esc(n.message||"")}${isNum(n.requests)&&+n.requests?` ${plural(n.requests,"S&amp;P request")} used.`:""}</span></div>`; }
+  if(running) h+=`<div class="info" id="wRunning" role="status"><span><b>A check is running.</b> It asks S&amp;P for filings published in the last ${count(st&&st.windowDays||14)} days. This can take a minute.</span></div>`;
+  if(empty) h+=`<div class="empty" id="wEmpty"><p><b>Nothing is watched yet.</b> ${cd?"Choose companies and states in the search form below, then add them here.":"Corp Dev can add companies and states to watch."}</p>${cd?`<button type="button" class="btn" data-act="w-add" ${w.saving?"disabled":""}>Add the companies and states chosen below</button>`:""}</div>`;
+  else {
+    const cos=w.allCos?list.companies:list.companies.slice(0,WATCH_CHIPS), label=c=>c.name||`${c.kind==="companyId"?"Company":"Institution"} id ${c.id}`;
+    h+=`<div class="wlist" id="wCos"><b>Companies (${count(list.companies.length)})</b><div class="chips">${cos.map(c=>`<span class="cchip"><b>${esc(label(c))}</b>${w.manage&&cd?`<button type="button" data-act="w-co-remove" data-k="${esc(c.kind+":"+c.id)}" aria-label="Stop watching ${esc(label(c))}" ${w.saving?"disabled":""}>×</button>`:""}</span>`).join("")}
+      ${list.companies.length>WATCH_CHIPS?`<button type="button" class="lnk t2" data-act="w-more">${w.allCos?"Show fewer":`and ${count(list.companies.length-WATCH_CHIPS)} more`}</button>`:""}</div></div>
+      <div class="wlist" id="wStates"><b>States (${count(list.states.length)})</b><div class="chips">${list.states.map(s=>`<span class="cchip"><b>${esc(s)}</b>${w.manage&&cd?`<button type="button" data-act="w-st-remove" data-s="${esc(s)}" aria-label="Stop watching ${esc(s)}" ${w.saving?"disabled":""}>×</button>`:""}</span>`).join("")}</div></div>
+      ${list.typeOfInsuranceIds.length||list.filingTypeIds.length?`<p class="t2" id="wFilters">Only ${[list.typeOfInsuranceIds.length?plural(list.typeOfInsuranceIds.length,"type of insurance","types of insurance"):"", list.filingTypeIds.length?plural(list.filingTypeIds.length,"filing type"):""].filter(Boolean).join(" and ")} chosen in S&amp;P's lists.</p>`:""}`;
+  }
+  const problems=(st&&Array.isArray(st.problems)&&st.problems.length?st.problems:w.problems.length?["Some entries in the saved watchlist couldn't be used and are left out."]:[]);
+  if(problems.length && !empty) h+=`<div class="notes" id="wProblems" role="status"><b>Part of the saved watchlist can't be used</b><ul>${problems.map(p=>`<li>${esc(p)}</li>`).join("")}</ul></div>`;
+  if(w.statusErr){ const e=w.statusErr;
+    h+= e.err==="not_deployed" ? `<div class="info" id="wNoFn" role="status"><span>${esc(errText(e))}</span></div>` : problemHTML(e, "Couldn't get the last check.", "w-retry"); }
+  else if(st){
+    if(st.configured===false && !empty) h+=`<div class="info" id="wNotSetUp" role="status"><span><b>Checks start once S&amp;P API access is set up.</b> The watchlist is kept until then.</span></div>`;
+    if(st.tooBig && !empty) h+=`<div class="banner" id="wTooBig" role="alert"><span>${esc(st.tooBig)}</span></div>`;
+    else if(st.lastRun && st.lastRun.status==="failed" && !running) h+=`<div class="banner" id="wFailed" role="alert"><span><b>The last check, on ${esc(whenAt(st.lastRun.started_at))}, failed.</b> ${esc(st.lastRun.message||"No reason was recorded.")}</span></div>`;
+    if(!empty && !list.enabled) h+=`<div class="info" id="wOff" role="status"><span><b>Switched off.</b> ${cd?"Switch it on under Manage to check every day.":"Corp Dev can switch it on."}</span></div>`;
+    if(!empty || (st.found&&st.found.length)) h+=watchFoundHTML(st);
+  }
+  if(cd && !empty) h+=`<div class="toolbar"><button type="button" class="btn sm primary" data-act="w-check" id="wCheck" ${running||w.saving?"disabled":""}>${w.checking?"Checking…":"Check now"}</button><span class="t2 grow">Uses a few S&amp;P requests. The daily check runs by itself once it is set up.</span></div>`;
+  if(w.saveErr) h+=`<p class="err" id="wErr" role="alert">${esc(w.saveErr)}</p>`;
+  if(cd && w.manage) h+=watchManageHTML(list, st, empty);
+  return h+`</section>`;
 }
 
 /* ---------- documents: fetched once with the login, then opened from memory ---------- */
@@ -793,12 +1185,14 @@ function askToldText(sc, past){
 async function askQuestion(){
   const a=S.ask, q=a.draft.trim();
   if(activeTurn()) return;
+  if(chatAtLimit(S.chatUse)) return;
   if(!q){ toast("Type a question first."); return; }
   if(q.length>MAX_QUESTION){ toast(`Keep the question under ${count(MAX_QUESTION)} characters.`); return; }
   // earlier finished answers go along as plain text, so a follow-up question makes sense
   const history=a.turns.filter(t=>t.status==="done"&&t.result).slice(-MAX_HISTORY).map(t=>({question:t.question, answer:answerText(t.result).slice(0, MAX_HISTORY_ANSWER).trim()})).filter(h=>h.answer);
   const screen=askScreen();
   const t={question:q, told:askToldText(screen, true), status:"starting", progress:[], partial:"", result:null, error:"", calm:false, jobId:null, lastContinue:0, note:"", contNote:""};
+  t.asked=new Date().toISOString();   // shown in the exported or copied answer
   a.turns.push(t); a.draft=""; a.scroll="bottom"; renderAsk();
   const r=await callFn("snl-chat",{action:"ask", question:q, ...(history.length?{history}:{}), ...(screen?{screen}:{})});
   if(!S.session || !S.ask.turns.includes(t)) return;
@@ -806,8 +1200,10 @@ async function askQuestion(){
   else if(r.err!=="signin"){
     t.status="error"; t.calm=r.err==="not_configured"; t.error=r.data ? "The question was sent but no answer was started. Try again." : errText(r);
     if(t.calm||r.err==="bad"||r.err==="busy") a.draft=a.draft||q;   // nothing was started: keep the question to send again
+    if(r.err==="daily_limit"){ t.calm=true; a.draft=a.draft||q; loadChatUse(); }   // not a fault: the limit is reached; keep the question for later
     if(!a.open) a.unseen="error";
   }
+  if(t.jobId && S.chatUse && isNum(S.chatUse.askedToday)) S.chatUse.askedToday=+S.chatUse.askedToday+1;
   renderAsk();
 }
 function schedulePoll(){
@@ -827,8 +1223,9 @@ async function pollJob(){
     t.progress=Array.isArray(data.progress)?data.progress:[]; t.partial=typeof data.partial==="string"?data.partial:"";
     if(t.status==="done"){ t.result=data.result&&typeof data.result==="object"?data.result:{}; loadStatus(); }
     if(t.status==="error") t.error=data.error||"Claude couldn't finish this answer. Ask again.";
+    if(t.status==="done"||t.status==="error") loadChatUse();   // the day's count and cost, now with this answer
     // ended while the panel was closed: mark the button; ended in view: show the answer from its top
-    if(t.status==="done"||t.status==="error"){ if(S.ask.open) S.ask.scroll=S.ask.turns.indexOf(t); else S.ask.unseen=t.status; }
+    if(t.status==="done"||t.status==="error"){ if(S.ask.open){ S.ask.scroll=S.ask.turns.indexOf(t); markSeen(t.jobId); } else S.ask.unseen=t.status; }
     // The function works in time slices. When it has paused, or has gone quiet, ask it to pick the answer up again.
     const now=Date.now(), quiet=(t.status==="running"||t.status==="queued") && !blank(data.heartbeat_at) && now-Date.parse(data.heartbeat_at)>TIMING.stale;
     if(t.status!=="paused" && !quiet) t.contNote="";
@@ -845,7 +1242,9 @@ async function continueJob(t){
 function newConversation(){ clearTimeout(S.ask.timer); S.ask={...freshAsk(), open:S.ask.open, wide:S.ask.wide}; renderAsk(); document.getElementById("ask_input")?.focus(); }
 function openAsk(){
   const a=S.ask; a.open=true; a.unseen="";
+  if(!S.chatUseAt || Date.now()-S.chatUseAt>60000) loadChatUse();   // where the login stands today, checked at most once a minute
   a.scroll = !a.turns.length ? null : activeTurn() ? "bottom" : a.turns.length-1;   // a running answer at its latest step; a finished one from its top
+  pastOnOpen();
   renderAsk(); document.getElementById("ask_input")?.focus({preventScroll:true});
 }
 function closeAsk(){ S.ask.open=false; renderAsk(); document.getElementById("askFab")?.focus(); }
@@ -880,16 +1279,154 @@ function answerHTML(t, ti){
       return `<li value="${esc(s.n)}" id="src-${ti}-${esc(s.n)}"><div class="t1">${blank(s.title)?"Filing document":esc(s.title)}</div>${meta?`<div class="t2">${meta}</div>`:""}
         ${!blank(s.quote)?`<blockquote class="quote">“${esc(s.quote)}”</blockquote>`:""}
         ${key?docButtonHTML(key, isNum(s.startPage)&&+s.startPage>0?`Open at page ${count(s.startPage)}`:"Open document", isNum(s.startPage)?s.startPage:""):""}</li>`; }).join("")}</ol></div>`;
+  h+=answerActsHTML(ti);
   const bits=[];
   if(lookups.length) bits.push("Looked up: "+lookups.map(l=>esc(l&&(l.detail||l.tool)||"")).filter(Boolean).join("; ")+".");
-  if(isNum(u.spRequests)) bits.push(`${plural(u.spRequests,"S&amp;P request")}.`);
-  if(isNum(u.inputTokens)||isNum(u.outputTokens)) bits.push(`Claude read ${count(u.inputTokens)} tokens and wrote ${count(u.outputTokens)}.`);
+  const spent=answerCostText(u); if(spent) bits.push(spent);
   if(!blank(r.model)) bits.push(`Model: ${esc(r.model)}.`);
   if(bits.length) h+=`<p class="look">${bits.join(" ")}</p>`;
   return h;
 }
+/* ---------- what answers cost, and the daily limit on questions ---------- */
+/* A cost in US dollars, said plainly: "about $0.42", "less than $0.01", or "n/d" when it can't be priced. */
+function costText(v){
+  if(!isNum(v)) return "n/d";
+  return +v<0.01 ? "less than $0.01" : "about $"+(+v).toLocaleString("en-US",{minimumFractionDigits:2, maximumFractionDigits:2});
+}
+/* "This answer cost about $0.42 (48,210 tokens read, 1,432 written) and used 9 S&P requests." */
+function answerCostText(u){
+  const tokens=isNum(u.inputTokens)||isNum(u.outputTokens), sp=isNum(u.spRequests);
+  const parts=[tokens?`cost ${costText(u.costUsd)} (${count(u.inputTokens)} tokens read, ${count(u.outputTokens)} written)`:"", sp?`used ${plural(u.spRequests,"S&amp;P request")}`:""].filter(Boolean);
+  return parts.length ? `This answer ${parts.join(" and ")}.` : "";
+}
+/* The login's questions today, against the daily limit, as the questions function counts them (midnight UTC to
+   midnight UTC). Null until it has answered; left out when it can't say, for example before it is redeployed. */
+async function loadChatUse(){
+  S.chatUseAt=Date.now();
+  const r=await callFn("snl-chat",{action:"status"});
+  if(!S.session) return;
+  if(r.data) S.chatUse = r.data.configured ? r.data : null;
+  renderAsk();
+}
+const chatAtLimit = c => !!c && isNum(c.dailyLimit) && isNum(c.askedToday) && +c.askedToday>=+c.dailyLimit && !(c.resetsAt && Date.now()>=Date.parse(c.resetsAt));
+function chatUseHTML(){
+  const c=S.chatUse; if(!c || !isNum(c.askedToday)) return "";
+  if(chatAtLimit(c)) return `<div class="info" id="askLimit" role="status"><span><b>Questions are off until midnight UTC${c.resetsAt&&fmtTime(c.resetsAt)?` (${esc(fmtTime(c.resetsAt))} your time)`:""}.</b> You've asked ${plural(c.askedToday,"question")} today and the limit is ${count(c.dailyLimit)} a day for each login${isNum(c.costToday)?`. Today's answers cost ${costText(c.costToday)}`:""}. The site owner can change the limit.</span></div>`;
+  const asked = isNum(c.dailyLimit) ? `${count(c.askedToday)} of ${plural(c.dailyLimit,"question")} today` : `${plural(c.askedToday,"question")} today`;
+  return `<p class="t2" id="askDaily">${asked}${isNum(c.costToday)?`, ${costText(c.costToday)}`:""}</p>`;
+}
+/* ---------- the whole answer to take away: a Word document (the docx library, loaded on the first click) or a copy
+   with a table that pastes as a table. Both are built from the same parts, and every piece of text in them is
+   handed over as text, never as markup. ---------- */
+const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const ANSWER_FOOT = "Data from S&P Global Market Intelligence. Check figures against the source before you use them.";
+const keepText = s => String(s ?? "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]/g, "");   // characters a Word file can't hold
+const oneLine = s => keepText(s).replace(/\s+/g, " ").trim();
+function boldRuns(s){
+  const out=[], re=/\*\*(.+?)\*\*/g; let i=0, m;
+  while((m=re.exec(s))){ if(m.index>i) out.push({text:s.slice(i, m.index), bold:false}); out.push({text:m[1], bold:true}); i=re.lastIndex; }
+  if(i<s.length) out.push({text:s.slice(i), bold:false});
+  return out.map(r=>({text:r.text.replace(/`([^`]+)`/g,"$1"), bold:r.bold})).filter(r=>r.text);
+}
+function askedLabel(at){
+  const d=new Date(at||""); if(blank(at) || isNaN(d)) return "";
+  return `Asked ${d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})} at ${fmtTime(at)}`;   // the year always, since the file outlives the day
+}
+/* The parts, in order: question, when it was asked, answer lines, table, limits that were hit, sources. */
+function answerDoc(t){
+  const r=t.result||{}, segs=Array.isArray(r.answer)?r.answer.filter(s=>s&&!blank(s.text)):[], tb=answerTable(t);
+  const lines=[];
+  for(const s of segs){
+    const ls=keepText(s.text).split(/\n/).map(l=>l.trimEnd()); let last=ls.length-1; while(last>0 && !ls[last]) last--;
+    const cites=(Array.isArray(s.cites)?s.cites:[]).filter(n=>!blank(n)).map(n=>`[${oneLine(n)}]`).join("");
+    ls.forEach((l,i)=>{ const tail=i===last?cites:"", m=l.match(/^\s*(?:[-*•]|\d+\.)\s+(.*)$/);
+      if(m) lines.push({bullet:true, runs:boldRuns(m[1]), cites:tail});
+      else if(/^#{1,4}\s+/.test(l)) lines.push({bullet:false, runs:boldRuns(l.replace(/^#{1,4}\s+/,"")).map(x=>({text:x.text, bold:true})), cites:tail});
+      else if(l.trim() || tail) lines.push({bullet:false, runs:boldRuns(l), cites:tail}); });
+  }
+  const sources=(Array.isArray(r.sources)?r.sources:[]).filter(s=>s&&!blank(s.n)).map(s=>({n:oneLine(s.n), title:blank(s.title)?"Filing document":oneLine(s.title),
+    meta:[s.company, s.state, s.trackingNumber, pagesLabel(s)].filter(x=>!blank(x)).map(oneLine).join(" · "), quote:blank(s.quote)?"":oneLine(s.quote)}));
+  return {question:keepText(t.question).trim(), asked:askedLabel(t.asked), lines,
+    table: tb ? {title:oneLine(tb.title), cols:tb.cols.map(oneLine), rows:tb.rows.map(row=>row.map(c=>c===""?"n/d":oneLine(c))), notes:tb.notes.map(oneLine)} : null,
+    caps:(Array.isArray(r.caps)?r.caps:[]).filter(c=>!blank(c)).map(oneLine), sources};
+}
+function answerActsHTML(ti){
+  return `<div class="inline ansacts"><button type="button" class="btn sm" data-act="answer-export" data-turn="${ti}" title="Downloads the question, answer, table and sources as one Word document">Export answer</button><button type="button" class="btn sm" data-act="answer-copy" data-turn="${ti}" title="Copies the question, answer, table and sources, to paste into an email or a document">Copy answer</button></div>`;
+}
+/* The document handed to the docx library. */
+function answerDocx(m){
+  const D=window.docx, R=(text,o)=>new D.TextRun({text, ...(o||{})}), P=(children,o)=>new D.Paragraph({children, ...(o||{})}), H=text=>new D.Paragraph({text, heading:D.HeadingLevel.HEADING_2});
+  const muted={color:"666666", size:18}, kids=[H("Question"), ...m.question.split(/\n/).filter(l=>l.trim()).map(l=>P([R(l)]))];
+  if(m.asked) kids.push(P([R(m.asked, muted)]));
+  kids.push(H("Answer"));
+  for(const l of m.lines) kids.push(P(l.runs.map(x=>R(x.text, x.bold?{bold:true}:undefined)).concat(l.cites?[R(" "+l.cites)]:[]), l.bullet?{bullet:{level:0}, spacing:{after:60}}:{spacing:{after:120}}));
+  if(m.table){
+    const n=Math.max(1, m.table.cols.length), w=Math.floor(9360/n);
+    const cell=(text,head)=>new D.TableCell({children:[P([R(text, head?{bold:true}:undefined)])], ...(head?{shading:{type:D.ShadingType.CLEAR, color:"auto", fill:"EEEEEE"}}:{})});
+    kids.push(H(m.table.title), new D.Table({width:{size:100, type:D.WidthType.PERCENTAGE}, columnWidths:m.table.cols.map(()=>w),
+      rows:[new D.TableRow({tableHeader:true, children:m.table.cols.map(c=>cell(c,true))})].concat(m.table.rows.map(row=>new D.TableRow({children:row.map(c=>cell(c,false))})))}));
+    for(const note of m.table.notes) kids.push(P([R(note, {italics:true, ...muted})], {spacing:{before:80}}));
+  }
+  if(m.caps.length) kids.push(H("Limits reached"), ...m.caps.map(c=>P([R(c)])));
+  if(m.sources.length){
+    kids.push(H("Sources"));
+    for(const s of m.sources){
+      kids.push(P([R(`[${s.n}] `, {bold:true}), R(s.title, {bold:true})], {spacing:{before:120}}));
+      if(s.meta) kids.push(P([R(s.meta)], {indent:{left:360}}));
+      if(s.quote) kids.push(P([R(`“${s.quote}”`, {italics:true})], {indent:{left:360}}));
+    }
+  }
+  kids.push(P([R(ANSWER_FOOT, {italics:true, ...muted})], {spacing:{before:240}}));
+  return new D.Document({creator:"SNL lookup", title:"Answer from Claude", styles:{default:{document:{run:{font:"Calibri", size:22}}}},
+    sections:[{properties:{page:{size:{width:12240, height:15840}, margin:{top:1440, right:1440, bottom:1440, left:1440}}}, children:kids}]});
+}
+/* The same parts as HTML (every piece escaped) and as plain text, for the clipboard. */
+function answerClipHTML(m){
+  const td="border:1px solid #999999;padding:4px 6px;text-align:left;vertical-align:top", sm="color:#666666;font-size:12px";
+  const line=l=>l.runs.map(x=>x.bold?`<b>${esc(x.text)}</b>`:esc(x.text)).join("")+(l.cites?" "+esc(l.cites):"");
+  let h=`<h3>Question</h3>${m.question.split(/\n/).filter(l=>l.trim()).map(l=>`<p>${esc(l)}</p>`).join("")}${m.asked?`<p style="${sm}">${esc(m.asked)}</p>`:""}<h3>Answer</h3>`, inList=false;
+  for(const l of m.lines){
+    if(l.bullet && !inList){ h+="<ul>"; inList=true; } else if(!l.bullet && inList){ h+="</ul>"; inList=false; }
+    h+=l.bullet ? `<li>${line(l)}</li>` : `<p>${line(l)}</p>`;
+  }
+  if(inList) h+="</ul>";
+  if(m.table) h+=`<h3>${esc(m.table.title)}</h3><table style="border-collapse:collapse"><thead><tr>${m.table.cols.map(c=>`<th style="${td};background:#eeeeee">${esc(c)}</th>`).join("")}</tr></thead>`
+    +`<tbody>${m.table.rows.map(row=>`<tr>${row.map(c=>`<td style="${td}">${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>${m.table.notes.map(n=>`<p style="${sm}"><i>${esc(n)}</i></p>`).join("")}`;
+  if(m.caps.length) h+=`<h3>Limits reached</h3>${m.caps.map(c=>`<p>${esc(c)}</p>`).join("")}`;
+  if(m.sources.length) h+=`<h3>Sources</h3>${m.sources.map(s=>`<p><b>[${esc(s.n)}] ${esc(s.title)}</b>${s.meta?`<br>${esc(s.meta)}`:""}${s.quote?`<br><i>“${esc(s.quote)}”</i>`:""}</p>`).join("")}`;
+  return `<div>${h}<p style="${sm}"><i>${esc(ANSWER_FOOT)}</i></p></div>`;
+}
+function answerClipText(m){
+  const out=["Question", m.question]; if(m.asked) out.push(m.asked);
+  out.push("", "Answer", ...m.lines.map(l=>(l.bullet?"- ":"")+l.runs.map(x=>x.text).join("")+(l.cites?" "+l.cites:"")));
+  if(m.table) out.push("", m.table.title, ...[m.table.cols].concat(m.table.rows).map(r=>r.join("\t")), ...m.table.notes);
+  if(m.caps.length) out.push("", "Limits reached", ...m.caps);
+  if(m.sources.length){ out.push("", "Sources"); for(const s of m.sources) out.push(`[${s.n}] ${s.title}`, ...(s.meta?["    "+s.meta]:[]), ...(s.quote?[`    “${s.quote}”`]:[])); }
+  out.push("", ANSWER_FOOT);
+  return out.join("\n");
+}
+function loadDocx(){
+  if(window.docx) return Promise.resolve();
+  return loadDocx.p || (loadDocx.p=loadScript(DOCX_SRC).catch(e=>{ loadDocx.p=null; throw e; }));   // one download, however many clicks
+}
+async function exportAnswer(t){
+  const m=answerDoc(t);
+  try{
+    if(!window.docx){ toast("Getting the Word export ready…"); await loadDocx(); document.getElementById("toastRoot").innerHTML=""; }
+    const blob=await window.docx.Packer.toBlob(answerDocx(m));
+    saveBlob(new Blob([blob],{type:DOCX_TYPE}), `snl-answer-${TODAY()}.docx`);
+  }catch{ toast("Couldn't make the Word document. Check your connection and try again, or use Copy answer."); }
+}
+async function copyAnswer(t){
+  const m=answerDoc(t);
+  try{
+    if(!navigator.clipboard || !navigator.clipboard.write || typeof ClipboardItem==="undefined") throw new Error("no clipboard");
+    await navigator.clipboard.write([new ClipboardItem({"text/html":new Blob([answerClipHTML(m)],{type:"text/html"}), "text/plain":new Blob([answerClipText(m)],{type:"text/plain"})})]);
+    toast("Answer copied. Paste it into an email or a document.");
+  }catch{ toast("Your browser didn't allow copying. Use Export answer to download it as a Word document instead."); }
+}
 function turnHTML(t, ti){
-  const q=`<div class="ccmsg u">${esc(t.question)}</div>${t.told?`<p class="t2 told">${esc(t.told)}</p>`:""}`;
+  const q=`${t.saved?pastLabelHTML(t):""}<div class="ccmsg u">${esc(t.question)}</div>${t.told?`<p class="t2 told">${esc(t.told)}</p>`:""}`;
   const wrap=inner=>`<div class="turn" id="turn-${ti}">${q}${inner}</div>`;
   if(t.status==="error") return wrap(t.calm ? `<div class="info ask-calm" role="status"><span>${esc(t.error)}</span></div>` : `<div class="ccmsg err" role="alert">${esc(t.error)}</div>`);
   if(t.status==="done") return wrap(`<div class="ccmsg a done">${answerHTML(t, ti)}</div>`);
@@ -911,6 +1448,7 @@ function askFabHTML(){
 }
 function askPanelHTML(){
   const a=S.ask, busy=!!activeTurn(), off=S.status&&S.status.claude&&S.status.claude.configured===false, sc=askScreen();
+  const limited=!busy && chatAtLimit(S.chatUse);   // the daily limit is reached: the box says why it is off and when it comes back
   const start = sc ? `<div id="askSuggest"><p class="t2">Claude searches S&amp;P's filings, reads the filing documents and looks up statutory data. To start from what is on screen, pick a question or type your own:</p>
         <div class="ccchips">${ASK_SUGGEST[sc.view].map((q,i)=>`<button type="button" class="chip" data-act="ask-suggest" data-v="${sc.view}" data-i="${i}">${esc(q)}</button>`).join("")}</div></div>`
     : `<p class="t2" id="askHint">For example: "Pull the homeowners form filings two companies made in Florida since 2021 and compare what changed." Name the companies, the state and the dates you care about. Claude searches S&amp;P's filings, reads the filing documents and looks up statutory data, then answers with sources you can open at the page it cites.</p>`;
@@ -921,13 +1459,14 @@ function askPanelHTML(){
       <button type="button" class="btn sm" id="askClose" data-act="ask-close">Close</button></div>
     <div class="ask-b" id="askBody" data-keep>
       ${off?`<div class="info" id="askOff" role="status"><span><b>Questions aren't set up yet.</b> ${isCorpDev()?"Set ANTHROPIC_API_KEY on Supabase and deploy the snl-chat function (see the README).":"Ask Corp Dev to finish the set-up."}</span></div>`:""}
-      <p class="t2" id="askSees">Claude sees only your question, a short description of what is on this screen, and what S&amp;P returns for it: nothing else from this site or from Ascot. Check figures against the source before you use them.</p>
-      ${a.turns.length?`<div class="cclog" id="askLog" aria-live="polite">${a.turns.map(turnHTML).join("")}</div>`:start}
+      <p class="t2" id="askSees">Claude sees only your question, a short description of what is on this screen, and what S&amp;P returns for it: nothing else from this site${ORG?` or from ${esc(ORG)}`:""}. Check figures against the source before you use them.</p>
+      ${a.turns.length?`<div class="cclog" id="askLog" aria-live="polite">${a.turns.map(turnHTML).join("")}</div>`:start+pastHTML()}
     </div>
     <div class="ask-f">
-      <div class="ccform"><textarea id="ask_input" data-bind="ask.draft" rows="2" maxlength="${MAX_QUESTION}" aria-label="${a.turns.length?"Follow-up question":"Question"}" placeholder="${a.turns.length?"Ask a follow-up question":"Type a question"}">${esc(a.draft)}</textarea>
-        <button type="button" class="btn primary" data-act="ask-send" ${busy?"disabled":""}>${busy?"Answering…":"Ask"}</button></div>
+      <div class="ccform"><textarea id="ask_input" data-bind="ask.draft" rows="2" maxlength="${MAX_QUESTION}" aria-label="${a.turns.length?"Follow-up question":"Question"}" placeholder="${a.turns.length?"Ask a follow-up question":"Type a question"}"${limited?" disabled":""}>${esc(a.draft)}</textarea>
+        <button type="button" class="btn primary" data-act="ask-send" ${busy||limited?"disabled":""}>${busy?"Answering…":"Ask"}</button></div>
       <p class="t2" id="askTold">${esc(askToldText(sc))}</p>
+      ${chatUseHTML()}
     </div></aside>`;
 }
 /* Draws the button and, when open, the panel. Left alone when nothing in them has changed, so the page under the
@@ -947,6 +1486,109 @@ function renderAsk(){
     else if(a.scroll==="bottom" || (atFoot && activeTurn())) body.scrollTop=body.scrollHeight;   // follow a running answer while the reader is at its foot
   }
   a.scroll=null;
+}
+
+/* ---------- Ask Claude: past answers, and an answer that outlives a reload ----------
+   The database is the only record: the page reads the login's own snl_jobs rows (row-level security limits them to
+   the login, and the page asks for its own owner too). The list reads a few small columns; one answer's full row is
+   read only when it is opened. The only thing kept in the browser is the id of the last answer the reader has seen. */
+const PAST_COLS = "id,status,question,error,created_at,updated_at,heartbeat_at";
+const PAST_PAGE = 10, PAST_DAYS = 30, SEEN_KEY = "snl.seenAnswer";
+// rows: the list (null until it first loads); failedMore: whether the load that failed was "Show more";
+// resumed: the latest answer has been checked once since sign-in; opening: the id being fetched
+function freshPast(){ return {rows:null, loading:false, err:"", failedMore:false, more:false, resumed:false, opening:"", openErr:""}; }
+S.past = freshPast();
+function seenId(){ try{ return localStorage.getItem(SEEN_KEY)||""; }catch{ return ""; } }
+function markSeen(id){ if(!id) return; try{ localStorage.setItem(SEEN_KEY, String(id)); }catch{} }
+const shortText = (s, n) => { s=String(s??"").replace(/\s+/g," ").trim(); return s.length>n ? s.slice(0,n-1).trimEnd()+"…" : s; };
+const askedText = s => { const d=fmtAt(s), h=fmtTime(s); return `Asked ${d}${h?` at ${h}`:""}`; };
+function pastState(r){
+  if(r.status==="done") return {text:"Answered", cls:""};
+  if(r.status==="error") return {text:"Stopped: "+shortText(r.error||"Claude couldn't finish this answer.", 160), cls:"stopped"};
+  return {text:"Still running", cls:""};
+}
+/* A row of snl_jobs as a turn of the conversation, the same shape askQuestion makes. saved: opened from the list.
+   asked is when the question was asked, which the exported answer shows. */
+function jobTurn(row, saved){
+  const st=["queued","running","paused","done","error"].includes(row.status) ? row.status : "running";
+  return {question:String(row.question??""), told:"", status:st, progress:Array.isArray(row.progress)?row.progress:[], partial:typeof row.partial==="string"?row.partial:"",
+    result: st==="done" ? (row.result&&typeof row.result==="object"?row.result:{}) : null, error: st==="error" ? (row.error||"Claude couldn't finish this answer. Ask again.") : "",
+    calm:false, jobId:row.id, lastContinue:0, note:"", contNote:"", asked:String(row.created_at||""), saved:!!saved};
+}
+function pastQuery(cols){
+  return S.sb.from("snl_jobs").select(cols).eq("owner", S.session.uid).gte("created_at", new Date(Date.now()-PAST_DAYS*DAY).toISOString()).order("created_at",{ascending:false});
+}
+/* The first page of the list (again), or the next page with "Show more". */
+async function loadPast(more){
+  const p=S.past; if(!S.session || p.loading) return;
+  const from = more && p.rows ? p.rows.length : 0;
+  p.loading=true; p.err=""; renderAsk();
+  let data=null, error=null;
+  try{ ({data, error}=await pastQuery(PAST_COLS).range(from, from+PAST_PAGE)); }catch(e){ error=e; }
+  if(S.past!==p || !S.session) return;   // signed out meanwhile: this list belonged to that login
+  p.loading=false;
+  if(error || !Array.isArray(data)){ p.err="Couldn't load your past answers. Check your connection and try again."; p.failedMore=!!from; renderAsk(); return; }
+  const base=from ? p.rows : [], ids=new Set(base.map(r=>r.id));
+  p.rows=base.concat(data.slice(0, PAST_PAGE).filter(r=>r && !ids.has(r.id))); p.more=data.length>PAST_PAGE;
+  if(!p.resumed){ p.resumed=true; await resumeLatest(p.rows[0]); }
+  renderAsk();
+}
+/* After a reload or a sign-in: follow the latest answer again if it is still going, or hold it ready if it ended
+   while the page was closed and hasn't been seen. */
+async function resumeLatest(row){
+  const a=S.ask, p=S.past;
+  if(!row || a.turns.length) return;
+  const going=["queued","running","paused"].includes(row.status);
+  if(!going && (!["done","error"].includes(row.status) || row.id===seenId())) return;
+  let full=row;
+  if(row.status==="done"){
+    let data=null; try{ ({data}=await S.sb.from("snl_jobs").select(JOB_COLS).eq("id", row.id).eq("owner", S.session.uid).maybeSingle()); }catch{}
+    if(S.past!==p || S.ask!==a || a.turns.length || !data) return;
+    full=data;
+  }
+  const t=jobTurn(full, false); a.turns=[t];
+  if(going){ pollJob().then(()=>{ if(S.session && activeTurn() && !S.ask.timer) schedulePoll(); }); }
+  else if(a.open){ a.scroll=0; markSeen(t.jobId); }
+  else a.unseen=t.status;
+}
+/* Opens one past answer: its full row, shown as a fresh answer is. A running one is followed again. */
+async function openPast(id){
+  const p=S.past, a=S.ask;
+  if(!id || p.opening || a.turns.length) return;
+  p.opening=id; p.openErr=""; renderAsk();
+  let data=null, error=null;
+  try{ ({data, error}=await S.sb.from("snl_jobs").select(JOB_COLS).eq("id", id).eq("owner", S.session.uid).maybeSingle()); }catch(e){ error=e; }
+  if(S.past!==p || !S.session) return;
+  p.opening="";
+  if(error || !data){ p.openErr = error ? "Couldn't open that answer. Check your connection and try again." : "That answer is no longer kept. Answers are kept for 30 days."; renderAsk(); return; }
+  if(S.ask!==a || a.turns.length){ renderAsk(); return; }
+  const t=jobTurn(data, true); a.turns=[t]; a.scroll=0;
+  if(activeTurn()){ a.scroll="bottom"; pollJob().then(()=>{ if(S.session && activeTurn() && !S.ask.timer) schedulePoll(); }); }
+  else if(p.rows && p.rows[0] && p.rows[0].id===data.id) markSeen(data.id);   // only the latest counts as seen
+  renderAsk();
+}
+/* The panel opened: count what it shows as seen, and freshen the list when the list is what it shows. */
+function pastOnOpen(){
+  const last=S.ask.turns[S.ask.turns.length-1];
+  if(last && last.jobId && !last.saved && ["done","error"].includes(last.status)) markSeen(last.jobId);
+  if(!S.ask.turns.length) loadPast(false);
+}
+function pastLabelHTML(t){
+  const back = S.ask.turns.length===1 && !activeTurn() ? ` <button type="button" class="lnk" data-act="ask-new">Back to past answers</button>` : "";
+  return `<p class="t2 asked">${esc(askedText(t.asked))}. A saved answer.${back}</p>`;
+}
+function pastHTML(){
+  const p=S.past, retry=`<button class="btn sm" data-act="past-retry">Try again</button>`;
+  const problem = p.err ? `<div class="banner" id="pastErr" role="alert"><span>${esc(p.err)}</span>${retry}</div>` : "";
+  let body;
+  if(p.rows===null) body = problem || `<p class="t2" id="pastLoading">Loading your past answers…</p>`;
+  else if(!p.rows.length) body = (problem || `<p class="t2" id="pastEmpty">No questions in the last 30 days. Your questions and Claude's answers are kept here for 30 days.</p>`);
+  else body = `<ul class="pastlist" id="pastList">${p.rows.map(r=>{ const s=pastState(r), busy=p.opening===r.id;
+      return `<li><button type="button" class="pastq" data-act="past-open" data-id="${esc(r.id)}"${p.opening?` aria-disabled="true"`:""}><span class="pq">${esc(shortText(r.question, 140))}</span>
+        <span class="t2">${esc(askedText(r.created_at))} · <span class="${s.cls}">${esc(busy?"Opening…":s.text)}</span></span></button></li>`; }).join("")}</ul>`
+      + problem + (p.more && !p.err ? `<div><button type="button" class="btn sm" id="pastMore" data-act="past-more" ${p.loading?"disabled":""}>${p.loading?"Loading…":"Show more"}</button></div>` : "");
+  return `<section class="past" id="askPast" aria-labelledby="pastH"><h3 id="pastH">Past answers</h3>
+    ${p.openErr?`<p class="err" id="pastOpenErr" role="alert">${esc(p.openErr)}</p>`:""}${body}</section>`;
 }
 
 /* ---------- Statutory ---------- */
@@ -977,7 +1619,7 @@ async function runStat(refresh){
   if(refresh){ if(!st.last) return; payload={...st.last, refresh:true}; }
   else{
     const problem=statProblem(); if(problem){ st.formErr=problem; render(); return; }
-    payload={action:"query", kind:st.kind, codes:statCodes(), fromYear:+st.fromYear, toYear:+st.toYear}; st.last=payload; st.res=null; st.ent={};
+    payload={action:"query", kind:st.kind, codes:statCodes(), fromYear:+st.fromYear, toYear:+st.toYear}; st.last=payload; st.res=null; st.ent={}; st.resNames={...statFind().names[st.kind]};
   }
   st.formErr=""; st.busy=true; st.err=null; render();
   const r=await callFn("snl-statutory", payload);
@@ -993,7 +1635,8 @@ function statEntities(res, field){
   const list=(Array.isArray(res.entities)?res.entities:[]).map(e=>({code:String(e.code), name:e.name}));
   for(const c of (Array.isArray(res.codes)?res.codes:[])) if(!list.some(e=>e.code===String(c))) list.push({code:String(c), name:null});
   for(const r of (field&&Array.isArray(field.rows)?field.rows:[])) if(!blank(r.code) && !list.some(e=>e.code===String(r.code))) list.push({code:String(r.code), name:null});
-  return list;
+  const known=S.st.resNames||{};   // the names found by name when the figures were asked for fill the gaps
+  return list.map(e=>blank(e.name) && !blank(known[e.code]) ? {...e, name:known[e.code]} : e);
 }
 const entLabel = e => blank(e.name) ? `NAIC ${e.code}` : `${e.name} (NAIC ${e.code})`;
 /* One block's table: for a "by year" field one row per company (the subject first, then peers); for a "by line"
@@ -1035,7 +1678,7 @@ function statBlockHTML(res, field){
 function statResultsHTML(){
   const st=S.st, res=st.res;
   if(st.busy && !res) return `<div class="banner" role="status"><span>Fetching statutory data from Snowflake… This can take a minute. After that the figures are saved for everyone until someone clicks Refresh.</span></div>`;
-  if(!res) return st.err ? problemHTML(st.err, "Couldn't fetch the statutory data.", "stat-retry") : `<div class="empty" id="statEmpty"><p>Type the NAIC code of the company you want, then any peers, and choose the years. The first code is the subject; the rest sit beside it for comparison.</p></div>`;
+  if(!res) return st.err ? problemHTML(st.err, "Couldn't fetch the statutory data.", "stat-retry") : `<div class="empty" id="statEmpty"><p>Type the NAIC code of the company you want, then any peers, and choose the years. The first code is the subject; the rest sit beside it for comparison. Don't know a code? Find the company or group by name above.</p></div>`;
   const fields=Array.isArray(res.fields)?res.fields:[], loaded=Array.isArray(res.loaded)?res.loaded:[];
   let h=`<h2 class="sec">Results</h2>`;
   if(st.busy) h+=`<div class="banner" role="status"><span>Asking Snowflake again… The figures below are from ${fmtAt(res.fetchedAt)} until the new ones arrive.</span></div>`;
@@ -1110,6 +1753,98 @@ function setupHTML(){
       <div class="inline"><button type="button" class="btn primary" data-act="su-save" ${su.saving||su.mapBusy?"disabled":""}>${su.saving?"Saving…":"Save mapping"}</button><span class="t2">Saving replaces the mapping for everyone.</span></div></div>
   </section>`;
 }
+/* ---------- Statutory: find companies and groups by name ---------- */
+/* The same company list as the Filings view (the resolve action). Looking up by company, a match adds its NAIC
+   company code; looking up by group, the matches are gathered into their groups and a group adds its NAIC group
+   code. Codes typed by hand work as before; the names found here are shown beside the codes and in the results. */
+function statFind(){ const st=S.st; if(!st.nf) st.nf={q:"", asked:"", matches:null, note:"", busy:false, err:"", names:{company:{}, group:{}}}; return st.nf; }
+const naicOk = c => /^[0-9]{1,6}$/.test(String(c??"").trim());
+async function statLookup(){
+  const nf=statFind(), q=nf.q.trim();
+  if(!q){ nf.matches=null; nf.err="Type part of a company or group name, or a NAIC code."; render(); return; }
+  nf.busy=true; nf.err=""; nf.note=""; nf.matches=null; nf.asked=q; render();
+  const r=await callFn("snl-filings",{action:"resolve", q});
+  if(!S.session || S.st.nf!==nf) return;
+  nf.busy=false;
+  if(r.data){ nf.matches=Array.isArray(r.data.matches)?r.data.matches.filter(m=>m&&typeof m==="object"):[]; nf.note=r.data.note||""; }
+  else if(r.err!=="signin") nf.err="Couldn't look that up. "+errText(r);
+  render();
+}
+/* Adds one code to the end of the list: the first code is the subject, the rest are peers. */
+function statAddCode(code, name){
+  const st=S.st, codes=statCodes(); code=String(code??"").trim();
+  if(!naicOk(code)) return "bad";
+  if(codes.includes(code)) return "dup";
+  if(codes.length>=MAX_CODES) return "full";
+  st.codes=codes.concat(code).join(", "); st.formErr="";
+  if(!blank(name)) statFind().names[st.kind][code]=String(name);
+  return "added";
+}
+const STAT_FULL = () => `The list is full: one subject and ${MAX_CODES-1} peers. Remove a code to add another.`;
+function statAdd(code, name){
+  const r=statAddCode(code, name);
+  if(r==="dup") toast("That code is already in the list.");
+  else if(r==="full") toast(STAT_FULL());
+  else if(r==="bad") toast("NAIC codes are numbers of up to 6 digits.");
+  render();
+}
+/* Company matches with a NAIC company code, once each. */
+const statAddable = matches => matches.filter((m,i)=>naicOk(m.naicCompanyCode) && matches.findIndex(x=>String(x.naicCompanyCode).trim()===String(m.naicCompanyCode).trim())===i);
+function statAddAll(){
+  const nf=statFind(); let added=0, left=0;
+  for(const m of statAddable(nf.matches||[])){ const r=statAddCode(m.naicCompanyCode, m.companyName); if(r==="added") added++; else if(r==="full") left++; }
+  render();
+  toast(left && !added ? STAT_FULL() : left ? `Added ${added}. A comparison takes at most ${MAX_CODES} codes, so ${left} ${left===1?"was":"were"} left out.` : added ? `Added ${plural(added,"company","companies")}.` : "Those companies are already in the list.");
+}
+/* The distinct groups among the matches, with how many matching companies each has. */
+function statGroups(matches){
+  const out=[];
+  for(const m of matches){
+    const code=blank(m.naicGroupCode)?"":String(m.naicGroupCode).trim(), name=blank(m.naicGroupName)?"":String(m.naicGroupName);
+    if(!code && !name) continue;
+    const key=code||"name:"+name.toLowerCase(); let g=out.find(x=>x.key===key);
+    if(!g){ g={key, code, name, n:0}; out.push(g); }
+    if(!g.name && name) g.name=name;
+    g.n++;
+  }
+  return out;
+}
+function statNameOf(kind, code){ const n=S.st.nf&&S.st.nf.names[kind]; return n&&!blank(n[code]) ? n[code] : ""; }
+function statNamedHTML(){
+  const st=S.st, codes=statCodes();
+  return codes.map((c,i)=>{ const name=statNameOf(st.kind, c), role=codes.length>1?(i?"peer":"subject"):"";
+    return `<span class="cchip"><span><b>${esc(name||`NAIC ${c}`)}</b>${name||role?` <span class="t2">${[name?`NAIC ${esc(c)}`:"", role].filter(Boolean).join(" · ")}</span>`:""}</span><button type="button" data-act="st-remove" data-code="${esc(c)}" aria-label="Remove ${esc(name||c)}">×</button></span>`; }).join("");
+}
+function statFinderHTML(){
+  const st=S.st, nf=statFind(), group=st.kind==="group", codes=statCodes(), asked=nf.asked;
+  const calm=t=>`<div class="info" id="st_findNote" role="status"><span>${t}</span></div>`;
+  let found="";
+  if(nf.busy) found=`<p class="t2" id="st_finding" role="status">Looking for matches…</p>`;
+  else if(nf.matches!==null && !nf.matches.length) found=calm(`No company in the app's company list matches "${esc(asked)}". Try a shorter part of the name, or type the NAIC ${group?"group":"company"} code in the box above.`);
+  else if(nf.matches!==null && group){
+    const groups=statGroups(nf.matches), loose=nf.matches.length-groups.reduce((a,g)=>a+g.n,0);
+    const rows=groups.map(g=>{ const can=naicOk(g.code), inList=can&&codes.includes(g.code);
+      const act=!can ? `<span class="t2 noadd">Can't be added: the company list has no NAIC group code for this group.</span>`
+        : inList ? `<button type="button" class="btn sm" disabled>Added</button>` : `<button type="button" class="btn sm" data-act="st-add" data-code="${esc(g.code)}" data-name="${esc(g.name)}">Add</button>`;
+      return `<li><div><div class="t1">${esc(g.name||`NAIC group ${g.code}`)}</div><div class="t2">${[can?`NAIC group ${esc(g.code)}`:"", `${plural(g.n,"matching company","matching companies")}`].filter(Boolean).join(" · ")}</div></div><span class="inline">${act}</span></li>`; }).join("");
+    found = groups.length ? `<ul class="matches" id="st_matches" aria-label="Matching groups">${rows}</ul>${loose?`<p class="t2" id="st_loose">${plural(loose,"matching company has","matching companies have")} no group in the company list.</p>`:""}`
+      : calm(`The companies that match "${esc(asked)}" have no group in the company list. Type the NAIC group code in the box above, or look up by NAIC company code.`);
+  }
+  else if(nf.matches!==null){
+    const rows=nf.matches.map(m=>{ const code=String(m.naicCompanyCode??"").trim(), can=naicOk(code), inList=can&&codes.includes(code);
+      const meta=[can?`NAIC ${code}`:"", !blank(m.naicGroupName)?`group ${m.naicGroupName}`:""].filter(Boolean).join(" · ");
+      const act=!can ? `<span class="t2 noadd">Can't be added: the company list has no NAIC company code for it.</span>`
+        : inList ? `<button type="button" class="btn sm" disabled>Added</button>` : `<button type="button" class="btn sm" data-act="st-add" data-code="${esc(code)}" data-name="${esc(m.companyName)}">Add</button>`;
+      return `<li><div><div class="t1">${esc(m.companyName||"n/d")}</div>${meta?`<div class="t2">${esc(meta)}</div>`:""}</div><span class="inline">${act}</span></li>`; }).join("");
+    const addable=statAddable(nf.matches), gs=[...new Set(nf.matches.map(m=>blank(m.naicGroupName)?"":String(m.naicGroupName)))];
+    const all=addable.length>1 ? `<p class="t2" id="st_addAll"><button type="button" class="btn sm" data-act="st-add-all">Add all ${addable.length}</button> ${gs.length===1&&gs[0]?`to compare the whole of ${esc(gs[0])}.`:"to compare them all."} The first code in the list is the subject; at most ${MAX_CODES} codes.</p>` : "";
+    found=`<ul class="matches" id="st_matches" aria-label="Matching companies">${rows}</ul>${all}`;
+  }
+  return `<div class="f" id="st_finder"><label for="st_find">Find by name <em>part of a company or group name, or a NAIC code; adds the ${group?"group":"company"}'s NAIC code to the list</em></label>
+    <div class="toolbar"><div class="grow"><input type="text" id="st_find" data-bind="st.nf.q" value="${esc(nf.q)}" autocomplete="off" spellcheck="false" placeholder="For example Calloway"></div>
+      <button type="button" class="btn" data-act="st-find" ${nf.busy?"disabled":""}>Find</button></div>
+    ${nf.err?`<p class="err" id="st_findErr" role="alert">${esc(nf.err)}</p>`:""}${found}</div>`;
+}
 function renderStatutory(){
   const st=S.st, s=st.status;
   const head=`<div><h2 class="action-title">Statutory financials by NAIC company or group</h2>
@@ -1128,6 +1863,8 @@ function renderStatutory(){
         <label class="f">First year<input type="number" id="st_from" data-bind="st.fromYear" value="${esc(st.fromYear)}" min="1990" max="${new Date().getFullYear()}" step="1"></label>
         <label class="f">Last year<input type="number" id="st_to" data-bind="st.toYear" value="${esc(st.toYear)}" min="1990" max="${new Date().getFullYear()}" step="1"></label>
       </div>
+      <div class="chips" id="st_named" aria-label="Chosen codes">${statNamedHTML()}</div>
+      ${statFinderHTML()}
       ${st.formErr?`<p class="err" id="statErr" role="alert">${esc(st.formErr)}</p>`:""}
       <div class="toolbar"><button class="btn primary" data-act="stat-search" ${st.busy?"disabled":""}>${st.busy?"Fetching…":"Show statutory data"}</button><span class="grow"></span>${setupBtn}</div>
     </form>
@@ -1161,11 +1898,12 @@ function render(){
   else setMenu(false);
   document.body.classList.toggle("signed", on);
   const keep=keepUi("view");
-  if(!on){ v.innerHTML=loginHTML(); keep(); renderDrawer(); renderAsk(); return; }
+  if(!on){ v.innerHTML=loginHTML(); keep(); renderDrawer(); renderAsk(); renderConn(); return; }
   document.querySelectorAll("nav.tabs a").forEach(a=>a.setAttribute("aria-current", a.dataset.view===S.view ? "page" : "false"));
   document.getElementById("stripIn").innerHTML=stripHTML();
   v.innerHTML = S.view==="statutory" ? renderStatutory() : renderFilings();
   keep(); renderDrawer(); renderAsk();
+  renderConn();
 }
 function renderDrawer(){
   const root=document.getElementById("drawerRoot"), dr=S.session?S.drawer:null;
@@ -1199,6 +1937,7 @@ const VIEW_KEY="snl.view";
 function enterView(){
   if(!S.session) return;
   if(S.view==="filings" && !S.refs && !S.refsLoading) loadRefs(false);
+  if(S.view==="filings" && !S.w.loaded && !S.w.loading) loadWatch();
   if(S.view==="statutory" && !S.st.status && !S.st.loading) loadStatStatus();
 }
 function route(){
@@ -1235,6 +1974,9 @@ document.addEventListener("click", e=>{
     case "close": closeDrawer(); break;
     case "save-pw": savePassword(); break;
     case "status-retry": S.statusErr=""; render(); loadStatus(); break;
+    case "conn-check": runConnCheck(); break;
+    case "conn-copy": copyConn(); break;
+    case "conn-close": S.conn=null; render(); document.getElementById("connBtn")?.focus(); break;
 
     case "co-find": resolveCompany(); break;
     case "co-add": addChip(t.dataset.kind, t.dataset.id, t.dataset.name); break;
@@ -1255,13 +1997,33 @@ document.addEventListener("click", e=>{
     case "co-toggle": f.openCo[t.dataset.key]=!f.openCo[t.dataset.key]; render(); break;
     case "open-doc": openDoc(t.dataset.doc, t.dataset.page); break;
     case "export": exportTable(exportOf(t), t.dataset.fmt); break;
+    case "recent-toggle": toggleRecent(); break;
+    case "recent-open": reopenRecent(+t.dataset.i); break;
+    case "recent-more": { const R=recentOf(); R.limit+=RECENT_PAGE; loadRecent(); break; }
+    case "recent-retry": loadRecent(); break;
+
+    case "w-add": watchAddFromForm(); break;
+    case "w-co-remove": { const k=t.dataset.k; changeWatch(l=>{ l.companies=l.companies.filter(c=>`${c.kind}:${c.id}`!==k); return l; }, "Removed from the watchlist."); break; }
+    case "w-st-remove": { const s=t.dataset.s; changeWatch(l=>{ l.states=l.states.filter(x=>x!==s); return l; }, `${s} removed from the watchlist.`); break; }
+    case "w-toggle": changeWatch(l=>{ l.enabled=!l.enabled; return l; }, S.w.doc&&S.w.doc.enabled?"The watchlist is switched off.":"The watchlist is switched on."); break;
+    case "w-recips-save": watchSaveRecipients(); break;
+    case "w-check": watchCheckNow(); break;
+    case "w-manage": S.w.manage=!S.w.manage; S.w.saveErr=""; render(); break;
+    case "w-all": S.w.showAll=!S.w.showAll; render(); break;
+    case "w-more": S.w.allCos=!S.w.allCos; render(); break;
+    case "w-retry": S.w.loaded=false; S.w.readErr=""; S.w.statusErr=null; loadWatch(); break;
 
     case "ask-open": openAsk(); break;
     case "ask-close": closeAsk(); break;
     case "ask-wide": S.ask.wide=!S.ask.wide; renderAsk(); break;
     case "ask-suggest": { const q=(ASK_SUGGEST[t.dataset.v]||[])[+t.dataset.i]; if(q){ S.ask.draft=q; renderAsk(); const box=document.getElementById("ask_input"); if(box){ box.focus(); box.setSelectionRange(q.length, q.length); } } break; }   // fills the box; sending is left to the reader
     case "ask-send": askQuestion(); break;
-    case "ask-new": newConversation(); break;
+    case "ask-new": newConversation(); loadPast(false); break;
+    case "past-open": openPast(t.dataset.id); break;
+    case "past-more": loadPast(true); break;
+    case "past-retry": loadPast(S.past.failedMore); break;
+    case "answer-export": { const at=S.ask.turns[+t.dataset.turn]; if(at && at.status==="done") exportAnswer(at); break; }
+    case "answer-copy": { const at=S.ask.turns[+t.dataset.turn]; if(at && at.status==="done") copyAnswer(at); break; }
     case "goto-source": { const el=document.getElementById(`src-${t.dataset.turn}-${t.dataset.n}`); if(el){ document.querySelectorAll(".srcs li.hit").forEach(x=>x.classList.remove("hit")); el.classList.add("hit"); el.scrollIntoView({block:"center"}); el.querySelector("button")?.focus({preventScroll:true}); } break; }
 
     case "stat-kind": st.kind=t.dataset.k==="group"?"group":"company"; render(); break;
@@ -1269,6 +2031,10 @@ document.addEventListener("click", e=>{
     case "stat-refresh": runStat(true); break;
     case "stat-retry": runStat(false); break;
     case "stat-status-retry": loadStatStatus(); break;
+    case "st-find": statLookup(); break;
+    case "st-add": statAdd(t.dataset.code, t.dataset.name); break;
+    case "st-add-all": statAddAll(); break;
+    case "st-remove": st.codes=statCodes().filter(c=>c!==t.dataset.code).join(", "); render(); document.getElementById("st_codes")?.focus(); break;
     case "su-toggle": if(st.setup.open){ st.setup.open=false; render(); } else openSetup(); break;
     case "su-views": discover(null, !!t.dataset.refresh); break;
     case "su-view": discover(t.dataset.name, false); break;
@@ -1281,6 +2047,7 @@ function onInput(e){
   if(!path) return;
   setPath(path, t.value);
   if("live" in t.dataset){ if(path==="f.filter") S.f.shown=PAGE; render(); }
+  else if(path==="st.codes"){ const el=document.getElementById("st_named"); if(el) el.innerHTML=statNamedHTML(); }   // names beside the codes, without a rebuild while typing
   else if(path==="f.from" || path==="f.to"){ const est=document.getElementById("f_est"); if(est) est.textContent=estimateText(); }   // no rebuild while a date is being typed
 }
 document.addEventListener("input", onInput);
@@ -1293,6 +2060,7 @@ document.addEventListener("submit", e=>{
 });
 document.addEventListener("keydown", e=>{
   if(e.target.id==="f_q" && e.key==="Enter"){ e.preventDefault(); resolveCompany(); return; }
+  if(e.target.id==="st_find" && e.key==="Enter"){ e.preventDefault(); statLookup(); return; }
   if(e.target.id==="su_like" && e.key==="Enter"){ e.preventDefault(); discover(null, false); return; }
   if(e.target.id==="ask_input" && e.key==="Enter" && !e.shiftKey && !e.isComposing){ e.preventDefault(); askQuestion(); return; }
   if(e.key==="Enter" && e.target.closest && e.target.closest("#pwForm")){ e.preventDefault(); savePassword(); return; }
@@ -1309,12 +2077,16 @@ function resetState(){
   for(const d of Object.values(S.docs)) if(d.url){ try{ URL.revokeObjectURL(d.url); }catch{} }
   S.session=null; S.drawer=null; S.status=null; S.statusErr=""; S.refs=null; S.refsLoading=false; S.refsMsg=""; S.refsErr=""; S.docs={};
   S.f=freshFilings(); S.ask=freshAsk(); S.st=freshStat();
+  S.chatUse=null; S.chatUseAt=0;
+  S.conn=null;
+  S.past=freshPast();
+  S.w=freshWatch();
 }
 async function onSignedIn(session){
   const {data, error}=await S.sb.from("profiles").select("username,display_name,role").eq("id", session.user.id).maybeSingle();
   if(error || !data || !ROLES[data.role]){ S.leaving=true; try{ await S.sb.auth.signOut(); }catch{} S.leaving=false; resetState(); S.loginErr="This login has no role on this site yet. Ask the site owner to set it up."; render(); return; }
-  S.session={username:data.username, name:data.display_name||data.username, role:data.role};
-  S.loginErr=""; route(); loadStatus();
+  S.session={username:data.username, name:data.display_name||data.username, role:data.role, uid:session.user.id};
+  S.loginErr=""; route(); loadStatus(); loadPast(false);
 }
 async function doLogin(){
   if(S.loginBusy) return;

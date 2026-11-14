@@ -8,7 +8,7 @@ export type StoreRow = { id: string; kind: StoreKind; label: string; doc: Record
 
 /** A company the app knows: one S&P has returned before, or one loaded from a company list
     (scripts/companies.mjs). Field names are S&P's own search columns. It has a company id, an institution id,
-    or both. */
+    or both; or, from a company list, only a NAIC company code (statutory figures only, no filing search). */
 export type Entity = {
   companyId: string | null; companyName: string; naicCompanyCode: string | null; institutionId: string | null;
   spStatEntityId: string | null; naicGroupCode: string | null; naicGroupName: string | null;
@@ -26,6 +26,21 @@ export type Job = {
 };
 export type JobPatch = Partial<Pick<Job, "status" | "progress" | "partial" | "result" | "error" | "segments">>;
 
+/** The watchlist (migration 0003). A check and what it did; scope is what it covered (see watch.ts). */
+export type WatchScope = { companies: string[]; states: string[]; filters: string };
+export type WatchRun = {
+  id: string; status: "running" | "ok" | "failed" | "skipped"; trigger: "schedule" | "manual"; started_at: string; finished_at: string | null;
+  requests: number; found: number; new_count: number; baseline: boolean; complete: boolean; emailed: number; message: string | null; scope: WatchScope | null;
+};
+export type WatchRunPatch = Partial<Pick<WatchRun, "status" | "requests" | "found" | "new_count" | "baseline" | "complete" | "emailed" | "message" | "scope">>;
+/** A filing a check found: enough to show it and open its document. baseline: part of the starting point, not new. */
+export type FoundFiling = {
+  filing_version_id: string; run_id: string | null; first_seen_at: string; baseline: boolean; companies: string[];
+  state: string | null; state_name: string | null; filing_type: string | null; type_of_insurance: string | null; sub_type_of_insurance: string | null;
+  filing_status: string | null; date_submitted: string | null; publish_date: string | null; effective_new: string | null; effective_renewal: string | null;
+  rate_impact: string | null; description: string | null; tracking_number: string | null; document_id: number | null;
+};
+
 export interface Db {
   /** Takes the next one-second S&P slot and counts the request (migration 0001, snl_take_slot). */
   takeSlot(limits: Usage): Promise<Slot>;
@@ -39,6 +54,24 @@ export interface Db {
   findEntities(q: string, limit: number): Promise<Entity[]>;
   putEntities(entities: Entity[]): Promise<void>;
   getSetting(id: string): Promise<Record<string, unknown> | null>;
+  // ---------- the watchlist (migration 0003) ----------
+  /** Starts a check, first closing any check still "running" after staleMs (with staleMessage). Returns its id, or
+      null when another check is running (only one may run at a time). */
+  startWatchRun(trigger: WatchRun["trigger"], staleMs: number, staleMessage: string): Promise<string | null>;
+  finishWatchRun(id: string, patch: WatchRunPatch): Promise<void>;
+  /** Records a check that ended before it started (not set up, nothing watched, switched off, too big). */
+  addWatchRun(run: Omit<WatchRun, "id">): Promise<void>;
+  /** The latest checks, newest first. */
+  watchRuns(limit: number): Promise<WatchRun[]>;
+  /** What the latest complete, successful check covered. null before the first one. */
+  lastWatchScope(): Promise<WatchScope | null>;
+  /** Which of these filing version ids a check has found before. */
+  seenFilings(ids: string[]): Promise<string[]>;
+  addFoundFilings(rows: FoundFiling[]): Promise<void>;
+  /** New filings found (not the starting point), the latest found first. */
+  foundFilings(limit: number): Promise<FoundFiling[]>;
+  /** Clears found filings and finished checks from before the given time. */
+  dropOldWatch(before: string): Promise<void>;
   createJob(owner: string, question: string): Promise<string | null>;
   getJob(id: string): Promise<Job | null>;
   /** Updates a job and its heartbeat. */
@@ -55,6 +88,10 @@ export interface Db {
   activeJob(owner: string, since: string): Promise<string | null>;
   /** Removes finished answers created before the given time. */
   dropOldJobs(before: string): Promise<void>;
+  /** How many questions the login has started since the given time, whatever became of them. */
+  countJobsSince(owner: string, since: string): Promise<number>;
+  /** The usage part of the result of each of the login's finished answers started since the given time. */
+  usageSince(owner: string, since: string): Promise<Record<string, unknown>[]>;
 }
 
 // A saved place is kept as text inside its row. Postgres re-orders the keys of JSON it stores, and Claude must
@@ -66,10 +103,16 @@ const unpack = (v: unknown): Record<string, unknown> | null => {
   return typeof json === "string" ? JSON.parse(json) : v as Record<string, unknown>;
 };
 
-/** What a company is saved under: its company id, or "i." and its institution id when it has no company id. */
-export function entityKey(e: Pick<Entity, "companyId" | "institutionId">): string | null {
-  return e.companyId ? String(e.companyId) : e.institutionId ? `i.${e.institutionId}` : null;
+/** What a company is saved under: its company id, or "i." and its institution id when it has no company id, or
+    "n." and its NAIC company code when it has neither. A company with only a NAIC code can't be searched for
+    filings, but its statutory figures can be found by name (scripts/companies-lib.mjs keeps the same key). */
+export function entityKey(e: Pick<Entity, "companyId" | "institutionId"> & Partial<Pick<Entity, "naicCompanyCode">>): string | null {
+  return e.companyId ? String(e.companyId) : e.institutionId ? `i.${e.institutionId}` : isNaicCode(e.naicCompanyCode) ? `n.${e.naicCompanyCode}` : null;
 }
+/** A NAIC company code as the Statutory view takes it: 1 to 6 digits. */
+export const isNaicCode = (v: unknown): v is string => typeof v === "string" && /^[0-9]{1,6}$/.test(v);
+/** Whether a filing search can use the company: it needs an S&P company id or institution id. */
+export const canSearchFilings = (e: Pick<Entity, "companyId" | "institutionId">): boolean => !!(e.companyId || e.institutionId);
 
 export function entityLabel(e: Entity): string {
   return [e.companyName, e.naicCompanyCode ? `NAIC ${e.naicCompanyCode}` : "", e.naicGroupName ?? ""].filter(Boolean).join(" | ").slice(0, 400);
@@ -132,7 +175,10 @@ export function supabaseDb(sb: SupabaseClient, now: () => number = Date.now): Db
       }
       // A company loaded by institution id alone, and later seen in results with its company id, is shown once.
       const withCompanyId = new Set(found.filter((e) => e.companyId && e.institutionId).map((e) => String(e.institutionId)));
-      return found.filter((e) => e.companyId || !withCompanyId.has(String(e.institutionId))).slice(0, limit);
+      // Likewise a company loaded by NAIC code alone, and later seen with an S&P id: the one with the id is kept.
+      const withSpId = new Set(found.filter((e) => canSearchFilings(e) && isNaicCode(e.naicCompanyCode)).map((e) => String(e.naicCompanyCode)));
+      return found.filter((e) => e.companyId || !withCompanyId.has(String(e.institutionId)))
+        .filter((e) => canSearchFilings(e) || !withSpId.has(String(e.naicCompanyCode))).slice(0, limit);
     },
     async putEntities(entities) {
       if (!entities.length) return;
@@ -143,6 +189,56 @@ export function supabaseDb(sb: SupabaseClient, now: () => number = Date.now): Db
     async getSetting(id) {
       const { data } = await sb.from("snl_settings").select("doc").eq("id", id).maybeSingle();
       return (data?.doc as Record<string, unknown> | undefined) ?? null;
+    },
+    async startWatchRun(trigger, staleMs, staleMessage) {
+      await sb.from("snl_watch_runs").update({ status: "failed", finished_at: nowIso(), message: staleMessage }).eq("status", "running").lt("started_at", new Date(now() - staleMs).toISOString());
+      const { data, error } = await sb.from("snl_watch_runs").insert({ status: "running", trigger, started_at: nowIso() }).select("id").single();
+      if (error?.code === "23505") return null;   // the one-running-check index: another check holds it
+      if (error) throw new Error(`Couldn't record the check: ${error.message}`);
+      return data.id as string;
+    },
+    async finishWatchRun(id, patch) {
+      const { error } = await sb.from("snl_watch_runs").update({ ...patch, finished_at: nowIso() }).eq("id", id);
+      if (error) throw new Error(`Couldn't record the end of the check: ${error.message}`);
+    },
+    async addWatchRun(run) {
+      const { error } = await sb.from("snl_watch_runs").insert(run);
+      if (error) throw new Error(`Couldn't record the check: ${error.message}`);
+    },
+    async watchRuns(limit) {
+      const { data, error } = await sb.from("snl_watch_runs").select("*").order("started_at", { ascending: false }).limit(limit);
+      if (error) throw new Error(`Couldn't read the record of checks: ${error.message}`);
+      return (data ?? []) as WatchRun[];
+    },
+    async lastWatchScope() {
+      const { data, error } = await sb.from("snl_watch_runs").select("scope").eq("status", "ok").eq("complete", true).not("scope", "is", null).order("started_at", { ascending: false }).limit(1);
+      if (error) throw new Error(`Couldn't read the last check: ${error.message}`);
+      return (data?.[0]?.scope as WatchScope | undefined) ?? null;
+    },
+    async seenFilings(ids) {
+      const out: string[] = [];
+      for (let i = 0; i < ids.length; i += 200) {
+        const { data, error } = await sb.from("snl_watch_found").select("filing_version_id").in("filing_version_id", ids.slice(i, i + 200));
+        if (error) throw new Error(`Couldn't read the filings found before: ${error.message}`);
+        out.push(...(data ?? []).map((r) => r.filing_version_id as string));
+      }
+      return out;
+    },
+    async addFoundFilings(rows) {
+      if (!rows.length) return;
+      const { error } = await sb.from("snl_watch_found").upsert(rows, { onConflict: "filing_version_id", ignoreDuplicates: true });
+      if (error) throw new Error(`Couldn't save the filings found: ${error.message}`);
+    },
+    async foundFilings(limit) {
+      const { data, error } = await sb.from("snl_watch_found").select("*").eq("baseline", false).order("first_seen_at", { ascending: false }).order("publish_date", { ascending: false }).limit(limit);
+      if (error) throw new Error(`Couldn't read the filings found: ${error.message}`);
+      return (data ?? []) as FoundFiling[];
+    },
+    async dropOldWatch(before) {
+      try {
+        await sb.from("snl_watch_found").delete().lt("first_seen_at", before);
+        await sb.from("snl_watch_runs").delete().neq("status", "running").lt("started_at", before);
+      } catch { /* housekeeping: tried again at the next check */ }
     },
     async createJob(owner, question) {
       const { data, error } = await sb.from("snl_jobs").insert({ owner, question, status: "queued" }).select("id").single();
@@ -183,6 +279,18 @@ export function supabaseDb(sb: SupabaseClient, now: () => number = Date.now): Db
     },
     async dropOldJobs(before) {
       try { await sb.from("snl_jobs").delete().in("status", ["done", "error"]).lt("created_at", before); } catch { /* housekeeping: tried again next time */ }
+    },
+    async countJobsSince(owner, since) {
+      const { count, error } = await sb.from("snl_jobs").select("id", { count: "exact", head: true }).eq("owner", owner).gte("created_at", since);
+      // Not knowing the count must never let a question through uncounted.
+      if (error) throw new Error(`Couldn't count today's questions: ${error.message}`);
+      return count ?? 0;
+    },
+    async usageSince(owner, since) {
+      // Only the usage part of each result is read, not the answers themselves.
+      const { data, error } = await sb.from("snl_jobs").select("usage:result->usage").eq("owner", owner).eq("status", "done").gte("created_at", since);
+      if (error) throw new Error(`Couldn't add up today's costs: ${error.message}`);
+      return (data ?? []).map((r) => (r as { usage?: unknown }).usage).filter((u): u is Record<string, unknown> => !!u && typeof u === "object" && !Array.isArray(u));
     },
   };
 }

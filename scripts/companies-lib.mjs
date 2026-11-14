@@ -73,12 +73,12 @@ export function matchColumns(headings, named = {}) {
   return { cols, problems };
 }
 
-/** The heading row: the first of the first 40 rows that has a company name column and an id column. Exports
+/** The heading row: the first of the first 40 rows that has a company name column and an id or NAIC code column. Exports
     often start with a title and a date before the headings. */
 export function findHeadingRow(rows, named = {}) {
   for (let i = 0; i < Math.min(rows.length, 40); i++) {
     const { cols, problems } = matchColumns(rows[i], named);
-    if (!problems.length && "companyName" in cols && ("companyId" in cols || "institutionId" in cols)) return { at: i, cols };
+    if (!problems.length && "companyName" in cols && ("companyId" in cols || "institutionId" in cols || "naicCompanyCode" in cols)) return { at: i, cols };
   }
   return null;
 }
@@ -91,8 +91,12 @@ export function cleanId(v) {
 const cleanCode = (v) => { const s = String(v ?? "").trim().replace(/\.0+$/, ""); return /^\d{1,6}$/.test(s) ? s : null; };
 const cleanText = (v, max) => { const s = String(v ?? "").replace(/\s+/g, " ").trim(); return s && !/^(n\/?a|na|null|none|-+)$/i.test(s) ? s.slice(0, max) : null; };
 
-// The same key and label the functions use (supabase/functions/_shared/db.ts: entityKey, entityLabel).
-export const entityKey = (e) => (e.companyId ? String(e.companyId) : e.institutionId ? `i.${e.institutionId}` : null);
+// The same key and label the functions use (supabase/functions/_shared/db.ts: entityKey, entityLabel). A company
+// with neither S&P id but a NAIC company code is saved under "n." and the code: the Statutory view can use it,
+// a filing search can't.
+const isNaicCode = (v) => typeof v === "string" && /^[0-9]{1,6}$/.test(v);
+export const canSearchFilings = (e) => !!(e.companyId || e.institutionId);
+export const entityKey = (e) => (e.companyId ? String(e.companyId) : e.institutionId ? `i.${e.institutionId}` : isNaicCode(e.naicCompanyCode) ? `n.${e.naicCompanyCode}` : null);
 export const entityLabel = (e) => [e.companyName, e.naicCompanyCode ? `NAIC ${e.naicCompanyCode}` : "", e.naicGroupName ?? ""].filter(Boolean).join(" | ").slice(0, 400);
 
 /** Reads a list. Returns the companies to load and a plain account of what was found and what was left out. */
@@ -102,7 +106,7 @@ export function readCompanies(text, named = {}) {
   if (!heading) {
     const first = rows.find((r) => r.some((c) => c !== "")) ?? [];
     const { problems } = matchColumns(first, named);
-    return { ok: false, headings: first, message: problems[0] ?? "Couldn't find the heading row. The list needs a company name column and an S&P company id or institution id column. Name them with flags, for example: --name \"Company\" --company-id \"S&P ID\"." };
+    return { ok: false, headings: first, message: problems[0] ?? "Couldn't find the heading row. The list needs a company name column and an S&P company id, institution id or NAIC company code column. Name them with flags, for example: --name \"Company\" --company-id \"S&P ID\" --naic \"NAIC code\"." };
   }
   const headings = rows[heading.at], cols = heading.cols;
   const cell = (r, field) => (field in cols ? r[cols[field]] : undefined);
@@ -123,14 +127,18 @@ export function readCompanies(text, named = {}) {
     if (byKey.has(key)) duplicates++;
     byKey.set(key, e);
   }
+  // A row with only a NAIC code for a company another row lists with an S&P id is the same company: keep the one
+  // with the id, which serves both filings and statutory figures.
+  const naicWithId = new Set([...byKey.values()].filter((c) => canSearchFilings(c) && c.naicCompanyCode).map((c) => c.naicCompanyCode));
+  for (const [key, c] of byKey) if (!canSearchFilings(c) && naicWithId.has(c.naicCompanyCode)) { byKey.delete(key); duplicates++; }
   const companies = [...byKey.values()];
   return {
     ok: true, companies, headingRow: heading.at + 1, skipped, duplicates,
     columns: Object.fromEntries(FIELDS.map((f) => [f, f in cols ? headings[cols[f]] : null])),
     unused: headings.filter((_, i) => !Object.values(cols).includes(i) && headings[i] !== ""),
     counts: {
-      withCompanyId: companies.filter((c) => c.companyId).length, institutionOnly: companies.filter((c) => !c.companyId).length,
-      withNaic: companies.filter((c) => c.naicCompanyCode).length, withGroup: companies.filter((c) => c.naicGroupName).length,
+      withCompanyId: companies.filter((c) => c.companyId).length, institutionOnly: companies.filter((c) => !c.companyId && c.institutionId).length,
+      naicOnly: companies.filter((c) => !canSearchFilings(c)).length, withNaic:companies.filter((c) => c.naicCompanyCode).length, withGroup: companies.filter((c) => c.naicGroupName).length,
     },
   };
 }
@@ -153,16 +161,18 @@ export function describe(r) {
   for (const f of FIELDS) lines.push(`  ${label[f].padEnd(24)} ${r.columns[f] ? `"${r.columns[f]}"` : "not in this list"}`);
   if (r.unused.length) lines.push("", `Columns not used: ${r.unused.map((h) => `"${h}"`).join(", ")}`);
   lines.push("", `${n(r.companies.length)} companies to load:`,
-    `  ${n(r.counts.withCompanyId)} with an S&P company id`,
-    `  ${n(r.counts.institutionOnly)} with an institution id only`,
-    `  ${n(r.counts.withNaic)} with a NAIC company code`,
+    `  ${n(r.counts.withCompanyId + r.counts.institutionOnly)} can be used to search filings:`,
+    `    ${n(r.counts.withCompanyId)} with an S&P company id`,
+    `    ${n(r.counts.institutionOnly)} with an institution id only`,
+    `  ${n(r.counts.naicOnly)} for statutory figures only: a NAIC company code but no S&P id, so their filings can't be searched`,
+    `  ${n(r.counts.withNaic)} with a NAIC company code, so their statutory figures can be found by name`,
     `  ${n(r.counts.withGroup)} with a group name`);
-  if (r.skipped.noId) lines.push(`${n(r.skipped.noId)} rows left out: no S&P company id or institution id, so the app couldn't search their filings.`);
+  if (r.skipped.noId) lines.push(`${n(r.skipped.noId)} rows left out: no S&P company id, institution id or NAIC company code, so the app couldn't use them.`);
   if (r.skipped.noName) lines.push(`${n(r.skipped.noName)} rows left out: no company name.`);
   if (r.duplicates) lines.push(`${n(r.duplicates)} rows repeated a company already in the list; the last one was kept.`);
   if (r.companies.length) {
     lines.push("", "First three, as they will be saved:");
-    for (const c of r.companies.slice(0, 3)) lines.push(`  ${entityLabel(c)}  [${c.companyId ? `company id ${c.companyId}` : `institution id ${c.institutionId}`}]`);
+    for (const c of r.companies.slice(0, 3)) lines.push(`  ${entityLabel(c)}  [${c.companyId ? `company id ${c.companyId}` : c.institutionId ? `institution id ${c.institutionId}` : "NAIC code only: statutory figures, no filings"}]`);
   }
   return lines.join("\n");
 }

@@ -125,7 +125,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
 
   t=await open(); p=t.p;
   // ----- before asking -----
-  ok("says what Claude sees", (await t.txt("#askSees"))==="Claude sees only your question, a short description of what is on this screen, and what S&P returns for it: nothing else from this site or from Ascot. Check figures against the source before you use them.");
+  ok("says what Claude sees", (await t.txt("#askSees"))==="Claude sees only your question, a short description of what is on this screen, and what S&P returns for it: nothing else from this site. Check figures against the source before you use them.");
   ok("a hint for the first question, and no conversation yet", (await t.txt("#askHint")).startsWith("For example:") && !(await p.$("#askLog")) && !(await p.$('button[data-act="ask-new"]')) && (await p.getAttribute("#ask_input","maxlength"))==="4000");
   ok("nothing on screen: says Claude starts from the question alone, and offers no starting points", (await t.txt("#askTold"))==="Nothing is on screen yet, so Claude starts from your question alone." && !(await p.$("#askSuggest")));
   await p.click('button[data-act="ask-send"]'); await p.waitForTimeout(100);
@@ -192,9 +192,9 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   ok("back in touch: the note goes", !(await p.$(".runnote")) && (await t.txt(".ccmsg.run")).startsWith("Claude is working on this."));
 
   // ----- the finished answer -----
-  const stB=t.of("status").length;
+  const stB=t.of("status").filter(c=>c.fn==="snl-filings").length;
   await t.job("job-1",{status:"done", partial:null, result:RESULT}); await p.waitForTimeout(200);
-  ok("status asked again when the answer is done", t.of("status").length===stB+1);
+  ok("status asked again when the answer is done", t.of("status").filter(c=>c.fn==="snl-filings").length===stB+1);
   ok("a finished answer shows from its top, with the question above it", await p.evaluate(()=>{ const b=document.getElementById("askBody").getBoundingClientRect(), q=document.querySelector("#turn-0 .ccmsg.u").getBoundingClientRect(); return q.top>=b.top && q.bottom<=b.bottom; }));
   const ans=await p.$eval(".ccmsg.done .ans",e=>e.innerHTML);
   ok("answer: paragraphs and bullets, bold only where Claude marked it", ans.includes("<p><b>Yes.</b> Calloway uses separate homeowners forms") && (await p.$$(".ans li")).length===2 && (await t.txt(".ans li >> nth=0 >> b"))==="Middle market:", ans.slice(0,300));
@@ -222,7 +222,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   const xl=await t.download(()=>p.click('.anstable button[data-fmt="xlsx"]')); const wb=JSON.parse(xl.text);
   ok("table XLSX: the same rows, on a sheet named for the table", xl.name==="snl-answer-table-2026-11-13.xlsx" && wb.sheets[0].name==="Homeowners form filings in Flor" && wb.sheets[0].aoa.length===7 && same(wb.sheets[0].aoa[2],RESULT.table.rows[1]), wb.sheets[0]);
   ok("caps show as plain notices", (await p.$eval(".caps",e=>e.innerText.split("\n").filter(Boolean))).join("|")==="Claude stopped at the limit of 12 lookups for one question, so the answer may be incomplete.|<b>Second notice</b>" && (await p.getAttribute(".caps","role"))==="status");
-  ok("a small line with the lookups and token counts", (await t.txt(".ccmsg.done .look"))==="Looked up: Filings: 3 companies, FL, 2021 to 2026; CALL-134000001, pages 1 to 10; CALL-134000002, pages 1 to 18; TARR-134000777, pages 1 to 12. 9 S&P requests. Claude read 48,210 tokens and wrote 1,432. Model: claude-example-1.", await t.txt(".ccmsg.done .look"));
+  ok("a small line with the lookups and token counts", (await t.txt(".ccmsg.done .look"))==="Looked up: Filings: 3 companies, FL, 2021 to 2026; CALL-134000001, pages 1 to 10; CALL-134000002, pages 1 to 18; TARR-134000777, pages 1 to 12. This answer cost n/d (48,210 tokens read, 1,432 written) and used 9 S&P requests. Model: claude-example-1.", await t.txt(".ccmsg.done .look"));
   const r2=await p.evaluate(()=>__mock.jobReads), c2=t.of("continue").length; await p.waitForTimeout(400);
   ok("polling stops when the answer is done", (await p.evaluate(()=>__mock.jobReads))===r2 && t.of("continue").length===c2);
   ok("Ask is ready for a follow-up", await p.isEnabled('button[data-act="ask-send"]') && (await p.getAttribute("#ask_input","placeholder"))==="Ask a follow-up question" && await p.isVisible('button[data-act="ask-new"]'));
@@ -254,7 +254,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   await t.say("Third question");
   ok("a failed turn isn't sent as history", same(t.of("ask")[2].body.history,[{question:Q1,answer:ANSWER_TEXT}]));
   await t.job("job-3",{status:"done", result:{answer:[{text:"Nothing more to add.\n", cites:[]}], sources:[], table:null, lookups:[], caps:[], model:"claude-example-1", usage:{inputTokens:1200, outputTokens:null, spRequests:0}}});
-  ok("an answer with no table or sources shows neither", (await p.$$(".ccmsg.done")).length===2 && (await p.$$(".anstable")).length===1 && (await p.$$(".srcs")).length===1 && (await t.txt(".ccmsg.done >> nth=1 >> .ans"))==="Nothing more to add." && (await t.txt(".ccmsg.done >> nth=1 >> .look"))==="0 S&P requests. Claude read 1,200 tokens and wrote n/d. Model: claude-example-1.", await t.txt(".ccmsg.done >> nth=1"));
+  ok("an answer with no table or sources shows neither", (await p.$$(".ccmsg.done")).length===2 && (await p.$$(".anstable")).length===1 && (await p.$$(".srcs")).length===1 && (await t.txt(".ccmsg.done >> nth=1 >> .ans"))==="Nothing more to add." && (await t.txt(".ccmsg.done >> nth=1 >> .look"))==="This answer cost n/d (1,200 tokens read, n/d written) and used 0 S&P requests. Model: claude-example-1.", await t.txt(".ccmsg.done >> nth=1"));
   await t.say("Fourth question");
   await t.job("job-4",{status:"done", result:{answer:[], sources:[], table:null}});
   ok("an empty answer says so", (await t.txt(".ccmsg.done >> nth=2 >> .ans"))==="No answer came back. Try rephrasing the question.");
@@ -401,9 +401,9 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   await t.openPanel();
   ok("reopened mid-answer: the question and every step so far, on the other view", (await t.txt("#turn-0 .ccmsg.u"))===Q1 && (await p.$$(".steps li")).length===4 && (await t.txt(".ccmsg.run")).includes("You can close this panel and carry on working.") && await p.isVisible("#statForm"));
   await t.closePanel();
-  const stC=t.of("status").length;
+  const stC=t.of("status").filter(c=>c.fn==="snl-filings").length;
   await t.job("job-1",{status:"done", partial:null, result:JOB.result}); await p.waitForTimeout(250);
-  ok("finished while closed: the button says an answer is ready", same(await t.fab(),{text:"Answer ready",cls:"ready",hidden:false,expanded:"false"}) && t.of("status").length===stC+1, await t.fab());
+  ok("finished while closed: the button says an answer is ready", same(await t.fab(),{text:"Answer ready",cls:"ready",hidden:false,expanded:"false"}) && t.of("status").filter(c=>c.fn==="snl-filings").length===stC+1, await t.fab());
   await p.locator("#askFab").screenshot({path:OUTDIR+"/ask-button-ready.png"});
   await p.click('nav.tabs a[data-view="filings"]'); await p.waitForTimeout(350);
   ok("the mark stays until the answer is looked at", (await t.fab()).text==="Answer ready" && (await p.$$("#resTable tbody tr")).length===6);

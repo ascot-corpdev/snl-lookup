@@ -1,6 +1,6 @@
 // Claude for SNL lookup. A user asks in plain English; Claude uses the filing search, filing documents and
 // statutory data as tools and answers with sources and a comparison table (see ../_shared/chat.ts).
-// Any signed-in login may call it. Claude sees only the question and S&P's results, never Ascot deal data.
+// Any signed-in login may call it. Claude sees only the question and S&P's results, never the company's deal data.
 //
 // An answer runs as a background task and writes its progress and result to public.snl_jobs; the page polls
 // that row. Supabase stops a function call after 150 seconds (free plan) or 400 seconds (paid), background
@@ -9,7 +9,8 @@
 //
 // Secrets: ANTHROPIC_API_KEY, plus the S&P and Snowflake secrets the other two functions use.
 // Optional: CLAUDE_MODEL (default claude-opus-5-5), CHAT_SLICE_SECONDS (default 110; set 360 on a paid
-// Supabase plan), ALLOWED_ORIGIN.
+// Supabase plan), CHAT_DAILY_LIMIT (questions each login may start in a UTC day; default 40, 0 for no limit),
+// ALLOWED_ORIGIN.
 // Deploy: supabase functions deploy snl-chat --no-verify-jwt
 //
 // POST /functions/v1/snl-chat
@@ -17,6 +18,9 @@
 //     screen is optional: the filings search or statutory query the user has in front of them, so Claude can
 //     open the same data ({view: "filings", search, total, companies} or {view: "statutory", query, companies})
 //   {"action": "continue", "jobId": "..."}                                     -> 202 {jobId, resumed}
+//   {"action": "status"}  -> 200 {configured, askedToday, dailyLimit, costToday, resetsAt}: the caller's questions
+//     since midnight UTC, the daily limit (null for none) and what today's finished answers cost in US dollars
+//   "ask" at the daily limit answers 429 {error: "daily_limit", message, askedToday, dailyLimit, resetsAt}.
 
 import { adminClient, type Env, type Json, readBody, sleep, type WhoIs, whoIs, withCors } from "../_shared/http.ts";
 import { type Db, supabaseDb } from "../_shared/db.ts";
@@ -46,11 +50,47 @@ function sliceMs(env: Env): number {
   return (Number.isFinite(s) && s >= 20 && s <= 380 ? s : 110) * 1000;
 }
 
+// ---------- the daily limit on questions ----------
+
+export const DEFAULT_DAILY_LIMIT = 40;
+
+/** Questions each login may start in a UTC day (CHAT_DAILY_LIMIT, a whole number), or null for no limit (0).
+    Anything that isn't a whole number gives the default. */
+export function dailyLimit(env: Env): number | null {
+  const raw = (env("CHAT_DAILY_LIMIT") ?? "").trim();
+  const n = /^\d{1,6}$/.test(raw) ? Number(raw) : DEFAULT_DAILY_LIMIT;
+  return n === 0 ? null : n;
+}
+
+/** Midnight UTC at the start of today, and the next one, when the count starts again. */
+function utcDay(now: number): { start: string; resetsAt: string } {
+  const d = new Date(now), start = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  return { start: new Date(start).toISOString(), resetsAt: new Date(start + 86_400_000).toISOString() };
+}
+
+export function dailyLimitMessage(asked: number, limit: number, now: number): string {
+  const hours = (Date.parse(utcDay(now).resetsAt) - now) / 3_600_000, h = Math.round(hours);
+  const when = hours < 1 ? "in less than an hour" : `in about ${h} ${h === 1 ? "hour" : "hours"}`;
+  return `You've asked ${asked.toLocaleString("en-US")} ${asked === 1 ? "question" : "questions"} today, and the limit is ${limit.toLocaleString("en-US")} a day for each login. `
+    + `You can ask again after midnight UTC, ${when}. The site owner can change the limit.`;
+}
+
+/** The caller's day so far: questions started, the limit, and what the finished answers cost (null when none of
+    them can be priced). */
+async function dayStatus(db: Db, env: Env, owner: string, now: number) {
+  const day = utcDay(now);
+  const [askedToday, usages] = await Promise.all([db.countJobsSince(owner, day.start), db.usageSince(owner, day.start)]);
+  const costs = usages.map((u) => u.costUsd).filter((c): c is number => typeof c === "number" && Number.isFinite(c));
+  return { configured: true, askedToday, dailyLimit: dailyLimit(env), costToday: costs.length ? Math.round(costs.reduce((a, b) => a + b, 0) * 100) / 100 : null, resetsAt: day.resetsAt };
+}
+
 async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
   const who = await (deps.whoIs ?? whoIs(deps.env))(req);
   if (!who) return json(401, { error: "signin", message: "Sign in again." });
   const body = await readBody(req);
   if (!body) return json(400, { error: "bad", message: "Send a JSON body with an action." });
+  // Before Claude is connected nobody can ask, so there is nothing to count.
+  if (body.action === "status" && !deps.env("ANTHROPIC_API_KEY")) return json(200, { configured: false, askedToday: null, dailyLimit: dailyLimit(deps.env), costToday: null, resetsAt: null });
   if (!deps.env("ANTHROPIC_API_KEY")) return json(503, { error: "not_configured", message: CLAUDE_NOT_CONFIGURED });
 
   const nowFn = deps.now ?? Date.now;
@@ -73,6 +113,13 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
     // One answer at a time for each login, so one person can't use up the hour's S&P requests or run up the bill.
     const going = await db.activeJob(who.id, new Date(nowFn() - BUSY_MS).toISOString());
     if (going) return json(409, { error: "busy", message: "You already have an answer in progress. Wait for it to finish, then ask again. If you closed its tab, you can ask again in ten minutes.", jobId: going });
+    // A daily limit for each login keeps the Anthropic bill in check. Checked before the job exists, so a refused
+    // question is never counted.
+    const limit = dailyLimit(deps.env);
+    if (limit !== null) {
+      const day = utcDay(nowFn()), asked = await db.countJobsSince(who.id, day.start);
+      if (asked >= limit) return json(429, { error: "daily_limit", message: dailyLimitMessage(asked, limit, nowFn()), askedToday: asked, dailyLimit: limit, resetsAt: day.resetsAt });
+    }
     const jobId = await db.createJob(who.id, question);
     if (!jobId) return json(500, { error: "server", message: "The answer couldn't be started. Try again." });
     // What is on the user's screen is passed on only if it passes the same checks as a search or a query.
@@ -102,6 +149,8 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
     run(runJob(job.id, ctx));
     return json(202, { jobId: job.id, resumed: true });
   }
+
+  if (body.action === "status") return json(200, await dayStatus(db, deps.env, who.id, nowFn()));
 
   return json(400, { error: "bad", message: "Unknown action. Use ask or continue." });
 }

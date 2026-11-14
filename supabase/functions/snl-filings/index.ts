@@ -15,6 +15,8 @@
 //              spStatEntityIds?, trackingNumbers?, refresh?}
 //                                                 -> {rows, total, notes, byState, byCompany, requests, capped, fetchedAt, ...}
 //   document  {documentId} or {filingVersionId}   -> the document itself, as S&P sends it (usually a PDF)
+//   check                                         -> the S&P connection check: sign-in, entitlement, the four lists
+//                                                    (at most five S&P requests), as a plain-English report
 
 import { adminClient, type Env, type Json, readBody, sleep, type WhoIs, whoIs, withCors } from "../_shared/http.ts";
 import { type Db, supabaseDb } from "../_shared/db.ts";
@@ -22,6 +24,7 @@ import { downloadDocument, getReference, MAX_SEARCH_REQUESTS, parseDocRef, parse
 import { clearOld } from "../_shared/chat.ts";
 import { type Gate, makeGate, NOT_CONFIGURED, planLimits, Spgmi, SpgmiError } from "../_shared/spgmi.ts";
 import { snowflakeConfigured } from "../_shared/snowflake.ts";
+import { checkConnection } from "../_shared/connection.ts";
 
 export type Deps = { env: Env; fetch: typeof fetch; anthropicFetch?: typeof fetch; now?: () => number; whoIs?: WhoIs; db?: Db; gate?: Gate; sleep?: (ms: number) => Promise<void> };
 
@@ -52,7 +55,7 @@ async function serve(req: Request, deps: Deps, json: Json, cors: Record<string, 
   const creds = Spgmi.creds(deps.env);
   const configured = Spgmi.configured(creds);
   const wait = deps.sleep ?? sleep;
-  const api = configured ? new Spgmi(creds, { fetch: deps.fetch, gate: deps.gate ?? makeGate(db, limits, wait), sleep: wait }) : null;
+  const api = configured ? new Spgmi(creds, { fetch: deps.fetch, gate: deps.gate ?? makeGate(db, limits, wait), sleep: wait, now: deps.now }) : null;
   const usage = async () => ({ used: await db.usage(), limits: { hour: limits.hour, day: limits.day }, account: limits.plan });
 
   try {
@@ -107,8 +110,11 @@ async function serve(req: Request, deps: Deps, json: Json, cors: Record<string, 
         return new Response(res.body, { status: 200, headers });
       }
 
+      case "check":
+        return json(200, await checkConnection({ creds, db, gate: deps.gate ?? makeGate(db, limits, wait), fetch: deps.fetch, sleep: wait, now: deps.now ?? Date.now, plan: limits.plan, limits }));
+
       default:
-        return json(400, { error: "bad", message: "Unknown action. Use status, reference, resolve, search or document." });
+        return json(400, { error: "bad", message: "Unknown action. Use status, reference, resolve, search, document or check." });
     }
   } catch (e) {
     const answer = spgmiAnswer(e);

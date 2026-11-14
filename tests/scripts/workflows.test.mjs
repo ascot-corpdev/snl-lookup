@@ -36,10 +36,14 @@ const sh = (script, env, cwd) => new Promise((resolve) => {
 
   const good = await sh(script, { SUPABASE_URL: " https://abcdefgh.supabase.co/rest/v1/ ", SUPABASE_PUBLISHABLE_KEY: "sb_publishable_madeup", USERNAME_DOMAIN: "" }, dir);
   ok("the settings file is written from the repository variables", good.status === 0 && existsSync(join(dir, "web/config.js")), good.out);
-  ok("the address is tidied to the project address alone, and the login domain defaults to snl-lookup.local", JSON.stringify(config()) === JSON.stringify({ supabaseUrl: "https://abcdefgh.supabase.co", supabaseAnonKey: "sb_publishable_madeup", usernameDomain: "snl-lookup.local" }), config());
+  ok("the address is tidied to the project address alone, the login domain defaults to snl-lookup.local and no company name is set", JSON.stringify(config()) === JSON.stringify({ supabaseUrl: "https://abcdefgh.supabase.co", supabaseAnonKey: "sb_publishable_madeup", usernameDomain: "snl-lookup.local", orgName: "" }), config());
   const domain = await sh(script, { SUPABASE_URL: "https://abcdefgh.supabase.co", SUPABASE_PUBLISHABLE_KEY: "sb_publishable_madeup", USERNAME_DOMAIN: "example.test" }, dir);
   ok("a login domain that is set is used", domain.status === 0 && config().usernameDomain === "example.test");
-  ok("the file holds nothing but those three settings", Object.keys(config()).join() === "supabaseUrl,supabaseAnonKey,usernameDomain");
+  ok("the file holds nothing but those four settings", Object.keys(config()).join() === "supabaseUrl,supabaseAnonKey,usernameDomain,orgName");
+  const named = await sh(script, { SUPABASE_URL: "https://abcdefgh.supabase.co", SUPABASE_PUBLISHABLE_KEY: "sb_publishable_madeup", ORG_NAME: " Calloway Group " }, dir);
+  ok("a company name that is set is written, trimmed, beside the other three settings", named.status === 0 && JSON.stringify(config()) === JSON.stringify({ supabaseUrl: "https://abcdefgh.supabase.co", supabaseAnonKey: "sb_publishable_madeup", usernameDomain: "snl-lookup.local", orgName: "Calloway Group" }), config());
+  const quoted = await sh(script, { SUPABASE_URL: "https://abcdefgh.supabase.co", SUPABASE_PUBLISHABLE_KEY: "sb_publishable_madeup", ORG_NAME: 'Nonesuch "Q" </script>' }, dir);
+  ok("a company name with quotes stays one string value in the settings file", quoted.status === 0 && config().orgName === 'Nonesuch "Q" </script>', config());
 
   rmSync(join(dir, "web/config.js"));
   const secret = await sh(script, { SUPABASE_URL: "https://abcdefgh.supabase.co", SUPABASE_PUBLISHABLE_KEY: "sb_secret_madeup" }, dir);

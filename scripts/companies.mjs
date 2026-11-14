@@ -8,7 +8,8 @@
 //   node scripts/companies.mjs count                how many companies the directory holds
 //
 // The file is a CSV (in Excel: File > Save As > CSV UTF-8). It needs a company name column and an S&P company
-// id or institution id column; NAIC codes and group names are used when present. Headings are matched
+// id, institution id or NAIC company code column; group names and codes are used when present. A company with
+// an S&P id can be searched for filings; one with a NAIC code can be found by name on the Statutory view. Headings are matched
 // automatically. To name a column yourself:
 //   --name "..."  --company-id "..."  --institution-id "..."  --naic "..."  --group-code "..."  --group-name "..."  --stat-id "..."
 //
@@ -72,7 +73,7 @@ try {
       if (error) throw new Error(`The database refused the list after ${done.toLocaleString("en-US")} companies: ${error.message}`);
       done += batch.length;
     }
-    console.log(`\nLoaded ${done.toLocaleString("en-US")} companies. They can be found by name or NAIC code on the Filings view straight away.`);
+    console.log(`\nLoaded ${done.toLocaleString("en-US")} companies. They can be found by name or NAIC code on the Filings and Statutory views straight away.`);
   } else if (cmd === "count") {
     const sb = await database();
     const { count, error } = await sb.from("snl_store").select("id", { count: "exact", head: true }).eq("kind", "entity");

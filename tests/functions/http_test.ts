@@ -17,7 +17,7 @@ const SECRETS = { ANTHROPIC_API_KEY: "test-anthropic-key" };
 const CORS = ["Access-Control-Allow-Origin", "Access-Control-Allow-Headers", "Access-Control-Allow-Methods", "Vary"];
 const hasCors = (res: Response) => CORS.every((h) => res.headers.get(h));
 const WHAT: Record<string, string> = { "snl-filings": "The filings function", "snl-statutory": "The statutory function", "snl-chat": "The chat function" };
-const ACTIONS: Record<string, string> = { "snl-filings": "status, reference, resolve, search or document", "snl-statutory": "status, query or discover", "snl-chat": "ask or continue" };
+const ACTIONS: Record<string, string> = { "snl-filings": "status, reference, resolve, search, document or check", "snl-statutory": "status, query or discover", "snl-chat": "ask or continue" };
 
 for (const [name, fn] of Object.entries(fns)) {
   const clock = fakeClock(), db = memoryDb(clock);

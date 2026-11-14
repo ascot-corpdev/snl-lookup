@@ -1,6 +1,6 @@
 # Working on SNL lookup
 
-SNL lookup is a small web app for Ascot's Strategy & Corporate Development team. It answers insurance questions from S&P Global Market Intelligence data: filing search and filing documents (S&P's Physical Documents API), statutory financials (S&P's data on Snowflake), and Claude on top with those as tools. Read `README.md` first.
+SNL lookup is a small web app for a Strategy & Corporate Development team at an insurer. It answers insurance questions from S&P Global Market Intelligence data: filing search and filing documents (S&P's Physical Documents API), statutory financials (S&P's data on Snowflake), and Claude on top with those as tools. Read `README.md` first.
 
 ## How it is built
 
@@ -15,14 +15,14 @@ SNL lookup is a small web app for Ascot's Strategy & Corporate Development team.
 
 - **The repository is public.** Never commit S&P documents or schema files, real query results or filing documents, credentials, or anyone's contact details. Test fixtures use made-up company names, NAIC codes, ids and filing text, in the shapes S&P's documents describe.
 - **Never** put secrets in the repo, the page or a commit. The publishable key is the only key the site uses. Never ask anyone to paste a password, key or token into a chat; give the owner the `supabase secrets set NAME=...` command with `...` in place of the value.
-- **No deal data.** This app never stores or sends Ascot deal, banker or pipeline information. Claude sees only the user's question and what S&P returns.
+- **No deal data.** This app never stores or sends the company's deal, banker or pipeline information. Claude sees only the user's question and what S&P returns.
 - **No invented schema or endpoints.** Anything S&P's documents don't confirm stays behind one function marked `UNCONFIRMED` and is listed in the README under "What is still unconfirmed".
 - **An empty result is not "no filings exist".** Say that S&P returned nothing for that search.
 - Work on a branch and open a pull request; merging to `main` publishes the site.
 - Database changes go in a new numbered migration that is safe to run once, keeps RLS on, and revokes access from `anon`. Don't edit migrations that have already been run.
 - **Libraries:** only from CDNs with exact versions. Function imports are `npm:` specifiers pinned to exact versions. Don't add a build step or npm packages to the site.
 - Keep the phone layout working: no sideways scroll at 390px wide.
-- Writing on the page follows the Ascot house style: plain English, sentence case, "n/d" for missing numbers, $M with commas, dates like "5 Nov" (year added when it isn't the current year).
+- Writing on the page follows the house style: plain English, sentence case, "n/d" for missing numbers, $M with commas, dates like "5 Nov" (year added when it isn't the current year).
 - Anything from the database, a function or a user goes through `esc()` before it is put into HTML. The page builds no link from data; if one is ever added, check its address first.
 - Every behaviour gets a test. If a change is meant to alter something a test checks, update that test in the same pull request. Never weaken or delete a check just to get it green.
 - No model identifiers in commit messages or pull request text. A model id appears only as a configuration value in code.

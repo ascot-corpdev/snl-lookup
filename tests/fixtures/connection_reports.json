@@ -1,0 +1,36 @@
+{
+  "_about": "Made-up answers from the snl-filings function's {action: \"check\"}, for the page tests. The wording matches supabase/functions/_shared/connection.ts.",
+  "ok": {
+    "configured": true, "checkedAt": "2026-11-13T12:00:00.000Z", "account": "trial", "limits": { "hour": 500, "day": 12000 }, "used": { "hour": 17, "day": 45 }, "requests": 5,
+    "steps": [
+      { "id": "signin", "ok": true, "title": "Signed in to S&P", "detail": "S&P accepted the API username and password." },
+      { "id": "entitlement", "ok": true, "title": "Entitled to SNL Insurance Product Filings", "detail": "S&P let the app read filings data (INSPRODFILINGS_DOCUMENTS_API)." },
+      { "id": "states", "ok": true, "title": "Loaded S&P's list of states", "detail": "3 states. Florida (FL) is in the list." },
+      { "id": "lists", "ok": true, "title": "Loaded the other three lists", "detail": "Types of insurance 2, filing types 4, statuses 3." }
+    ],
+    "florida": true,
+    "summary": "The S&P connection works. The app signed in, can read SNL Insurance Product Filings and loaded all four lists. Florida is in the state list, so you can run your first search."
+  },
+  "notConfigured": {
+    "configured": false, "checkedAt": "2026-11-13T12:00:00.000Z", "account": "trial", "limits": { "hour": 500, "day": 12000 }, "used": { "hour": 0, "day": 0 }, "requests": 0,
+    "steps": [], "florida": null,
+    "summary": "S&P isn't set up yet, so there was nothing to check. When S&P sends the API username and password, set SPGMI_API_USERNAME and SPGMI_API_PASSWORD on Supabase (README, step 5), then click Check S&P connection again."
+  },
+  "entitlement": {
+    "configured": true, "checkedAt": "2026-11-13T12:00:00.000Z", "account": "trial", "limits": { "hour": 500, "day": 12000 }, "used": { "hour": 2, "day": 2 }, "requests": 2,
+    "steps": [
+      { "id": "signin", "ok": true, "title": "Signed in to S&P", "detail": "S&P accepted the API username and password." },
+      { "id": "entitlement", "ok": false, "title": "This S&P account can't use SNL Insurance Product Filings yet", "detail": "S&P signed the app in but refused filings data (403, entitlement needed). Ask S&P to add the INSPRODFILINGS_DOCUMENTS_API entitlement (SNL Insurance Product Filings, Physical Documents API) to this API account.", "requestId": "req-ent-77" }
+    ],
+    "florida": null,
+    "summary": "The S&P connection isn't working yet. This S&P account can't use SNL Insurance Product Filings yet. Ask S&P for the entitlement named below."
+  },
+  "signin": {
+    "configured": true, "checkedAt": "2026-11-13T12:00:00.000Z", "account": "production", "limits": { "hour": 2000, "day": 48000 }, "used": { "hour": 1, "day": 1 }, "requests": 1,
+    "steps": [
+      { "id": "signin", "ok": false, "title": "Couldn't sign in to S&P", "detail": "S&P didn't accept the API sign-in (401). Check SPGMI_API_USERNAME and SPGMI_API_PASSWORD on Supabase. A Capital IQ Pro website login doesn't work here. S&P reference: req-signin-7.", "requestId": "req-signin-7" }
+    ],
+    "florida": null,
+    "summary": "The S&P connection isn't working yet. Couldn't sign in to S&P. The step below says what to do."
+  }
+}
