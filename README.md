@@ -63,7 +63,7 @@ The role is `corpdev` (can also set up the statutory mapping) or `reader` (can s
 
 S&P's filings search needs S&P's own company id or institution id for every company, and it has no search by name. Loading a list once lets everyone find a company, or a whole group, by name or NAIC code.
 
-1. Export the list from S&P Capital IQ Pro with these columns where you have them: company name, S&P company id, institution id, NAIC company code, NAIC group code and group name. It needs the name and at least one of the two S&P ids.
+1. Export the list from S&P Capital IQ Pro with these columns where you have them: company name, S&P company id, institution id, NAIC company code, NAIC group code and group name. It needs the name and at least one of: an S&P company id, an institution id, or a NAIC company code. A NAIC code alone is enough to be useful: on the Statutory view people can type part of a company or group name, pick from the matches and add a whole group at once, instead of remembering NAIC codes. Companies with an S&P id can also be found by name on the Filings view; companies with only a NAIC code show there but can't be searched for filings.
 2. Save it as a CSV (in Excel: **File > Save As > CSV UTF-8**). Keep the file out of this repository: it may be S&P's data, and `.csv` files are ignored by git here for that reason.
 3. See what would be loaded. This changes nothing and needs no key:
 

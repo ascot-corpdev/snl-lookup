@@ -47,20 +47,21 @@ const LIST = [
   "Calloway Coastal Co,,5000003,90003,9001,Calloway Group,FL",
   "Tarrow Mutual Insurance Co,4000107,5000107,90107,n/a,,FL",
   "Nonesuch Specialty Co,,,90555,,,TX",
+  "Tarrow Specialty Co,,,,,,TX",
   ",4000999,,,,,",
   "Calloway Insurance Co,4000001,5000001,90001,9001,Calloway Group,OH",
 ].join("\n");
 const r = readCompanies(LIST);
-ok("a list is read from its heading row down", r.ok && r.headingRow === 3 && r.companies.length === 4, r);
+ok("a list is read from its heading row down", r.ok && r.headingRow === 3 && r.companies.length === 5, r);
 ok("each company keeps its ids, codes and group", same(r.companies[0], { companyId: "4000001", companyName: "Calloway Insurance Co", naicCompanyCode: "90001", institutionId: "5000001", spStatEntityId: null, naicGroupCode: "9001", naicGroupName: "Calloway Group" }), r.companies[0]);
 ok("a company with only an institution id is kept", same([r.companies[2].companyId, r.companies[2].institutionId, entityKey(r.companies[2])], [null, "5000003", "i.5000003"]));
 ok("blank and n/a cells are empty, not text", r.companies[3].naicGroupCode === null && r.companies[3].naicGroupName === null && r.companies[1].institutionId === null);
-ok("rows with no S&P id, or no name, are left out and counted", same(r.skipped, { noName: 1, noId: 1 }));
+ok("rows with no S&P id and no NAIC code, or no name, are left out and counted", same(r.skipped, { noName: 1, noId: 1 }));
 ok("a repeated company is loaded once and counted", r.duplicates === 1 && r.companies.filter((c) => c.companyId === "4000001").length === 1);
 ok("the columns used and not used are reported", r.columns.companyId === "S&P Company ID" && r.columns.institutionId === "SNL Institution Key" && r.columns.spStatEntityId === null && same(r.unused, ["State"]));
-ok("the counts say how many have each kind of id", same(r.counts, { withCompanyId: 3, institutionOnly: 1, withNaic: 4, withGroup: 3 }));
+ok("the counts say how many have each kind of id", same(r.counts, { withCompanyId: 3, institutionOnly: 1, naicOnly: 1, withNaic: 5, withGroup: 3 }));
 const noIds = readCompanies("Company Name,State\nCalloway Insurance Co,OH\n");
-ok("a list with no S&P id column is refused, saying what it needs and what the first row reads", noIds.ok === false && /needs a company name column and an S&P company id or institution id column/.test(noIds.message) && same(noIds.headings, ["Company Name", "State"]), noIds);
+ok("a list with no S&P id column is refused, saying what it needs and what the first row reads", noIds.ok === false && /needs a company name column and an S&P company id, institution id or NAIC company code column/.test(noIds.message) && same(noIds.headings, ["Company Name", "State"]), noIds);
 
 // ---------- the rows saved ----------
 const rows = toStoreRows(r.companies, "2026-11-13T12:00:00.000Z");
@@ -69,8 +70,8 @@ ok("a company with only an institution id is saved under entity:i.<institution i
 ok("every saved id passes the database's check on saved rows", rows.every((x) => /^(ref|search|entity|discover|statutory):[A-Za-z0-9_.:-]{1,80}$/.test(x.id)));
 ok("rows go to the database in batches of 500", same(batches(Array.from({ length: 1201 }, (_, i) => i)).map((b) => b.length), [500, 500, 201]));
 const said = describe(r);
-ok("the summary is in plain words and shows the first companies", said.includes('S&P company id           "S&P Company ID"') && said.includes("4 companies to load:") && said.includes("1 with an institution id only")
-  && said.includes("1 rows left out: no S&P company id or institution id") && said.includes("Calloway Insurance Co | NAIC 90001 | Calloway Group  [company id 4000001]") && said.includes('Columns not used: "State"'), said);
+ok("the summary is in plain words and shows the first companies", said.includes('S&P company id           "S&P Company ID"') && said.includes("5 companies to load:") && said.includes("1 with an institution id only")
+  && said.includes("1 rows left out: no S&P company id, institution id or NAIC company code") && said.includes("Calloway Insurance Co | NAIC 90001 | Calloway Group  [company id 4000001]") && said.includes('Columns not used: "State"'), said);
 
 // ---------- the command, against a stand-in for Supabase ----------
 const saved = new Map(), log = [];
@@ -103,7 +104,7 @@ const run = (args, env = { SUPABASE_URL: base + "/rest/v1/", SUPABASE_SECRET_KEY
 const usage = await run([]);
 ok("with no command it prints how to use it", usage.status === 0 && /check <file\.csv> \| load <file\.csv> \| count/.test(usage.out), usage.out);
 const check = await run(["check", file], {});
-ok("check shows what would be loaded, needs no key and sends nothing", check.status === 0 && check.out.includes("4 companies to load:") && check.out.includes("Nothing was changed.") && log.length === 0, check.out);
+ok("check shows what would be loaded, needs no key and sends nothing", check.status === 0 && check.out.includes("5 companies to load:") && check.out.includes("Nothing was changed.") && log.length === 0, check.out);
 const excel = await run(["check", join(dir, "list.xlsx")], {});
 ok("an Excel file is turned away with how to save it as CSV", excel.status === 1 && /File > Save As > CSV UTF-8/.test(excel.out), excel.out);
 const absent = await run(["check", join(dir, "nothing.csv")], {});
@@ -114,15 +115,15 @@ const noKey = await run(["load", file], {});
 ok("load without the address and secret key stops and says what to set", noKey.status === 1 && /Set SUPABASE_URL and SUPABASE_SECRET_KEY first/.test(noKey.out) && log.length === 0, noKey.out);
 
 const load = await run(["load", file]);
-ok("load saves every company and says how many", load.status === 0 && /Loaded 4 companies\./.test(load.out) && saved.size === 4, load.out);
-ok("it upserts by id with the secret key, so loading again updates and never duplicates", log.length === 1 && log[0].method === "POST" && log[0].query.on_conflict === "id" && /resolution=merge-duplicates/.test(log[0].prefer) && log[0].key === "test-secret-key" && log[0].rows === 4, log);
+ok("load saves every company and says how many", load.status === 0 && /Loaded 5 companies\./.test(load.out) && saved.size === 5, load.out);
+ok("it upserts by id with the secret key, so loading again updates and never duplicates", log.length === 1 && log[0].method === "POST" && log[0].query.on_conflict === "id" && /resolution=merge-duplicates/.test(log[0].prefer) && log[0].key === "test-secret-key" && log[0].rows === 5, log);
 ok("what is saved is exactly the directory's row shape", same(saved.get("entity:4000001").doc, r.companies[0]) && saved.get("entity:4000001").kind === "entity" && saved.get("entity:i.5000003").label === "Calloway Coastal Co | NAIC 90003 | Calloway Group");
 await run(["load", file]);
-ok("loading the same list twice leaves the same companies", saved.size === 4);
+ok("loading the same list twice leaves the same companies", saved.size === 5);
 const named = await run(["check", file, "--naic", "NAIC Group Code"], {});
 ok("a column named with a flag is the one used", named.status === 0 && named.out.includes('NAIC company code        "NAIC Group Code"'), named.out);
 const count = await run(["count"]);
-ok("count reports how many companies the directory holds", count.status === 0 && /The directory holds 4 companies\./.test(count.out), count.out);
+ok("count reports how many companies the directory holds", count.status === 0 && /The directory holds 5 companies\./.test(count.out), count.out);
 
 server.close();
 rmSync(dir, { recursive: true, force: true });

@@ -84,7 +84,7 @@ const TABLE_SCHEMA = {
 export const TOOLS: Anthropic.Beta.BetaTool[] = [
   {
     name: "resolve_entity",
-    description: "Find a company's S&P ids from its name, NAIC company code or an S&P id. Only knows companies that have appeared in earlier search results; it never calls S&P. Returns companyId, institutionId, NAIC codes and group for each match.",
+    description: "Find a company's S&P ids from its name, NAIC company code or an S&P id. Only knows companies that have appeared in earlier search results; it never calls S&P. Returns companyId, institutionId, NAIC codes and group for each match. A match with no companyId and no institutionId has only a NAIC code: use it with query_statutory; search_filings can't search it.",
     strict: true,
     input_schema: { type: "object", properties: { query: { type: "string", description: "Part of a company name, a NAIC code, or an S&P company or institution id" } }, required: ["query"], additionalProperties: false },
   },

@@ -143,6 +143,8 @@ label.f em,.f em{font-weight:normal;font-style:normal;color:var(--muted)}
 .recent-i:focus-visible{outline:2px solid var(--magenta);outline-offset:-2px}
 .recent-i:disabled{cursor:not-allowed;opacity:.6}
 .recent-i .t1{color:var(--blue)}
+#st_named:empty{display:none}
+.noadd{max-width:44ch}
 
 /* Tables */
 .tbl-wrap{overflow-x:auto;border:1px solid var(--grid);max-width:100%}
@@ -533,6 +535,10 @@ function addAllMatches(){
   toast(full ? `Added ${added}. A search takes at most ${MAX_COMPANIES} companies, so the rest were left out.` : added ? `Added ${plural(added,"company","companies")}.` : "Those companies are already chosen.");
   document.getElementById("f_q")?.focus();
 }
+/* A match from the company list with no S&P id: shown, but it can't be added to a filing search. */
+function noFilingsHTML(m){
+  return `<span class="t2 noadd">Can't be added: the company list has no S&amp;P id for it, so its filings can't be searched.${!blank(m.naicCompanyCode)?" Its NAIC code works on the Statutory view.":""}</span>`;
+}
 const chipLabel = c => `${c.kind==="companyId"?"company":"institution"} id ${c.id}`;
 function companyPickerHTML(){
   const f=S.f, numeric=/^\d{1,12}$/.test((f.asked||"").trim()) && f.matches!==null;
@@ -544,7 +550,7 @@ function companyPickerHTML(){
       const meta=[!blank(m.naicCompanyCode)?`NAIC ${m.naicCompanyCode}`:"", hasCo?`S&P company id ${m.companyId}`:hasIn?`S&P institution id ${m.institutionId}`:"", !blank(m.naicGroupName)?`group ${m.naicGroupName}`:""].filter(Boolean).join(" · ");
       const add = hasCo ? `<button type="button" class="btn sm" data-act="co-add" data-kind="companyId" data-id="${esc(m.companyId)}" data-name="${esc(m.companyName)}">Add</button>
         ${hasIn?`<button type="button" class="btn sm ghost" data-act="co-add" data-kind="institutionId" data-id="${esc(m.institutionId)}" data-name="${esc(m.naicGroupName||m.companyName)}" title="Searches by the company's S&amp;P institution id instead">Add by institution id ${esc(m.institutionId)}</button>`:""}`
-        : hasIn ? `<button type="button" class="btn sm" data-act="co-add" data-kind="institutionId" data-id="${esc(m.institutionId)}" data-name="${esc(m.companyName)}">Add</button>` : "";
+        : hasIn ? `<button type="button" class="btn sm" data-act="co-add" data-kind="institutionId" data-id="${esc(m.institutionId)}" data-name="${esc(m.companyName)}">Add</button>` : noFilingsHTML(m);
       return `<li><div><div class="t1">${esc(m.companyName)}</div><div class="t2">${esc(meta)}</div></div><span class="inline">${add}</span></li>`; }).join("");
     const addable=f.matches.filter(m=>!blank(m.companyId)||!blank(m.institutionId)).length;
     const all = addable>1 ? `<p class="t2" id="addAll"><button type="button" class="btn sm" data-act="co-add-all">Add all ${addable}</button> to search a whole group at once.</p>` : "";
@@ -1107,7 +1113,7 @@ async function runStat(refresh){
   if(refresh){ if(!st.last) return; payload={...st.last, refresh:true}; }
   else{
     const problem=statProblem(); if(problem){ st.formErr=problem; render(); return; }
-    payload={action:"query", kind:st.kind, codes:statCodes(), fromYear:+st.fromYear, toYear:+st.toYear}; st.last=payload; st.res=null; st.ent={};
+    payload={action:"query", kind:st.kind, codes:statCodes(), fromYear:+st.fromYear, toYear:+st.toYear}; st.last=payload; st.res=null; st.ent={}; st.resNames={...statFind().names[st.kind]};
   }
   st.formErr=""; st.busy=true; st.err=null; render();
   const r=await callFn("snl-statutory", payload);
@@ -1123,7 +1129,8 @@ function statEntities(res, field){
   const list=(Array.isArray(res.entities)?res.entities:[]).map(e=>({code:String(e.code), name:e.name}));
   for(const c of (Array.isArray(res.codes)?res.codes:[])) if(!list.some(e=>e.code===String(c))) list.push({code:String(c), name:null});
   for(const r of (field&&Array.isArray(field.rows)?field.rows:[])) if(!blank(r.code) && !list.some(e=>e.code===String(r.code))) list.push({code:String(r.code), name:null});
-  return list;
+  const known=S.st.resNames||{};   // the names found by name when the figures were asked for fill the gaps
+  return list.map(e=>blank(e.name) && !blank(known[e.code]) ? {...e, name:known[e.code]} : e);
 }
 const entLabel = e => blank(e.name) ? `NAIC ${e.code}` : `${e.name} (NAIC ${e.code})`;
 /* One block's table: for a "by year" field one row per company (the subject first, then peers); for a "by line"
@@ -1165,7 +1172,7 @@ function statBlockHTML(res, field){
 function statResultsHTML(){
   const st=S.st, res=st.res;
   if(st.busy && !res) return `<div class="banner" role="status"><span>Fetching statutory data from Snowflake… This can take a minute. After that the figures are saved for everyone until someone clicks Refresh.</span></div>`;
-  if(!res) return st.err ? problemHTML(st.err, "Couldn't fetch the statutory data.", "stat-retry") : `<div class="empty" id="statEmpty"><p>Type the NAIC code of the company you want, then any peers, and choose the years. The first code is the subject; the rest sit beside it for comparison.</p></div>`;
+  if(!res) return st.err ? problemHTML(st.err, "Couldn't fetch the statutory data.", "stat-retry") : `<div class="empty" id="statEmpty"><p>Type the NAIC code of the company you want, then any peers, and choose the years. The first code is the subject; the rest sit beside it for comparison. Don't know a code? Find the company or group by name above.</p></div>`;
   const fields=Array.isArray(res.fields)?res.fields:[], loaded=Array.isArray(res.loaded)?res.loaded:[];
   let h=`<h2 class="sec">Results</h2>`;
   if(st.busy) h+=`<div class="banner" role="status"><span>Asking Snowflake again… The figures below are from ${fmtAt(res.fetchedAt)} until the new ones arrive.</span></div>`;
@@ -1240,6 +1247,98 @@ function setupHTML(){
       <div class="inline"><button type="button" class="btn primary" data-act="su-save" ${su.saving||su.mapBusy?"disabled":""}>${su.saving?"Saving…":"Save mapping"}</button><span class="t2">Saving replaces the mapping for everyone.</span></div></div>
   </section>`;
 }
+/* ---------- Statutory: find companies and groups by name ---------- */
+/* The same company list as the Filings view (the resolve action). Looking up by company, a match adds its NAIC
+   company code; looking up by group, the matches are gathered into their groups and a group adds its NAIC group
+   code. Codes typed by hand work as before; the names found here are shown beside the codes and in the results. */
+function statFind(){ const st=S.st; if(!st.nf) st.nf={q:"", asked:"", matches:null, note:"", busy:false, err:"", names:{company:{}, group:{}}}; return st.nf; }
+const naicOk = c => /^[0-9]{1,6}$/.test(String(c??"").trim());
+async function statLookup(){
+  const nf=statFind(), q=nf.q.trim();
+  if(!q){ nf.matches=null; nf.err="Type part of a company or group name, or a NAIC code."; render(); return; }
+  nf.busy=true; nf.err=""; nf.note=""; nf.matches=null; nf.asked=q; render();
+  const r=await callFn("snl-filings",{action:"resolve", q});
+  if(!S.session || S.st.nf!==nf) return;
+  nf.busy=false;
+  if(r.data){ nf.matches=Array.isArray(r.data.matches)?r.data.matches.filter(m=>m&&typeof m==="object"):[]; nf.note=r.data.note||""; }
+  else if(r.err!=="signin") nf.err="Couldn't look that up. "+errText(r);
+  render();
+}
+/* Adds one code to the end of the list: the first code is the subject, the rest are peers. */
+function statAddCode(code, name){
+  const st=S.st, codes=statCodes(); code=String(code??"").trim();
+  if(!naicOk(code)) return "bad";
+  if(codes.includes(code)) return "dup";
+  if(codes.length>=MAX_CODES) return "full";
+  st.codes=codes.concat(code).join(", "); st.formErr="";
+  if(!blank(name)) statFind().names[st.kind][code]=String(name);
+  return "added";
+}
+const STAT_FULL = () => `The list is full: one subject and ${MAX_CODES-1} peers. Remove a code to add another.`;
+function statAdd(code, name){
+  const r=statAddCode(code, name);
+  if(r==="dup") toast("That code is already in the list.");
+  else if(r==="full") toast(STAT_FULL());
+  else if(r==="bad") toast("NAIC codes are numbers of up to 6 digits.");
+  render();
+}
+/* Company matches with a NAIC company code, once each. */
+const statAddable = matches => matches.filter((m,i)=>naicOk(m.naicCompanyCode) && matches.findIndex(x=>String(x.naicCompanyCode).trim()===String(m.naicCompanyCode).trim())===i);
+function statAddAll(){
+  const nf=statFind(); let added=0, left=0;
+  for(const m of statAddable(nf.matches||[])){ const r=statAddCode(m.naicCompanyCode, m.companyName); if(r==="added") added++; else if(r==="full") left++; }
+  render();
+  toast(left && !added ? STAT_FULL() : left ? `Added ${added}. A comparison takes at most ${MAX_CODES} codes, so ${left} ${left===1?"was":"were"} left out.` : added ? `Added ${plural(added,"company","companies")}.` : "Those companies are already in the list.");
+}
+/* The distinct groups among the matches, with how many matching companies each has. */
+function statGroups(matches){
+  const out=[];
+  for(const m of matches){
+    const code=blank(m.naicGroupCode)?"":String(m.naicGroupCode).trim(), name=blank(m.naicGroupName)?"":String(m.naicGroupName);
+    if(!code && !name) continue;
+    const key=code||"name:"+name.toLowerCase(); let g=out.find(x=>x.key===key);
+    if(!g){ g={key, code, name, n:0}; out.push(g); }
+    if(!g.name && name) g.name=name;
+    g.n++;
+  }
+  return out;
+}
+function statNameOf(kind, code){ const n=S.st.nf&&S.st.nf.names[kind]; return n&&!blank(n[code]) ? n[code] : ""; }
+function statNamedHTML(){
+  const st=S.st, codes=statCodes();
+  return codes.map((c,i)=>{ const name=statNameOf(st.kind, c), role=codes.length>1?(i?"peer":"subject"):"";
+    return `<span class="cchip"><span><b>${esc(name||`NAIC ${c}`)}</b>${name||role?` <span class="t2">${[name?`NAIC ${esc(c)}`:"", role].filter(Boolean).join(" · ")}</span>`:""}</span><button type="button" data-act="st-remove" data-code="${esc(c)}" aria-label="Remove ${esc(name||c)}">×</button></span>`; }).join("");
+}
+function statFinderHTML(){
+  const st=S.st, nf=statFind(), group=st.kind==="group", codes=statCodes(), asked=nf.asked;
+  const calm=t=>`<div class="info" id="st_findNote" role="status"><span>${t}</span></div>`;
+  let found="";
+  if(nf.busy) found=`<p class="t2" id="st_finding" role="status">Looking for matches…</p>`;
+  else if(nf.matches!==null && !nf.matches.length) found=calm(`No company in the app's company list matches "${esc(asked)}". Try a shorter part of the name, or type the NAIC ${group?"group":"company"} code in the box above.`);
+  else if(nf.matches!==null && group){
+    const groups=statGroups(nf.matches), loose=nf.matches.length-groups.reduce((a,g)=>a+g.n,0);
+    const rows=groups.map(g=>{ const can=naicOk(g.code), inList=can&&codes.includes(g.code);
+      const act=!can ? `<span class="t2 noadd">Can't be added: the company list has no NAIC group code for this group.</span>`
+        : inList ? `<button type="button" class="btn sm" disabled>Added</button>` : `<button type="button" class="btn sm" data-act="st-add" data-code="${esc(g.code)}" data-name="${esc(g.name)}">Add</button>`;
+      return `<li><div><div class="t1">${esc(g.name||`NAIC group ${g.code}`)}</div><div class="t2">${[can?`NAIC group ${esc(g.code)}`:"", `${plural(g.n,"matching company","matching companies")}`].filter(Boolean).join(" · ")}</div></div><span class="inline">${act}</span></li>`; }).join("");
+    found = groups.length ? `<ul class="matches" id="st_matches" aria-label="Matching groups">${rows}</ul>${loose?`<p class="t2" id="st_loose">${plural(loose,"matching company has","matching companies have")} no group in the company list.</p>`:""}`
+      : calm(`The companies that match "${esc(asked)}" have no group in the company list. Type the NAIC group code in the box above, or look up by NAIC company code.`);
+  }
+  else if(nf.matches!==null){
+    const rows=nf.matches.map(m=>{ const code=String(m.naicCompanyCode??"").trim(), can=naicOk(code), inList=can&&codes.includes(code);
+      const meta=[can?`NAIC ${code}`:"", !blank(m.naicGroupName)?`group ${m.naicGroupName}`:""].filter(Boolean).join(" · ");
+      const act=!can ? `<span class="t2 noadd">Can't be added: the company list has no NAIC company code for it.</span>`
+        : inList ? `<button type="button" class="btn sm" disabled>Added</button>` : `<button type="button" class="btn sm" data-act="st-add" data-code="${esc(code)}" data-name="${esc(m.companyName)}">Add</button>`;
+      return `<li><div><div class="t1">${esc(m.companyName||"n/d")}</div>${meta?`<div class="t2">${esc(meta)}</div>`:""}</div><span class="inline">${act}</span></li>`; }).join("");
+    const addable=statAddable(nf.matches), gs=[...new Set(nf.matches.map(m=>blank(m.naicGroupName)?"":String(m.naicGroupName)))];
+    const all=addable.length>1 ? `<p class="t2" id="st_addAll"><button type="button" class="btn sm" data-act="st-add-all">Add all ${addable.length}</button> ${gs.length===1&&gs[0]?`to compare the whole of ${esc(gs[0])}.`:"to compare them all."} The first code in the list is the subject; at most ${MAX_CODES} codes.</p>` : "";
+    found=`<ul class="matches" id="st_matches" aria-label="Matching companies">${rows}</ul>${all}`;
+  }
+  return `<div class="f" id="st_finder"><label for="st_find">Find by name <em>part of a company or group name, or a NAIC code; adds the ${group?"group":"company"}'s NAIC code to the list</em></label>
+    <div class="toolbar"><div class="grow"><input type="text" id="st_find" data-bind="st.nf.q" value="${esc(nf.q)}" autocomplete="off" spellcheck="false" placeholder="For example Calloway"></div>
+      <button type="button" class="btn" data-act="st-find" ${nf.busy?"disabled":""}>Find</button></div>
+    ${nf.err?`<p class="err" id="st_findErr" role="alert">${esc(nf.err)}</p>`:""}${found}</div>`;
+}
 function renderStatutory(){
   const st=S.st, s=st.status;
   const head=`<div><h2 class="action-title">Statutory financials by NAIC company or group</h2>
@@ -1258,6 +1357,8 @@ function renderStatutory(){
         <label class="f">First year<input type="number" id="st_from" data-bind="st.fromYear" value="${esc(st.fromYear)}" min="1990" max="${new Date().getFullYear()}" step="1"></label>
         <label class="f">Last year<input type="number" id="st_to" data-bind="st.toYear" value="${esc(st.toYear)}" min="1990" max="${new Date().getFullYear()}" step="1"></label>
       </div>
+      <div class="chips" id="st_named" aria-label="Chosen codes">${statNamedHTML()}</div>
+      ${statFinderHTML()}
       ${st.formErr?`<p class="err" id="statErr" role="alert">${esc(st.formErr)}</p>`:""}
       <div class="toolbar"><button class="btn primary" data-act="stat-search" ${st.busy?"disabled":""}>${st.busy?"Fetching…":"Show statutory data"}</button><span class="grow"></span>${setupBtn}</div>
     </form>
@@ -1403,6 +1504,10 @@ document.addEventListener("click", e=>{
     case "stat-refresh": runStat(true); break;
     case "stat-retry": runStat(false); break;
     case "stat-status-retry": loadStatStatus(); break;
+    case "st-find": statLookup(); break;
+    case "st-add": statAdd(t.dataset.code, t.dataset.name); break;
+    case "st-add-all": statAddAll(); break;
+    case "st-remove": st.codes=statCodes().filter(c=>c!==t.dataset.code).join(", "); render(); document.getElementById("st_codes")?.focus(); break;
     case "su-toggle": if(st.setup.open){ st.setup.open=false; render(); } else openSetup(); break;
     case "su-views": discover(null, !!t.dataset.refresh); break;
     case "su-view": discover(t.dataset.name, false); break;
@@ -1415,6 +1520,7 @@ function onInput(e){
   if(!path) return;
   setPath(path, t.value);
   if("live" in t.dataset){ if(path==="f.filter") S.f.shown=PAGE; render(); }
+  else if(path==="st.codes"){ const el=document.getElementById("st_named"); if(el) el.innerHTML=statNamedHTML(); }   // names beside the codes, without a rebuild while typing
   else if(path==="f.from" || path==="f.to"){ const est=document.getElementById("f_est"); if(est) est.textContent=estimateText(); }   // no rebuild while a date is being typed
 }
 document.addEventListener("input", onInput);
@@ -1427,6 +1533,7 @@ document.addEventListener("submit", e=>{
 });
 document.addEventListener("keydown", e=>{
   if(e.target.id==="f_q" && e.key==="Enter"){ e.preventDefault(); resolveCompany(); return; }
+  if(e.target.id==="st_find" && e.key==="Enter"){ e.preventDefault(); statLookup(); return; }
   if(e.target.id==="su_like" && e.key==="Enter"){ e.preventDefault(); discover(null, false); return; }
   if(e.target.id==="ask_input" && e.key==="Enter" && !e.shiftKey && !e.isComposing){ e.preventDefault(); askQuestion(); return; }
   if(e.key==="Enter" && e.target.closest && e.target.closest("#pwForm")){ e.preventDefault(); savePassword(); return; }
