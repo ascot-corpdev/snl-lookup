@@ -340,6 +340,7 @@ const FN = {"snl-filings":"the filings function", "snl-chat":"the questions func
 const US_STATES = "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY".split(" ");
 const PAGE = 100, MAX_COMPANIES = 50, MAX_YEARS = 10, MAX_QUESTION = 4000, MAX_HISTORY = 6, MAX_HISTORY_ANSWER = 20000, MAX_CODES = 8, MAX_STAT_YEARS = 15;
 const XLSX_SRC = "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.mini.min.js";
+const DOCX_SRC = "https://cdn.jsdelivr.net/npm/docx@9.5.1/dist/index.iife.min.js";   // the Word export, loaded on the first click
 const JOB_COLS = "id,status,question,progress,partial,result,error,segments,created_at,updated_at,heartbeat_at";
 const EMPTY_RESULT = "S&P returned no filings for this search. That means none are in S&P's data for these companies, states, dates and filters. It doesn't prove that none were filed.";
 const DAY = 86400000;
@@ -1018,6 +1019,7 @@ async function askQuestion(){
   const history=a.turns.filter(t=>t.status==="done"&&t.result).slice(-MAX_HISTORY).map(t=>({question:t.question, answer:answerText(t.result).slice(0, MAX_HISTORY_ANSWER).trim()})).filter(h=>h.answer);
   const screen=askScreen();
   const t={question:q, told:askToldText(screen, true), status:"starting", progress:[], partial:"", result:null, error:"", calm:false, jobId:null, lastContinue:0, note:"", contNote:""};
+  t.asked=new Date().toISOString();   // shown in the exported or copied answer
   a.turns.push(t); a.draft=""; a.scroll="bottom"; renderAsk();
   const r=await callFn("snl-chat",{action:"ask", question:q, ...(history.length?{history}:{}), ...(screen?{screen}:{})});
   if(!S.session || !S.ask.turns.includes(t)) return;
@@ -1104,6 +1106,7 @@ function answerHTML(t, ti){
       return `<li value="${esc(s.n)}" id="src-${ti}-${esc(s.n)}"><div class="t1">${blank(s.title)?"Filing document":esc(s.title)}</div>${meta?`<div class="t2">${meta}</div>`:""}
         ${!blank(s.quote)?`<blockquote class="quote">“${esc(s.quote)}”</blockquote>`:""}
         ${key?docButtonHTML(key, isNum(s.startPage)&&+s.startPage>0?`Open at page ${count(s.startPage)}`:"Open document", isNum(s.startPage)?s.startPage:""):""}</li>`; }).join("")}</ol></div>`;
+  h+=answerActsHTML(ti);
   const bits=[];
   if(lookups.length) bits.push("Looked up: "+lookups.map(l=>esc(l&&(l.detail||l.tool)||"")).filter(Boolean).join("; ")+".");
   const spent=answerCostText(u); if(spent) bits.push(spent);
@@ -1139,8 +1142,118 @@ function chatUseHTML(){
   const asked = isNum(c.dailyLimit) ? `${count(c.askedToday)} of ${plural(c.dailyLimit,"question")} today` : `${plural(c.askedToday,"question")} today`;
   return `<p class="t2" id="askDaily">${asked}${isNum(c.costToday)?`, ${costText(c.costToday)}`:""}</p>`;
 }
+/* ---------- the whole answer to take away: a Word document (the docx library, loaded on the first click) or a copy
+   with a table that pastes as a table. Both are built from the same parts, and every piece of text in them is
+   handed over as text, never as markup. ---------- */
+const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const ANSWER_FOOT = "Data from S&P Global Market Intelligence. Check figures against the source before you use them.";
+const keepText = s => String(s ?? "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]/g, "");   // characters a Word file can't hold
+const oneLine = s => keepText(s).replace(/\s+/g, " ").trim();
+function boldRuns(s){
+  const out=[], re=/\*\*(.+?)\*\*/g; let i=0, m;
+  while((m=re.exec(s))){ if(m.index>i) out.push({text:s.slice(i, m.index), bold:false}); out.push({text:m[1], bold:true}); i=re.lastIndex; }
+  if(i<s.length) out.push({text:s.slice(i), bold:false});
+  return out.map(r=>({text:r.text.replace(/`([^`]+)`/g,"$1"), bold:r.bold})).filter(r=>r.text);
+}
+function askedLabel(at){
+  const d=new Date(at||""); if(blank(at) || isNaN(d)) return "";
+  return `Asked ${d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})} at ${fmtTime(at)}`;   // the year always, since the file outlives the day
+}
+/* The parts, in order: question, when it was asked, answer lines, table, limits that were hit, sources. */
+function answerDoc(t){
+  const r=t.result||{}, segs=Array.isArray(r.answer)?r.answer.filter(s=>s&&!blank(s.text)):[], tb=answerTable(t);
+  const lines=[];
+  for(const s of segs){
+    const ls=keepText(s.text).split(/\n/).map(l=>l.trimEnd()); let last=ls.length-1; while(last>0 && !ls[last]) last--;
+    const cites=(Array.isArray(s.cites)?s.cites:[]).filter(n=>!blank(n)).map(n=>`[${oneLine(n)}]`).join("");
+    ls.forEach((l,i)=>{ const tail=i===last?cites:"", m=l.match(/^\s*(?:[-*•]|\d+\.)\s+(.*)$/);
+      if(m) lines.push({bullet:true, runs:boldRuns(m[1]), cites:tail});
+      else if(/^#{1,4}\s+/.test(l)) lines.push({bullet:false, runs:boldRuns(l.replace(/^#{1,4}\s+/,"")).map(x=>({text:x.text, bold:true})), cites:tail});
+      else if(l.trim() || tail) lines.push({bullet:false, runs:boldRuns(l), cites:tail}); });
+  }
+  const sources=(Array.isArray(r.sources)?r.sources:[]).filter(s=>s&&!blank(s.n)).map(s=>({n:oneLine(s.n), title:blank(s.title)?"Filing document":oneLine(s.title),
+    meta:[s.company, s.state, s.trackingNumber, pagesLabel(s)].filter(x=>!blank(x)).map(oneLine).join(" · "), quote:blank(s.quote)?"":oneLine(s.quote)}));
+  return {question:keepText(t.question).trim(), asked:askedLabel(t.asked), lines,
+    table: tb ? {title:oneLine(tb.title), cols:tb.cols.map(oneLine), rows:tb.rows.map(row=>row.map(c=>c===""?"n/d":oneLine(c))), notes:tb.notes.map(oneLine)} : null,
+    caps:(Array.isArray(r.caps)?r.caps:[]).filter(c=>!blank(c)).map(oneLine), sources};
+}
+function answerActsHTML(ti){
+  return `<div class="inline ansacts"><button type="button" class="btn sm" data-act="answer-export" data-turn="${ti}" title="Downloads the question, answer, table and sources as one Word document">Export answer</button><button type="button" class="btn sm" data-act="answer-copy" data-turn="${ti}" title="Copies the question, answer, table and sources, to paste into an email or a document">Copy answer</button></div>`;
+}
+/* The document handed to the docx library. */
+function answerDocx(m){
+  const D=window.docx, R=(text,o)=>new D.TextRun({text, ...(o||{})}), P=(children,o)=>new D.Paragraph({children, ...(o||{})}), H=text=>new D.Paragraph({text, heading:D.HeadingLevel.HEADING_2});
+  const muted={color:"666666", size:18}, kids=[H("Question"), ...m.question.split(/\n/).filter(l=>l.trim()).map(l=>P([R(l)]))];
+  if(m.asked) kids.push(P([R(m.asked, muted)]));
+  kids.push(H("Answer"));
+  for(const l of m.lines) kids.push(P(l.runs.map(x=>R(x.text, x.bold?{bold:true}:undefined)).concat(l.cites?[R(" "+l.cites)]:[]), l.bullet?{bullet:{level:0}, spacing:{after:60}}:{spacing:{after:120}}));
+  if(m.table){
+    const n=Math.max(1, m.table.cols.length), w=Math.floor(9360/n);
+    const cell=(text,head)=>new D.TableCell({children:[P([R(text, head?{bold:true}:undefined)])], ...(head?{shading:{type:D.ShadingType.CLEAR, color:"auto", fill:"EEEEEE"}}:{})});
+    kids.push(H(m.table.title), new D.Table({width:{size:100, type:D.WidthType.PERCENTAGE}, columnWidths:m.table.cols.map(()=>w),
+      rows:[new D.TableRow({tableHeader:true, children:m.table.cols.map(c=>cell(c,true))})].concat(m.table.rows.map(row=>new D.TableRow({children:row.map(c=>cell(c,false))})))}));
+    for(const note of m.table.notes) kids.push(P([R(note, {italics:true, ...muted})], {spacing:{before:80}}));
+  }
+  if(m.caps.length) kids.push(H("Limits reached"), ...m.caps.map(c=>P([R(c)])));
+  if(m.sources.length){
+    kids.push(H("Sources"));
+    for(const s of m.sources){
+      kids.push(P([R(`[${s.n}] `, {bold:true}), R(s.title, {bold:true})], {spacing:{before:120}}));
+      if(s.meta) kids.push(P([R(s.meta)], {indent:{left:360}}));
+      if(s.quote) kids.push(P([R(`“${s.quote}”`, {italics:true})], {indent:{left:360}}));
+    }
+  }
+  kids.push(P([R(ANSWER_FOOT, {italics:true, ...muted})], {spacing:{before:240}}));
+  return new D.Document({creator:"SNL lookup", title:"Answer from Claude", styles:{default:{document:{run:{font:"Calibri", size:22}}}},
+    sections:[{properties:{page:{size:{width:12240, height:15840}, margin:{top:1440, right:1440, bottom:1440, left:1440}}}, children:kids}]});
+}
+/* The same parts as HTML (every piece escaped) and as plain text, for the clipboard. */
+function answerClipHTML(m){
+  const td="border:1px solid #999999;padding:4px 6px;text-align:left;vertical-align:top", sm="color:#666666;font-size:12px";
+  const line=l=>l.runs.map(x=>x.bold?`<b>${esc(x.text)}</b>`:esc(x.text)).join("")+(l.cites?" "+esc(l.cites):"");
+  let h=`<h3>Question</h3>${m.question.split(/\n/).filter(l=>l.trim()).map(l=>`<p>${esc(l)}</p>`).join("")}${m.asked?`<p style="${sm}">${esc(m.asked)}</p>`:""}<h3>Answer</h3>`, inList=false;
+  for(const l of m.lines){
+    if(l.bullet && !inList){ h+="<ul>"; inList=true; } else if(!l.bullet && inList){ h+="</ul>"; inList=false; }
+    h+=l.bullet ? `<li>${line(l)}</li>` : `<p>${line(l)}</p>`;
+  }
+  if(inList) h+="</ul>";
+  if(m.table) h+=`<h3>${esc(m.table.title)}</h3><table style="border-collapse:collapse"><thead><tr>${m.table.cols.map(c=>`<th style="${td};background:#eeeeee">${esc(c)}</th>`).join("")}</tr></thead>`
+    +`<tbody>${m.table.rows.map(row=>`<tr>${row.map(c=>`<td style="${td}">${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>${m.table.notes.map(n=>`<p style="${sm}"><i>${esc(n)}</i></p>`).join("")}`;
+  if(m.caps.length) h+=`<h3>Limits reached</h3>${m.caps.map(c=>`<p>${esc(c)}</p>`).join("")}`;
+  if(m.sources.length) h+=`<h3>Sources</h3>${m.sources.map(s=>`<p><b>[${esc(s.n)}] ${esc(s.title)}</b>${s.meta?`<br>${esc(s.meta)}`:""}${s.quote?`<br><i>“${esc(s.quote)}”</i>`:""}</p>`).join("")}`;
+  return `<div>${h}<p style="${sm}"><i>${esc(ANSWER_FOOT)}</i></p></div>`;
+}
+function answerClipText(m){
+  const out=["Question", m.question]; if(m.asked) out.push(m.asked);
+  out.push("", "Answer", ...m.lines.map(l=>(l.bullet?"- ":"")+l.runs.map(x=>x.text).join("")+(l.cites?" "+l.cites:"")));
+  if(m.table) out.push("", m.table.title, ...[m.table.cols].concat(m.table.rows).map(r=>r.join("\t")), ...m.table.notes);
+  if(m.caps.length) out.push("", "Limits reached", ...m.caps);
+  if(m.sources.length){ out.push("", "Sources"); for(const s of m.sources) out.push(`[${s.n}] ${s.title}`, ...(s.meta?["    "+s.meta]:[]), ...(s.quote?[`    “${s.quote}”`]:[])); }
+  out.push("", ANSWER_FOOT);
+  return out.join("\n");
+}
+function loadDocx(){
+  if(window.docx) return Promise.resolve();
+  return loadDocx.p || (loadDocx.p=loadScript(DOCX_SRC).catch(e=>{ loadDocx.p=null; throw e; }));   // one download, however many clicks
+}
+async function exportAnswer(t){
+  const m=answerDoc(t);
+  try{
+    if(!window.docx){ toast("Getting the Word export ready…"); await loadDocx(); document.getElementById("toastRoot").innerHTML=""; }
+    const blob=await window.docx.Packer.toBlob(answerDocx(m));
+    saveBlob(new Blob([blob],{type:DOCX_TYPE}), `snl-answer-${TODAY()}.docx`);
+  }catch{ toast("Couldn't make the Word document. Check your connection and try again, or use Copy answer."); }
+}
+async function copyAnswer(t){
+  const m=answerDoc(t);
+  try{
+    if(!navigator.clipboard || !navigator.clipboard.write || typeof ClipboardItem==="undefined") throw new Error("no clipboard");
+    await navigator.clipboard.write([new ClipboardItem({"text/html":new Blob([answerClipHTML(m)],{type:"text/html"}), "text/plain":new Blob([answerClipText(m)],{type:"text/plain"})})]);
+    toast("Answer copied. Paste it into an email or a document.");
+  }catch{ toast("Your browser didn't allow copying. Use Export answer to download it as a Word document instead."); }
+}
 function turnHTML(t, ti){
-  const q=`${t.asked?pastLabelHTML(t):""}<div class="ccmsg u">${esc(t.question)}</div>${t.told?`<p class="t2 told">${esc(t.told)}</p>`:""}`;
+  const q=`${t.saved?pastLabelHTML(t):""}<div class="ccmsg u">${esc(t.question)}</div>${t.told?`<p class="t2 told">${esc(t.told)}</p>`:""}`;
   const wrap=inner=>`<div class="turn" id="turn-${ti}">${q}${inner}</div>`;
   if(t.status==="error") return wrap(t.calm ? `<div class="info ask-calm" role="status"><span>${esc(t.error)}</span></div>` : `<div class="ccmsg err" role="alert">${esc(t.error)}</div>`);
   if(t.status==="done") return wrap(`<div class="ccmsg a done">${answerHTML(t, ti)}</div>`);
@@ -1221,12 +1334,13 @@ function pastState(r){
   if(r.status==="error") return {text:"Stopped: "+shortText(r.error||"Claude couldn't finish this answer.", 160), cls:"stopped"};
   return {text:"Still running", cls:""};
 }
-/* A row of snl_jobs as a turn of the conversation, the same shape askQuestion makes. asked: opened from the list. */
-function jobTurn(row, asked){
+/* A row of snl_jobs as a turn of the conversation, the same shape askQuestion makes. saved: opened from the list.
+   asked is when the question was asked, which the exported answer shows. */
+function jobTurn(row, saved){
   const st=["queued","running","paused","done","error"].includes(row.status) ? row.status : "running";
   return {question:String(row.question??""), told:"", status:st, progress:Array.isArray(row.progress)?row.progress:[], partial:typeof row.partial==="string"?row.partial:"",
     result: st==="done" ? (row.result&&typeof row.result==="object"?row.result:{}) : null, error: st==="error" ? (row.error||"Claude couldn't finish this answer. Ask again.") : "",
-    calm:false, jobId:row.id, lastContinue:0, note:"", contNote:"", asked: asked ? String(row.created_at||"") : ""};
+    calm:false, jobId:row.id, lastContinue:0, note:"", contNote:"", asked:String(row.created_at||""), saved:!!saved};
 }
 function pastQuery(cols){
   return S.sb.from("snl_jobs").select(cols).eq("owner", S.session.uid).gte("created_at", new Date(Date.now()-PAST_DAYS*DAY).toISOString()).order("created_at",{ascending:false});
@@ -1283,7 +1397,7 @@ async function openPast(id){
 /* The panel opened: count what it shows as seen, and freshen the list when the list is what it shows. */
 function pastOnOpen(){
   const last=S.ask.turns[S.ask.turns.length-1];
-  if(last && last.jobId && !last.asked && ["done","error"].includes(last.status)) markSeen(last.jobId);
+  if(last && last.jobId && !last.saved && ["done","error"].includes(last.status)) markSeen(last.jobId);
   if(!S.ask.turns.length) loadPast(false);
 }
 function pastLabelHTML(t){
@@ -1723,6 +1837,8 @@ document.addEventListener("click", e=>{
     case "past-open": openPast(t.dataset.id); break;
     case "past-more": loadPast(true); break;
     case "past-retry": loadPast(S.past.failedMore); break;
+    case "answer-export": { const at=S.ask.turns[+t.dataset.turn]; if(at && at.status==="done") exportAnswer(at); break; }
+    case "answer-copy": { const at=S.ask.turns[+t.dataset.turn]; if(at && at.status==="done") copyAnswer(at); break; }
     case "goto-source": { const el=document.getElementById(`src-${t.dataset.turn}-${t.dataset.n}`); if(el){ document.querySelectorAll(".srcs li.hit").forEach(x=>x.classList.remove("hit")); el.classList.add("hit"); el.scrollIntoView({block:"center"}); el.querySelector("button")?.focus({preventScroll:true}); } break; }
 
     case "stat-kind": st.kind=t.dataset.k==="group"?"group":"company"; render(); break;
