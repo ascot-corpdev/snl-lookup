@@ -99,7 +99,7 @@ function fakeSearch(body){
     '"Note: Segment is taken from each form\'s title page. Tarrow\'s form doesn\'t name a segment.","","","","",""'].join("\r\n"), csv.text);
   const xl=await download(()=>p.click('.anstable button[data-fmt="xlsx"]')); const wb=JSON.parse(xl.text);
   ok("and to XLSX", xl.name==="snl-answer-table-2026-11-13.xlsx" && same(wb.sheets[0].aoa.slice(0,4),[JOB.result.table.columns, ...JOB.result.table.rows]));
-  ok("what it took is on the page", (await txt(".ccmsg.done .look")).endsWith("9 S&P requests. Claude read 48,210 tokens and wrote 1,432. Model: claude-example-1."));
+  ok("what it took is on the page", (await txt(".ccmsg.done .look")).endsWith("This answer cost n/d (48,210 tokens read, 1,432 written) and used 9 S&P requests. Model: claude-example-1."));
   await p.$eval("#askBody",e=>{ e.scrollTop=0; });
   await p.screenshot({path:OUTDIR+"/e2e-ask-1440.png"});
   await p.setViewportSize({width:390,height:844}); await p.waitForTimeout(150);

@@ -67,6 +67,11 @@ export function memoryDb(clock: Clock) {
     async activeJob(owner, since) { return [...jobs.values()].find((j) => j.owner === owner && ["queued", "running", "paused"].includes(j.status) && j.heartbeat_at >= since)?.id ?? null; },
     async dropOldJobs(before) { for (const [id, j] of jobs) if (["done", "error"].includes(j.status) && j.created_at < before) jobs.delete(id); },
     async oldJobStates(before, limit) { return [...states.entries()].filter(([, s]) => s.updated_at < before).slice(0, limit).map(([jobId, s]) => ({ jobId, state: structuredClone(s.state) })); },
+    async countJobsSince(owner, since) { return [...jobs.values()].filter((j) => j.owner === owner && j.created_at >= since).length; },
+    async usageSince(owner, since) {
+      return [...jobs.values()].filter((j) => j.owner === owner && j.status === "done" && j.created_at >= since)
+        .map((j) => (j.result as { usage?: unknown } | null)?.usage).filter((u): u is Record<string, unknown> => !!u && typeof u === "object" && !Array.isArray(u)).map((u) => structuredClone(u));
+    },
   };
   return db;
 }

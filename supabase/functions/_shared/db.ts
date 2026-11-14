@@ -55,6 +55,10 @@ export interface Db {
   activeJob(owner: string, since: string): Promise<string | null>;
   /** Removes finished answers created before the given time. */
   dropOldJobs(before: string): Promise<void>;
+  /** How many questions the login has started since the given time, whatever became of them. */
+  countJobsSince(owner: string, since: string): Promise<number>;
+  /** The usage part of the result of each of the login's finished answers started since the given time. */
+  usageSince(owner: string, since: string): Promise<Record<string, unknown>[]>;
 }
 
 // A saved place is kept as text inside its row. Postgres re-orders the keys of JSON it stores, and Claude must
@@ -183,6 +187,18 @@ export function supabaseDb(sb: SupabaseClient, now: () => number = Date.now): Db
     },
     async dropOldJobs(before) {
       try { await sb.from("snl_jobs").delete().in("status", ["done", "error"]).lt("created_at", before); } catch { /* housekeeping: tried again next time */ }
+    },
+    async countJobsSince(owner, since) {
+      const { count, error } = await sb.from("snl_jobs").select("id", { count: "exact", head: true }).eq("owner", owner).gte("created_at", since);
+      // Not knowing the count must never let a question through uncounted.
+      if (error) throw new Error(`Couldn't count today's questions: ${error.message}`);
+      return count ?? 0;
+    },
+    async usageSince(owner, since) {
+      // Only the usage part of each result is read, not the answers themselves.
+      const { data, error } = await sb.from("snl_jobs").select("usage:result->usage").eq("owner", owner).eq("status", "done").gte("created_at", since);
+      if (error) throw new Error(`Couldn't add up today's costs: ${error.message}`);
+      return (data ?? []).map((r) => (r as { usage?: unknown }).usage).filter((u): u is Record<string, unknown> => !!u && typeof u === "object" && !Array.isArray(u));
     },
   };
 }
