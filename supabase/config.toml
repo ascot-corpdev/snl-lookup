@@ -17,6 +17,10 @@ verify_jwt = false
 [functions.snl-watch]
 verify_jwt = false
 
+# Company profiles: the figures and text for a profile deck. Uses the Snowflake, S&P and Anthropic secrets above.
+[functions.snl-profile]
+verify_jwt = false
+
 # Lets background tasks run under `supabase functions serve` on your own machine.
 [edge_runtime]
 policy = "per_worker"

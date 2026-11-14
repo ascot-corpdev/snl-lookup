@@ -227,7 +227,7 @@ const HOSTILE = ["X; DROP TABLE Y", 'a"b', "A--", "A/*", "A B", "A.B", "A)", "(S
   ok("a by-year field needs neither line nor state", mapProblem("surplus", { view: "IR_SURPLUS", entity: { company: "NAIC_CD" }, year: "STMT_YEAR", value: "PHS" }) === null);
   ok("a where value may hold any text, because it is bound", mapProblem("dpw_by_line", { ...GOOD, where: [{ column: "BASIS", equals: "'; DROP TABLE X; --" }] }) === null);
   const status = fieldStatus({ fields: { dpw_by_line: GOOD, surplus: { ...GOOD, view: "X; DROP TABLE Y" } } });
-  ok("status lists all seven fields and which are mapped", status.length === 7 && same(status.filter((f) => f.mapped).map((f) => f.id), ["dpw_by_line"]) && same(status.map((f) => f.id), STAT_FIELDS.map((f) => f.id)), status.map((f) => [f.id, f.mapped]));
+  ok("status lists every field (the seven the view shows and ten for company profiles) and which are mapped", status.length === 17 && same(status.filter((f) => f.mapped).map((f) => f.id), ["dpw_by_line"]) && same(status.map((f) => f.id), STAT_FIELDS.map((f) => f.id)), status.map((f) => [f.id, f.mapped]));
   ok("a settings row with no fields reads as nothing mapped", same(readMapping(null), { fields: {} }) && same(readMapping({}), { fields: {} }) && same(readMapping({ fields: "x" }), { fields: {} }) && same(readMapping({ fields: null }), { fields: {} }));
 }
 
@@ -256,7 +256,7 @@ const Q: StatQuery = { kind: "company", codes: ["91001", "92001"], fromYear: 202
 // ---------- parseStatQuery ----------
 {
   const p = parseStatQuery({ codes: ["91001", 92001, " 91001 "] }, 2026);
-  ok("a query needs only codes: company, last five full years, every field", p.ok && same(p.q, { kind: "company", codes: ["91001", "92001"], fromYear: 2021, toYear: 2025 }) && same(p.fields, STAT_FIELDS.map((f) => f.id)), p);
+  ok("a query needs only codes: company, last five full years, the seven fields the view shows", p.ok && same(p.q, { kind: "company", codes: ["91001", "92001"], fromYear: 2021, toYear: 2025 }) && same(p.fields, STAT_FIELDS.slice(0, 7).map((f) => f.id)), p);
   const g = parseStatQuery({ kind: "group", codes: ["9100"], fromYear: 2015, toYear: 2026, fields: ["surplus", "surplus", "loss_ratio"] }, 2026);
   ok("kind, years and fields can be chosen; repeats are dropped", g.ok && g.q.kind === "group" && g.q.fromYear === 2015 && g.q.toYear === 2026 && same(g.fields, ["surplus", "loss_ratio"]), g);
   ok("15 years at a time is allowed, 16 is not", parseStatQuery({ codes: ["1"], fromYear: 2011, toYear: 2025 }, 2026).ok && !parseStatQuery({ codes: ["1"], fromYear: 2010, toYear: 2025 }, 2026).ok);
