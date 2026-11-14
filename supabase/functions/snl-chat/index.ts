@@ -1,6 +1,6 @@
 // Claude for SNL lookup. A user asks in plain English; Claude uses the filing search, filing documents and
 // statutory data as tools and answers with sources and a comparison table (see ../_shared/chat.ts).
-// Any signed-in login may call it. Claude sees only the question and S&P's results, never Ascot deal data.
+// Any signed-in login may call it. Claude sees only the question and S&P's results, never the company's deal data.
 //
 // An answer runs as a background task and writes its progress and result to public.snl_jobs; the page polls
 // that row. Supabase stops a function call after 150 seconds (free plan) or 400 seconds (paid), background

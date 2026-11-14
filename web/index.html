@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
-<title>Ascot SNL lookup</title>
+<title>SNL lookup</title>
 <style>
-/* Layout: Ascot template chrome (spectrum stripe, magenta action title, navy text, footer) over two views:
+/* Layout: house template chrome (spectrum stripe, magenta action title, navy text, footer) over two views:
    Filings (search and open S&P product filings) and Statutory (Snowflake). Ask Claude is a panel that opens beside
    either view from a button fixed at the bottom right, so a question never means leaving what is on screen. */
 :root{
@@ -275,7 +275,7 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 <div class="strip" id="strip" hidden><div class="wrap" id="stripIn" role="status" aria-label="S&amp;P usage and data freshness"></div></div>
 
 <main><div class="wrap" id="view"></div></main>
-<footer class="foot"><div class="wrap"><span>2026 Ascot Group</span><span>Confidential: strategy and corporate development use only. Data: S&amp;P Global Market Intelligence.</span></div></footer>
+<footer class="foot"><div class="wrap"><span id="footOrg">2026</span><span>Confidential: strategy and corporate development use only. Data: S&amp;P Global Market Intelligence.</span></div></footer>
 
 <div id="askRoot"></div>
 <div id="drawerRoot"></div>
@@ -286,6 +286,10 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 /* ---------- settings and state ---------- */
 const CFG = Object.assign({}, window.SNL_CONFIG || {});
 if(CFG.supabaseUrl) CFG.supabaseUrl = String(CFG.supabaseUrl).trim().replace(/\/+$/,"").replace(/\/(rest|auth)\/v1$/,"");
+// The company's name is a setting (orgName, from the ORG_NAME repository variable), so the public code stays neutral.
+const ORG = String(CFG.orgName ?? "").trim();
+document.title = ORG ? `${ORG} SNL lookup` : "SNL lookup";
+{ const f = document.getElementById("footOrg"); if(f) f.innerHTML = ORG ? `2026 ${esc(ORG)}` : "2026"; }
 // How often the page checks a running answer, how old a heartbeat may get before the page asks the function to
 // pick the answer up again, and the shortest gap between two such requests (milliseconds).
 const TIMING = {poll:2000, stale:45000, again:30000};
@@ -921,7 +925,7 @@ function askPanelHTML(){
       <button type="button" class="btn sm" id="askClose" data-act="ask-close">Close</button></div>
     <div class="ask-b" id="askBody" data-keep>
       ${off?`<div class="info" id="askOff" role="status"><span><b>Questions aren't set up yet.</b> ${isCorpDev()?"Set ANTHROPIC_API_KEY on Supabase and deploy the snl-chat function (see the README).":"Ask Corp Dev to finish the set-up."}</span></div>`:""}
-      <p class="t2" id="askSees">Claude sees only your question, a short description of what is on this screen, and what S&amp;P returns for it: nothing else from this site or from Ascot. Check figures against the source before you use them.</p>
+      <p class="t2" id="askSees">Claude sees only your question, a short description of what is on this screen, and what S&amp;P returns for it: nothing else from this site${ORG?` or from ${esc(ORG)}`:""}. Check figures against the source before you use them.</p>
       ${a.turns.length?`<div class="cclog" id="askLog" aria-live="polite">${a.turns.map(turnHTML).join("")}</div>`:start}
     </div>
     <div class="ask-f">

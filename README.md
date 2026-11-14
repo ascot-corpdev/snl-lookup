@@ -1,6 +1,6 @@
 # SNL lookup
 
-A small web app for Ascot's Strategy & Corporate Development team. It answers insurance questions from S&P Global Market Intelligence data.
+A small web app for a Strategy & Corporate Development team at an insurer. It answers insurance questions from S&P Global Market Intelligence data.
 
 - **Filings:** search S&P's SNL Insurance Product Filings (rate, rule and form filings) by company, state, type of insurance, filing type and date. See the rate impact and description, and open the filing's original document.
 - **Ask Claude:** a panel that opens over either view. Type a question in plain English. Claude is told what is on your screen (the filings search or the statutory figures), searches filings, reads the documents, and answers with page citations, its sources and a comparison table you can export to CSV or Excel.
@@ -114,7 +114,7 @@ supabase functions deploy snl-chat --no-verify-jwt
 ### 4. GitHub Pages
 
 1. **Settings > Pages > Build and deployment > Source:** GitHub Actions.
-2. **Settings > Secrets and variables > Actions > Variables:** add `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` (and `USERNAME_DOMAIN` if you changed it for the login script). Use the publishable key, never the secret key.
+2. **Settings > Secrets and variables > Actions > Variables:** add `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` (and `USERNAME_DOMAIN` if you changed it for the login script). Use the publishable key, never the secret key. Optionally add `ORG_NAME`, the company name the site shows in the browser tab, the footer and the Ask Claude panel; without it the site names no company.
 3. Merge to `main`, or run the "Deploy site to GitHub Pages" workflow. The site appears at `https://YOUR_GITHUB_ORG.github.io/snl-lookup/`.
 
 A merge to `main` is a deploy.
@@ -159,7 +159,11 @@ supabase secrets set CLAUDE_MODEL=claude-opus-5-5
 supabase secrets set CHAT_SLICE_SECONDS=360
 ```
 
-`CLAUDE_MODEL` changes the model (the default is shown). Set `CHAT_SLICE_SECONDS=360` only on a paid Supabase plan (see [Supabase limits](#supabase-limits-that-matter)).
+```bash
+supabase secrets set ORG_NAME=...
+```
+
+`ORG_NAME` is the company name Claude is told it works for; without it Claude is told it works for an insurer's team. `CLAUDE_MODEL` changes the model (the default is shown). Set `CHAT_SLICE_SECONDS=360` only on a paid Supabase plan (see [Supabase limits](#supabase-limits-that-matter)).
 
 ### 7. Statutory data on Snowflake (when S&P creates the reader account)
 

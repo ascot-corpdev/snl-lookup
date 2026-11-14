@@ -4,5 +4,6 @@
 window.SNL_CONFIG = {
   supabaseUrl: "",
   supabaseAnonKey: "",   // paste the publishable key here
-  usernameDomain: "snl-lookup.local"
+  usernameDomain: "snl-lookup.local",
+  orgName: ""            // optional: the company name shown in the tab title, footer and Ask Claude panel
 };

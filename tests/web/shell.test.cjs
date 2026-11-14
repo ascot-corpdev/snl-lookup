@@ -95,7 +95,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   await p.click('nav.tabs a[data-view="statutory"]'); await p.waitForTimeout(250);
   ok("Statutory opens from the nav; the strip and the Ask Claude button stay", (await t.txt(".action-title"))==="Statutory financials by NAIC company or group" && (await p.getAttribute('nav.tabs a[data-view="statutory"]',"aria-current"))==="page" && (await strip()).length===4 && p.url().endsWith("#statutory") && await p.isVisible("#askFab"));
   await p.click("#askFab"); await p.waitForTimeout(150);
-  ok("headings and buttons are in sentence case, in the view and in the Ask Claude panel", (await p.$$("#askPanel h2, #askPanel button")).length>=4 && (await p.$$eval("h1,h2,h3,button,nav a",e=>e.map(x=>x.textContent.trim()).filter(s=>s && /\s[A-Z][a-z]+/.test(s.replace(/\b(S&P|NAIC|Ask|Claude|Corp Dev|Snowflake|SNL|Filings|Statutory|CSV|XLSX|Ascot)\b/g,"x"))))).length===0);
+  ok("headings and buttons are in sentence case, in the view and in the Ask Claude panel", (await p.$$("#askPanel h2, #askPanel button")).length>=4 && (await p.$$eval("h1,h2,h3,button,nav a",e=>e.map(x=>x.textContent.trim()).filter(s=>s && /\s[A-Z][a-z]+/.test(s.replace(/\b(S&P|NAIC|Ask|Claude|Corp Dev|Snowflake|SNL|Filings|Statutory|CSV|XLSX)\b/g,"x"))))).length===0);
   await p.click("#pwBtn"); await p.waitForTimeout(150);
   ok("change password opens over the Ask Claude panel", await p.evaluate(()=>{ const d=document.querySelector(".drawer").getBoundingClientRect(), el=document.elementFromPoint(d.left+d.width/2, d.top+d.height/2); return !!el.closest(".drawer"); }));
   await p.keyboard.press("Escape"); await p.waitForTimeout(100);
