@@ -162,8 +162,85 @@ export type ChatState = {
   longestMs?: number;
   /** Files uploaded during a step that never finished. They are deleted when the answer is picked up again. */
   orphans?: string[];
+  /** Tokens by the model that served each request, so the answer can be priced. Missing in places saved before
+      costs were tracked. */
+  byModel?: Record<string, ModelTokens>;
+  /** Some tokens were counted before costs were tracked, so the answer's cost can't be known. */
+  unpriced?: boolean;
 };
 export type Turn = { question: string; answer: string };
+
+// ---------- what an answer costs ----------
+
+// Anthropic's list prices in US dollars per million tokens, at the time of writing (November 2026). They give the
+// reader an estimate; the Anthropic console is the record of what was actually charged. To change a price or
+// add a model, edit this table. A served model id matches its own entry, or its entry followed by a dash and a
+// date (claude-opus-5-5-20261101). A model not listed here is shown as "cost n/d", never guessed.
+export const PRICES: Record<string, { input: number; output: number; cacheRead: number }> = {
+  "claude-opus-5-5": { input: 4.00, output: 20.00, cacheRead: 0.20 },
+  "claude-opus-5": { input: 5.00, output: 25.00, cacheRead: 0.50 },
+  "claude-opus-4-8": { input: 5.00, output: 25.00, cacheRead: 0.50 },
+  "claude-sonnet-5-5": { input: 2.00, output: 10.00, cacheRead: 0.10 },
+  "claude-sonnet-5": { input: 2.00, output: 10.00, cacheRead: 0.20 },
+  "claude-fable-5-2": { input: 8.00, output: 40.00, cacheRead: 0.20 },
+  "claude-haiku-5-5": { input: 0.10, output: 0.50, cacheRead: 0.01 },
+};
+/** Writing to the prompt cache costs this many times the input price. */
+export const CACHE_WRITE_FACTOR = 1.25;
+
+export type ModelTokens = { uncachedInputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; outputTokens: number };
+
+/** The price list entry for a model id as the API reports it, or null when it isn't listed. */
+export function priceFor(model: string): { input: number; output: number; cacheRead: number } | null {
+  for (const [id, price] of Object.entries(PRICES)) {
+    if (model === id || (model.startsWith(id + "-") && /^\d{8}$/.test(model.slice(id.length + 1)))) return price;
+  }
+  return null;
+}
+
+/** What these tokens cost in US dollars (not rounded), or null when the model isn't in the price list. */
+export function costOf(model: string, t: ModelTokens): number | null {
+  const p = priceFor(model);
+  if (!p) return null;
+  return (t.uncachedInputTokens * p.input + t.cacheWriteTokens * p.input * CACHE_WRITE_FACTOR + t.cacheReadTokens * p.cacheRead + t.outputTokens * p.output) / 1_000_000;
+}
+
+const cents = (usd: number) => Math.round(usd * 100) / 100;
+
+/** Adds one reply's tokens to the answer, under the model that served it (with fallbacks it can differ from the
+    one asked for). */
+export function addUsage(st: ChatState, model: string, usage: { input_tokens?: number | null; output_tokens?: number | null; cache_creation_input_tokens?: number | null; cache_read_input_tokens?: number | null }): void {
+  const fresh = usage.input_tokens ?? 0, write = usage.cache_creation_input_tokens ?? 0, read = usage.cache_read_input_tokens ?? 0, out = usage.output_tokens ?? 0;
+  if (!st.byModel) {
+    // A place saved before costs were tracked: its earlier tokens can't be priced.
+    if (st.inputTokens || st.outputTokens) st.unpriced = true;
+    st.byModel = {};
+  }
+  const m = st.byModel[model] ??= { uncachedInputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0 };
+  m.uncachedInputTokens += fresh; m.cacheWriteTokens += write; m.cacheReadTokens += read; m.outputTokens += out;
+  st.inputTokens += fresh + write + read;
+  st.outputTokens += out;
+}
+
+/** The answer's usage as the page shows it: the totals it has always had, the four kinds of tokens, each model's
+    share, and the cost in US dollars rounded to cents (null when any part of it can't be priced). */
+export function answerUsage(st: ChatState) {
+  const legacy = st.unpriced === true || (!st.byModel && (st.inputTokens > 0 || st.outputTokens > 0));
+  const byModel: Record<string, ModelTokens & { costUsd: number | null }> = {};
+  let uncached = 0, write = 0, read = 0, cost: number | null = 0;
+  for (const [model, t] of Object.entries(st.byModel ?? {})) {
+    const c = costOf(model, t);
+    byModel[model] = { ...t, costUsd: c === null ? null : cents(c) };
+    uncached += t.uncachedInputTokens; write += t.cacheWriteTokens; read += t.cacheReadTokens;
+    cost = c === null || cost === null ? null : cost + c;
+  }
+  return {
+    inputTokens: st.inputTokens, outputTokens: st.outputTokens, spRequests: st.spRequests,
+    // The breakdown is incomplete for a place saved before costs were tracked, so it is left out (null).
+    uncachedInputTokens: legacy ? null : uncached, cacheWriteTokens: legacy ? null : write, cacheReadTokens: legacy ? null : read,
+    costUsd: legacy || cost === null ? null : cents(cost), byModel,
+  };
+}
 
 /** What the user has on screen when they ask, in plain words for Claude: the filings search or the statutory
     figures in front of them, so Claude can open the same data with its tools. Built only from values that pass
@@ -452,8 +529,7 @@ export async function runJob(jobId: string, ctx: ChatCtx): Promise<void> {
       st.longestMs = Math.max(st.longestMs ?? 0, ctx.now() - asked);
       st.tries = 0;
       st.model = message.model;
-      st.inputTokens += (message.usage.input_tokens ?? 0) + (message.usage.cache_creation_input_tokens ?? 0) + (message.usage.cache_read_input_tokens ?? 0);
-      st.outputTokens += message.usage.output_tokens ?? 0;
+      addUsage(st, message.model, message.usage);
 
       if (message.stop_reason === "refusal") throw new Plain("Claude declined this question. Try rephrasing it.");
       const { content, calls } = echoable(message.content);
@@ -495,7 +571,7 @@ export async function runJob(jobId: string, ctx: ChatCtx): Promise<void> {
 
     const result = {
       answer: st.final!.answer, sources: st.final!.sources, table, lookups: st.lookups, caps: st.caps, model: st.model,
-      usage: { inputTokens: st.inputTokens, outputTokens: st.outputTokens, spRequests: st.spRequests },
+      usage: answerUsage(st),
     };
     // The answer is only cleared away once it is safely written. If the write keeps failing, the saved place
     // stays, and the next "continue" rebuilds the table and tries again.
@@ -530,8 +606,7 @@ export async function buildTable(client: Anthropic, model: string, question: str
     messages: [{ role: "user", content: `Question:\n${question}\n\nAnswer:\n${answer}\n\nSources cited:\n${sources || "none"}\n\nFilings the searches returned (JSON):\n${filings}` }],
   });
   const message = await stream.finalMessage();
-  st.inputTokens += (message.usage.input_tokens ?? 0) + (message.usage.cache_creation_input_tokens ?? 0) + (message.usage.cache_read_input_tokens ?? 0);
-  st.outputTokens += message.usage.output_tokens ?? 0;
+  addUsage(st, message.model, message.usage);
   // Anything other than a complete, readable reply is a failure the caller reports. Only "no table needed" is null.
   if (message.stop_reason !== "end_turn") throw new Plain(`The table request stopped early (${message.stop_reason}).`);
   const raw = message.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text").map((b) => b.text).join("");

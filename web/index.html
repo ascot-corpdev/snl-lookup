@@ -344,6 +344,7 @@ const S = {
   status:null, statusErr:"", refs:null, refsLoading:false, refsMsg:"", refsErr:"",
   f:null, ask:freshAsk(), st:null, docs:{}
 };
+S.chatUse=null; S.chatUseAt=0;   // the login's questions today and their cost, from the questions function
 
 /* ---------- helpers ---------- */
 function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
@@ -929,6 +930,7 @@ function askToldText(sc, past){
 async function askQuestion(){
   const a=S.ask, q=a.draft.trim();
   if(activeTurn()) return;
+  if(chatAtLimit(S.chatUse)) return;
   if(!q){ toast("Type a question first."); return; }
   if(q.length>MAX_QUESTION){ toast(`Keep the question under ${count(MAX_QUESTION)} characters.`); return; }
   // earlier finished answers go along as plain text, so a follow-up question makes sense
@@ -942,8 +944,10 @@ async function askQuestion(){
   else if(r.err!=="signin"){
     t.status="error"; t.calm=r.err==="not_configured"; t.error=r.data ? "The question was sent but no answer was started. Try again." : errText(r);
     if(t.calm||r.err==="bad"||r.err==="busy") a.draft=a.draft||q;   // nothing was started: keep the question to send again
+    if(r.err==="daily_limit"){ t.calm=true; a.draft=a.draft||q; loadChatUse(); }   // not a fault: the limit is reached; keep the question for later
     if(!a.open) a.unseen="error";
   }
+  if(t.jobId && S.chatUse && isNum(S.chatUse.askedToday)) S.chatUse.askedToday=+S.chatUse.askedToday+1;
   renderAsk();
 }
 function schedulePoll(){
@@ -963,6 +967,7 @@ async function pollJob(){
     t.progress=Array.isArray(data.progress)?data.progress:[]; t.partial=typeof data.partial==="string"?data.partial:"";
     if(t.status==="done"){ t.result=data.result&&typeof data.result==="object"?data.result:{}; loadStatus(); }
     if(t.status==="error") t.error=data.error||"Claude couldn't finish this answer. Ask again.";
+    if(t.status==="done"||t.status==="error") loadChatUse();   // the day's count and cost, now with this answer
     // ended while the panel was closed: mark the button; ended in view: show the answer from its top
     if(t.status==="done"||t.status==="error"){ if(S.ask.open) S.ask.scroll=S.ask.turns.indexOf(t); else S.ask.unseen=t.status; }
     // The function works in time slices. When it has paused, or has gone quiet, ask it to pick the answer up again.
@@ -981,6 +986,7 @@ async function continueJob(t){
 function newConversation(){ clearTimeout(S.ask.timer); S.ask={...freshAsk(), open:S.ask.open, wide:S.ask.wide}; renderAsk(); document.getElementById("ask_input")?.focus(); }
 function openAsk(){
   const a=S.ask; a.open=true; a.unseen="";
+  if(!S.chatUseAt || Date.now()-S.chatUseAt>60000) loadChatUse();   // where the login stands today, checked at most once a minute
   a.scroll = !a.turns.length ? null : activeTurn() ? "bottom" : a.turns.length-1;   // a running answer at its latest step; a finished one from its top
   renderAsk(); document.getElementById("ask_input")?.focus({preventScroll:true});
 }
@@ -1018,11 +1024,38 @@ function answerHTML(t, ti){
         ${key?docButtonHTML(key, isNum(s.startPage)&&+s.startPage>0?`Open at page ${count(s.startPage)}`:"Open document", isNum(s.startPage)?s.startPage:""):""}</li>`; }).join("")}</ol></div>`;
   const bits=[];
   if(lookups.length) bits.push("Looked up: "+lookups.map(l=>esc(l&&(l.detail||l.tool)||"")).filter(Boolean).join("; ")+".");
-  if(isNum(u.spRequests)) bits.push(`${plural(u.spRequests,"S&amp;P request")}.`);
-  if(isNum(u.inputTokens)||isNum(u.outputTokens)) bits.push(`Claude read ${count(u.inputTokens)} tokens and wrote ${count(u.outputTokens)}.`);
+  const spent=answerCostText(u); if(spent) bits.push(spent);
   if(!blank(r.model)) bits.push(`Model: ${esc(r.model)}.`);
   if(bits.length) h+=`<p class="look">${bits.join(" ")}</p>`;
   return h;
+}
+/* ---------- what answers cost, and the daily limit on questions ---------- */
+/* A cost in US dollars, said plainly: "about $0.42", "less than $0.01", or "n/d" when it can't be priced. */
+function costText(v){
+  if(!isNum(v)) return "n/d";
+  return +v<0.01 ? "less than $0.01" : "about $"+(+v).toLocaleString("en-US",{minimumFractionDigits:2, maximumFractionDigits:2});
+}
+/* "This answer cost about $0.42 (48,210 tokens read, 1,432 written) and used 9 S&P requests." */
+function answerCostText(u){
+  const tokens=isNum(u.inputTokens)||isNum(u.outputTokens), sp=isNum(u.spRequests);
+  const parts=[tokens?`cost ${costText(u.costUsd)} (${count(u.inputTokens)} tokens read, ${count(u.outputTokens)} written)`:"", sp?`used ${plural(u.spRequests,"S&amp;P request")}`:""].filter(Boolean);
+  return parts.length ? `This answer ${parts.join(" and ")}.` : "";
+}
+/* The login's questions today, against the daily limit, as the questions function counts them (midnight UTC to
+   midnight UTC). Null until it has answered; left out when it can't say, for example before it is redeployed. */
+async function loadChatUse(){
+  S.chatUseAt=Date.now();
+  const r=await callFn("snl-chat",{action:"status"});
+  if(!S.session) return;
+  if(r.data) S.chatUse = r.data.configured ? r.data : null;
+  renderAsk();
+}
+const chatAtLimit = c => !!c && isNum(c.dailyLimit) && isNum(c.askedToday) && +c.askedToday>=+c.dailyLimit && !(c.resetsAt && Date.now()>=Date.parse(c.resetsAt));
+function chatUseHTML(){
+  const c=S.chatUse; if(!c || !isNum(c.askedToday)) return "";
+  if(chatAtLimit(c)) return `<div class="info" id="askLimit" role="status"><span><b>Questions are off until midnight UTC${c.resetsAt&&fmtTime(c.resetsAt)?` (${esc(fmtTime(c.resetsAt))} your time)`:""}.</b> You've asked ${plural(c.askedToday,"question")} today and the limit is ${count(c.dailyLimit)} a day for each login${isNum(c.costToday)?`. Today's answers cost ${costText(c.costToday)}`:""}. The site owner can change the limit.</span></div>`;
+  const asked = isNum(c.dailyLimit) ? `${count(c.askedToday)} of ${plural(c.dailyLimit,"question")} today` : `${plural(c.askedToday,"question")} today`;
+  return `<p class="t2" id="askDaily">${asked}${isNum(c.costToday)?`, ${costText(c.costToday)}`:""}</p>`;
 }
 function turnHTML(t, ti){
   const q=`<div class="ccmsg u">${esc(t.question)}</div>${t.told?`<p class="t2 told">${esc(t.told)}</p>`:""}`;
@@ -1047,6 +1080,7 @@ function askFabHTML(){
 }
 function askPanelHTML(){
   const a=S.ask, busy=!!activeTurn(), off=S.status&&S.status.claude&&S.status.claude.configured===false, sc=askScreen();
+  const limited=!busy && chatAtLimit(S.chatUse);   // the daily limit is reached: the box says why it is off and when it comes back
   const start = sc ? `<div id="askSuggest"><p class="t2">Claude searches S&amp;P's filings, reads the filing documents and looks up statutory data. To start from what is on screen, pick a question or type your own:</p>
         <div class="ccchips">${ASK_SUGGEST[sc.view].map((q,i)=>`<button type="button" class="chip" data-act="ask-suggest" data-v="${sc.view}" data-i="${i}">${esc(q)}</button>`).join("")}</div></div>`
     : `<p class="t2" id="askHint">For example: "Pull the homeowners form filings two companies made in Florida since 2021 and compare what changed." Name the companies, the state and the dates you care about. Claude searches S&amp;P's filings, reads the filing documents and looks up statutory data, then answers with sources you can open at the page it cites.</p>`;
@@ -1061,9 +1095,10 @@ function askPanelHTML(){
       ${a.turns.length?`<div class="cclog" id="askLog" aria-live="polite">${a.turns.map(turnHTML).join("")}</div>`:start}
     </div>
     <div class="ask-f">
-      <div class="ccform"><textarea id="ask_input" data-bind="ask.draft" rows="2" maxlength="${MAX_QUESTION}" aria-label="${a.turns.length?"Follow-up question":"Question"}" placeholder="${a.turns.length?"Ask a follow-up question":"Type a question"}">${esc(a.draft)}</textarea>
-        <button type="button" class="btn primary" data-act="ask-send" ${busy?"disabled":""}>${busy?"Answering…":"Ask"}</button></div>
+      <div class="ccform"><textarea id="ask_input" data-bind="ask.draft" rows="2" maxlength="${MAX_QUESTION}" aria-label="${a.turns.length?"Follow-up question":"Question"}" placeholder="${a.turns.length?"Ask a follow-up question":"Type a question"}"${limited?" disabled":""}>${esc(a.draft)}</textarea>
+        <button type="button" class="btn primary" data-act="ask-send" ${busy||limited?"disabled":""}>${busy?"Answering…":"Ask"}</button></div>
       <p class="t2" id="askTold">${esc(askToldText(sc))}</p>
+      ${chatUseHTML()}
     </div></aside>`;
 }
 /* Draws the button and, when open, the panel. Left alone when nothing in them has changed, so the page under the
@@ -1550,6 +1585,7 @@ function resetState(){
   for(const d of Object.values(S.docs)) if(d.url){ try{ URL.revokeObjectURL(d.url); }catch{} }
   S.session=null; S.drawer=null; S.status=null; S.statusErr=""; S.refs=null; S.refsLoading=false; S.refsMsg=""; S.refsErr=""; S.docs={};
   S.f=freshFilings(); S.ask=freshAsk(); S.st=freshStat();
+  S.chatUse=null; S.chatUseAt=0;
 }
 async function onSignedIn(session){
   const {data, error}=await S.sb.from("profiles").select("username,display_name,role").eq("id", session.user.id).maybeSingle();
