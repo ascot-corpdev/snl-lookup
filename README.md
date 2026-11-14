@@ -165,6 +165,12 @@ supabase secrets set ORG_NAME=...
 
 `ORG_NAME` is the company name Claude is told it works for; without it Claude is told it works for an insurer's team. `CLAUDE_MODEL` changes the model (the default is shown). Set `CHAT_SLICE_SECONDS=360` only on a paid Supabase plan (see [Supabase limits](#supabase-limits-that-matter)).
 
+Each login can ask 40 questions a day, counted from midnight UTC. To change that (0 means no limit):
+
+```bash
+supabase secrets set CHAT_DAILY_LIMIT=40
+```
+
 ### 7. Statutory data on Snowflake (when S&P creates the reader account)
 
 Snowflake's SQL API does not accept a username and password. It needs a key pair or a programmatic access token on a service user in the reader account S&P provides.
@@ -245,7 +251,7 @@ The app waits its turn so calls are at least a second apart, and stops with a pl
 
 - A question answered from search results alone: a few cents.
 - A question that reads documents: Anthropic counts 1,500 to 3,000 text tokens a page plus an image of each page. Three filings of about 50 pages each is roughly 400,000 to 600,000 tokens, or about $2 to $3 for the answer. Later steps of the same answer re-read the documents from Anthropic's cache at a twentieth of the price.
-- Each finished answer shows its token counts and S&P requests under the answer.
+- Under each answer the page shows what it cost in US dollars, worked out from Anthropic's list prices for the model that served each request, with the tokens read and written and the S&P requests used. A model not in the price list shows "cost n/d". The line under the question box shows the questions asked today and what they cost. These are estimates; the Anthropic console is the record of what was charged. To update a price, edit `PRICES` in `supabase/functions/_shared/chat.ts`.
 
 **Snowflake credits.** S&P's guide says an X-Small warehouse uses 1 credit an hour while it runs. Snowflake bills a minimum of one minute each time the warehouse wakes, so a statutory query (up to 8 short statements) costs about 0.02 credit, and Discover about the same. A repeated query opens from the saved result and costs nothing, whether it comes from the Statutory view or from Claude. In a reader account the provider (S&P) pays for credits; ask S&P whether use is capped or recharged.
 
