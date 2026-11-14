@@ -3,6 +3,7 @@
 // A test sets options before the page loads with page.addInitScript(o => { window.__opts = o; }, {...}):
 //   role: "corpdev" (default) or "reader"    signedOut: true to start at the sign-in form
 //   noProfile: true for a login with no role   seed: [[table, id, row], ...] rows to start with
+//   users: {username:{id, display_name, role}} more logins that can sign in (snl_jobs rows carry owner; the default is "u1")
 (function(){
   const clone = o => JSON.parse(JSON.stringify(o));
   const O = window.__opts || {};
@@ -10,10 +11,17 @@
   const store = { profiles:{ [ME]:{id:ME, username:"corpdev1", display_name:"Corp Dev 1", role:O.role||"corpdev"} }, snl_jobs:{}, snl_settings:{}, snl_store:{} };
   if(O.noProfile) delete store.profiles[ME];
   (O.seed||[]).forEach(([t,id,row]) => { store[t][id] = {id, ...clone(row)}; });
+  // More logins, for tests that sign one out and another in: users: {corpdev2:{id:"u2", display_name:"Corp Dev 2", role:"reader"}}
+  Object.values(O.users||{}).forEach(u => { store.profiles[u.id] = {username:"", ...clone(u)}; });
+  Object.entries(O.users||{}).forEach(([name,u]) => { store.profiles[u.id].username = store.profiles[u.id].username || name; });
   const authCbs = [];
-  const session = () => ({user:{id:ME}, access_token:"t"});
+  const session = () => ({user:{id:M.uid}, access_token: M.uid===ME ? "t" : "t-"+M.uid});
   const M = window.__mock = {
     store, log:[], created:null, signedOut:!!O.signedOut,
+    uid:ME,              // the login signed in now; snl_jobs rows are read only where owner is this login, as row-level security does
+    jobQueries:[],       // every read of snl_jobs: {cols, eqs, ins, gtes, lts, ord, lim, range, uid}
+    listReads:0,         // how many times the page has read snl_jobs other than by id (the past answers list, the latest answer)
+    failList:!!O.failList,   // true: reading snl_jobs other than by id fails (option failList: true from the start)
     jobReads:0,          // how many times the page has read a job row
     failJobs:false,      // true: reading snl_jobs fails, as it would with no connection
     denySettings:false,  // true: saving a setting is refused, as row-level security refuses a reader
@@ -36,9 +44,12 @@
   };
 
   function query(table){
-    const st = {op:"select", eqs:[], ins:[], ord:null, lim:null, single:false, vals:null};
+    const st = {op:"select", eqs:[], ins:[], ord:null, lim:null, single:false, vals:null, cols:null, gtes:[], lts:[], range:null};
     const b = {
-      select(c){ st.cols=c; return b; },
+      select(c){ st.cols=c||null; return b; },
+      gte(c, v){ st.gtes.push([c, v]); return b; },
+      lt(c, v){ st.lts.push([c, v]); return b; },
+      range(a, z){ st.range=[a, z]; return b; },
       eq(c, v){ st.eqs.push([c, v]); return b; },
       in(c, v){ st.ins.push([c, v]); return b; },
       order(c, o){ st.ord=[c, !(o&&o.ascending===false)]; return b; },
@@ -47,7 +58,9 @@
       upsert(row){ st.op="upsert"; st.vals=row; return b; },
       then(res, rej){ return Promise.resolve().then(run).then(res, rej); }
     };
-    const match = r => st.eqs.every(([c,v]) => String(r[c]) === String(v)) && st.ins.every(([c,v]) => v.map(String).includes(String(r[c])));
+    const match = r => st.eqs.every(([c,v]) => String(r[c]) === String(v)) && st.ins.every(([c,v]) => v.map(String).includes(String(r[c])))
+      && st.gtes.every(([c,v]) => String(r[c]) >= String(v)) && st.lts.every(([c,v]) => String(r[c]) < String(v))
+      && (table !== "snl_jobs" || (r.owner ?? ME) === M.uid);
     function run(){
       const T = store[table];
       if(!T) return {data:null, error:{code:"PGRST205", message:`Could not find the table 'public.${table}' in the schema cache`}};
@@ -58,22 +71,28 @@
         return {data:null, error:null};
       }
       if(table === "snl_store") return storeRun();
-      if(table === "snl_jobs"){ M.jobReads++; if(M.failJobs) return {data:null, error:{message:"TypeError: Failed to fetch"}}; }
+      const byId = st.eqs.some(([c]) => c === "id");
+      if(table === "snl_jobs"){ M.jobQueries.push(clone({cols:st.cols, eqs:st.eqs, ins:st.ins, gtes:st.gtes, lts:st.lts, ord:st.ord, lim:st.lim, range:st.range, single:st.single, uid:M.uid}));
+        if(!byId){ M.listReads++; if(M.failList || M.failJobs) return {data:null, error:{message:"TypeError: Failed to fetch"}}; } }
+      if(table === "snl_jobs" && byId){ M.jobReads++; if(M.failJobs) return {data:null, error:{message:"TypeError: Failed to fetch"}}; }
       let rows = Object.values(T).filter(match).map(clone);
       if(st.ord){ const [c,asc]=st.ord; rows.sort((x,y)=>(String(x[c])<String(y[c])?-1:String(x[c])>String(y[c])?1:0)*(asc?1:-1)); }
       if(st.lim) rows = rows.slice(0, st.lim);
+      if(st.range) rows = rows.slice(st.range[0], st.range[1]+1);
+      // only the columns asked for, as PostgREST answers
+      if(table === "snl_jobs" && st.cols && st.cols !== "*"){ const cs = st.cols.split(",").map(s=>s.trim()); rows = rows.map(r => Object.fromEntries(cs.filter(c=>c in r).map(c=>[c, r[c]]))); }
       return st.single ? {data:rows[0]||null, error:null} : {data:rows, error:null};
     }
     // snl_store answers the way PostgREST would: only the columns asked for, where "alias:doc->a->b" is a JSON
     // path into a jsonb column and a plain name is the whole column (so "doc" alone returns every saved row).
     async function storeRun(){
-      M.storeReads.push({cols:st.cols===undefined?"*":String(st.cols), eqs:clone(st.eqs), ord:st.ord, lim:st.lim});
+      M.storeReads.push({cols:st.cols==null?"*":String(st.cols), eqs:clone(st.eqs), ord:st.ord, lim:st.lim});
       if(M.storeDelay) await new Promise(r=>setTimeout(r, M.storeDelay));
       if(M.failStore) return {data:null, error:{message:M.failStore}};
       let rows = Object.values(store.snl_store).filter(match).map(clone);
       if(st.ord){ const [c,asc]=st.ord; rows.sort((x,y)=>(String(x[c])<String(y[c])?-1:String(x[c])>String(y[c])?1:0)*(asc?1:-1)); }
       if(st.lim) rows = rows.slice(0, st.lim);
-      const cols = st.cols===undefined||st.cols==="*" ? null : String(st.cols).split(",").map(s=>s.trim()).filter(Boolean).map(s=>{
+      const cols = st.cols==null||st.cols==="*" ? null : String(st.cols).split(",").map(s=>s.trim()).filter(Boolean).map(s=>{
         const m=s.match(/^(?:([A-Za-z_]\w*):)?([A-Za-z_]\w*)((?:->>?\w+)*)$/); if(!m) throw new Error("bad select "+s);
         const path=[...m[3].matchAll(/->(>?)(\w+)/g)].map(x=>[x[2], !!x[1]]);
         return {as:m[1]||(path.length?path[path.length-1][0]:m[2]), col:m[2], path};
@@ -94,6 +113,8 @@
         M.log.push({op:"signIn", email:c&&c.email});
         if(M.failLogin==="invalid") return {data:{session:null}, error:{code:"invalid_credentials", message:"Invalid login credentials"}};
         if(M.failLogin==="rate") return {data:{session:null}, error:{code:"over_request_rate_limit", message:"Request rate limit reached"}};
+        const name = String(c&&c.email||"").split("@")[0], other = Object.entries(O.users||{}).find(([n]) => n === name);
+        M.uid = other ? other[1].id : ME;
         M.signedOut = false; return {data:{session:session()}, error:null};
       },
       async signOut(){ M.signedOut = true; M.log.push({op:"signOut"}); M.fire("SIGNED_OUT"); return {error:null}; },

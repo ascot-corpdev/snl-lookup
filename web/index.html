@@ -228,6 +228,18 @@ body.signed footer.foot .wrap{padding-bottom:calc(68px + env(safe-area-inset-bot
 .blk{display:grid;gap:8px;min-width:0}
 .blk-h{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;justify-content:space-between;min-width:0}
 .blk-h>div{min-width:0}
+/* Past answers: the login's own questions from the last 30 days, under the start of an empty conversation */
+.past{display:grid;gap:8px;min-width:0;border-top:1px solid var(--grid);padding-top:12px}
+.pastlist{list-style:none;margin:0;padding:0;border:1px solid var(--grid);min-width:0}
+.pastlist li{min-width:0}
+.pastlist li+li{border-top:1px solid var(--grid)}
+.pastq{all:unset;box-sizing:border-box;cursor:pointer;display:grid;gap:2px;width:100%;padding:8px 10px;min-width:0;overflow-wrap:anywhere}
+.pastq:hover{background:var(--alt)}
+.pastq:focus-visible{outline:2px solid var(--magenta);outline-offset:-2px}
+.pastq[aria-disabled="true"]{cursor:default}
+.pastq .pq{font-weight:bold;color:var(--ink)}
+.pastq .stopped{color:var(--magenta)}
+.turn .asked{margin:0;justify-self:end;text-align:right;overflow-wrap:anywhere}
 
 /* Drawer (change password) */
 .scrim{position:fixed;inset:0;background:var(--overlay);z-index:40}
@@ -1038,7 +1050,7 @@ async function pollJob(){
     if(t.status==="error") t.error=data.error||"Claude couldn't finish this answer. Ask again.";
     if(t.status==="done"||t.status==="error") loadChatUse();   // the day's count and cost, now with this answer
     // ended while the panel was closed: mark the button; ended in view: show the answer from its top
-    if(t.status==="done"||t.status==="error"){ if(S.ask.open) S.ask.scroll=S.ask.turns.indexOf(t); else S.ask.unseen=t.status; }
+    if(t.status==="done"||t.status==="error"){ if(S.ask.open){ S.ask.scroll=S.ask.turns.indexOf(t); markSeen(t.jobId); } else S.ask.unseen=t.status; }
     // The function works in time slices. When it has paused, or has gone quiet, ask it to pick the answer up again.
     const now=Date.now(), quiet=(t.status==="running"||t.status==="queued") && !blank(data.heartbeat_at) && now-Date.parse(data.heartbeat_at)>TIMING.stale;
     if(t.status!=="paused" && !quiet) t.contNote="";
@@ -1057,6 +1069,7 @@ function openAsk(){
   const a=S.ask; a.open=true; a.unseen="";
   if(!S.chatUseAt || Date.now()-S.chatUseAt>60000) loadChatUse();   // where the login stands today, checked at most once a minute
   a.scroll = !a.turns.length ? null : activeTurn() ? "bottom" : a.turns.length-1;   // a running answer at its latest step; a finished one from its top
+  pastOnOpen();
   renderAsk(); document.getElementById("ask_input")?.focus({preventScroll:true});
 }
 function closeAsk(){ S.ask.open=false; renderAsk(); document.getElementById("askFab")?.focus(); }
@@ -1127,7 +1140,7 @@ function chatUseHTML(){
   return `<p class="t2" id="askDaily">${asked}${isNum(c.costToday)?`, ${costText(c.costToday)}`:""}</p>`;
 }
 function turnHTML(t, ti){
-  const q=`<div class="ccmsg u">${esc(t.question)}</div>${t.told?`<p class="t2 told">${esc(t.told)}</p>`:""}`;
+  const q=`${t.asked?pastLabelHTML(t):""}<div class="ccmsg u">${esc(t.question)}</div>${t.told?`<p class="t2 told">${esc(t.told)}</p>`:""}`;
   const wrap=inner=>`<div class="turn" id="turn-${ti}">${q}${inner}</div>`;
   if(t.status==="error") return wrap(t.calm ? `<div class="info ask-calm" role="status"><span>${esc(t.error)}</span></div>` : `<div class="ccmsg err" role="alert">${esc(t.error)}</div>`);
   if(t.status==="done") return wrap(`<div class="ccmsg a done">${answerHTML(t, ti)}</div>`);
@@ -1161,7 +1174,7 @@ function askPanelHTML(){
     <div class="ask-b" id="askBody" data-keep>
       ${off?`<div class="info" id="askOff" role="status"><span><b>Questions aren't set up yet.</b> ${isCorpDev()?"Set ANTHROPIC_API_KEY on Supabase and deploy the snl-chat function (see the README).":"Ask Corp Dev to finish the set-up."}</span></div>`:""}
       <p class="t2" id="askSees">Claude sees only your question, a short description of what is on this screen, and what S&amp;P returns for it: nothing else from this site${ORG?` or from ${esc(ORG)}`:""}. Check figures against the source before you use them.</p>
-      ${a.turns.length?`<div class="cclog" id="askLog" aria-live="polite">${a.turns.map(turnHTML).join("")}</div>`:start}
+      ${a.turns.length?`<div class="cclog" id="askLog" aria-live="polite">${a.turns.map(turnHTML).join("")}</div>`:start+pastHTML()}
     </div>
     <div class="ask-f">
       <div class="ccform"><textarea id="ask_input" data-bind="ask.draft" rows="2" maxlength="${MAX_QUESTION}" aria-label="${a.turns.length?"Follow-up question":"Question"}" placeholder="${a.turns.length?"Ask a follow-up question":"Type a question"}"${limited?" disabled":""}>${esc(a.draft)}</textarea>
@@ -1187,6 +1200,108 @@ function renderAsk(){
     else if(a.scroll==="bottom" || (atFoot && activeTurn())) body.scrollTop=body.scrollHeight;   // follow a running answer while the reader is at its foot
   }
   a.scroll=null;
+}
+
+/* ---------- Ask Claude: past answers, and an answer that outlives a reload ----------
+   The database is the only record: the page reads the login's own snl_jobs rows (row-level security limits them to
+   the login, and the page asks for its own owner too). The list reads a few small columns; one answer's full row is
+   read only when it is opened. The only thing kept in the browser is the id of the last answer the reader has seen. */
+const PAST_COLS = "id,status,question,error,created_at,updated_at,heartbeat_at";
+const PAST_PAGE = 10, PAST_DAYS = 30, SEEN_KEY = "snl.seenAnswer";
+// rows: the list (null until it first loads); failedMore: whether the load that failed was "Show more";
+// resumed: the latest answer has been checked once since sign-in; opening: the id being fetched
+function freshPast(){ return {rows:null, loading:false, err:"", failedMore:false, more:false, resumed:false, opening:"", openErr:""}; }
+S.past = freshPast();
+function seenId(){ try{ return localStorage.getItem(SEEN_KEY)||""; }catch{ return ""; } }
+function markSeen(id){ if(!id) return; try{ localStorage.setItem(SEEN_KEY, String(id)); }catch{} }
+const shortText = (s, n) => { s=String(s??"").replace(/\s+/g," ").trim(); return s.length>n ? s.slice(0,n-1).trimEnd()+"…" : s; };
+const askedText = s => { const d=fmtAt(s), h=fmtTime(s); return `Asked ${d}${h?` at ${h}`:""}`; };
+function pastState(r){
+  if(r.status==="done") return {text:"Answered", cls:""};
+  if(r.status==="error") return {text:"Stopped: "+shortText(r.error||"Claude couldn't finish this answer.", 160), cls:"stopped"};
+  return {text:"Still running", cls:""};
+}
+/* A row of snl_jobs as a turn of the conversation, the same shape askQuestion makes. asked: opened from the list. */
+function jobTurn(row, asked){
+  const st=["queued","running","paused","done","error"].includes(row.status) ? row.status : "running";
+  return {question:String(row.question??""), told:"", status:st, progress:Array.isArray(row.progress)?row.progress:[], partial:typeof row.partial==="string"?row.partial:"",
+    result: st==="done" ? (row.result&&typeof row.result==="object"?row.result:{}) : null, error: st==="error" ? (row.error||"Claude couldn't finish this answer. Ask again.") : "",
+    calm:false, jobId:row.id, lastContinue:0, note:"", contNote:"", asked: asked ? String(row.created_at||"") : ""};
+}
+function pastQuery(cols){
+  return S.sb.from("snl_jobs").select(cols).eq("owner", S.session.uid).gte("created_at", new Date(Date.now()-PAST_DAYS*DAY).toISOString()).order("created_at",{ascending:false});
+}
+/* The first page of the list (again), or the next page with "Show more". */
+async function loadPast(more){
+  const p=S.past; if(!S.session || p.loading) return;
+  const from = more && p.rows ? p.rows.length : 0;
+  p.loading=true; p.err=""; renderAsk();
+  let data=null, error=null;
+  try{ ({data, error}=await pastQuery(PAST_COLS).range(from, from+PAST_PAGE)); }catch(e){ error=e; }
+  if(S.past!==p || !S.session) return;   // signed out meanwhile: this list belonged to that login
+  p.loading=false;
+  if(error || !Array.isArray(data)){ p.err="Couldn't load your past answers. Check your connection and try again."; p.failedMore=!!from; renderAsk(); return; }
+  const base=from ? p.rows : [], ids=new Set(base.map(r=>r.id));
+  p.rows=base.concat(data.slice(0, PAST_PAGE).filter(r=>r && !ids.has(r.id))); p.more=data.length>PAST_PAGE;
+  if(!p.resumed){ p.resumed=true; await resumeLatest(p.rows[0]); }
+  renderAsk();
+}
+/* After a reload or a sign-in: follow the latest answer again if it is still going, or hold it ready if it ended
+   while the page was closed and hasn't been seen. */
+async function resumeLatest(row){
+  const a=S.ask, p=S.past;
+  if(!row || a.turns.length) return;
+  const going=["queued","running","paused"].includes(row.status);
+  if(!going && (!["done","error"].includes(row.status) || row.id===seenId())) return;
+  let full=row;
+  if(row.status==="done"){
+    let data=null; try{ ({data}=await S.sb.from("snl_jobs").select(JOB_COLS).eq("id", row.id).eq("owner", S.session.uid).maybeSingle()); }catch{}
+    if(S.past!==p || S.ask!==a || a.turns.length || !data) return;
+    full=data;
+  }
+  const t=jobTurn(full, false); a.turns=[t];
+  if(going){ pollJob().then(()=>{ if(S.session && activeTurn() && !S.ask.timer) schedulePoll(); }); }
+  else if(a.open){ a.scroll=0; markSeen(t.jobId); }
+  else a.unseen=t.status;
+}
+/* Opens one past answer: its full row, shown as a fresh answer is. A running one is followed again. */
+async function openPast(id){
+  const p=S.past, a=S.ask;
+  if(!id || p.opening || a.turns.length) return;
+  p.opening=id; p.openErr=""; renderAsk();
+  let data=null, error=null;
+  try{ ({data, error}=await S.sb.from("snl_jobs").select(JOB_COLS).eq("id", id).eq("owner", S.session.uid).maybeSingle()); }catch(e){ error=e; }
+  if(S.past!==p || !S.session) return;
+  p.opening="";
+  if(error || !data){ p.openErr = error ? "Couldn't open that answer. Check your connection and try again." : "That answer is no longer kept. Answers are kept for 30 days."; renderAsk(); return; }
+  if(S.ask!==a || a.turns.length){ renderAsk(); return; }
+  const t=jobTurn(data, true); a.turns=[t]; a.scroll=0;
+  if(activeTurn()){ a.scroll="bottom"; pollJob().then(()=>{ if(S.session && activeTurn() && !S.ask.timer) schedulePoll(); }); }
+  else if(p.rows && p.rows[0] && p.rows[0].id===data.id) markSeen(data.id);   // only the latest counts as seen
+  renderAsk();
+}
+/* The panel opened: count what it shows as seen, and freshen the list when the list is what it shows. */
+function pastOnOpen(){
+  const last=S.ask.turns[S.ask.turns.length-1];
+  if(last && last.jobId && !last.asked && ["done","error"].includes(last.status)) markSeen(last.jobId);
+  if(!S.ask.turns.length) loadPast(false);
+}
+function pastLabelHTML(t){
+  const back = S.ask.turns.length===1 && !activeTurn() ? ` <button type="button" class="lnk" data-act="ask-new">Back to past answers</button>` : "";
+  return `<p class="t2 asked">${esc(askedText(t.asked))}. A saved answer.${back}</p>`;
+}
+function pastHTML(){
+  const p=S.past, retry=`<button class="btn sm" data-act="past-retry">Try again</button>`;
+  const problem = p.err ? `<div class="banner" id="pastErr" role="alert"><span>${esc(p.err)}</span>${retry}</div>` : "";
+  let body;
+  if(p.rows===null) body = problem || `<p class="t2" id="pastLoading">Loading your past answers…</p>`;
+  else if(!p.rows.length) body = (problem || `<p class="t2" id="pastEmpty">No questions in the last 30 days. Your questions and Claude's answers are kept here for 30 days.</p>`);
+  else body = `<ul class="pastlist" id="pastList">${p.rows.map(r=>{ const s=pastState(r), busy=p.opening===r.id;
+      return `<li><button type="button" class="pastq" data-act="past-open" data-id="${esc(r.id)}"${p.opening?` aria-disabled="true"`:""}><span class="pq">${esc(shortText(r.question, 140))}</span>
+        <span class="t2">${esc(askedText(r.created_at))} · <span class="${s.cls}">${esc(busy?"Opening…":s.text)}</span></span></button></li>`; }).join("")}</ul>`
+      + problem + (p.more && !p.err ? `<div><button type="button" class="btn sm" id="pastMore" data-act="past-more" ${p.loading?"disabled":""}>${p.loading?"Loading…":"Show more"}</button></div>` : "");
+  return `<section class="past" id="askPast" aria-labelledby="pastH"><h3 id="pastH">Past answers</h3>
+    ${p.openErr?`<p class="err" id="pastOpenErr" role="alert">${esc(p.openErr)}</p>`:""}${body}</section>`;
 }
 
 /* ---------- Statutory ---------- */
@@ -1604,7 +1719,10 @@ document.addEventListener("click", e=>{
     case "ask-wide": S.ask.wide=!S.ask.wide; renderAsk(); break;
     case "ask-suggest": { const q=(ASK_SUGGEST[t.dataset.v]||[])[+t.dataset.i]; if(q){ S.ask.draft=q; renderAsk(); const box=document.getElementById("ask_input"); if(box){ box.focus(); box.setSelectionRange(q.length, q.length); } } break; }   // fills the box; sending is left to the reader
     case "ask-send": askQuestion(); break;
-    case "ask-new": newConversation(); break;
+    case "ask-new": newConversation(); loadPast(false); break;
+    case "past-open": openPast(t.dataset.id); break;
+    case "past-more": loadPast(true); break;
+    case "past-retry": loadPast(S.past.failedMore); break;
     case "goto-source": { const el=document.getElementById(`src-${t.dataset.turn}-${t.dataset.n}`); if(el){ document.querySelectorAll(".srcs li.hit").forEach(x=>x.classList.remove("hit")); el.classList.add("hit"); el.scrollIntoView({block:"center"}); el.querySelector("button")?.focus({preventScroll:true}); } break; }
 
     case "stat-kind": st.kind=t.dataset.k==="group"?"group":"company"; render(); break;
@@ -1660,12 +1778,13 @@ function resetState(){
   S.f=freshFilings(); S.ask=freshAsk(); S.st=freshStat();
   S.chatUse=null; S.chatUseAt=0;
   S.conn=null;
+  S.past=freshPast();
 }
 async function onSignedIn(session){
   const {data, error}=await S.sb.from("profiles").select("username,display_name,role").eq("id", session.user.id).maybeSingle();
   if(error || !data || !ROLES[data.role]){ S.leaving=true; try{ await S.sb.auth.signOut(); }catch{} S.leaving=false; resetState(); S.loginErr="This login has no role on this site yet. Ask the site owner to set it up."; render(); return; }
-  S.session={username:data.username, name:data.display_name||data.username, role:data.role};
-  S.loginErr=""; route(); loadStatus();
+  S.session={username:data.username, name:data.display_name||data.username, role:data.role, uid:session.user.id};
+  S.loginErr=""; route(); loadStatus(); loadPast(false);
 }
 async function doLogin(){
   if(S.loginBusy) return;
