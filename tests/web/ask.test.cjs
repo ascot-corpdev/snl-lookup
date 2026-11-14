@@ -125,7 +125,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
 
   t=await open(); p=t.p;
   // ----- before asking -----
-  ok("says what Claude sees", (await t.txt("#askSees"))==="Claude sees only your question, a short description of what is on this screen, and what S&P returns for it: nothing else from this site or from Ascot. Check figures against the source before you use them.");
+  ok("says what Claude sees", (await t.txt("#askSees"))==="Claude sees only your question, a short description of what is on this screen, and what S&P returns for it: nothing else from this site. Check figures against the source before you use them.");
   ok("a hint for the first question, and no conversation yet", (await t.txt("#askHint")).startsWith("For example:") && !(await p.$("#askLog")) && !(await p.$('button[data-act="ask-new"]')) && (await p.getAttribute("#ask_input","maxlength"))==="4000");
   ok("nothing on screen: says Claude starts from the question alone, and offers no starting points", (await t.txt("#askTold"))==="Nothing is on screen yet, so Claude starts from your question alone." && !(await p.$("#askSuggest")));
   await p.click('button[data-act="ask-send"]'); await p.waitForTimeout(100);
