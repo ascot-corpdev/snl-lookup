@@ -1,0 +1,1239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>Ascot SNL lookup</title>
+<style>
+/* Layout: Ascot template chrome (spectrum stripe, magenta action title, navy text, footer) over three views:
+   Filings (search and open S&P product filings), Ask (Claude answers with sources), Statutory (Snowflake). */
+:root{
+  --bg:#FFFFFF; --surface:#FFFFFF; --tile:#EEEEF5; --alt:#F5F5FA; --grid:#D9DCE6;
+  --ink:#262166; --muted:#666666; --magenta:#EB008C; --blue:#00539E; --lblue:#0081C3;
+  --teal:#00857C; --purple:#944599; --orange:#C46A1B; --head:#262166; --headInk:#FFFFFF;
+  --overlay:rgba(38,33,102,.28); --shadow:0 12px 40px rgba(38,33,102,.18);
+  --font:Arial,"Helvetica Neue",Helvetica,sans-serif;
+}
+:root,:root[data-theme]{color-scheme:light}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{background:var(--bg);margin:0}
+body{color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.45}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--blue)}
+:focus-visible{outline:2px solid var(--magenta);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* Template chrome */
+.stripe{display:flex;height:6px}
+.stripe i{flex:1}
+.stripe i:nth-child(1){background:#262166}.stripe i:nth-child(2){background:#944599}
+.stripe i:nth-child(3){background:#EB008C}.stripe i:nth-child(4){background:#0081C3}
+.stripe i:nth-child(5){background:#00539E}.stripe i:nth-child(6){background:#00857C}
+.wrap{max-width:1320px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header.top{border-bottom:1px solid var(--grid);background:var(--surface)}
+.top .wrap{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px 24px;padding-block:14px 0}
+.brand{flex:1 1 320px;min-width:0;padding-bottom:12px}
+.kicker{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink);font-weight:bold}
+.brand h1{margin:2px 0 0;font-size:24px;color:var(--magenta);font-weight:normal;text-wrap:balance}
+.who{position:relative;display:flex;align-items:center;gap:10px;padding-bottom:12px;font-size:13px}
+.dot{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:12px;font-weight:bold;background:var(--blue);border:0;padding:0;cursor:pointer;font-family:inherit}
+.whomenu{position:absolute;right:0;top:calc(100% - 4px);z-index:30;min-width:220px;background:var(--surface);border:1px solid var(--grid);box-shadow:var(--shadow);display:flex;flex-direction:column;padding:6px 0}
+.whomenu .wm-n{padding:8px 14px 10px;border-bottom:1px solid var(--grid);margin-bottom:4px}
+.whomenu .wm-n b{display:block}.whomenu .wm-n span{font-size:12px;color:var(--muted)}
+.whomenu button{all:unset;cursor:pointer;padding:9px 14px;font-weight:bold;font-size:13px}
+.whomenu button:hover,.whomenu button:focus-visible{background:var(--tile)}
+nav.tabs{display:flex;gap:4px;flex-basis:100%;overflow-x:auto}
+nav.tabs a{padding:10px 16px;text-decoration:none;color:var(--ink);border-bottom:3px solid transparent;font-weight:bold;white-space:nowrap}
+nav.tabs a[aria-current="page"]{border-bottom-color:var(--magenta);color:var(--magenta)}
+nav.tabs a:hover{background:var(--alt)}
+
+/* Status strip: S&P requests used and when each source was last refreshed, on every view */
+.strip{background:var(--alt);border-bottom:1px solid var(--grid);font-size:12px}
+.strip .wrap{display:flex;flex-wrap:wrap;gap:4px 22px;padding-block:7px}
+.strip .s-i{min-width:0;overflow-wrap:anywhere}
+.strip .s-i.warn{color:var(--magenta);font-weight:bold}
+
+main .wrap{padding-block:22px 28px;display:flex;flex-direction:column;gap:22px}
+footer.foot{border-top:1px solid var(--grid)}
+footer.foot .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 12px;padding-block:10px;font-size:11px;color:var(--muted)}
+
+/* Type */
+.action-title{font-size:22px;color:var(--magenta);margin:0;font-weight:bold;text-wrap:balance}
+.sub{margin:4px 0 0;color:var(--ink);max-width:90ch}
+.sec{display:flex;align-items:center;gap:12px;margin:0;font-size:14px;font-weight:bold;color:var(--ink)}
+.sec::before,.sec::after{content:"";flex:1;height:1px;background:var(--ink);opacity:.6}
+.source{font-size:11px;font-style:italic;color:var(--muted);margin:0;overflow-wrap:anywhere}
+.t1{font-weight:bold}
+.t2{font-size:12px;color:var(--muted)}
+p.t2{margin:0}
+h3{margin:0;font-size:15px}
+
+/* Notices: .banner for problems, .info for calm states and things to read, .notes for S&P's caveats on a result */
+.banner,.info,.notes{background:var(--tile);border-left:4px solid var(--magenta);padding:10px 14px;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;min-width:0;overflow-wrap:anywhere}
+.info{border-left-color:var(--blue)}
+.banner>span,.info>span{min-width:0;flex:1 1 260px}
+.notes{display:block}
+.notes ul{margin:6px 0 0;padding-left:18px}
+.notes li+li{margin-top:4px}
+.err{color:var(--magenta);font-size:13px;margin:0;overflow-wrap:anywhere}
+.empty{border:1px dashed var(--grid);padding:28px;text-align:center;display:flex;flex-direction:column;gap:10px;align-items:center}
+.empty p{margin:0;max-width:60ch}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;z-index:60;font-size:13px;max-width:calc(100% - 32px)}
+
+/* Controls */
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;min-width:0}
+.toolbar .grow{flex:1 1 220px;min-width:0}
+.inline{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-width:0}
+input[type=text],input[type=search],input[type=number],input[type=date],input[type=password],select,textarea{
+  width:100%;min-width:0;padding:7px 9px;border:1px solid var(--grid);background:var(--surface);border-radius:0}
+textarea{resize:vertical;min-height:64px}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--ink);background:var(--surface);color:var(--ink);cursor:pointer;font-weight:bold;font-size:13px;white-space:nowrap;border-radius:0}
+.btn:hover{background:var(--tile)}
+.btn.primary{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.btn.primary:hover{opacity:.9}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn.sm{padding:4px 9px;font-size:12px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink)}
+.seg{display:inline-flex}.seg .btn+.btn{margin-left:-1px}
+.lnk{all:unset;cursor:pointer;color:var(--blue);text-decoration:underline;font-weight:bold}
+.lnk:focus-visible{outline:2px solid var(--magenta);outline-offset:2px}
+.pill{display:inline-block;padding:2px 8px;font-size:11px;font-weight:bold;border:1px solid currentColor;white-space:nowrap}
+.fchip{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:5px 8px;border:1px solid var(--grid);background:var(--surface);color:var(--ink);cursor:pointer;font-size:12px;font-weight:bold;white-space:nowrap;border-radius:0}
+.fchip:hover{border-color:var(--magenta)}
+.fchip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#fff}
+label.f,.f{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:bold;min-width:0;overflow-wrap:anywhere}
+label.f em,.f em{font-weight:normal;font-style:normal;color:var(--muted)}
+.f>p,.f input,.f select,.f textarea,.f td,.f .t2,.f .banner,.f .info,.blk-h select{font-weight:normal}
+.tcard{border:1px solid var(--grid);padding:14px 16px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.fgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 14px}
+.fgrid.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.fgrid .full{grid-column:1/-1}
+.checks{display:flex;flex-direction:column;gap:5px;max-height:168px;overflow:auto;border:1px solid var(--grid);padding:8px;font-weight:normal}
+.checks label{display:flex;gap:6px;align-items:flex-start;font-size:13px;overflow-wrap:anywhere}
+.checks input{margin-top:2px;flex:none}
+.stgrid{display:flex;flex-wrap:wrap;gap:4px}
+.stgrid .fchip{min-width:38px;padding:5px 4px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+.cchip{display:inline-flex;align-items:center;gap:8px;max-width:100%;padding:4px 4px 4px 10px;background:var(--tile);font-size:12px;font-weight:normal;min-width:0}
+.cchip b{overflow-wrap:anywhere}
+.cchip button{all:unset;cursor:pointer;padding:2px 7px;font-weight:bold}
+.cchip button:hover,.cchip button:focus-visible{background:var(--ink);color:#fff}
+.matches{list-style:none;margin:0;padding:0;border:1px solid var(--grid);font-weight:normal}
+.matches li{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;justify-content:space-between;padding:8px 10px;min-width:0}
+.matches li+li{border-top:1px solid var(--grid)}
+.matches li>div{min-width:0;flex:1 1 220px;overflow-wrap:anywhere}
+
+/* Tables */
+.tbl-wrap{overflow-x:auto;border:1px solid var(--grid);max-width:100%}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{background:var(--head);color:var(--headInk);font-weight:bold;text-align:left;padding:8px 10px;white-space:nowrap;font-size:12px}
+th.num{text-align:right}
+td{padding:8px 10px;border-top:1px solid var(--grid);vertical-align:top}
+tbody tr:nth-child(even) td{background:var(--alt)}
+th .sorth{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+th .sorth:hover{text-decoration:underline}
+th .sorth:focus-visible{outline:2px solid #fff;outline-offset:2px}
+th .sorth .ar{font-size:9px}
+/* a table inside a scrolling box keeps whole words and scrolls, rather than breaking words to fit */
+.tbl-wrap td,.tbl-wrap th,.tbl-wrap code{overflow-wrap:break-word}
+.filings td{overflow-wrap:break-word}
+.filings .c-co,.filings .c-desc{overflow-wrap:anywhere}
+@media (min-width:701px){.filings .c-co{min-width:170px}.filings .c-desc{min-width:240px}.filings .c-dates,.filings .c-tn{white-space:nowrap}}
+.filings .dl{display:grid;grid-template-columns:auto auto;gap:1px 8px;justify-content:start;font-size:12px}
+.filings .dl span{color:var(--muted)}
+.counts{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;min-width:0}
+.counts b{font-weight:bold}
+.counts span{overflow-wrap:anywhere}
+.stat td:first-child,.stat th:first-child{min-width:160px}
+.stat td:first-child{overflow-wrap:anywhere}
+
+/* Ask */
+.ccbox{border:1px solid var(--grid);padding:14px 16px;display:grid;gap:12px;min-width:0}
+.cch{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.cch .grow{flex:1}
+.cclog{display:grid;gap:12px;min-width:0}
+.ccmsg{padding:8px 12px;max-width:100%;min-width:0;overflow-wrap:anywhere}
+.ccmsg.u{background:var(--tile);justify-self:end;max-width:85%;white-space:pre-wrap}
+.ccmsg.a{border-left:3px solid var(--blue);display:grid;gap:12px}
+.ccmsg.a p{margin:0 0 6px}.ccmsg.a ul{margin:0 0 6px;padding-left:18px}
+.ccmsg.err{border-left:3px solid var(--magenta);color:var(--magenta)}
+.ccmsg .look{font-size:12px;color:var(--muted);margin:0}
+.ccform{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}.ccform textarea{width:100%;min-height:44px}.ccform .btn{justify-content:center}
+.steps{margin:0;padding-left:20px;font-size:13px}
+.steps li+li{margin-top:2px}
+.steps li span{color:var(--muted);font-size:11px;margin-left:8px;white-space:nowrap}
+.partial{border-top:1px dashed var(--grid);padding-top:8px}
+.cite{all:unset;cursor:pointer;color:var(--blue);font-weight:bold;font-size:12px;margin-left:2px}
+.cite:hover{text-decoration:underline}
+.cite:focus-visible{outline:2px solid var(--magenta);outline-offset:1px}
+.cite.off{cursor:default;color:var(--muted)}
+.srcs{margin:0;padding-left:26px;display:grid;gap:10px}
+.srcs li{min-width:0;padding:2px 4px}
+.srcs li.hit{background:var(--tile);outline:2px solid var(--magenta)}
+.srcs .quote{margin:4px 0;padding-left:8px;border-left:2px solid var(--grid);font-size:12px;color:var(--muted)}
+.blk{display:grid;gap:8px;min-width:0}
+.blk-h{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;justify-content:space-between;min-width:0}
+.blk-h>div{min-width:0}
+
+/* Drawer (change password) */
+.scrim{position:fixed;inset:0;background:var(--overlay);z-index:40}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(520px,100%);background:var(--surface);z-index:41;display:flex;flex-direction:column;box-shadow:var(--shadow);
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);padding-right:env(safe-area-inset-right,0px)}
+.drawer-h{display:flex;align-items:flex-start;gap:12px;padding:16px 20px;border-bottom:1px solid var(--grid)}
+.drawer-h h2{margin:0;font-size:20px;color:var(--magenta);font-weight:normal;flex:1;min-width:0}
+.drawer-b{flex:1;overflow:auto;padding:18px 20px;display:flex;flex-direction:column;gap:16px}
+.drawer-f{display:flex;flex-wrap:wrap;gap:8px;padding:12px 20px;border-top:1px solid var(--grid);align-items:center}
+.drawer-f .sp{flex:1}
+
+.login{max-width:440px;width:100%;margin:28px auto;display:flex;flex-direction:column;gap:14px;background:var(--tile);padding:28px}
+.login h2{margin:0;color:var(--magenta);font-weight:normal;font-size:22px}
+.login p{margin:0}
+code{font-family:Consolas,Menlo,monospace;font-size:12px;overflow-wrap:anywhere}
+textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220px;white-space:pre;overflow:auto}
+
+@media (prefers-reduced-motion:no-preference){.drawer{animation:slide .18s ease-out}@keyframes slide{from{transform:translateX(24px);opacity:.6}}}
+@media (max-width:900px){.fgrid.three{grid-template-columns:1fr}}
+@media (max-width:560px){.fgrid{grid-template-columns:1fr}.ccform{grid-template-columns:1fr}.ccmsg.u{max-width:100%}}
+/* Phone: compact header (account actions behind the initials), tabs that fit, the filings table as cards */
+@media (max-width:700px){
+  .top .wrap{align-items:center;gap:6px 12px;padding-block:10px 0}
+  .brand{flex:1 1 0;padding-bottom:4px}
+  .brand h1{font-size:19px}
+  .who{padding-bottom:4px;gap:8px}
+  #whoName,#pwBtn,#signoutBtn{display:none}
+  .dot{width:34px;height:34px;font-size:13px}
+  nav.tabs a{padding:10px 9px}
+  main .wrap{padding-block:16px 22px;gap:18px}
+  .action-title{font-size:19px}
+  .toolbar .btn{flex:1 1 auto;justify-content:center}
+  .login{padding:20px}
+  .tbl-wrap.cardwrap{border:0;overflow:visible}
+  table.cards,table.cards tbody{display:block;width:100%}
+  table.cards thead{display:none}
+  table.cards tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;padding:12px;border:1px solid var(--grid);margin-bottom:10px;background:var(--surface)}
+  table.cards td{display:block;padding:0;border:0;min-width:0;max-width:none;text-align:left;white-space:normal;grid-column:1/-1;overflow-wrap:anywhere}
+  table.cards td.c-half{grid-column:auto}
+  table.cards td.c-late{order:2}
+  table.cards tbody tr:nth-child(even) td{background:transparent}
+  table.cards td[data-label]::before{content:attr(data-label);display:block;font-size:11px;font-weight:bold;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin-bottom:2px}
+}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+</head>
+<body>
+<div class="stripe" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+<header class="top">
+  <div class="wrap">
+    <div class="brand">
+      <div class="kicker">Strategy and corporate development</div>
+      <h1>SNL lookup: insurance filings and statutory data</h1>
+    </div>
+    <div class="who">
+      <span id="whoName"></span><button type="button" class="dot" id="whoDot" data-act="who-menu" aria-haspopup="menu" aria-expanded="false" aria-controls="whoMenu" hidden></button>
+      <button class="btn sm ghost" id="pwBtn" data-act="change-pw" hidden>Change password</button>
+      <button class="btn sm" id="signoutBtn" data-act="signout" hidden>Sign out</button>
+      <div class="whomenu" id="whoMenu" role="menu" hidden><div class="wm-n" id="whoMenuName"></div>
+        <button role="menuitem" data-act="change-pw">Change password</button><button role="menuitem" data-act="signout">Sign out</button></div>
+    </div>
+    <nav class="tabs" aria-label="Views" id="tabs" hidden>
+      <a href="#filings" data-view="filings">Filings</a>
+      <a href="#ask" data-view="ask">Ask</a>
+      <a href="#statutory" data-view="statutory">Statutory</a>
+    </nav>
+  </div>
+</header>
+<div class="strip" id="strip" hidden><div class="wrap" id="stripIn" role="status" aria-label="S&amp;P usage and data freshness"></div></div>
+
+<main><div class="wrap" id="view"></div></main>
+<footer class="foot"><div class="wrap"><span>2026 Ascot Group</span><span>Confidential: strategy and corporate development use only. Data: S&amp;P Global Market Intelligence.</span></div></footer>
+
+<div id="drawerRoot"></div>
+<div id="toastRoot"></div>
+
+<script>
+"use strict";
+/* ---------- settings and state ---------- */
+const CFG = Object.assign({}, window.SNL_CONFIG || {});
+if(CFG.supabaseUrl) CFG.supabaseUrl = String(CFG.supabaseUrl).trim().replace(/\/+$/,"").replace(/\/(rest|auth)\/v1$/,"");
+// How often the page checks a running answer, how old a heartbeat may get before the page asks the function to
+// pick the answer up again, and the shortest gap between two such requests (milliseconds).
+const TIMING = {poll:2000, stale:45000, again:30000};
+const VIEWS = ["filings","ask","statutory"];
+const ROLES = {corpdev:"Corp Dev", reader:"Reader"};
+const FN = {"snl-filings":"the filings function", "snl-chat":"the questions function", "snl-statutory":"the statutory function"};
+const US_STATES = "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY".split(" ");
+const PAGE = 100, MAX_COMPANIES = 50, MAX_YEARS = 10, MAX_QUESTION = 4000, MAX_HISTORY = 6, MAX_HISTORY_ANSWER = 20000, MAX_CODES = 8, MAX_STAT_YEARS = 15;
+const XLSX_SRC = "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.mini.min.js";
+const JOB_COLS = "id,status,question,progress,partial,result,error,segments,created_at,updated_at,heartbeat_at";
+const EMPTY_RESULT = "S&P returned no filings for this search. That means none are in S&P's data for these companies, states, dates and filters. It doesn't prove that none were filed.";
+const DAY = 86400000;
+
+function iso(d){ const z=new Date(d.getTime()-d.getTimezoneOffset()*60000); return z.toISOString().slice(0,10); }
+const TODAY = () => iso(new Date());
+function daysBefore(day, n){ const d=parseDay(day); d.setDate(d.getDate()-n); return iso(d); }
+function yearsBefore(day, n){ const d=parseDay(day); d.setFullYear(d.getFullYear()-n); return iso(d); }
+
+function freshFilings(){
+  const to=TODAY();
+  return {q:"", matches:null, resolveNote:"", resolving:false, resolveErr:"", chips:[], states:[], from:daysBefore(to,364), to,
+    toi:[], ftype:[], fstatus:[], toiFilter:"", tracking:"", formErr:"", busy:false, res:null, err:null, last:null,
+    filter:"", sort:{k:"publishDate",dir:-1}, shown:PAGE, openDesc:{}, openCo:{}};
+}
+function freshAsk(){ return {turns:[], draft:"", timer:null}; }
+function freshStat(){
+  const y=new Date().getFullYear()-1;   // the last full year
+  return {status:null, statusErr:null, loading:false, kind:"company", codes:"", fromYear:String(y-4), toYear:String(y), formErr:"", busy:false, res:null, err:null, last:null, ent:{},
+    setup:{open:false, like:"", views:null, viewsBusy:false, viewsErr:null, view:null, cols:null, colsBusy:false, colsErr:null, text:null, mapBusy:false, mapErr:"", saving:false}};
+}
+const S = {
+  view:"filings", sb:null, session:null, authChecked:false, configMissing:false, loginErr:"", loginBusy:false, leaving:false, menuOpen:false, drawer:null,
+  status:null, statusErr:"", refs:null, refsLoading:false, refsMsg:"", refsErr:"",
+  f:null, ask:freshAsk(), st:null, docs:{}
+};
+
+/* ---------- helpers ---------- */
+function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+const blank = v => v===null || v===undefined || v==="";
+const isNum = v => !blank(v) && typeof v!=="boolean" && isFinite(+v);
+const count = v => isNum(v) ? Math.round(+v).toLocaleString("en-US") : "n/d";
+const plural = (n, one, many) => `${count(n)} ${+n===1 ? one : (many || one+"s")}`;
+/* US dollars shown in $M: commas, one decimal under 10, negatives in parentheses, "n/d" when missing. */
+function usdM(v){
+  if(!isNum(v)) return "n/d";
+  const m=+v/1e6, a=Math.abs(m), s = a===0 ? "0" : a<9.95 ? a.toFixed(1) : Math.round(a).toLocaleString("en-US");
+  return m<0 && s!=="0.0" ? `($${s}M)` : `$${s}M`;
+}
+function pct(v){ if(!isNum(v)) return "n/d"; const s=Math.abs(+v).toFixed(1); return +v<0 && s!=="0.0" ? `(${s}%)` : `${s}%`; }
+/* A day as S&P sends it (2026-11-05, 2026-11-05T00:00:00 or 11/05/2026). Null when it can't be read. */
+function parseDay(s){
+  if(blank(s)) return null;
+  const t=String(s).trim(); let y, m, d;
+  let x=t.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|[T ])/);
+  if(x){ y=+x[1]; m=+x[2]; d=+x[3]; }
+  else if((x=t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:$|\s)/))){ y=+x[3]; m=+x[1]; d=+x[2]; }
+  else return null;
+  const out=new Date(y, m-1, d);
+  return out.getFullYear()===y && out.getMonth()===m-1 && out.getDate()===d ? out : null;
+}
+// "5 Nov"; the year only when it isn't this year, so an old filing never reads as recent
+function fmtD(d){ return d.toLocaleDateString("en-GB",{day:"numeric",month:"short", ...(d.getFullYear()!==new Date().getFullYear()?{year:"numeric"}:{})}); }
+const fmtDay = s => { const d=parseDay(s); return d ? fmtD(d) : "n/d"; };
+// a moment (2026-11-05T14:02:00Z) in the reader's own time zone; a bare day is shown as that day
+const fmtAt = s => { if(blank(s)) return "n/d"; if(/^\d{4}-\d{2}-\d{2}$/.test(String(s).trim())) return fmtDay(s); const d=new Date(s); return isNaN(d) ? "n/d" : fmtD(d); };
+const fmtTime = s => { if(blank(s)) return ""; const d=new Date(s); return isNaN(d) ? "" : d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}); };
+const dayOut = s => { const d=parseDay(s); return d ? iso(d) : (blank(s) ? "" : String(s)); };
+function toast(msg){ const r=document.getElementById("toastRoot"); r.innerHTML=`<div class="toast" role="status">${esc(msg)}</div>`; clearTimeout(toast.t); toast.t=setTimeout(()=>{ r.innerHTML=""; },4200); }
+const isCorpDev = () => !!S.session && S.session.role==="corpdev";
+function setPath(path, v){ const ks=path.split("."); let o=S; for(const k of ks.slice(0,-1)) o=o[k]; o[ks[ks.length-1]]=v; }
+/* Markdown-lite for Claude's text: escaped first, then bold, code, bullets and headings only. Each part is a piece
+   of text and, optionally, HTML to put at the end of its last line (the citation markers). Bullets in parts that
+   follow one another join into one list. */
+function mdParts(parts){
+  let out="", inList=false;
+  const inline=t=>t.replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/`([^`]+)`/g,"<code>$1</code>");
+  for(const part of parts){
+    const lines=esc(part.text).split(/\n/).map(l=>l.trimEnd()); let last=lines.length-1; while(last>0 && !lines[last]) last--;
+    lines.forEach((l,i)=>{ const tail=i===last&&part.tail ? " "+part.tail : "", m=l.match(/^\s*(?:[-*•]|\d+\.)\s+(.*)$/);
+      if(m){ if(!inList){ out+="<ul>"; inList=true; } out+=`<li>${inline(m[1])}${tail}</li>`; return; }
+      if(inList){ out+="</ul>"; inList=false; }
+      if(/^#{1,4}\s+/.test(l)) out+=`<p><b>${inline(l.replace(/^#{1,4}\s+/,""))}</b>${tail}</p>`;
+      else if(l || tail) out+=`<p>${inline(l)}${tail}</p>`; });
+  }
+  if(inList) out+="</ul>"; return out;
+}
+const md = s => mdParts([{text:s}]);
+function sortRows(list, get, dir){
+  return [...list].sort((a,b)=>{ const x=get(a), y=get(b); if(blank(x)&&blank(y)) return 0; if(blank(x)) return 1; if(blank(y)) return -1;   // blanks always last
+    return (typeof x==="number"&&typeof y==="number" ? x-y : String(x).localeCompare(String(y)))*dir; });
+}
+const errText = r => (r.msg||"Something went wrong. Try again.") + (r.requestId ? ` S&P reference: ${r.requestId}.` : "");
+/* A problem (red, with Try again) or a calm "not set up yet" state, depending on what the function said. */
+function problemHTML(r, lead, retryAct){
+  if(r.err==="not_configured") return `<div class="info" role="status"><span>${esc(errText(r))}</span></div>`;
+  return `<div class="banner" role="alert"><span><b>${esc(lead)}</b> ${esc(errText(r))}</span>${retryAct?`<button class="btn sm" data-act="${retryAct}">Try again</button>`:""}</div>`;
+}
+
+/* ---------- calling the Supabase Edge Functions ---------- */
+/* Returns {data} on success, {res} for a raw answer (documents), or {err, msg, status, requestId}. */
+async function callFn(fn, payload, opts){
+  let session=null;
+  try{ ({data:{session}}=await S.sb.auth.getSession()); }catch{}
+  if(!session){ sessionEnded("Your session ended. Sign in again."); return {err:"signin", msg:"Your session ended. Sign in again.", status:401}; }
+  let res;
+  try{
+    res=await fetch(CFG.supabaseUrl+"/functions/v1/"+fn, {method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+session.access_token,"apikey":CFG.supabaseAnonKey}, body:JSON.stringify(payload)});
+  }catch{ return {err:"network", msg:`Couldn't reach ${FN[fn]}. Check your connection and try again.`, status:0}; }
+  if(res.ok && opts && opts.raw) return {res, status:res.status};
+  let body=null; try{ body=await res.json(); }catch{}
+  if(res.status===401){ const msg=(body&&body.message)||"Sign in again."; sessionEnded(msg); return {err:"signin", msg, status:401}; }
+  if(res.status===404 && !(body&&body.message)) return {err:"not_deployed", status:404,
+    msg: isCorpDev() ? `${FN[fn][0].toUpperCase()+FN[fn].slice(1)} isn't deployed yet. Run: supabase functions deploy ${fn} --no-verify-jwt (see the README).` : "This part of the site isn't set up yet. Ask Corp Dev."};
+  if(!res.ok) return {err:(body&&body.error)||("http_"+res.status), msg:(body&&body.message)||`${FN[fn][0].toUpperCase()+FN[fn].slice(1)} answered ${res.status}. Try again in a minute.`, status:res.status, requestId:body&&body.requestId};
+  return {data:body||{}, status:res.status};
+}
+
+/* ---------- status strip ---------- */
+async function loadStatus(){
+  const r=await callFn("snl-filings",{action:"status"});
+  if(!S.session) return;
+  if(r.data){ S.status=r.data; S.statusErr=""; if(ROLES[r.data.role]) S.session.role=r.data.role; }
+  else if(r.err!=="signin") S.statusErr=errText(r);
+  render();
+}
+/* Search, reference and statutory answers carry the latest request counts: keep the strip in step with them. */
+function takeUsage(b){
+  if(!b || !b.used || !b.limits) return;
+  S.status=S.status||{}; S.status.filings={...(S.status.filings||{}), used:b.used, limits:b.limits, ...(b.account?{account:b.account}:{})};
+}
+function stripHTML(){
+  const st=S.status;
+  if(!st) return S.statusErr ? `<span class="s-i">Couldn't check S&amp;P usage. ${esc(S.statusErr)} <button class="lnk" data-act="status-retry">Try again</button></span>` : `<span class="s-i">Checking S&amp;P usage…</span>`;
+  const f=st.filings||{}, u=f.used||{}, l=f.limits||{}, rf=st.refreshed||{}, items=[];
+  if(f.configured===false) items.push(`<span class="s-i" id="s_setup"><b>S&amp;P filings:</b> not set up yet</span>`);
+  const over = (isNum(u.hour)&&isNum(l.hour)&&+u.hour>=+l.hour) ? "this hour's limit is reached; wait for the next hour" : (isNum(u.day)&&isNum(l.day)&&+u.day>=+l.day) ? "today's limit is reached; try again tomorrow" : "";
+  items.push(`<span class="s-i${over?" warn":""}" id="s_usage"><b>S&amp;P requests:</b> ${count(u.hour)} of ${count(l.hour)} this hour, ${count(u.day)} of ${count(l.day)} today${f.account?` (${esc(f.account)} account)`:""}${over?`. ${over[0].toUpperCase()+over.slice(1)}.`:""}</span>`);
+  items.push(`<span class="s-i" id="s_ref">${rf.reference?`Reference lists refreshed ${fmtAt(rf.reference)}`:"Reference lists: not loaded yet"}</span>`);
+  items.push(`<span class="s-i" id="s_search">${rf.search?`Last search ${fmtAt(rf.search)}`:"No searches yet"}</span>`);
+  items.push(`<span class="s-i" id="s_stat">${st.statutory&&st.statutory.configured ? (rf.statutory?`Statutory data refreshed ${fmtAt(rf.statutory)}`:"Statutory data: connected, nothing fetched yet") : "Statutory data: not set up yet"}</span>`);
+  if(st.claude && st.claude.configured===false) items.push(`<span class="s-i" id="s_claude">Questions: not set up yet</span>`);
+  return items.join("");
+}
+
+/* ---------- Filings: the search form ---------- */
+async function loadRefs(refresh){
+  if(S.refsLoading) return;
+  S.refsLoading=true; S.refsErr=""; render();
+  const r=await callFn("snl-filings",{action:"reference", ...(refresh?{refresh:true}:{})});
+  S.refsLoading=false;
+  if(!S.session) return;
+  if(r.data){ S.refs=r.data.lists||{}; S.refsMsg=r.data.message||""; takeUsage(r.data); if(refresh){ toast(S.refsMsg ? "S&P's lists couldn't be refreshed yet." : "Lists refreshed from S&P."); loadStatus(); } }
+  else if(r.err!=="signin"){ S.refs=S.refs||{}; S.refsErr=errText(r); }
+  render();
+}
+const refOptions = field => { const l=S.refs&&S.refs[field]; return l&&Array.isArray(l.options) ? l.options.filter(o=>o&&!blank(o.id)) : []; };
+/* States: S&P's own list when it is loaded and uses two-letter codes, otherwise the built-in list. */
+function stateOptions(){
+  const sp=refOptions("serffFilingState").filter(o=>/^[A-Za-z]{2}$/.test(String(o.id))).map(o=>({id:String(o.id).toUpperCase(), name:String(o.name||o.id)}));
+  return sp.length ? sp : US_STATES.map(s=>({id:s, name:s}));
+}
+function trackingList(){ return [...new Set(S.f.tracking.split(/[,\n;]+/).map(s=>s.trim()).filter(Boolean))]; }
+function searchProblem(){
+  const f=S.f;
+  if(!f.chips.length) return "Choose at least one company. S&P needs a company for every search.";
+  if(f.chips.length>MAX_COMPANIES) return `Search at most ${MAX_COMPANIES} companies at a time.`;
+  if(!f.states.length) return "Choose at least one state.";
+  const a=/^\d{4}-\d{2}-\d{2}$/.test(f.from)?parseDay(f.from):null, b=/^\d{4}-\d{2}-\d{2}$/.test(f.to)?parseDay(f.to):null;
+  if(!a || !b) return "Choose a start date and an end date.";
+  if(a>b) return "The start date is after the end date.";
+  if(b-a > MAX_YEARS*366*DAY) return `Search at most ${MAX_YEARS} years at a time.`;
+  const tn=trackingList();
+  if(tn.length>20 || tn.some(t=>!/^[A-Za-z0-9 ._\/-]{1,60}$/.test(t))) return "Tracking numbers can use letters, numbers, spaces, dots, dashes and slashes. Separate up to 20 with commas.";
+  return "";
+}
+function searchPayload(){
+  const f=S.f, ids=k=>f.chips.filter(c=>c.kind===k).map(c=>Number(c.id));
+  const p={action:"search", companyIds:ids("companyId"), institutionIds:ids("institutionId"), states:[...f.states].sort(), from:f.from, to:f.to};
+  // a filter is only sent when S&P's list for it is loaded and something in it is ticked
+  const add=(key, ticked, field)=>{ const have=refOptions(field).map(o=>String(o.id)); const v=ticked.filter(id=>have.includes(id)).map(Number).filter(Number.isInteger); if(v.length) p[key]=v; };
+  add("filingStatusIds", f.fstatus, "filingStatus"); add("typeOfInsuranceIds", f.toi, "typeOfInsurance"); add("filingTypeIds", f.ftype, "serffFilingType");
+  const tn=trackingList(); if(tn.length) p.trackingNumbers=tn;
+  return p;
+}
+/* S&P takes 10 companies and 365 days a request, so a search costs one request for each batch and year. */
+function estimateText(){
+  const f=S.f, a=parseDay(f.from), b=parseDay(f.to);
+  if(!f.chips.length || !a || !b || a>b) return "";
+  const windows=Math.ceil((Math.round((b-a)/DAY)+1)/365), n=k=>Math.ceil(f.chips.filter(c=>c.kind===k).length/10);
+  const req=windows*(n("companyId")+n("institutionId"));
+  return `About ${plural(req,"S&P request")}, more if there are many results. A search someone has already run costs none.`;
+}
+async function resolveCompany(){
+  const f=S.f, q=f.q.trim();
+  if(!q){ f.matches=null; f.resolveNote=""; f.resolveErr="Type a company name, a NAIC code or an S&P id."; render(); return; }
+  f.resolving=true; f.resolveErr=""; f.resolveNote=""; f.matches=null; f.asked=q; render();
+  const r=await callFn("snl-filings",{action:"resolve", q});
+  f.resolving=false;
+  if(!S.session) return;
+  if(r.data){ f.matches=Array.isArray(r.data.matches)?r.data.matches:[]; f.resolveNote=r.data.note||""; }
+  else if(r.err!=="signin"){ f.matches=[]; f.resolveErr=errText(r); }
+  render();
+}
+function addChip(kind, id, name){
+  const f=S.f; id=String(id).trim();
+  if(!/^\d{1,12}$/.test(id) || !["companyId","institutionId"].includes(kind)){ toast("S&P ids are whole numbers."); return; }
+  if(f.chips.some(c=>c.kind===kind && c.id===id)){ toast("That company is already chosen."); return; }
+  if(f.chips.length>=MAX_COMPANIES){ toast(`Search at most ${MAX_COMPANIES} companies at a time.`); return; }
+  f.chips.push({kind, id, name:name||""}); f.q=""; f.matches=null; f.resolveNote=""; f.resolveErr=""; f.formErr=""; render();
+  document.getElementById("f_q")?.focus();
+}
+const chipLabel = c => `${c.kind==="companyId"?"company":"institution"} id ${c.id}`;
+function companyPickerHTML(){
+  const f=S.f, numeric=/^\d{1,12}$/.test((f.asked||"").trim()) && f.matches!==null;
+  let found="";
+  if(f.resolving) found=`<p class="t2" role="status">Looking for the company…</p>`;
+  else if(f.matches!==null){
+    const rows=f.matches.map(m=>{ const meta=[!blank(m.naicCompanyCode)?`NAIC ${m.naicCompanyCode}`:"", `S&P company id ${m.companyId}`, !blank(m.naicGroupName)?`group ${m.naicGroupName}`:""].filter(Boolean).join(" · ");
+      return `<li><div><div class="t1">${esc(m.companyName)}</div><div class="t2">${esc(meta)}</div></div><span class="inline">
+        <button type="button" class="btn sm" data-act="co-add" data-kind="companyId" data-id="${esc(m.companyId)}" data-name="${esc(m.companyName)}">Add</button>
+        ${!blank(m.institutionId)?`<button type="button" class="btn sm ghost" data-act="co-add" data-kind="institutionId" data-id="${esc(m.institutionId)}" data-name="${esc(m.naicGroupName||m.companyName)}" title="Searches by the company's S&amp;P institution id instead">Add by institution id ${esc(m.institutionId)}</button>`:""}</span></li>`; }).join("");
+    const byId = numeric ? `<li id="byId"><div><div class="t1">Use ${esc(f.asked.trim())} as an S&amp;P id</div><div class="t2">For a company the app hasn't seen yet. The name fills in after the first search.</div></div><span class="inline">
+        <button type="button" class="btn sm" data-act="co-add" data-kind="companyId" data-id="${esc(f.asked.trim())}">Add as company id</button>
+        <button type="button" class="btn sm" data-act="co-add" data-kind="institutionId" data-id="${esc(f.asked.trim())}">Add as institution id</button></span></li>` : "";
+    found = (f.resolveNote ? `<div class="info" id="resolveNote" role="status"><span>${esc(f.resolveNote)}${numeric?"":" Type the id (a whole number) in the box above to add it."}</span></div>` : "")
+      + (rows||byId ? `<ul class="matches" id="matches" aria-label="Matching companies">${rows}${byId}</ul>` : "");
+  }
+  const chips = f.chips.length ? `<div class="chips" id="chips" aria-label="Chosen companies">${f.chips.map((c,i)=>`<span class="cchip"><span><b>${esc(c.name||(c.kind==="companyId"?"Company":"Institution")+" "+c.id)}</b>${c.name?` <span class="t2">${esc(chipLabel(c))}</span>`:` <span class="t2">S&amp;P ${c.kind==="companyId"?"company":"institution"} id</span>`}</span><button type="button" data-act="co-remove" data-i="${i}" aria-label="Remove ${esc(c.name||chipLabel(c))}">×</button></span>`).join("")}</div>`
+    : `<p class="t2" id="noChips">No companies chosen yet.</p>`;
+  return `<div class="f"><label for="f_q">Companies <em>name, NAIC code or S&amp;P id; up to ${MAX_COMPANIES}</em></label>
+    <div class="toolbar"><div class="grow"><input type="text" id="f_q" data-bind="f.q" value="${esc(f.q)}" autocomplete="off" spellcheck="false" placeholder="For example Calloway, 90001 or 4000001"></div>
+      <button type="button" class="btn" data-act="co-find" ${f.resolving?"disabled":""}>Find company</button></div>
+    ${f.resolveErr?`<p class="err" role="alert">${esc(f.resolveErr)}</p>`:""}${found}${chips}</div>`;
+}
+function refListHTML(field, label, key){
+  const f=S.f, opts=refOptions(field);
+  if(S.refsLoading && !S.refs) return `<div class="f"><span>${label}</span><p class="t2">Loading S&amp;P's lists…</p></div>`;
+  if(!opts.length) return `<div class="f"><span>${label}</span><p class="t2 nolist">S&amp;P's lists aren't loaded yet, so this filter is left out of the search.</p></div>`;
+  const long=opts.length>12, flt=key==="toi" ? f.toiFilter.trim().toLowerCase() : "";
+  const shown=flt ? opts.filter(o=>String(o.name).toLowerCase().includes(flt)) : opts;
+  const n=f[key].filter(id=>opts.some(o=>String(o.id)===id)).length;
+  return `<div class="f"><span>${label} <em>${n?`${n} ticked`:"none ticked means all"}</em></span>
+    ${long&&key==="toi"?`<input type="search" id="f_toiFilter" data-bind="f.toiFilter" data-live value="${esc(f.toiFilter)}" placeholder="Filter this list" aria-label="Filter the ${label.toLowerCase()} list">`:""}
+    <div class="checks" id="chk_${key}" data-keep>${shown.map(o=>`<label><input type="checkbox" data-act="ref-tick" data-k="${key}" data-id="${esc(o.id)}" ${f[key].includes(String(o.id))?"checked":""}>${esc(o.name)}</label>`).join("") || `<span class="t2">Nothing in the list matches.</span>`}</div></div>`;
+}
+function filingsFormHTML(){
+  const f=S.f, states=stateOptions(), est=estimateText();
+  const listsOff = S.refs && ["typeOfInsurance","filingStatus","serffFilingType"].some(k=>!refOptions(k).length);
+  return `<form class="tcard" id="searchForm" novalidate aria-label="Search filings">
+    ${companyPickerHTML()}
+    <div class="f"><span>States <em>${f.states.length?`${f.states.length} chosen`:"choose at least one"}</em></span>
+      <div class="stgrid" id="states">${states.map(s=>`<button type="button" class="fchip" data-act="state-toggle" data-s="${esc(s.id)}" aria-pressed="${f.states.includes(s.id)}"${s.name!==s.id?` title="${esc(s.name)}"`:""}>${esc(s.id)}</button>`).join("")}</div>
+      <div class="inline"><button type="button" class="btn sm ghost" data-act="state-all">Choose all</button><button type="button" class="btn sm ghost" data-act="state-none">Clear</button></div></div>
+    <div class="fgrid">
+      <label class="f">Published from<input type="date" id="f_from" data-bind="f.from" value="${esc(f.from)}"></label>
+      <label class="f">Published to<input type="date" id="f_to" data-bind="f.to" value="${esc(f.to)}"></label>
+      <div class="inline full"><span class="t2">Quick ranges:</span>${[1,3,5,10].map(y=>`<button type="button" class="btn sm ghost" data-act="range" data-y="${y}">Last ${y===1?"12 months":y+" years"}</button>`).join("")}</div>
+    </div>
+    <div class="fgrid three">
+      ${refListHTML("typeOfInsurance","Type of insurance","toi")}
+      ${refListHTML("serffFilingType","Filing type","ftype")}
+      ${refListHTML("filingStatus","Status","fstatus")}
+    </div>
+    ${listsOff||S.refsMsg||S.refsErr?`<p class="t2" id="refsMsg">${esc(S.refsErr||S.refsMsg||"Some of S&P's lists aren't loaded yet.")}</p>`:""}
+    <label class="f"><span>Tracking numbers <em>optional; separate with commas</em></span><input type="text" id="f_tracking" data-bind="f.tracking" value="${esc(f.tracking)}" autocomplete="off" spellcheck="false"></label>
+    ${f.formErr?`<p class="err" id="formErr" role="alert">${esc(f.formErr)}</p>`:""}
+    <div class="toolbar"><button class="btn primary" data-act="search" ${f.busy?"disabled":""}>${f.busy?"Searching…":"Search filings"}</button>
+      <span class="t2 grow" id="f_est">${esc(est)}</span>
+      <button type="button" class="btn sm ghost" data-act="refs-refresh" ${S.refsLoading?"disabled":""} title="Fetches S&amp;P's lists of states, types of insurance, filing types and statuses again (four S&amp;P requests)">${S.refsLoading?"Refreshing lists…":"Refresh lists"}</button></div>
+  </form>`;
+}
+async function runSearch(refresh){
+  const f=S.f; if(f.busy) return;
+  let payload;
+  if(refresh){ if(!f.last) return; payload={...f.last, refresh:true}; }
+  else{
+    const problem=searchProblem();
+    if(problem){ f.formErr=problem; render(); document.getElementById("formErr")?.scrollIntoView({block:"nearest"}); return; }
+    payload=searchPayload(); f.last=payload; f.res=null;
+  }
+  f.formErr=""; f.busy=true; f.err=null; render();
+  const r=await callFn("snl-filings", payload);
+  f.busy=false;
+  if(!S.session) return;
+  if(r.data){
+    f.res=r.data; f.shown=PAGE; f.filter=""; f.openDesc={}; f.openCo={}; takeUsage(r.data);
+    for(const c of (r.data.byCompany||[])){ const chip=f.chips.find(x=>x.kind===c.kind && x.id===String(c.id)); if(chip && !chip.name && c.name) chip.name=c.name; }
+    loadStatus();
+  } else if(r.err!=="signin") f.err=r;
+  render();
+}
+
+/* ---------- Filings: results ---------- */
+const rowKey = (r,i) => String(!blank(r.filingVersionId) ? "v"+r.filingVersionId : !blank(r.serffFilingEntityEventId) ? "e"+r.serffFilingEntityEventId : "i"+i);
+const companiesOf = r => Array.isArray(r.companies)&&r.companies.length ? r.companies : [{companyId:r.companyId, companyName:r.companyName, naicCompanyCode:r.naicCompanyCode}];
+/* S&P's own wording first, then the number as a percentage, then "n/d". */
+function rateImpact(r){ return !blank(r.dispOverallRateImpact) ? String(r.dispOverallRateImpact) : isNum(r.overallRateImpact) ? pct(r.overallRateImpact) : "n/d"; }
+const docKeyOf = r => !blank(r.documentId) ? "d:"+r.documentId : !blank(r.filingVersionId) ? "v:"+r.filingVersionId : "";
+const FSORT = {
+  company:r=>String(companiesOf(r)[0].companyName||"").toLowerCase(), state:r=>r.serffFilingStateId||r.serffFilingState,
+  publishDate:r=>{ const d=parseDay(r.publishDate); return d?d.getTime():null; }, rate:r=>isNum(r.overallRateImpact)?+r.overallRateImpact:null
+};
+function visibleRows(){
+  const f=S.f, all=(f.res&&Array.isArray(f.res.rows)?f.res.rows:[]).map((r,i)=>({r, key:rowKey(r,i)}));
+  const q=f.filter.trim().toLowerCase();
+  const hit = !q ? all : all.filter(({r})=>[companiesOf(r).map(c=>`${c.companyName} ${c.naicCompanyCode}`).join(" "), r.serffFilingStateId, r.serffFilingState, r.serffFilingType, r.typeOfInsurance, r.subTypeOfInsurance, r.filingStatus, r.filingDescription, r.trackingNumber].join(" ").toLowerCase().includes(q));
+  return sortRows(hit, x=>FSORT[f.sort.k](x.r), f.sort.dir);
+}
+function sortTh(label, k, cls){
+  const on=S.f.sort.k===k, dir=on?S.f.sort.dir:0;
+  return `<th${cls?` class="${cls}"`:""} aria-sort="${on?(dir>0?"ascending":"descending"):"none"}"><button type="button" class="sorth" data-act="fsort" data-k="${k}" aria-label="Sort by ${esc(label)}">${esc(label)}<span class="ar" aria-hidden="true">${on?(dir>0?"▲":"▼"):""}</span></button></th>`;
+}
+function docButtonHTML(key, label, page){
+  if(!key) return `<span class="t2">No document</span>`;
+  const d=S.docs[key]||{};
+  return `<button type="button" class="btn sm" data-act="open-doc" data-doc="${esc(key)}"${page?` data-page="${esc(page)}"`:""} ${d.busy?"disabled":""}>${d.busy?"Opening…":esc(label)}</button>${d.err?`<p class="err doc-err" role="alert">${esc(d.err)}</p>`:""}`;
+}
+function filingRowHTML({r,key}){
+  const f=S.f, cos=companiesOf(r), openCo=!!f.openCo[key], shownCos=openCo?cos:cos.slice(0,3);
+  const co=shownCos.map((c,i)=>`<div class="${i?"":"t1"}">${blank(c.companyName)?"n/d":esc(c.companyName)}${!blank(c.naicCompanyCode)?` <span class="t2">NAIC ${esc(c.naicCompanyCode)}</span>`:""}</div>`).join("")
+    + (cos.length>3?`<button type="button" class="lnk t2" data-act="co-toggle" data-key="${esc(key)}">${openCo?"Show fewer":`and ${cos.length-3} more`}</button>`:"");
+  const desc=blank(r.filingDescription)?"":String(r.filingDescription), long=desc.length>180, openD=!!f.openDesc[key];
+  const descH = !desc ? "n/d" : esc(long&&!openD ? desc.slice(0,160).trimEnd()+"…" : desc) + (long?` <button type="button" class="lnk t2" data-act="desc-toggle" data-key="${esc(key)}" aria-expanded="${openD}">${openD?"less":"more"}</button>`:"");
+  const state=!blank(r.serffFilingStateId)&&/^[A-Za-z]{2}$/.test(String(r.serffFilingStateId)) ? String(r.serffFilingStateId).toUpperCase() : r.serffFilingState;
+  const t=v=>blank(v)?"n/d":esc(v);
+  return `<tr data-key="${esc(key)}">
+    <td class="c-co">${co}</td>
+    <td class="c-half" data-label="State"${!blank(r.serffFilingState)&&r.serffFilingState!==state?` title="${esc(r.serffFilingState)}"`:""}>${t(state)}</td>
+    <td class="c-half" data-label="Filing type">${t(r.serffFilingType)}</td>
+    <td class="c-late" data-label="Type of insurance">${t(r.typeOfInsurance)}${!blank(r.subTypeOfInsurance)?`<div class="t2">${esc(r.subTypeOfInsurance)}</div>`:""}</td>
+    <td class="c-half" data-label="Status">${t(r.filingStatus)}</td>
+    <td class="c-dates c-late" data-label="Dates"><div class="dl"><span>Submitted</span><b>${fmtDay(r.dateSubmitted)}</b><span>Published</span><b>${fmtDay(r.publishDate)}</b><span>Effective, new</span><b>${fmtDay(r.newBusReqEffDate)}</b><span>Effective, renewal</span><b>${fmtDay(r.renewBusReqEffDate)}</b></div></td>
+    <td class="num c-rate c-half" data-label="Rate impact">${esc(rateImpact(r))}</td>
+    <td class="c-desc c-late" data-label="Description">${descH}</td>
+    <td class="c-tn c-late" data-label="Tracking number">${t(r.trackingNumber)}</td>
+    <td class="c-doc c-late">${docButtonHTML(docKeyOf(r), "Open document")}${isNum(r.pages)?`<div class="t2">${plural(r.pages,"page")}</div>`:""}</td></tr>`;
+}
+function filingsResultsHTML(){
+  const f=S.f, r=f.res;
+  if(f.busy && !r) return `<div class="banner" role="status" id="searching"><span>Searching S&amp;P's filings… A long date range can take a minute. After that the results are saved for everyone until someone clicks Refresh.</span></div>`;
+  if(!r) return f.err ? problemHTML(f.err, "Couldn't run the search.", "search-retry")
+    : `<div class="empty" id="noSearch"><p>Choose companies, states and dates, then search. Results are saved, so the same search opens at once next time.</p></div>`;
+  const all=Array.isArray(r.rows)?r.rows:[], notes=Array.isArray(r.notes)?r.notes.filter(n=>!blank(n)):[], p=r.params||f.last||{};
+  const total=isNum(r.total)?+r.total:all.length, rows=visibleRows(), shown=rows.slice(0,f.shown);
+  let h=`<h2 class="sec">Results</h2>`;
+  h+=`<p class="sub" id="resSummary" style="margin:0">${total?`<b>${plural(total,"filing")}</b>`:`<b>S&amp;P returned nothing</b> for filings`}${p.from&&p.to?` published from ${fmtDay(p.from)} to ${fmtDay(p.to)}`:""}${Array.isArray(p.states)&&p.states.length?` in ${esc(p.states.join(", "))}`:""}.</p>`;
+  if(f.busy) h+=`<div class="banner" role="status" id="refreshing"><span>Asking S&amp;P again… The results below are from ${fmtAt(r.fetchedAt)} until the new ones arrive.</span></div>`;
+  else if(f.err) h+=problemHTML(f.err, "Couldn't refresh the search.", "search-refresh");
+  else if(r.fromStore) h+=`<div class="info" id="fromStore" role="status"><span>From the last fetch on ${fmtAt(r.fetchedAt)}.</span><button class="btn sm" data-act="search-refresh">Refresh</button></div>`;
+  if(r.capped) h+=`<div class="banner" id="capped" role="alert"><span><b>These results are incomplete.</b> The search stopped before S&amp;P had returned everything. Narrow the dates, states or companies and search again.</span></div>`;
+  if(r.saved===false && !r.capped && !f.busy) h+=`<p class="t2" id="notSaved">These results couldn't be saved, so the next search will ask S&amp;P again.</p>`;
+  if(notes.length || !all.length) h+=`<div class="notes" id="notes" role="status"><b>${all.length?"Read this before you rely on the results":"Nothing came back, and that isn't proof that nothing was filed"}</b><ul>${(notes.length?notes:[EMPTY_RESULT]).map(n=>`<li>${esc(n)}</li>`).join("")}</ul></div>`;
+  const bs=Array.isArray(r.byState)?r.byState:[], bc=Array.isArray(r.byCompany)?r.byCompany:[];
+  if(bs.length) h+=`<div class="counts" id="byState"><b>By state:</b>${bs.map(s=>`<span>${esc(s.state)} ${count(s.rows)}</span>`).join("")}</div>`;
+  if(bc.length) h+=`<div class="counts" id="byCompany"><b>By company:</b>${bc.map(c=>`<span>${esc(c.name||(c.kind==="institutionId"?"Institution id ":"Company id ")+c.id)} ${count(c.rows)}</span>`).join("")}</div>`;
+  if(!all.length) return h;
+  h+=`<div class="toolbar"><div class="grow"><input type="search" id="f_filter" data-bind="f.filter" data-live value="${esc(f.filter)}" placeholder="Filter these results" aria-label="Filter these results"></div>
+    <span class="t2" id="resCount">${rows.length===all.length?`Showing ${count(shown.length)} of ${count(all.length)}`:`${count(rows.length)} of ${count(all.length)} match; showing ${count(shown.length)}`}</span>
+    <button class="btn" data-act="export" data-what="filings" data-fmt="csv">Export CSV</button><button class="btn" data-act="export" data-what="filings" data-fmt="xlsx">Export XLSX</button></div>`;
+  if(!rows.length) return h+`<div class="empty"><p>No filings in these results match the filter.</p></div>`;
+  h+=`<div class="tbl-wrap cardwrap" id="resWrap" data-keep><table class="cards filings" id="resTable"><thead><tr>${sortTh("Company","company")}${sortTh("State","state")}<th>Filing type</th><th>Type of insurance</th><th>Status</th>${sortTh("Dates","publishDate")}${sortTh("Rate impact","rate","num")}<th>Description</th><th>Tracking number</th><th>Document</th></tr></thead>
+    <tbody>${shown.map(filingRowHTML).join("")}</tbody></table></div>`;
+  if(rows.length>shown.length) h+=`<div class="inline"><button class="btn" data-act="more-rows">Show ${count(Math.min(PAGE, rows.length-shown.length))} more</button><span class="t2">The exports include all ${count(rows.length)}.</span></div>`;
+  h+=`<p class="source">Source: ${esc(r.source||"S&P Global Market Intelligence, SNL Insurance Product Filings")}, fetched ${fmtAt(r.fetchedAt)}. Opening a document uses one S&amp;P request the first time.</p>`;
+  return h;
+}
+function renderFilings(){
+  return `<div><h2 class="action-title">Search rate, rule and form filings</h2>
+    <p class="sub">S&amp;P's SNL Insurance Product Filings by company, state, type of insurance, filing type and date. Open any filing's original document.</p></div>
+    ${filingsFormHTML()}<div id="results" style="display:flex;flex-direction:column;gap:14px;min-width:0" aria-live="polite">${filingsResultsHTML()}</div>`;
+}
+function filingsExport(){
+  const cols=["Company","NAIC company code","S&P company id","All companies on the filing","NAIC group","State","Filing type","Type of insurance","Sub-type of insurance","Status","Date submitted","Date published","Effective date, new business","Effective date, renewals","Rate impact","Rate impact (number)","Description","Tracking number","SFC number","Document id","Filing version id","Pages"];
+  const rows=visibleRows().map(({r})=>{ const cos=companiesOf(r), c=cos[0];
+    return [c.companyName, c.naicCompanyCode, c.companyId, cos.map(x=>x.companyName).filter(x=>!blank(x)).join("; "), r.naicGroupName, r.serffFilingStateId||r.serffFilingState, r.serffFilingType, r.typeOfInsurance, r.subTypeOfInsurance, r.filingStatus,
+      dayOut(r.dateSubmitted), dayOut(r.publishDate), dayOut(r.newBusReqEffDate), dayOut(r.renewBusReqEffDate), rateImpact(r), isNum(r.overallRateImpact)?+r.overallRateImpact:null, r.filingDescription, r.trackingNumber, r.sfcNumber, r.documentId, r.filingVersionId, isNum(r.pages)?+r.pages:null]; });
+  return {name:`snl-filings-${TODAY()}`, sheet:"Filings", cols, rows};
+}
+
+/* ---------- documents: fetched once with the login, then opened from memory ---------- */
+function docName(disposition, key, type){
+  const m=/filename\*=(?:UTF-8'')?([^;]+)/i.exec(disposition||"") || /filename="?([^";]+)"?/i.exec(disposition||"");
+  let n=""; if(m){ try{ n=decodeURIComponent(m[1].trim().replace(/^"|"$/g,"")); }catch{ n=m[1]; } }
+  n=n.replace(/[^\w .()-]+/g,"_").replace(/^[. ]+/,"").slice(0,120);
+  const ext={"application/pdf":"pdf","application/zip":"zip","text/plain":"txt","text/html":"html","application/msword":"doc","application/vnd.openxmlformats-officedocument.wordprocessingml.document":"docx","application/vnd.ms-excel":"xls","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":"xlsx"}[type]||"bin";
+  return n || `snl-document-${key.slice(2).replace(/[^\w-]+/g,"_")}.${ext}`;
+}
+function showDoc(d, page, w){
+  if(d.type==="application/pdf"){
+    const url=d.url+(page?`#page=${page}`:"");
+    if(w && !w.closed){ w.location.href=url; return; }
+    const nw=window.open(url,"_blank");
+    if(!nw) toast("Your browser blocked the new tab. Allow pop-ups for this site, then click again.");
+  } else {
+    if(w){ try{ w.close(); }catch{} }
+    download(d.url, d.name);
+    toast(`This document isn't a PDF, so it was saved to your downloads as ${d.name}.`);
+  }
+}
+async function openDoc(key, page){
+  if(!key) return;
+  page = /^\d{1,5}$/.test(String(page||"")) && +page>0 ? +page : 0;
+  const d=S.docs[key]||(S.docs[key]={});
+  if(d.busy) return;
+  if(d.url){ showDoc(d, page, null); return; }   // already fetched this session: no second S&P request
+  // Open the tab now, while the click still counts, so the pop-up blocker lets it through; point it at the document later.
+  let w=null;
+  try{ w=window.open("","_blank"); if(w){ try{ w.opener=null; }catch{} try{ w.document.title="Opening the document…"; w.document.body.textContent="Opening the document from S&P…"; }catch{} } }catch{}
+  d.busy=true; d.err=""; render();
+  const r=await callFn("snl-filings", key.startsWith("d:") ? {action:"document", documentId:Number(key.slice(2))} : {action:"document", filingVersionId:key.slice(2)}, {raw:true});
+  let blob=null;
+  if(r.res){ try{ blob=await r.res.blob(); }catch{} }
+  d.busy=false;
+  if(!blob){
+    if(w){ try{ w.close(); }catch{} }
+    if(r.err!=="signin") d.err = r.res ? "The document didn't download fully. Try again." : errText(r);
+    if(S.session) render(); return;
+  }
+  d.type=(r.res.headers.get("Content-Type")||"application/octet-stream").split(";")[0].trim().toLowerCase();
+  d.name=docName(r.res.headers.get("Content-Disposition"), key, d.type);
+  d.url=URL.createObjectURL(d.type==="application/pdf" ? blob.slice(0, blob.size, "application/pdf") : blob);
+  showDoc(d, page, w); render(); loadStatus();
+}
+
+/* ---------- export: CSV built here, XLSX with SheetJS loaded on the first click ---------- */
+function download(url, name){ const a=document.createElement("a"); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); }
+function saveBlob(blob, name){ const url=URL.createObjectURL(blob); download(url, name); setTimeout(()=>URL.revokeObjectURL(url), 4000); }
+/* Every cell quoted; text that a spreadsheet would run as a formula gets a leading apostrophe. */
+function csvCell(v){
+  if(blank(v)) return '""';
+  let s=String(v);
+  if(typeof v!=="number" && /^[=+\-@\t\r]/.test(s) && !/^[+-]?[\d.,]+%?$/.test(s)) s="'"+s;
+  return `"${s.replace(/"/g,'""')}"`;
+}
+function loadScript(src){ return new Promise((res,rej)=>{ const s=document.createElement("script"); s.src=src; s.onload=()=>res(); s.onerror=()=>{ s.remove(); rej(new Error("The script didn't load")); }; document.head.appendChild(s); }); }
+async function exportTable(t, fmt){
+  if(!t || !t.rows.length){ toast("There is nothing to export yet."); return; }
+  if(fmt==="csv"){
+    const lines=[t.cols].concat(t.rows).map(r=>r.map(csvCell).join(","));
+    saveBlob(new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"}), t.name+".csv"); return;
+  }
+  try{
+    if(!window.XLSX){ toast("Getting the Excel export ready…"); await loadScript(XLSX_SRC); document.getElementById("toastRoot").innerHTML=""; }
+    const X=window.XLSX, ws=X.utils.aoa_to_sheet([t.cols].concat(t.rows.map(r=>r.map(v=>blank(v)?"":v)))), wb=X.utils.book_new();
+    X.utils.book_append_sheet(wb, ws, String(t.sheet||"Sheet1").replace(/[\[\]:*?\/\\]/g," ").slice(0,31));
+    saveBlob(new Blob([X.write(wb,{bookType:"xlsx",type:"array"})],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), t.name+".xlsx");
+  }catch{ toast("Couldn't load the Excel export. Check your connection, or use Export CSV."); }
+}
+
+/* ---------- Ask: Claude answers in the background; the page follows the job ---------- */
+const activeTurn = () => S.ask.turns.find(t=>!["done","error"].includes(t.status));
+const answerText = res => (Array.isArray(res&&res.answer)?res.answer:[]).map(s=>String(s&&s.text||"")).filter(Boolean).join("\n");
+async function askQuestion(){
+  const a=S.ask, q=a.draft.trim();
+  if(activeTurn()) return;
+  if(!q){ toast("Type a question first."); return; }
+  if(q.length>MAX_QUESTION){ toast(`Keep the question under ${count(MAX_QUESTION)} characters.`); return; }
+  // earlier finished answers go along as plain text, so a follow-up question makes sense
+  const history=a.turns.filter(t=>t.status==="done"&&t.result).slice(-MAX_HISTORY).map(t=>({question:t.question, answer:answerText(t.result).slice(0, MAX_HISTORY_ANSWER).trim()})).filter(h=>h.answer);
+  const t={question:q, status:"starting", progress:[], partial:"", result:null, error:"", calm:false, jobId:null, lastContinue:0, note:"", contNote:""};
+  a.turns.push(t); a.draft=""; render();
+  const r=await callFn("snl-chat",{action:"ask", question:q, ...(history.length?{history}:{})});
+  if(!S.session || !a.turns.includes(t)) return;
+  if(r.data && r.data.jobId){ t.jobId=r.data.jobId; t.status="queued"; schedulePoll(); }
+  else if(r.err!=="signin"){ t.status="error"; t.calm=r.err==="not_configured"; t.error=r.data ? "The question was sent but no answer was started. Try again." : errText(r); if(t.calm||r.err==="bad") a.draft=a.draft||q; }
+  if(S.view==="ask") render();
+}
+function schedulePoll(){
+  clearTimeout(S.ask.timer);
+  S.ask.timer=setTimeout(async()=>{ S.ask.timer=null; await pollJob(); if(S.session && activeTurn()) schedulePoll(); }, TIMING.poll);
+}
+async function pollJob(){
+  const t=activeTurn(); if(!t || !t.jobId) return;
+  let data=null, error=null;
+  try{ ({data, error}=await S.sb.from("snl_jobs").select(JOB_COLS).eq("id", t.jobId).maybeSingle()); }catch(e){ error=e; }
+  if(!S.session || !S.ask.turns.includes(t)) return;   // signed out or a new conversation meanwhile
+  const sig=()=>JSON.stringify([t.status, t.progress.length, t.partial.length, t.note, t.contNote]), before=sig();
+  if(error) t.note="Couldn't check on the answer just now. Still trying.";
+  else if(data){
+    t.note="";
+    t.status=["queued","running","paused","done","error"].includes(data.status)?data.status:"running";
+    t.progress=Array.isArray(data.progress)?data.progress:[]; t.partial=typeof data.partial==="string"?data.partial:"";
+    if(t.status==="done"){ t.result=data.result&&typeof data.result==="object"?data.result:{}; loadStatus(); }
+    if(t.status==="error") t.error=data.error||"Claude couldn't finish this answer. Ask again.";
+    // The function works in time slices. When it has paused, or has gone quiet, ask it to pick the answer up again.
+    const now=Date.now(), quiet=(t.status==="running"||t.status==="queued") && !blank(data.heartbeat_at) && now-Date.parse(data.heartbeat_at)>TIMING.stale;
+    if(t.status!=="paused" && !quiet) t.contNote="";
+    else if(now-t.lastContinue>=TIMING.again){ t.lastContinue=now; continueJob(t); }
+  }
+  if(S.view==="ask" && before!==sig()) render();
+}
+async function continueJob(t){
+  const r=await callFn("snl-chat",{action:"continue", jobId:t.jobId});
+  if(r.err==="signin" || !S.ask.turns.includes(t) || ["done","error"].includes(t.status)) return;
+  const was=t.contNote; t.contNote = r.err ? `Couldn't pick the answer up again: ${errText(r)} The page will try again shortly.` : "";
+  if(was!==t.contNote && S.view==="ask") render();
+}
+function newConversation(){ clearTimeout(S.ask.timer); S.ask=freshAsk(); render(); document.getElementById("ask_input")?.focus(); }
+function citeMarks(cites, ti, known){
+  if(!Array.isArray(cites) || !cites.length) return "";
+  return `<span class="cites">${cites.map(n=>known.has(String(n))
+    ? `<button type="button" class="cite" data-act="goto-source" data-turn="${ti}" data-n="${esc(n)}" aria-label="Source ${esc(n)}">[${esc(n)}]</button>`
+    : `<span class="cite off">[${esc(n)}]</span>`).join("")}</span>`;
+}
+const pagesLabel = s => !blank(s.pages) ? (/[-–,]/.test(String(s.pages)) ? "pages " : "page ")+s.pages : isNum(s.startPage) ? "page "+s.startPage : "";
+const sourceDocKey = s => !blank(s.documentId) ? "d:"+s.documentId : !blank(s.filingVersionId) ? "v:"+s.filingVersionId : "";
+function answerTable(t){
+  const tb=t.result&&t.result.table; if(!tb || !Array.isArray(tb.columns) || !Array.isArray(tb.rows)) return null;
+  const cols=tb.columns.map(c=>String(c??"")), rows=tb.rows.filter(Array.isArray).map(r=>cols.map((_,i)=>blank(r[i])?"":String(r[i])));
+  return {title:String(tb.title||"Comparison"), cols, rows, notes:(Array.isArray(tb.notes)?tb.notes:[]).filter(n=>!blank(n)).map(String)};
+}
+function answerExport(t){
+  const tb=answerTable(t); if(!tb) return null;
+  const pad=r=>tb.cols.map((_,i)=>r[i]??"");
+  return {name:`snl-answer-table-${TODAY()}`, sheet:tb.title, cols:tb.cols, rows:tb.rows.concat(tb.notes.length?[pad([])].concat(tb.notes.map(n=>pad(["Note: "+n]))):[])};
+}
+function answerHTML(t, ti){
+  const r=t.result||{}, segs=Array.isArray(r.answer)?r.answer.filter(s=>s&&!blank(s.text)):[], sources=Array.isArray(r.sources)?r.sources.filter(s=>s&&!blank(s.n)):[];
+  const known=new Set(sources.map(s=>String(s.n))), tb=answerTable(t), caps=(Array.isArray(r.caps)?r.caps:[]).filter(c=>!blank(c)), lookups=Array.isArray(r.lookups)?r.lookups:[], u=r.usage||{};
+  let h=`<div class="ans">${mdParts(segs.map(s=>({text:String(s.text), tail:citeMarks(s.cites, ti, known)}))) || "<p>No answer came back. Try rephrasing the question.</p>"}</div>`;
+  if(caps.length) h+=`<div class="info caps" role="status"><span>${caps.map(c=>esc(c)).join("<br>")}</span></div>`;
+  if(tb) h+=`<div class="blk anstable"><div class="blk-h"><h3>${esc(tb.title)}</h3><span class="inline"><button class="btn sm" data-act="export" data-what="answer" data-turn="${ti}" data-fmt="csv">Export CSV</button><button class="btn sm" data-act="export" data-what="answer" data-turn="${ti}" data-fmt="xlsx">Export XLSX</button></span></div>
+    <div class="tbl-wrap"><table><thead><tr>${tb.cols.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${tb.rows.map(row=>`<tr>${row.map(c=>`<td>${c===""?"n/d":esc(c)}</td>`).join("")}</tr>`).join("") || `<tr><td colspan="${tb.cols.length||1}">No rows.</td></tr>`}</tbody></table></div>
+    ${tb.notes.map(n=>`<p class="source">${esc(n)}</p>`).join("")}</div>`;
+  if(sources.length) h+=`<div class="blk"><h3>Sources</h3><ol class="srcs">${sources.map(s=>{ const key=sourceDocKey(s), pl=pagesLabel(s);
+      const meta=[s.company, s.state, s.trackingNumber, pl].filter(x=>!blank(x)).map(esc).join(" · ");
+      return `<li value="${esc(s.n)}" id="src-${ti}-${esc(s.n)}"><div class="t1">${blank(s.title)?"Filing document":esc(s.title)}</div>${meta?`<div class="t2">${meta}</div>`:""}
+        ${!blank(s.quote)?`<blockquote class="quote">“${esc(s.quote)}”</blockquote>`:""}
+        ${key?docButtonHTML(key, isNum(s.startPage)&&+s.startPage>0?`Open at page ${count(s.startPage)}`:"Open document", isNum(s.startPage)?s.startPage:""):""}</li>`; }).join("")}</ol></div>`;
+  const bits=[];
+  if(lookups.length) bits.push("Looked up: "+lookups.map(l=>esc(l&&(l.detail||l.tool)||"")).filter(Boolean).join("; ")+".");
+  if(isNum(u.spRequests)) bits.push(`${plural(u.spRequests,"S&amp;P request")}.`);
+  if(isNum(u.inputTokens)||isNum(u.outputTokens)) bits.push(`Claude read ${count(u.inputTokens)} tokens and wrote ${count(u.outputTokens)}.`);
+  if(!blank(r.model)) bits.push(`Model: ${esc(r.model)}.`);
+  if(bits.length) h+=`<p class="look">${bits.join(" ")}</p>`;
+  return h;
+}
+function turnHTML(t, ti){
+  let h=`<div class="ccmsg u">${esc(t.question)}</div>`;
+  if(t.status==="error") return h + (t.calm ? `<div class="info ask-calm" role="status"><span>${esc(t.error)}</span></div>` : `<div class="ccmsg err" role="alert">${esc(t.error)}</div>`);
+  if(t.status==="done") return h+`<div class="ccmsg a done">${answerHTML(t, ti)}</div>`;
+  const lead={starting:"Sending your question…", queued:"Waiting to start…", running:"Claude is working on this.", paused:"Claude is picking this up again."}[t.status]||"Claude is working on this.";
+  return h+`<div class="ccmsg a run" role="status"><p style="margin:0"><b>${lead}</b> Keep this tab open until the answer finishes. It can take a few minutes when Claude reads filing documents.</p>
+    ${t.progress.length?`<ol class="steps">${t.progress.map(s=>`<li>${esc(s&&s.text)}${s&&s.at?`<span>${esc(fmtTime(s.at))}</span>`:""}</li>`).join("")}</ol>`:""}
+    ${t.partial?`<div class="partial">${md(t.partial)}</div>`:""}${t.note||t.contNote?`<p class="t2 runnote">${esc(t.note||t.contNote)}</p>`:""}</div>`;
+}
+function renderAsk(){
+  const a=S.ask, busy=!!activeTurn(), off=S.status&&S.status.claude&&S.status.claude.configured===false;
+  return `<div><h2 class="action-title">Ask a question about filings and statutory data</h2>
+    <p class="sub">Claude searches S&amp;P's filings, reads the filing documents and looks up statutory data, then answers in plain English with sources you can open at the page it cites.</p></div>
+    ${off?`<div class="info" id="askOff" role="status"><span><b>Questions aren't set up yet.</b> ${isCorpDev()?"Set ANTHROPIC_API_KEY on Supabase and deploy the snl-chat function (see the README).":"Ask Corp Dev to finish the set-up."}</span></div>`:""}
+    <section class="ccbox" aria-label="Questions and answers">
+      <div class="cch"><h3>${a.turns.length?"This conversation":"Your question"}</h3><span class="grow"></span>${a.turns.length?`<button class="btn sm ghost" data-act="ask-new">New conversation</button>`:""}</div>
+      <p class="t2" id="askSees">Claude sees only your question and what S&amp;P returns for it: nothing else from this site or from Ascot. Check figures against the source before you use them.</p>
+      ${a.turns.length?`<div class="cclog" id="askLog" aria-live="polite">${a.turns.map(turnHTML).join("")}</div>`:`<p class="t2" id="askHint">For example: "Pull the homeowners form filings two companies made in Florida since 2021 and compare what changed." Name the companies, the state and the dates you care about.</p>`}
+      <div class="ccform"><textarea id="ask_input" data-bind="ask.draft" rows="2" maxlength="${MAX_QUESTION}" aria-label="${a.turns.length?"Follow-up question":"Question"}" placeholder="${a.turns.length?"Ask a follow-up question":"Type a question"}">${esc(a.draft)}</textarea>
+        <button class="btn primary" data-act="ask-send" ${busy?"disabled":""}>${busy?"Answering…":"Ask"}</button></div>
+    </section>`;
+}
+
+/* ---------- Statutory ---------- */
+async function loadStatStatus(){
+  const st=S.st; if(st.loading) return;
+  st.loading=true; st.statusErr=null; render();
+  const r=await callFn("snl-statutory",{action:"status"});
+  st.loading=false;
+  if(!S.session) return;
+  if(r.data) st.status=r.data; else if(r.err!=="signin") st.statusErr=r;
+  render();
+}
+function statCodes(){ return [...new Set(S.st.codes.split(/[\s,;]+/).map(s=>s.trim()).filter(Boolean))]; }
+function statProblem(){
+  const st=S.st, codes=statCodes(), y=new Date().getFullYear();
+  if(!codes.length) return `Type at least one NAIC ${st.kind==="group"?"group":"company"} code.`;
+  if(codes.length>MAX_CODES) return `Compare at most ${MAX_CODES} codes at a time: one subject and ${MAX_CODES-1} peers.`;
+  if(codes.some(c=>!/^[0-9]{1,6}$/.test(c))) return "NAIC codes are numbers of up to 6 digits, like 90001. Separate them with commas.";
+  const a=/^\d{4}$/.test(st.fromYear)?+st.fromYear:0, b=/^\d{4}$/.test(st.toYear)?+st.toYear:0;
+  if(!a || !b || a<1990 || b>y) return `Choose years between 1990 and ${y}.`;
+  if(a>b) return "The first year is after the last year.";
+  if(b-a>MAX_STAT_YEARS-1) return `Choose at most ${MAX_STAT_YEARS} years at a time.`;
+  return "";
+}
+async function runStat(refresh){
+  const st=S.st; if(st.busy) return;
+  let payload;
+  if(refresh){ if(!st.last) return; payload={...st.last, refresh:true}; }
+  else{
+    const problem=statProblem(); if(problem){ st.formErr=problem; render(); return; }
+    payload={action:"query", kind:st.kind, codes:statCodes(), fromYear:+st.fromYear, toYear:+st.toYear}; st.last=payload; st.res=null; st.ent={};
+  }
+  st.formErr=""; st.busy=true; st.err=null; render();
+  const r=await callFn("snl-statutory", payload);
+  st.busy=false;
+  if(!S.session) return;
+  if(r.data){ st.res=r.data; takeUsage(r.data); loadStatus(); }
+  else if(r.err!=="signin"){ st.err=r; if(r.err==="not_configured"||r.err==="not_mapped") loadStatStatus(); }
+  render();
+}
+const statVal = (unit, v) => unit==="pct" ? pct(v) : usdM(v);
+const statYears = res => { const a=+res.fromYear, b=+res.toYear, out=[]; if(isFinite(a)&&isFinite(b)) for(let y=a; y<=b && out.length<40; y++) out.push(y); return out; };
+function statEntities(res, field){
+  const list=(Array.isArray(res.entities)?res.entities:[]).map(e=>({code:String(e.code), name:e.name}));
+  for(const c of (Array.isArray(res.codes)?res.codes:[])) if(!list.some(e=>e.code===String(c))) list.push({code:String(c), name:null});
+  for(const r of (field&&Array.isArray(field.rows)?field.rows:[])) if(!blank(r.code) && !list.some(e=>e.code===String(r.code))) list.push({code:String(r.code), name:null});
+  return list;
+}
+const entLabel = e => blank(e.name) ? `NAIC ${e.code}` : `${e.name} (NAIC ${e.code})`;
+/* One block's table: for a "by year" field one row per company (the subject first, then peers); for a "by line"
+   or "by state" field one row per line or state for the company chosen in the block. */
+function statBlock(res, field){
+  const years=statYears(res), ents=statEntities(res, field), rows=Array.isArray(field.rows)?field.rows:[], dim=field.by==="line"?"line":field.by==="state"?"state":null;
+  const find=(code, y, d)=>{ const r=rows.find(x=>String(x.code)===code && +x.year===y && (!dim || String(x[dim]??"")===d)); return r ? r.value : null; };
+  if(!dim) return {years, ents, dim, lines:ents.map((e,i)=>({label:entLabel(e), tag:ents.length>1?(i?"Peer":"Subject"):"", vals:years.map(y=>find(e.code,y))}))};
+  const chosen=ents.some(e=>e.code===S.st.ent[field.id]) ? S.st.ent[field.id] : (ents[0]?ents[0].code:"");
+  const keys=[...new Set(rows.filter(r=>String(r.code)===chosen && !blank(r[dim])).map(r=>String(r[dim])))];
+  const last=years[years.length-1];
+  const lines=sortRows(keys.map(k=>({label:k, tag:"", vals:years.map(y=>find(chosen,y,k))})), l=>{ const v=l.vals[l.vals.length-1]; return isNum(v)?+v:null; }, -1);   // largest in the latest year first
+  return {years, ents, dim, chosen, lines, last};
+}
+function statExport(fieldId){
+  const res=S.st.res, field=res&&(res.fields||[]).find(f=>f.id===fieldId); if(!field) return null;
+  const years=statYears(res), ents=statEntities(res, field), rows=Array.isArray(field.rows)?field.rows:[], dim=field.by==="line"?"line":field.by==="state"?"state":null, unit=field.unit==="pct"?"%":"US dollars";
+  const val=(code,y,d)=>{ const r=rows.find(x=>String(x.code)===code && +x.year===y && (!dim || String(x[dim]??"")===d)); return r&&isNum(r.value) ? +r.value : null; };
+  const out=[];
+  for(const e of ents){
+    if(!dim){ out.push([e.code, e.name, unit, ...years.map(y=>val(e.code,y))]); continue; }
+    for(const k of [...new Set(rows.filter(r=>String(r.code)===e.code && !blank(r[dim])).map(r=>String(r[dim])))]) out.push([e.code, e.name, k, unit, ...years.map(y=>val(e.code,y,k))]);
+  }
+  return {name:`snl-statutory-${String(field.id).replace(/[^\w-]+/g,"-")}-${TODAY()}`, sheet:field.label||field.id, cols:["NAIC code","Name", ...(dim?[dim==="line"?"Line of business":"State"]:[]), "Unit", ...years.map(String)], rows:out};
+}
+function statBlockHTML(res, field){
+  const unit=field.unit==="pct"?"%":"$M";
+  const head=(extra)=>`<div class="blk-h"><div><h3>${esc(field.label||field.id)} <span class="t2">${unit}</span></h3></div><span class="inline">${extra||""}</span></div>`;
+  if(field.mapped===false) return `<section class="blk statblk" data-field="${esc(field.id)}">${head()}<p class="t2">This figure isn't mapped to a Snowflake column yet${isCorpDev()?". Add it in the field set-up below.":". Ask Corp Dev."}</p></section>`;
+  if(!blank(field.error)) return `<section class="blk statblk" data-field="${esc(field.id)}">${head()}<p class="err" role="alert">${esc(field.error)}</p></section>`;
+  const b=statBlock(res, field);
+  const exp=`<button class="btn sm" data-act="export" data-what="stat" data-field="${esc(field.id)}" data-fmt="csv">Export CSV</button><button class="btn sm" data-act="export" data-what="stat" data-field="${esc(field.id)}" data-fmt="xlsx">Export XLSX</button>`;
+  const pick=b.dim && b.ents.length>1 ? `<label class="inline t2" style="font-weight:bold">Company<select data-ent="${esc(field.id)}" style="width:auto;max-width:240px" aria-label="Company shown for ${esc(field.label||field.id)}">${b.ents.map(e=>`<option value="${esc(e.code)}" ${e.code===b.chosen?"selected":""}>${esc(entLabel(e))}</option>`).join("")}</select></label>` : "";
+  if(!b.lines.length || !(field.rows||[]).length) return `<section class="blk statblk" data-field="${esc(field.id)}">${head(pick)}<p class="t2">S&amp;P returned nothing for this figure, so it shows as n/d. That doesn't prove the figure is zero.</p></section>`;
+  return `<section class="blk statblk" data-field="${esc(field.id)}">${head(pick+exp)}
+    <div class="tbl-wrap"><table class="stat"><thead><tr><th>${b.dim==="line"?"Line of business":b.dim==="state"?"State":"Company"}</th>${b.years.map(y=>`<th class="num">${y}</th>`).join("")}</tr></thead>
+    <tbody>${b.lines.map(l=>`<tr><td>${esc(l.label)}${l.tag?` <span class="t2">${l.tag}</span>`:""}</td>${l.vals.map(v=>`<td class="num">${statVal(field.unit, v)}</td>`).join("")}</tr>`).join("")}</tbody></table></div></section>`;
+}
+function statResultsHTML(){
+  const st=S.st, res=st.res;
+  if(st.busy && !res) return `<div class="banner" role="status"><span>Fetching statutory data from Snowflake… This can take a minute. After that the figures are saved for everyone until someone clicks Refresh.</span></div>`;
+  if(!res) return st.err ? problemHTML(st.err, "Couldn't fetch the statutory data.", "stat-retry") : `<div class="empty" id="statEmpty"><p>Type the NAIC code of the company you want, then any peers, and choose the years. The first code is the subject; the rest sit beside it for comparison.</p></div>`;
+  const fields=Array.isArray(res.fields)?res.fields:[], loaded=Array.isArray(res.loaded)?res.loaded:[];
+  let h=`<h2 class="sec">Results</h2>`;
+  if(st.busy) h+=`<div class="banner" role="status"><span>Asking Snowflake again… The figures below are from ${fmtAt(res.fetchedAt)} until the new ones arrive.</span></div>`;
+  else if(st.err) h+=problemHTML(st.err, "Couldn't refresh the statutory data.", "stat-refresh");
+  else if(res.fromStore) h+=`<div class="info" id="statFromStore" role="status"><span>From the last fetch on ${fmtAt(res.fetchedAt)}.</span><button class="btn sm" data-act="stat-refresh">Refresh</button></div>`;
+  if(res.truncated) h+=`<div class="banner" id="statTruncated" role="alert"><span><b>These figures are incomplete.</b> Snowflake returned more rows than one request allows. Use fewer codes or fewer years.</span></div>`;
+  h+=fields.length ? fields.map(f=>statBlockHTML(res, f)).join("") : `<div class="empty"><p>No figures came back for these codes and years. That doesn't prove there are none.</p></div>`;
+  h+=`<p class="source" id="statSource">${loaded.map(l=>`S&amp;P last loaded ${esc(l.view)} on ${fmtAt(l.at)!=="n/d"?fmtAt(l.at):esc(blank(l.at)?"n/d":l.at)}.`).join(" ")} Source: ${esc(res.source||"S&P Global Market Intelligence statutory data")}, fetched ${fmtAt(res.fetchedAt)}. US dollars are shown in $M.</p>`;
+  return h;
+}
+/* One-off set-up for Corp Dev: look at Snowflake's views and columns, then save which column holds each figure. */
+async function openSetup(){
+  const su=S.st.setup; su.open=true;
+  if(su.text===null && !su.mapBusy){
+    su.mapBusy=true; render();
+    let data=null, error=null;
+    try{ ({data, error}=await S.sb.from("snl_settings").select("doc").eq("id","statutory_mapping").maybeSingle()); }catch(e){ error=e; }
+    su.mapBusy=false;
+    if(error) su.mapErr="Couldn't read the saved mapping: "+((error&&error.message)||"unknown error")+".";
+    su.text=JSON.stringify(data&&data.doc&&typeof data.doc==="object" ? data.doc : {fields:{}}, null, 2);
+  }
+  render();
+}
+async function discover(view, refresh){
+  const su=S.st.setup;
+  if(view){ su.view=view; su.cols=null; su.colsErr=null; su.colsBusy=true; } else { su.views=null; su.viewsErr=null; su.viewsBusy=true; }
+  render();
+  const like=su.like.trim();
+  const r=await callFn("snl-statutory",{action:"discover", ...(view?{view}:like?{like}:{}), ...(refresh?{refresh:true}:{})});
+  if(!S.session) return;
+  if(view){ if(su.view!==view) return; su.colsBusy=false; if(r.data) su.cols=Array.isArray(r.data.columns)?r.data.columns:[]; else if(r.err!=="signin") su.colsErr=r; }
+  else { su.viewsBusy=false; if(r.data) su.views=Array.isArray(r.data.views)?r.data.views:[]; else if(r.err!=="signin") su.viewsErr=r; }
+  render();
+}
+function mappingProblem(text){
+  let doc; try{ doc=JSON.parse(text); }catch(e){ return {problem:"This isn't valid JSON yet: "+String(e&&e.message||e).replace(/^JSON\.parse: /,"")+"."}; }
+  const obj=v=>v!==null && typeof v==="object" && !Array.isArray(v);
+  if(!obj(doc)) return {problem:'The mapping must be an object, like {"fields": {...}}.'};
+  if(!obj(doc.fields)) return {problem:'The mapping needs a "fields" object, with one entry for each figure.'};
+  const bad=Object.keys(doc.fields).find(k=>!obj(doc.fields[k]));
+  if(bad!==undefined) return {problem:`The entry for "${bad}" must be an object with view, entity, year and value.`};
+  if(text.length>200000) return {problem:"The mapping is too large to save."};
+  return {doc};
+}
+async function saveMapping(){
+  const su=S.st.setup, {doc, problem}=mappingProblem(su.text||"");
+  if(problem){ su.mapErr=problem; render(); return; }
+  su.saving=true; su.mapErr=""; render();
+  let error=null;
+  try{ ({error}=await S.sb.from("snl_settings").upsert({id:"statutory_mapping", doc})); }catch(e){ error=e; }
+  su.saving=false;
+  if(error){ su.mapErr = /42501|row-level security|permission/i.test(`${error.code||""} ${error.message||""}`) ? "Only Corp Dev logins can save the mapping." : "Couldn't save the mapping: "+(error.message||"unknown error")+"."; render(); return; }
+  su.text=JSON.stringify(doc, null, 2); toast("Mapping saved"); S.st.status=null; S.st.res=null; render(); loadStatStatus();
+}
+function setupHTML(){
+  const st=S.st, su=st.setup, fields=st.status&&Array.isArray(st.status.fields)?st.status.fields:[];
+  return `<section class="tcard" id="setup" aria-label="Field set-up">
+    <div><h3>One-off set-up: tell the app where each figure lives in Snowflake</h3>
+      <p class="t2">Do this once, after S&amp;P creates the Snowflake account. Only Corp Dev logins see this panel. Find the view and columns that hold each figure, then save them in the mapping below.</p></div>
+    ${fields.length?`<div class="counts" id="suFields"><b>Figures the app shows:</b>${fields.map(f=>`<span><code>${esc(f.id)}</code> ${esc(f.label)} ${f.mapped?"(mapped)":"(not mapped)"}</span>`).join("")}</div>`:""}
+    <div class="f"><label for="su_like">1. Find the view <em>optional: part of a view name</em></label>
+      <div class="toolbar"><div class="grow"><input type="text" id="su_like" data-bind="st.setup.like" value="${esc(su.like)}" autocomplete="off" spellcheck="false" placeholder="For example PREMIUM"></div>
+        <button type="button" class="btn" data-act="su-views" ${su.viewsBusy?"disabled":""}>${su.viewsBusy?"Listing…":"List views"}</button>${su.views?`<button type="button" class="btn sm ghost" data-act="su-views" data-refresh="1">Ask Snowflake again</button>`:""}</div>
+      ${su.viewsErr?problemHTML(su.viewsErr, "Couldn't list the views.", ""):""}
+      ${su.views?(su.views.length?`<div class="tbl-wrap" style="max-height:260px;overflow:auto"><table id="suViews"><thead><tr><th>View</th><th>Type</th><th>What S&amp;P says about it</th></tr></thead><tbody>${su.views.map(v=>`<tr><td><button type="button" class="lnk" data-act="su-view" data-name="${esc(v.name)}">${esc(v.name)}</button></td><td>${esc(v.type||"n/d")}</td><td>${blank(v.comment)?"n/d":esc(v.comment)}</td></tr>`).join("")}</tbody></table></div>`:`<p class="t2">No views match. That may mean the Snowflake login can't see them yet.</p>`):""}</div>
+    ${su.view?`<div class="f"><span>2. Columns in ${esc(su.view)}</span>
+      ${su.colsBusy?`<p class="t2" role="status">Listing the columns…</p>`:""}${su.colsErr?problemHTML(su.colsErr, "Couldn't list the columns.", ""):""}
+      ${su.cols?(su.cols.length?`<div class="tbl-wrap" style="max-height:260px;overflow:auto"><table id="suCols"><thead><tr><th>Column</th><th>Type</th><th>What S&amp;P says about it</th></tr></thead><tbody>${sortRows(su.cols, c=>isNum(c.position)?+c.position:null, 1).map(c=>`<tr><td><code>${esc(c.name)}</code></td><td>${esc(c.type||"n/d")}</td><td>${blank(c.comment)?"n/d":esc(c.comment)}</td></tr>`).join("")}</tbody></table></div>`:`<p class="t2">This view has no columns the login can see.</p>`):""}</div>`:""}
+    <div class="f"><label for="su_map">${su.view?"3":"2"}. The mapping <em>JSON: for each figure, the view, the columns for the company or group code, the year and the value, and the line or state column where there is one</em></label>
+      ${su.mapBusy?`<p class="t2" role="status">Loading the saved mapping…</p>`:`<textarea class="code" id="su_map" data-bind="st.setup.text" spellcheck="false" autocapitalize="off">${esc(su.text||"")}</textarea>`}
+      ${su.mapErr?`<p class="err" id="suErr" role="alert">${esc(su.mapErr)}</p>`:""}
+      <div class="inline"><button type="button" class="btn primary" data-act="su-save" ${su.saving||su.mapBusy?"disabled":""}>${su.saving?"Saving…":"Save mapping"}</button><span class="t2">Saving replaces the mapping for everyone.</span></div></div>
+  </section>`;
+}
+function renderStatutory(){
+  const st=S.st, s=st.status;
+  const head=`<div><h2 class="action-title">Statutory financials by NAIC company or group</h2>
+    <p class="sub">Premiums written by line and by state, policyholder surplus, and loss, expense and combined ratios over five years, with peers alongside.</p></div>`;
+  if(!s) return head + (st.statusErr ? problemHTML(st.statusErr, "Couldn't check the statutory data.", "stat-status-retry") : `<div class="banner" role="status"><span>Checking whether statutory data is set up…</span></div>`);
+  if(!s.configured) return head+`<div class="info" id="statOff" role="status"><span>${blank(s.message)?"<b>Statutory data isn't set up yet.</b> It needs a Snowflake reader account from S&amp;P.":esc(s.message)}</span></div>
+    <section class="tcard" id="statComing"><h3>What will appear here</h3><ul style="margin:0;padding-left:18px">
+      <li>Direct and net premiums written, by line of business and by state</li><li>Policyholder surplus</li><li>Loss, expense and combined ratios for the last five years</li><li>The same figures for peers, side by side, by NAIC company or group code</li></ul>
+      <p class="t2">Nothing on this view works until then. Filings and questions about filings don't depend on it.</p></section>`;
+  const setupBtn = isCorpDev() ? `<button type="button" class="btn sm ghost" data-act="su-toggle" aria-expanded="${st.setup.open}">${st.setup.open?"Hide field set-up":"Field set-up"}</button>` : "";
+  if(!s.mapped) return head+`<div class="info" id="statUnmapped" role="status"><span>${blank(s.message)?"<b>Snowflake is connected, but the statutory fields aren't mapped yet.</b>":esc(s.message)}${isCorpDev()?"":" Ask Corp Dev to finish the set-up."}</span>${isCorpDev()&&!st.setup.open?`<button class="btn sm" data-act="su-toggle">Start the set-up</button>`:""}</div>${isCorpDev()&&st.setup.open?setupHTML():""}`;
+  return head+`<form class="tcard" id="statForm" novalidate aria-label="Statutory search">
+      <div class="f"><span>Look up by</span><div class="seg"><button type="button" class="btn sm" data-act="stat-kind" data-k="company" aria-pressed="${st.kind==="company"}">NAIC company code</button><button type="button" class="btn sm" data-act="stat-kind" data-k="group" aria-pressed="${st.kind==="group"}">NAIC group code</button></div></div>
+      <div class="fgrid three" style="align-items:end">
+        <label class="f"><span>NAIC ${st.kind==="group"?"group":"company"} codes <em>the subject first, then up to ${MAX_CODES-1} peers; separate with commas</em></span><input type="text" id="st_codes" data-bind="st.codes" value="${esc(st.codes)}" autocomplete="off" spellcheck="false" inputmode="numeric" placeholder="For example 90001, 90107"></label>
+        <label class="f">First year<input type="number" id="st_from" data-bind="st.fromYear" value="${esc(st.fromYear)}" min="1990" max="${new Date().getFullYear()}" step="1"></label>
+        <label class="f">Last year<input type="number" id="st_to" data-bind="st.toYear" value="${esc(st.toYear)}" min="1990" max="${new Date().getFullYear()}" step="1"></label>
+      </div>
+      ${st.formErr?`<p class="err" id="statErr" role="alert">${esc(st.formErr)}</p>`:""}
+      <div class="toolbar"><button class="btn primary" data-act="stat-search" ${st.busy?"disabled":""}>${st.busy?"Fetching…":"Show statutory data"}</button><span class="grow"></span>${setupBtn}</div>
+    </form>
+    <div id="statResults" style="display:flex;flex-direction:column;gap:18px;min-width:0" aria-live="polite">${statResultsHTML()}</div>${isCorpDev()&&st.setup.open?setupHTML():""}`;
+}
+
+/* ---------- render ---------- */
+/* The view is rebuilt from state each time: keep the cursor, the scroll position of boxes marked data-keep,
+   and anything half-typed in boxes that aren't bound to state (the sign-in form). */
+function keepUi(){
+  const a=document.activeElement, id=a&&a.id, sel=a&&"selectionStart" in a ? (()=>{ try{ return [a.selectionStart, a.selectionEnd]; }catch{ return null; } })() : null;
+  const scroll=[...document.querySelectorAll("#view [data-keep][id]")].map(e=>[e.id, e.scrollTop, e.scrollLeft]);
+  const typed=["li_user","li_pw"].map(i=>[i, document.getElementById(i)?.value]).filter(x=>x[1]!==undefined);
+  return ()=>{
+    for(const [i,v] of typed){ const e=document.getElementById(i); if(e) e.value=v; }
+    for(const [i,t,l] of scroll){ const e=document.getElementById(i); if(e){ e.scrollTop=t; e.scrollLeft=l; } }
+    if(id && document.getElementById("view").querySelector("#"+CSS.escape(id))){ const e=document.getElementById(id); e.focus({preventScroll:true}); if(sel && sel[0]!==null && e.setSelectionRange){ try{ e.setSelectionRange(sel[0], sel[1]); }catch{} } }
+  };
+}
+function render(){
+  const v=document.getElementById("view"), on=!!S.session;
+  document.getElementById("tabs").hidden=!on;
+  document.getElementById("signoutBtn").hidden=!on;
+  document.getElementById("pwBtn").hidden=!on;
+  document.getElementById("strip").hidden=!on;
+  const wn=document.getElementById("whoName"); wn.textContent=on?S.session.name:""; wn.title=on?`${S.session.username||""} · ${ROLES[S.session.role]||""}`:"";
+  document.getElementById("whoMenuName").innerHTML=on?`<b>${esc(S.session.name)}</b><span>${esc(S.session.username||"")} · ${esc(ROLES[S.session.role]||"")}</span>`:"";
+  const dot=document.getElementById("whoDot"); dot.hidden=!on;
+  if(on){ dot.setAttribute("aria-label", `Account: ${S.session.name}`); dot.textContent=S.session.name.trim().split(/\s+/).map(x=>x[0]).slice(0,2).join("").toUpperCase(); }
+  else setMenu(false);
+  const keep=keepUi();
+  if(!on){ v.innerHTML=loginHTML(); keep(); renderDrawer(); return; }
+  document.querySelectorAll("nav.tabs a").forEach(a=>a.setAttribute("aria-current", a.dataset.view===S.view ? "page" : "false"));
+  document.getElementById("stripIn").innerHTML=stripHTML();
+  v.innerHTML = S.view==="ask" ? renderAsk() : S.view==="statutory" ? renderStatutory() : renderFilings();
+  keep(); renderDrawer();
+}
+function renderDrawer(){
+  const root=document.getElementById("drawerRoot"), dr=S.session?S.drawer:null;
+  if(!dr){ if(root.innerHTML) root.innerHTML=""; return; }
+  if(dr.rendered) return;
+  dr.rendered=true;
+  root.innerHTML=`<div class="scrim" data-act="close"></div><aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="drTitle">
+    <div class="drawer-h"><div style="flex:1;min-width:0"><div class="kicker">Your login</div><h2 id="drTitle">Change password</h2></div><button class="btn ghost" data-act="close" aria-label="Close">Close</button></div>
+    <form class="drawer-b" id="pwForm" novalidate>
+      <p style="margin:0">Signed in as <b>${esc(S.session.username||"")}</b>. Use at least 12 characters.</p>
+      <label class="f">New password<input type="password" id="p_new" autocomplete="new-password"></label>
+      <label class="f">Repeat new password<input type="password" id="p_again" autocomplete="new-password"></label>
+      <p class="err" id="pwErr" role="alert" hidden></p>
+    </form>
+    <div class="drawer-f"><span class="sp"></span><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="save-pw">Save password</button></div></aside>`;
+  root.querySelector("input").focus();
+}
+function closeDrawer(){ S.drawer=null; renderDrawer(); (S.lastFocusEl&&document.contains(S.lastFocusEl)?S.lastFocusEl:document.getElementById("whoDot"))?.focus(); }
+async function savePassword(){
+  const a=document.getElementById("p_new").value, b=document.getElementById("p_again").value, e=document.getElementById("pwErr");
+  const say=m=>{ e.textContent=m; e.hidden=false; };
+  if(a.length<12){ say("Use at least 12 characters."); return; }
+  if(a!==b){ say("The two passwords don't match."); return; }
+  const {error}=await S.sb.auth.updateUser({password:a});
+  if(error){ say(error.message || "Couldn't change the password. Try again."); return; }
+  toast("Password changed"); closeDrawer();
+}
+
+/* ---------- routing ---------- */
+const VIEW_KEY="snl.view";
+function enterView(){
+  if(!S.session) return;
+  if(S.view==="filings" && !S.refs && !S.refsLoading) loadRefs(false);
+  if(S.view==="statutory" && !S.st.status && !S.st.loading) loadStatStatus();
+}
+function route(){
+  const h=location.hash.replace(/^#/,""); let v=VIEWS.includes(h)?h:null;
+  if(!v){ try{ v=localStorage.getItem(VIEW_KEY); }catch{} }   // no view in the address: open the one used last
+  S.view=VIEWS.includes(v)?v:"filings";
+  try{ localStorage.setItem(VIEW_KEY, S.view); }catch{}
+  render(); enterView();
+}
+window.addEventListener("hashchange", route);
+
+/* ---------- events ---------- */
+function setMenu(open){
+  S.menuOpen=!!open; const m=document.getElementById("whoMenu"), d=document.getElementById("whoDot"); if(!m||!d) return;
+  m.hidden=!S.menuOpen; d.setAttribute("aria-expanded", String(S.menuOpen));
+  if(S.menuOpen) m.querySelector("button")?.focus();
+}
+function exportOf(t){
+  if(t.dataset.what==="filings") return filingsExport();
+  if(t.dataset.what==="answer"){ const turn=S.ask.turns[+t.dataset.turn]; return turn?answerExport(turn):null; }
+  if(t.dataset.what==="stat") return statExport(t.dataset.field);
+  return null;
+}
+document.addEventListener("click", e=>{
+  if(S.menuOpen && !e.target.closest("#whoMenu,#whoDot")) setMenu(false);
+  const t=e.target.closest("[data-act]"); if(!t) return; const a=t.dataset.act, f=S.f, st=S.st;
+  if(t.closest("#whoMenu")) setMenu(false);
+  if(t.tagName==="BUTTON" && t.type==="submit") e.preventDefault();
+  switch(a){
+    case "who-menu": setMenu(!S.menuOpen); break;
+    case "signout": signOut(); break;
+    case "change-pw": S.lastFocusEl=t.closest("#whoMenu")?document.getElementById("whoDot"):t; S.drawer={kind:"password"}; renderDrawer(); break;
+    case "close": closeDrawer(); break;
+    case "save-pw": savePassword(); break;
+    case "status-retry": S.statusErr=""; render(); loadStatus(); break;
+
+    case "co-find": resolveCompany(); break;
+    case "co-add": addChip(t.dataset.kind, t.dataset.id, t.dataset.name); break;
+    case "co-remove": f.chips.splice(+t.dataset.i,1); render(); break;
+    case "state-toggle": { const s=t.dataset.s; f.states=f.states.includes(s)?f.states.filter(x=>x!==s):f.states.concat(s); f.formErr=""; render(); document.querySelector(`#states [data-s="${CSS.escape(s)}"]`)?.focus(); break; }
+    case "state-all": f.states=stateOptions().map(s=>s.id); f.formErr=""; render(); break;
+    case "state-none": f.states=[]; render(); break;
+    case "range": { const to=TODAY(), y=+t.dataset.y; f.to=to; f.from=y===1?daysBefore(to,364):yearsBefore(to,y); render(); break; }
+    case "ref-tick": { const k=t.dataset.k, id=String(t.dataset.id); f[k]=t.checked?[...new Set(f[k].concat(id))]:f[k].filter(x=>x!==id); break; }
+    case "refs-refresh": loadRefs(true); break;
+    case "search": runSearch(false); break;
+    case "search-refresh": runSearch(true); break;
+    case "search-retry": if(f.last){ f.busy=false; runSearch(false); } break;
+    case "fsort": { const k=t.dataset.k; f.sort = f.sort.k===k ? {k, dir:-f.sort.dir} : {k, dir:k==="publishDate"||k==="rate"?-1:1}; f.shown=PAGE; render(); break; }
+    case "more-rows": f.shown+=PAGE; render(); break;
+    case "desc-toggle": f.openDesc[t.dataset.key]=!f.openDesc[t.dataset.key]; render(); break;
+    case "co-toggle": f.openCo[t.dataset.key]=!f.openCo[t.dataset.key]; render(); break;
+    case "open-doc": openDoc(t.dataset.doc, t.dataset.page); break;
+    case "export": exportTable(exportOf(t), t.dataset.fmt); break;
+
+    case "ask-send": askQuestion(); break;
+    case "ask-new": newConversation(); break;
+    case "goto-source": { const el=document.getElementById(`src-${t.dataset.turn}-${t.dataset.n}`); if(el){ document.querySelectorAll(".srcs li.hit").forEach(x=>x.classList.remove("hit")); el.classList.add("hit"); el.scrollIntoView({block:"center"}); el.querySelector("button")?.focus({preventScroll:true}); } break; }
+
+    case "stat-kind": st.kind=t.dataset.k==="group"?"group":"company"; render(); break;
+    case "stat-search": runStat(false); break;
+    case "stat-refresh": runStat(true); break;
+    case "stat-retry": runStat(false); break;
+    case "stat-status-retry": loadStatStatus(); break;
+    case "su-toggle": if(st.setup.open){ st.setup.open=false; render(); } else openSetup(); break;
+    case "su-views": discover(null, !!t.dataset.refresh); break;
+    case "su-view": discover(t.dataset.name, false); break;
+    case "su-save": saveMapping(); break;
+  }
+});
+function onInput(e){
+  const t=e.target, path=t.dataset&&t.dataset.bind;
+  if(t.dataset && t.dataset.ent){ S.st.ent[t.dataset.ent]=t.value; render(); return; }
+  if(!path) return;
+  setPath(path, t.value);
+  if("live" in t.dataset){ if(path==="f.filter") S.f.shown=PAGE; render(); }
+  else if(path==="f.from" || path==="f.to"){ const est=document.getElementById("f_est"); if(est) est.textContent=estimateText(); }   // no rebuild while a date is being typed
+}
+document.addEventListener("input", onInput);
+document.addEventListener("submit", e=>{
+  e.preventDefault();
+  if(e.target.id==="loginForm") doLogin();
+  else if(e.target.id==="pwForm") savePassword();
+  else if(e.target.id==="searchForm") runSearch(false);
+  else if(e.target.id==="statForm") runStat(false);
+});
+document.addEventListener("keydown", e=>{
+  if(e.target.id==="f_q" && e.key==="Enter"){ e.preventDefault(); resolveCompany(); return; }
+  if(e.target.id==="su_like" && e.key==="Enter"){ e.preventDefault(); discover(null, false); return; }
+  if(e.target.id==="ask_input" && e.key==="Enter" && !e.shiftKey && !e.isComposing){ e.preventDefault(); askQuestion(); return; }
+  if(e.key==="Enter" && e.target.closest && e.target.closest("#pwForm")){ e.preventDefault(); savePassword(); return; }
+  if(e.key==="Escape" && S.drawer){ closeDrawer(); return; }
+  if(e.key==="Escape" && S.menuOpen){ setMenu(false); document.getElementById("whoDot").focus(); }
+});
+
+/* ---------- auth: Supabase email and password; usernames map to <username>@<usernameDomain> ---------- */
+function toEmail(u){ u=u.trim().toLowerCase(); return u.includes("@") ? u : u+"@"+(CFG.usernameDomain||"snl-lookup.local"); }
+function resetState(){
+  clearTimeout(S.ask.timer);
+  for(const d of Object.values(S.docs)) if(d.url){ try{ URL.revokeObjectURL(d.url); }catch{} }
+  S.session=null; S.drawer=null; S.status=null; S.statusErr=""; S.refs=null; S.refsLoading=false; S.refsMsg=""; S.refsErr=""; S.docs={};
+  S.f=freshFilings(); S.ask=freshAsk(); S.st=freshStat();
+}
+async function onSignedIn(session){
+  const {data, error}=await S.sb.from("profiles").select("username,display_name,role").eq("id", session.user.id).maybeSingle();
+  if(error || !data || !ROLES[data.role]){ S.leaving=true; try{ await S.sb.auth.signOut(); }catch{} S.leaving=false; resetState(); S.loginErr="This login has no role on this site yet. Ask the site owner to set it up."; render(); return; }
+  S.session={username:data.username, name:data.display_name||data.username, role:data.role};
+  S.loginErr=""; route(); loadStatus();
+}
+async function doLogin(){
+  if(S.loginBusy) return;
+  const u=(document.getElementById("li_user")?.value||"").trim(), pw=document.getElementById("li_pw")?.value||"";
+  if(!u||!pw){ S.loginErr="Enter your username and password."; render(); return; }
+  S.loginBusy=true; S.loginErr=""; render();
+  let data=null, error=null;
+  try{ ({data, error}=await S.sb.auth.signInWithPassword({email:toEmail(u), password:pw})); }catch(e){ error=e; }
+  S.loginBusy=false;
+  if(error || !data || !data.session){
+    const m=(error&&error.message)||"No session returned";
+    S.loginErr = /rate|too many/i.test(m) ? "Too many attempts. Wait a few minutes and try again."
+      : (error && (error.code==="invalid_credentials" || /invalid login credentials/i.test(m))) ? "That username and password don't match. Check them, or ask the site owner to reset your password."
+      : (error && error.code==="email_provider_disabled") ? "Sign-in is switched off in Supabase (Authentication > Sign In / Providers > Email). Tell the site owner."
+      : "Sign-in failed: "+m+". The site's Supabase settings may be wrong; tell the site owner.";
+    render(); const f=document.getElementById("li_pw"); if(f){ f.value=""; f.focus(); } return;
+  }
+  await onSignedIn(data.session);
+}
+async function signOut(){
+  S.leaving=true; try{ await S.sb.auth.signOut(); }catch{} S.leaving=false;
+  resetState(); S.loginErr=""; history.replaceState(null,"",location.pathname); render();
+}
+/* A function said the login is no longer good: back to the sign-in form, with its message. */
+async function sessionEnded(msg){
+  if(!S.session) return;
+  resetState(); S.loginErr=msg||"Sign in again."; render();
+  S.leaving=true; try{ await S.sb.auth.signOut(); }catch{} S.leaving=false;
+}
+function loginHTML(){
+  const wrap = inner => `<div class="login" role="region" aria-label="Sign in">${inner}</div>`;
+  if(S.configMissing) return wrap(`<h2>Not connected yet</h2>
+    <p>This site doesn't know which Supabase project to use.</p>
+    <p><b>On GitHub Pages:</b> add the repository variables <code>SUPABASE_URL</code> and <code>SUPABASE_PUBLISHABLE_KEY</code>, then run the deploy again.</p>
+    <p><b>On your own computer:</b> fill in <code>supabaseUrl</code> and <code>supabaseAnonKey</code> in <code>web/config.js</code>. Use the publishable key, never the secret key.</p>
+    <p class="source">The README has the steps.</p>`);
+  if(!S.authChecked) return wrap(`<h2>SNL lookup</h2><p>Loading…</p>`);
+  return wrap(`<div class="kicker">Strategy and corporate development</div><h2>Sign in to SNL lookup</h2>
+    <form id="loginForm" style="display:flex;flex-direction:column;gap:12px" novalidate>
+      <label class="f">Username<input type="text" id="li_user" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+      <label class="f">Password<input type="password" id="li_pw" autocomplete="current-password"></label>
+      ${S.loginErr?`<p class="err" role="alert">${esc(S.loginErr)}</p>`:""}
+      <div class="inline"><button class="btn primary" ${S.loginBusy?"disabled":""}>${S.loginBusy?"Signing in…":"Sign in"}</button></div>
+    </form><p class="source">Forgot your password? Ask the site owner to reset it. Logins are created by the owner; there is no sign-up.</p>`);
+}
+async function boot(){
+  S.f=freshFilings(); S.st=freshStat();
+  if(!CFG.supabaseUrl || !CFG.supabaseAnonKey || !window.supabase){ S.configMissing=true; render(); return; }
+  S.sb=window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
+  render();
+  let session=null;
+  try{ ({data:{session}}=await S.sb.auth.getSession()); }catch{}
+  S.authChecked=true;
+  if(session) await onSignedIn(session); else render();
+  S.sb.auth.onAuthStateChange((event)=>{ if(event==="SIGNED_OUT" && S.session && !S.leaving){ resetState(); S.loginErr="You were signed out. Sign in again."; render(); } });
+}
+boot();
+</script>
+</body>
+</html>

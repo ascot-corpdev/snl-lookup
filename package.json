@@ -1,0 +1,16 @@
+{
+  "name": "snl-lookup",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "logins": "node scripts/logins.mjs",
+    "serve": "npx --yes http-server@14.1.1 web -p 8080 -c-1",
+    "test": "node tests/run.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.119.0"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

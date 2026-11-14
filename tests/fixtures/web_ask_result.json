@@ -1,0 +1,43 @@
+{
+  "_about": "A made-up answer job for the page tests, in the shape of a public.snl_jobs row written by the snl-chat function. The companies, form numbers, tracking numbers and quotes are invented.",
+  "question": "Pull Calloway Insurance Co and Tarrow Mutual Insurance Co homeowners form filings in Florida. Do Calloway have separate forms for middle market and private client customers?",
+  "progress": [
+    { "at": "2026-11-13T12:00:05Z", "text": "Searching S&P filings: 3 companies, FL, 2021 to 2026" },
+    { "at": "2026-11-13T12:00:21Z", "text": "Reading filing CALL-134000001 (42 pages)" },
+    { "at": "2026-11-13T12:00:48Z", "text": "Reading filing CALL-134000002 (18 pages)" },
+    { "at": "2026-11-13T12:01:10Z", "text": "Reading filing TARR-134000777 (27 pages)" }
+  ],
+  "partial": "**Yes.** Calloway uses separate homeowners forms for its two customer groups in Florida.",
+  "result": {
+    "answer": [
+      { "text": "**Yes.** Calloway uses separate homeowners forms for its two customer groups in Florida.", "cites": [1, 2] },
+      { "text": "- **Middle market:** form CAL-HO3-MM (06 25), filed by Calloway Insurance Co, effective 1 Jan 2026.", "cites": [1] },
+      { "text": "- **Private client:** form CAL-HO5-PC (03 25), filed by Calloway Home Co, effective 1 Oct 2025.", "cites": [2] },
+      { "text": "Tarrow Mutual Insurance Co files one homeowners form for all customers.", "cites": [3] }
+    ],
+    "sources": [
+      { "n": 1, "documentId": 880001, "filingVersionId": "fv-00000001", "title": "Homeowners HO-3 middle market policy form", "company": "Calloway Insurance Co", "state": "FL", "trackingNumber": "CALL-134000001", "pages": "3-4", "startPage": 3, "quote": "This form applies to dwellings insured under the Calloway middle market program." },
+      { "n": 2, "documentId": 880002, "filingVersionId": "fv-00000002", "title": "Homeowners HO-5 private client policy form", "company": "Calloway Home Co", "state": "FL", "trackingNumber": "CALL-134000002", "pages": "7", "startPage": 7, "quote": "Private client: for dwellings with a replacement cost of $1,500,000 or more." },
+      { "n": 3, "documentId": null, "filingVersionId": "fv-00000004", "title": "Homeowners policy form", "company": "Tarrow Mutual Insurance Co", "state": "FL", "trackingNumber": "TARR-134000777", "pages": null, "startPage": null, "quote": null }
+    ],
+    "table": {
+      "title": "Homeowners form filings in Florida",
+      "columns": ["Company", "Form number", "Product", "Segment", "Effective date", "Source filing"],
+      "rows": [
+        ["Calloway Insurance Co", "CAL-HO3-MM (06 25)", "Homeowners HO-3", "Middle market", "1 Jan 2026", "CALL-134000001"],
+        ["Calloway Home Co", "CAL-HO5-PC (03 25)", "Homeowners HO-5", "Private client", "1 Oct 2025", "CALL-134000002"],
+        ["Tarrow Mutual Insurance Co", "TMI-HO-01 (01 24)", "Homeowners", "n/d", "1 Mar 2024", "TARR-134000777"]
+      ],
+      "notes": ["Segment is taken from each form's title page. Tarrow's form doesn't name a segment."]
+    },
+    "lookups": [
+      { "tool": "search_filings", "detail": "Filings: 3 companies, FL, 2021 to 2026" },
+      { "tool": "read_document", "detail": "CALL-134000001, pages 1 to 10" },
+      { "tool": "read_document", "detail": "CALL-134000002, pages 1 to 18" },
+      { "tool": "read_document", "detail": "TARR-134000777, pages 1 to 12" }
+    ],
+    "caps": [],
+    "model": "claude-example-1",
+    "usage": { "inputTokens": 48210, "outputTokens": 1432, "spRequests": 9 }
+  }
+}

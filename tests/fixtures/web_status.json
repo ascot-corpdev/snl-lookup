@@ -1,0 +1,8 @@
+{
+  "_about": "Made-up data for the page tests, in the shape the snl-filings function answers {action: \"status\"} with.",
+  "filings": { "configured": true, "message": null, "used": { "hour": 12, "day": 40 }, "limits": { "hour": 500, "day": 12000 }, "account": "trial" },
+  "statutory": { "configured": false },
+  "claude": { "configured": true },
+  "refreshed": { "reference": "2026-11-05T09:30:00Z", "search": "2026-11-13T08:15:00Z", "statutory": null },
+  "role": "corpdev"
+}

@@ -1,0 +1,83 @@
+{
+ "_note": "Made-up reference lists. S&P's real column names for these lists are not confirmed.",
+ "typeOfInsurance": {
+  "headers": [
+   "typeOfInsuranceId",
+   "typeOfInsurance"
+  ],
+  "rows": [
+   [
+    4,
+    "Homeowners"
+   ],
+   [
+    19,
+    "Personal auto"
+   ]
+  ]
+ },
+ "filingStatus": {
+  "headers": [
+   "filingStatusId",
+   "filingStatus"
+  ],
+  "rows": [
+   [
+    1,
+    "Closed - Approved"
+   ],
+   [
+    2,
+    "Pending"
+   ],
+   [
+    3,
+    "Withdrawn"
+   ]
+  ]
+ },
+ "serffFilingState": {
+  "headers": [
+   "serffFilingStateId",
+   "serffFilingState"
+  ],
+  "rows": [
+   [
+    "FL",
+    "Florida"
+   ],
+   [
+    "TX",
+    "Texas"
+   ],
+   [
+    "GA",
+    "Georgia"
+   ]
+  ]
+ },
+ "serffFilingType": {
+  "headers": [
+   "serffFilingTypeId",
+   "serffFilingType"
+  ],
+  "rows": [
+   [
+    0,
+    "Form"
+   ],
+   [
+    1,
+    "Rate"
+   ],
+   [
+    2,
+    "Rule"
+   ],
+   [
+    3,
+    "Rate/Rule"
+   ]
+  ]
+ }
+}
