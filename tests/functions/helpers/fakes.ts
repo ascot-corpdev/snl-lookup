@@ -85,7 +85,7 @@ export const PDF = (pagesText: string) => new TextEncoder().encode(`%PDF-1.4\n% 
 export type SpCall = { path: string; method: string; query: Record<string, string>; body: any; auth: string | null; at: number };
 
 /** S&P's token endpoint and Physical Documents API, shaped as S&P's documents describe them. */
-export function fakeSpgmi(clock: Clock, opts: { username?: string; password?: string; documents?: Record<string, { bytes: Uint8Array; type?: string; name?: string }> } = {}) {
+export function fakeSpgmi(clock: Clock, opts: { username?: string; password?: string; documents?: Record<string, { bytes: Uint8Array; type?: string; name?: string }>; auth?: FakeAuthOpts } = {}) {
   const search = read("spgmi_search.json"), refs = read("spgmi_reference.json");
   const col = (name: string) => search.headers.indexOf(name);
   const state = {
@@ -104,6 +104,10 @@ export function fakeSpgmi(clock: Clock, opts: { username?: string; password?: st
     const auth = headers.get("authorization");
     const raw = typeof init.body === "string" ? init.body : "";
     const path = url.href.startsWith(SPGMI) ? url.pathname : url.href;
+    if (opts.auth && (path === "/gdsapi/rest/authenticate/api/v1/token" || path === "/gdsapi/rest/authenticate/api/v1/tokenRefresh")) {
+      const answer = authAnswer(opts.auth, path, raw, headers, clock, opts, state);
+      if (answer) return answer;
+    }
     if (path === "/gdsapi/rest/authenticate/api/v1/token") {
       state.log.push({ path, method, query: {}, body: Object.fromEntries(new URLSearchParams(raw)), auth, at: clock.now });
       const form = new URLSearchParams(raw);
@@ -118,6 +122,7 @@ export function fakeSpgmi(clock: Clock, opts: { username?: string; password?: st
     state.log.push(call);
     if (!path.startsWith("/gds/documents/")) return err(404, "Not Found", "Invalid endpoint");
     if (!auth || !state.valid.has(auth.replace(/^Bearer /, ""))) return err(401, "Unauthorized", "Token is invalid or has expired.");
+    if (opts.auth && (opts.auth.expires.get(auth.replace(/^Bearer /, "")) ?? Infinity) <= clock.now) return err(401, "Unauthorized", "Token is invalid or has expired.");
     if (url.searchParams.get("docType") !== "INSPRODFILINGS_DOCUMENTS_API") return err(400, "Bad Request", "Missing parameters: docType");
     const forced = state.failNext.shift();
     if (forced) return forced.body !== undefined ? J(forced.body, forced.status, forced.headers) : new Response(JSON.stringify({ status: forced.status, timestamp: new Date(clock.now).toISOString(), requestId: "req-forced", error: "Error", message: forced.status === 403 ? "Entitlement needed" : forced.status === 429 ? "Too many requests" : "Unknown Error" }), { status: forced.status, headers: { "content-type": "application/json", ...(forced.headers ?? {}) } });
@@ -154,6 +159,59 @@ export function fakeSpgmi(clock: Clock, opts: { username?: string; password?: st
     return err(405, "Method Not Allowed", "Method Not Allowed");
   }) as typeof globalThis.fetch;
   return Object.assign(state, { fetch });
+}
+
+// ---------- fake S&P sign-in, as S&P's Authenticate specification describes it ----------
+
+/** Turns on fakeSpgmi's fuller sign-in: token lifetimes, refresh tokens and scripted failures. Make one with fakeAuth(). */
+export type FakeAuthOpts = {
+  /** expires_in_seconds sent with each token (a string, as in the specification); null leaves it out. */
+  lifeSeconds: string | number | null;
+  /** Send a refresh_token with each sign-in. */
+  refresh: boolean;
+  /** A refresh answer carries a new refresh token as well. */
+  rotate: boolean;
+  /** Answer the next sign-ins (or refreshes) with these, before normal handling. */
+  signInFail: { status: number; message?: string; requestId?: string }[];
+  refreshFail: { status: number; message?: string; requestId?: string }[];
+  /** Access token -> when it stops working; refresh tokens S&P would take. */
+  expires: Map<string, number>;
+  refreshValid: Set<string>;
+  signIns: number; refreshes: number;
+};
+export function fakeAuth(o: { lifeSeconds?: string | number | null; refresh?: boolean; rotate?: boolean } = {}): FakeAuthOpts {
+  return { lifeSeconds: o.lifeSeconds === undefined ? "3600" : o.lifeSeconds, refresh: o.refresh ?? true, rotate: o.rotate ?? false, signInFail: [], refreshFail: [], expires: new Map(), refreshValid: new Set(), signIns: 0, refreshes: 0 };
+}
+
+function authAnswer(a: FakeAuthOpts, path: string, raw: string, headers: Headers, clock: Clock, opts: { username?: string; password?: string }, state: { log: SpCall[]; tokens: number; valid: Set<string> }): Response {
+  const form = new URLSearchParams(raw);
+  state.log.push({ path, method: "POST", query: {}, body: Object.fromEntries(form), auth: headers.get("authorization"), at: clock.now });
+  // The error body in the Authenticate specification is {error, message}; a reference is added only when a test asks.
+  const fail = (f: { status: number; message?: string; requestId?: string }) => J({ error: String(f.status), message: f.message ?? "Error", ...(f.requestId ? { requestId: f.requestId } : {}) }, f.status);
+  if (headers.get("content-type") !== "application/x-www-form-urlencoded") return fail({ status: 400, message: "Expected a form" });
+  const issue = (withRefresh: boolean) => {
+    const token = `tok-${++state.tokens}`;
+    state.valid.add(token);
+    const life = a.lifeSeconds === null ? null : Number(a.lifeSeconds);
+    if (life !== null && life > 0) a.expires.set(token, clock.now + life * 1000);   // an unreadable lifetime: the token doesn't expire
+    let rt: string | undefined;
+    if (withRefresh) { rt = `rt-${state.tokens}`; a.refreshValid.add(rt); }
+    return J({ scope: "test", token_type: "bearer", access_token: token, ...(a.lifeSeconds === null ? {} : { expires_in_seconds: a.lifeSeconds }), ...(rt ? { refresh_token: rt } : {}) });
+  };
+  if (path.endsWith("/tokenRefresh")) {
+    a.refreshes++;
+    const forced = a.refreshFail.shift();
+    if (forced) return fail(forced);
+    const rt = form.get("refreshToken");
+    if (!rt || !a.refreshValid.has(rt)) return fail({ status: 401, message: "User unauthorized" });
+    if (a.rotate) a.refreshValid.delete(rt);
+    return issue(a.rotate);
+  }
+  a.signIns++;
+  const forced = a.signInFail.shift();
+  if (forced) return fail(forced);
+  if (form.get("username") !== (opts.username ?? "api-user") || form.get("password") !== (opts.password ?? "api-pass")) return fail({ status: 401, message: "User unauthorized" });
+  return issue(a.refresh);
 }
 
 // ---------- fake Anthropic ----------
