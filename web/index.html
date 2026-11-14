@@ -2111,6 +2111,7 @@ async function pfBuild(plain){
     pfChatUse();   // the day's count and cost, now with this draft
     if(r.data && r.data.facts && typeof r.data.facts==="object" && r.data.text){
       pf.drafted={facts:r.data.facts, text:r.data.text, usage:r.data.usage||null};
+      markSeen(r.data.jobId);   // the draft is saved as a past answer; it is already in front of the reader, so no "Answer ready"
     } else if(r.err!=="signin"){ pf.busy=""; pf.draftErr = r.data ? {err:"bad_answer", msg:"Claude's draft came back in a form the page can't read."} : r; render(); return; }
     else return;
   }
@@ -2188,7 +2189,7 @@ function pfDraftHTML(pf){
 function pfCostLine(u){ u=u||{}; const tok=isNum(u.inputTokens)||isNum(u.outputTokens); return tok||isNum(u.costUsd) ? `. It cost ${costText(u.costUsd)}${tok?` (${count(u.inputTokens)} tokens read, ${count(u.outputTokens)} written)`:""}.` : "."; }
 function pfDraftErrText(r){
   if(r.err==="limit"||r.err==="daily_limit") return "You've reached today's limit of questions to Claude, so it can't draft the text now. Build with plain text instead, or try again tomorrow.";
-  if(r.err==="busy") return "Claude is busy with other work just now. Build with plain text, or try the draft again in a few minutes.";
+  if(r.err==="busy") return "You already have an answer in progress in Ask Claude, and Claude takes one at a time for each login. Build with plain text, or try the draft again when that answer has finished.";
   if(r.err==="not_configured") return "Claude isn't set up, so it can't draft the text. Build with plain text instead.";
   return `Claude couldn't draft the text. ${errText(r)} You can build with plain text instead.`;
 }

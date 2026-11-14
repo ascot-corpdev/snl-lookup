@@ -37,7 +37,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
 const FACTS=ANSWER.facts, TEXT=ANSWER.text;
 const PSTATUS=(over={})=>({statutory:{configured:true, mapped:true, fields:[]}, claude:{configured:true}, filings:{configured:true}, ...over});
 const CLAUDE_TEXT={...copy(TEXT), by:"claude", summary:{title:"A growing Florida homeowners writer", points:copy(TEXT.summary.points)}};
-const DRAFT=()=>({facts:copy(FACTS), text:copy(CLAUDE_TEXT), usage:{inputTokens:18400, outputTokens:2100, costUsd:0.12}});
+const DRAFT=()=>({facts:copy(FACTS), text:copy(CLAUDE_TEXT), usage:{inputTokens:18400, outputTokens:2100, costUsd:0.12}, jobId:"job-pf-1"});
 const SAMPLE=()=>({facts:{...copy(FACTS), sample:true, entity:{kind:"company", code:"99999", name:"Nonesuch Sample Insurance Co", groupName:null, naicGroupCode:null}}, text:copy(TEXT)});
 const TPL={text:"PK made-up template", updated_at:"2026-11-05T09:30:00Z"};
 
@@ -121,6 +121,7 @@ const TPL={text:"PK made-up template", updated_at:"2026-11-05T09:30:00Z"};
   let dl=await t.download(async()=>{ await p.click("#pf_buildBtn"); await p.waitForTimeout(200);
     ok("drafting: says it can take up to two minutes", (await t.txt("#pfDrafting"))==="Claude is drafting the slide text… This can take up to two minutes. Keep this tab open." && await p.isDisabled("#pf_buildBtn") && await p.isDisabled("#pf_draft")); });
   t.delay.draft=0; await p.waitForTimeout(250);
+  ok("the draft, saved as a past answer, is counted as seen: no \"Answer ready\" for it", (await p.evaluate(()=>localStorage.getItem("snl.seenAnswer")))==="job-pf-1");
   ok("the draft is asked for by kind and code only: no figures go from the page", same(t.of("draft").map(c=>c.body),[{action:"draft",kind:"company",code:"90001"}]));
   ok("the file downloads with the name the slides script gives it", dl.name==="Calloway-Insurance-Co-profile-2026-11-13.pptx" && dl.text==="PPTX for Calloway-Insurance-Co-profile-2026-11-13.pptx", dl);
   ok("as a PowerPoint file", same(await p.evaluate(()=>__blobs.map(x=>x.type)),[PPTX]));
@@ -179,7 +180,7 @@ const TPL={text:"PK made-up template", updated_at:"2026-11-05T09:30:00Z"};
 
   // ----- Claude's draft refused: limit, busy, not set up; each still builds with plain text -----
   for(const [code, status, msg, again] of [["limit",429,"You've reached today's limit of questions to Claude, so it can't draft the text now. Build with plain text instead, or try again tomorrow.",false],
-    ["busy",503,"Claude is busy with other work just now. Build with plain text, or try the draft again in a few minutes.",true],
+    ["busy",409,"You already have an answer in progress in Ask Claude, and Claude takes one at a time for each login. Build with plain text, or try the draft again when that answer has finished.",true],
     ["not_configured",503,"Claude isn't set up, so it can't draft the text. Build with plain text instead.",false]]){
     t=await open({template:TPL}, {draft:()=>({status, body:{error:code, message:"Server words for "+code}})}); p=t.p;
     await t.figures("90001");
