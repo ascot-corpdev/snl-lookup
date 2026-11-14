@@ -3,7 +3,7 @@
 A small web app for a Strategy & Corporate Development team at an insurer. It answers insurance questions from S&P Global Market Intelligence data.
 
 - **Filings:** search S&P's SNL Insurance Product Filings (rate, rule and form filings) by company, state, type of insurance, filing type and date. See the rate impact and description, and open the filing's original document.
-- **Ask Claude:** a panel that opens over either view. Type a question in plain English. Claude is told what is on your screen (the filings search or the statutory figures), searches filings, reads the documents, and answers with page citations, its sources and a comparison table you can export to CSV or Excel.
+- **Ask Claude:** a panel that opens over either view. Type a question in plain English. Claude is told what is on your screen (the filings search or the statutory figures), searches filings, reads the documents, and answers with page citations, its sources and a comparison table you can export to CSV or Excel. Under every finished answer, **Export answer** downloads the question, answer, table and numbered sources as one Word document, and **Copy answer** copies the same so it pastes into an email or a memo with the table intact. The panel also lists your own questions from the last 30 days under "Past answers".
 - **Statutory:** direct and net premiums written by line and state, policyholder surplus, and loss, expense and combined ratios by NAIC company or group code, with peers side by side. This view is built and waiting: it goes live when the Snowflake secrets are set (step 7).
 
 It is a standalone app with its own repository and its own Supabase project. It never stores or sends deal, banker or pipeline information. Claude sees only the question typed and what S&P returns.
@@ -139,7 +139,11 @@ The app assumes a **trial** account's limits (500 requests an hour, 12,000 a day
 supabase secrets set SPGMI_ACCOUNT=production
 ```
 
-Functions read new secrets straight away; there is nothing to redeploy. Then run [the first live search](#the-first-live-search).
+Functions read new secrets straight away; there is nothing to redeploy.
+
+**Check the S&P connection first.** Sign in to the site and click **Check S&P connection** at the right of the grey strip under the tabs. In a few seconds it signs in to S&P, checks the account can use SNL Insurance Product Filings, and loads the lists of states, types of insurance, filing types and statuses (at most five S&P requests). Each step says Done or Failed. If anything failed, click **Copy for S&P** and paste the text into an email to S&P support: it says what failed and gives S&P's reference number where S&P sent one. If S&P has locked the API account, ask S&P to unlock it. The app stops signing in for 30 minutes after a lock so it can't make the lock worse, and for 5 minutes after a refused password unless the password is changed.
+
+Then run [the first live search](#the-first-live-search).
 
 ### 6. Claude
 
@@ -273,7 +277,7 @@ From Supabase's documentation in November 2026.
 | Active projects | 2 | No fixed limit | This app needs a project of its own. |
 | Log history | 1 day | 7 days | Useful when chasing an S&P error after the fact. |
 
-**How long answers work.** A function call cannot run longer than the first row, and a background task does not extend it. So an answer saves its place after every step and pauses before the limit; the page then asks the function to carry on, and it picks up where it stopped. Keep the tab open while an answer runs. If a function call dies mid-step, the page notices within a minute and the next call starts again from the last saved place.
+**How long answers work.** A function call cannot run longer than the first row, and a background task does not extend it. So an answer saves its place after every step and pauses before the limit; the page then asks the function to carry on, and it picks up where it stopped. A reload or a closed tab does not lose an answer. Open the app again and a running answer carries on where it stopped, and one that finished while the page was closed shows as "Answer ready" on the Ask Claude button. An answer only moves forward while the app is open in a tab, so keep the tab open to get it sooner. The panel also lists your own questions from the last 30 days under "Past answers": open one to see the full answer with its sources and table, or ask a follow-up from it. If a function call dies mid-step, the page notices within a minute and the next call starts again from the last saved place.
 
 **When Pro is worth it:**
 
@@ -289,7 +293,9 @@ Nothing in this list is guessed in the code: each item is either handled both wa
 | What | Where it sits | Who confirms it |
 | --- | --- | --- |
 | **S&P API credentials.** The API does not accept a Capital IQ Pro website login. Nothing has run against the live API; every test uses made-up fixtures. | Step 5 | S&P |
-| **The sign-in address and how long a token lasts.** The address comes from an S&P sample notebook, not the public API specification. The lifetime is not documented, so the app keeps the token and gets a new one after S&P rejects it. | `signIn` in `_shared/spgmi.ts` | First live call |
+| **How long S&P's refresh token stays usable.** The sign-in address, its form-encoded `username` and `password`, the token's `expires_in_seconds` and the refresh call (`POST .../api/v1/tokenRefresh`, form field `refreshToken`) are confirmed by S&P's public Authenticate specification. The app gets a new token a minute before the old one expires. The refresh token lasts up to 7 days and expires after 24 hours without activity; whether ordinary API calls count as activity is not stated, so the app counts only refresh use, the cautious reading. | `signIn` and `refresh` in `_shared/spgmi.ts` | First live call |
+| **How long S&P locks an account, and whether the refresh can answer 423.** 423 "Account Locked" at sign-in is confirmed. The app stops signing in for 30 minutes after a 423 from any call. The 30 minutes, and the 5-minute wait after a refused password, are this app's choices, not S&P's. | `_shared/spgmi.ts` | S&P |
+| **Whether sign-in errors carry an S&P reference.** The Authenticate specification's error body is `{error, message}` with no request id, so a failed sign-in may show no reference number. | `_shared/connection.ts` | First live call |
 | **Florida coverage.** | The state list in step 1 of the first live search | First live call |
 | **The columns of S&P's reference lists.** The specification does not give them. The app takes the first column ending in "Id" as the id and the next as the name, and keeps the raw rows. | `referenceOptions` in `_shared/filings.ts` | First live call |
 | **Paging fields in search results** (`totalPages` and so on). They are in S&P's user guide but not the public specification. The app works with or without them. | `searchFilings` in `_shared/filings.ts` | First live call |
@@ -302,7 +308,7 @@ Nothing in this list is guessed in the code: each item is either handled both wa
 | **One filing version has one document, state and set of dates.** When several rows share a `filingVersionId`, the app keeps the first row and lists every company on it. | `dedupe` in `_shared/filings.ts` | First live call |
 | **What `pages` means.** Taken as the document's page count. The app also counts the pages in the file and uses the larger number for Claude's limits. | `read` in `_shared/chat.ts` | First live answer |
 | **What a `filingVersionId` looks like.** S&P's example is a 36-character id; the app passes on any id of 8 to 64 letters, digits, dots, underscores and dashes. | `parseDocRef` in `_shared/filings.ts` | First live call |
-| **How S&P answers a wrong username or password.** A 400 or 401 from the sign-in address is shown as "sign-in refused". | `signIn` in `_shared/spgmi.ts` | First live call |
+| **How S&P answers a wrong username or password.** 401 "User unauthorized" is confirmed by the Authenticate specification. A 400 at sign-in is not in the specification; the app reads it as a refused sign-in too. | `signIn` in `_shared/spgmi.ts` | First live call |
 | **The unit of `overallRateImpact`.** Shown as a percentage when S&P's display value is missing. | The Filings view (`web/index.html`) | First live call |
 | **How an account name with an underscore is written in the Snowflake sign-in token.** Snowflake's documentation does not say; the app keeps the underscore. | `jwtAccount` in `_shared/snowflake.ts` | First Snowflake call |
 | **Whether S&P limits API access to fixed IP addresses.** Supabase functions do not have fixed addresses. | n/a | S&P |
@@ -337,5 +343,5 @@ npm test
 - **Documents.** Usually PDFs. Claude can read PDFs and plain text of up to 100 pages each; anything else opens from the Filings view. When S&P gives no page count, the app counts the pages in the file itself, and refuses a file over 5 MB whose pages it can't count.
 - **Follow-up questions** in the same conversation carry the earlier questions and answers, not the documents. Claude re-reads a document if it needs it again (1 S&P request).
 - **Bulk download** (the "API Drive" delivery in S&P's API specification) needs separate credentials and is not used.
-- **One answer at a time.** A login with an answer in progress is asked to wait before asking another. If its tab was closed, a new question is accepted ten minutes later.
+- **One answer at a time.** A login with an answer in progress is asked to wait before asking another. If its tab was closed, open the app again to pick it up, or a new question is accepted ten minutes later.
 - **Housekeeping.** Finished answers are removed after 30 days, and leftovers from abandoned answers are cleared whenever someone opens the app.
