@@ -294,6 +294,30 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 .watch .wlist>b{font-size:12px}
 .watch .wmanage{border-top:1px solid var(--grid);padding-top:10px;display:flex;flex-direction:column;gap:10px;min-width:0}
 .watch .pill.on{color:var(--teal)}.watch .pill.off{color:var(--muted)}
+/* Profile: the figures at a glance, the slides in or out, the draft choice and the template */
+.pfout{display:flex;flex-direction:column;gap:18px;min-width:0}
+.pfout:empty{display:none}
+.pfchosen{padding:7px 0;min-width:0;overflow-wrap:anywhere;font-weight:normal}
+.pfchosen:empty{padding:0}
+@media (max-width:560px){.pfsp{display:none}}
+.pftiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.pftile{background:var(--tile);padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.pftile b{font-size:20px;font-variant-numeric:tabular-nums}
+.pfplan{margin:0;padding:0;list-style:none;border:1px solid var(--grid);font-weight:normal;counter-reset:pf}
+.pfplan li{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;justify-content:space-between;padding:7px 10px;min-width:0;counter-increment:pf}
+.pfplan li+li{border-top:1px solid var(--grid)}
+.pfplan li .t1::before{content:counter(pf) ". ";color:var(--muted);font-weight:normal}
+.pfplan li.out .t1{color:var(--muted)}
+.pfplan .pill.in{color:var(--teal)}
+.pfplan .pfwhy{font-size:12px;color:var(--magenta);min-width:0;overflow-wrap:anywhere;flex:0 1 auto;text-align:right}
+.pfcheck{display:flex;gap:10px;align-items:flex-start;cursor:pointer;min-width:0;overflow-wrap:anywhere}
+.pfcheck input{margin-top:3px;flex:none;width:16px;height:16px}
+.pfdraft{display:flex;flex-direction:column;gap:6px;min-width:0}
+.pfdraft p{margin:0}
+.pfsample{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;border-top:1px solid var(--grid);padding-top:12px;min-width:0}
+.pfsample>div{flex:1 1 260px;min-width:0}
+.pfsample p{margin:2px 0 0}
+@media (max-width:560px){.pftiles{grid-template-columns:1fr}.pftile{flex-direction:row;justify-content:space-between;align-items:baseline;gap:8px}.pftile b{font-size:17px}.pfplan .pfwhy{text-align:left;flex-basis:100%}}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
@@ -316,6 +340,7 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
     <nav class="tabs" aria-label="Views" id="tabs" hidden>
       <a href="#filings" data-view="filings">Filings</a>
       <a href="#statutory" data-view="statutory">Statutory</a>
+      <a href="#profile" data-view="profile">Profile</a>
     </nav>
   </div>
 </header>
@@ -341,7 +366,7 @@ document.title = ORG ? `${ORG} SNL lookup` : "SNL lookup";
 // How often the page checks a running answer, how old a heartbeat may get before the page asks the function to
 // pick the answer up again, and the shortest gap between two such requests (milliseconds).
 const TIMING = {poll:2000, stale:45000, again:30000};
-const VIEWS = ["filings","statutory"];
+const VIEWS = ["filings","statutory","profile"];
 const ROLES = {corpdev:"Corp Dev", reader:"Reader"};
 const FN = {"snl-filings":"the filings function", "snl-chat":"the questions function", "snl-statutory":"the statutory function"};
 FN["snl-watch"]="the watchlist function";
@@ -1168,6 +1193,7 @@ function askScreen(){
     const r=S.st.res;
     return {view:"statutory", query:{kind:r.kind==="group"?"group":"company", codes:(Array.isArray(r.codes)?r.codes:[]).map(String), fromYear:+r.fromYear, toYear:+r.toYear}, companies:names(r.entities)};
   }
+  if(S.view==="profile") return pfScreen();
   return null;
 }
 /* The same thing in one plain line, so what Claude is told is never a surprise. */
@@ -1450,7 +1476,7 @@ function askPanelHTML(){
   const a=S.ask, busy=!!activeTurn(), off=S.status&&S.status.claude&&S.status.claude.configured===false, sc=askScreen();
   const limited=!busy && chatAtLimit(S.chatUse);   // the daily limit is reached: the box says why it is off and when it comes back
   const start = sc ? `<div id="askSuggest"><p class="t2">Claude searches S&amp;P's filings, reads the filing documents and looks up statutory data. To start from what is on screen, pick a question or type your own:</p>
-        <div class="ccchips">${ASK_SUGGEST[sc.view].map((q,i)=>`<button type="button" class="chip" data-act="ask-suggest" data-v="${sc.view}" data-i="${i}">${esc(q)}</button>`).join("")}</div></div>`
+        <div class="ccchips">${ASK_SUGGEST[askSuggestKey(sc)].map((q,i)=>`<button type="button" class="chip" data-act="ask-suggest" data-v="${askSuggestKey(sc)}" data-i="${i}">${esc(q)}</button>`).join("")}</div></div>`
     : `<p class="t2" id="askHint">For example: "Pull the homeowners form filings two companies made in Florida since 2021 and compare what changed." Name the companies, the state and the dates you care about. Claude searches S&amp;P's filings, reads the filing documents and looks up statutory data, then answers with sources you can open at the page it cites.</p>`;
   return `<aside class="askpanel${a.wide?" wide":""}" id="askPanel" role="dialog" aria-modal="false" aria-label="Ask Claude">
     <div class="ask-h"><h2>Ask Claude</h2>
@@ -1871,6 +1897,375 @@ function renderStatutory(){
     <div id="statResults" style="display:flex;flex-direction:column;gap:18px;min-width:0" aria-live="polite">${statResultsHTML()}</div>${isCorpDev()&&st.setup.open?setupHTML():""}`;
 }
 
+/* ---------- Profile: a company profile as a PowerPoint file on the team's own template ----------
+   The profile function gives the figures (facts) and plain slide text, or Claude's draft of the text. The slides are
+   built in this browser by deck.js and profile-slides.js, loaded on first use after the zip library. The template
+   lives in private storage: it is downloaded once per session and kept in memory only (never in browser storage),
+   and the built file is only handed to the browser to save. Both are dropped on sign-out. */
+FN["snl-profile"]="the profile function";
+const JSZIP_SRC = "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js";   // the zip library the slide builder needs
+const DECK_SRC = "deck.js", SLIDES_SRC = "profile-slides.js";                        // beside this page
+const PPTX_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+const TPL_BUCKET = "snl-template", TPL_PATH = "template.pptx", TPL_MAX = 50*1024*1024;
+function freshTemplate(){ return {checked:false, loading:false, info:null, err:"", errKind:"", bytes:null, uploading:"", upErr:"", upNote:""}; }
+function freshProfile(){
+  return {status:null, statusErr:null, loading:false, kind:"company", code:"", name:"", formErr:"", find:{q:"", asked:"", matches:null, busy:false, err:""},
+    busy:"", asked:null, res:null, err:null, plan:null, libsErr:"", draft:null, drafted:null, draftErr:null, built:null, buildErr:"", tpl:freshTemplate()};
+}
+S.pf=freshProfile();
+ASK_SUGGEST.profile=["What stands out in this company's results over these years?", "How has policyholder surplus moved against premiums written?", "Which lines of business and states drive this company's premiums?"];
+const askSuggestKey = sc => S.view==="profile" && sc && sc.view==="statutory" ? "profile" : sc.view;
+const pfLive = () => { const s=S.pf.status&&S.pf.status.statutory; return !!(s&&s.configured&&s.mapped); };
+const pfClaude = () => !!(S.pf.status&&S.pf.status.claude&&S.pf.status.claude.configured);
+const pfHasData = f => !!f && Array.isArray(f.years) && f.years.length>0;
+const pfHasTemplate = () => !!(S.pf.tpl.bytes || S.pf.tpl.info);
+// Claude drafts when it is set up, the reader hasn't switched it off, today's limit isn't reached, and it isn't the sample
+const pfDraftWanted = () => pfClaude() && S.pf.draft!==false && !chatAtLimit(S.chatUse) && !!S.pf.res && !S.pf.res.facts.sample;
+const pfEntLabel = (kind, code) => `NAIC ${kind==="group"?"group":"company"} ${code}`;
+function pfName(f){ const e=f&&f.entity||{}; return !blank(e.name) ? String(e.name) : S.pf.asked&&!blank(S.pf.asked.name) ? S.pf.asked.name : pfEntLabel(e.kind, e.code); }
+function pfYears(f){ const y=(f.years||[]).filter(isNum).map(Number); return !y.length ? "n/d" : y.length===1 ? String(y[0]) : `${Math.min(...y)} to ${Math.max(...y)}`; }
+
+function enterProfile(){
+  const pf=S.pf;
+  if(!pf.status && !pf.statusErr && !pf.loading) loadProfileStatus();
+  if(!pf.tpl.checked && !pf.tpl.loading) checkTemplate();
+}
+async function loadProfileStatus(){
+  const pf=S.pf; if(pf.loading) return;
+  pf.loading=true; pf.statusErr=null; render();
+  const r=await callFn("snl-profile",{action:"status"});
+  if(!S.session || S.pf!==pf) return;
+  pf.loading=false;
+  if(r.data){ pf.status=r.data; if(pfClaude() && (!S.chatUseAt || Date.now()-S.chatUseAt>60000)) pfChatUse(); }
+  else if(r.err!=="signin") pf.statusErr=r;
+  render();
+}
+// today's questions and their cost, for the line under the draft choice and the Ask Claude panel alike
+function pfChatUse(){ loadChatUse().then(()=>{ if(S.session && S.view==="profile") render(); }); }
+
+/* The scripts that build the slides, loaded once, in order; a failed load can be tried again. */
+function loadProfileLibs(){
+  if(window.JSZip && window.SNLDeck && window.SNLProfile) return Promise.resolve();
+  return loadProfileLibs.p || (loadProfileLibs.p=(async()=>{
+    if(!window.JSZip) await loadScript(JSZIP_SRC);
+    if(!window.SNLDeck) await loadScript(DECK_SRC);
+    if(!window.SNLProfile) await loadScript(SLIDES_SRC);
+    if(!window.JSZip || !window.SNLDeck || !window.SNLProfile) throw new Error("The slide builder didn't load");
+  })().finally(()=>{ loadProfileLibs.p=null; }));
+}
+const PF_LIBS_ERR = "Couldn't load the slide builder. Check your connection and try again.";
+
+/* ----- the template in storage ----- */
+function tplErrKind(e){
+  const m=`${e&&e.statusCode||""} ${e&&e.status||""} ${e&&e.error||""} ${e&&e.message||""}`;
+  return /bucket not found/i.test(m) ? "nobucket" : /row-level security|unauthori[sz]ed|forbidden|permission|denied|\b403\b|policy/i.test(m) ? "refused"
+    : /not found|\b404\b/i.test(m) ? "nofile" : /fetch|network|load failed|timed? ?out/i.test(m) ? "network" : "other";
+}
+function tplErrText(kind, e, upload){
+  const what=upload?"upload":"get";
+  if(kind==="nobucket") return isCorpDev() ? "The place the template is kept isn't set up yet. Run migration 0004_profile_template.sql in Supabase (see the README), then try again." : "The place the template is kept isn't set up yet. Ask Corp Dev to finish the set-up.";
+  if(kind==="refused") return upload ? "Only Corp Dev logins can upload the template. If this is a Corp Dev login, check that migration 0004_profile_template.sql has been run (see the README)." : "This login isn't allowed to read the template. Ask Corp Dev.";
+  if(kind==="network") return `Couldn't reach storage to ${what} the template. Check your connection and try again.`;
+  if(kind==="nofile") return isCorpDev() ? "There is no template yet. Upload your PowerPoint template first." : "There is no template yet. Ask Corp Dev to upload the template.";
+  return `Couldn't ${what} the template: ${(e&&e.message)||"unknown error"}. Try again.`;
+}
+async function checkTemplate(){
+  const pf=S.pf, tp=pf.tpl; if(tp.loading) return;
+  tp.loading=true; tp.err=""; tp.errKind=""; render();
+  let data=null, error=null;
+  try{ ({data, error}=await S.sb.storage.from(TPL_BUCKET).list("", {limit:100, search:TPL_PATH})); }catch(e){ error=e; }
+  if(!S.session || S.pf!==pf) return;
+  tp.loading=false; tp.checked=true;
+  if(error){ tp.errKind=tplErrKind(error); if(tp.errKind==="nofile") tp.info=null; else tp.err=tplErrText(tp.errKind, error, false); }
+  else { const o=(Array.isArray(data)?data:[]).find(x=>x && x.name===TPL_PATH), m=o&&o.metadata||{};
+    tp.info = o ? {at:o.updated_at||o.created_at||m.lastModified||null, size:isNum(m.size)?+m.size:null} : null; }
+  render();
+}
+/* The template's bytes: from memory after the first time. Throws an Error with a message for the page. */
+async function templateBytes(pf){
+  const tp=pf.tpl; if(tp.bytes) return tp.bytes;
+  let data=null, error=null;
+  try{ ({data, error}=await S.sb.storage.from(TPL_BUCKET).download(TPL_PATH)); }catch(e){ error=e; }
+  if(error || !data){ const k=error?tplErrKind(error):"other"; if(k==="nofile"){ tp.info=null; tp.checked=true; } throw new Error(tplErrText(k, error, false)); }
+  let buf; try{ buf=await data.arrayBuffer(); }catch{ throw new Error(tplErrText("network", null, false)); }
+  if(S.pf===pf) tp.bytes=buf;
+  return buf;
+}
+async function uploadTemplate(file){
+  const pf=S.pf, tp=pf.tpl; if(!file || tp.uploading || !isCorpDev()) return;
+  const stop=msg=>{ if(S.pf!==pf) return; tp.uploading=""; tp.upErr=msg; render(); };
+  tp.upErr=""; tp.upNote="";
+  if(!/\.pptx$/i.test(String(file.name||""))){ stop("Choose a PowerPoint file whose name ends in .pptx."); return; }
+  if(+file.size>TPL_MAX){ stop(`That file is ${(+file.size/1048576).toFixed(1)} MB. The template can be at most 50 MB.`); return; }
+  tp.uploading="checking"; render();
+  let bytes; try{ bytes=await file.arrayBuffer(); }catch{ stop("Couldn't read that file. Choose it again."); return; }
+  try{ await loadProfileLibs(); }catch{ stop("Couldn't load the template check. Check your connection and try again."); return; }
+  let r; try{ r=await window.SNLDeck.inspect(bytes); }catch{ r=null; }
+  if(!S.session || S.pf!==pf) return;
+  if(!r || !r.ok){ stop(r&&!blank(r.message) ? String(r.message) : "That file can't be used as the template. Choose a PowerPoint file."); return; }
+  tp.uploading="uploading"; render();
+  const replaced=!!tp.info;
+  let error=null;
+  try{ ({error}=await S.sb.storage.from(TPL_BUCKET).upload(TPL_PATH, file, {upsert:true, contentType:PPTX_TYPE, cacheControl:"60"})); }catch(e){ error=e; }
+  if(!S.session || S.pf!==pf) return;
+  if(error){ stop(tplErrText(tplErrKind(error), error, true)); return; }
+  tp.uploading=""; tp.bytes=bytes; tp.info={at:new Date().toISOString(), size:+file.size||null}; tp.checked=true; tp.err=""; tp.errKind="";
+  tp.upNote=`Template ${replaced?"replaced":"uploaded"}: ${plural(r.slides,"slide")}, ${isNum(r.widthIn)?(+r.widthIn).toFixed(2).replace(/\.?0+$/,""):"n/d"} x ${isNum(r.heightIn)?(+r.heightIn).toFixed(2).replace(/\.?0+$/,""):"n/d"} in. Every profile from now on is built on it.`;
+  render();
+}
+document.addEventListener("change", e=>{
+  if(e.target.id!=="pf_tplFile") return;
+  const f=e.target.files&&e.target.files[0]; uploadTemplate(f); try{ e.target.value=""; }catch{}
+});
+
+/* ----- choosing the company or group: a small picker over the same company list the Statutory view uses ----- */
+async function pfLookup(){
+  const pf=S.pf, fd=pf.find, q=fd.q.trim();
+  if(!q){ fd.matches=null; fd.err="Type part of a company or group name."; render(); return; }
+  fd.busy=true; fd.err=""; fd.matches=null; fd.asked=q; render();
+  const r=await callFn("snl-filings",{action:"resolve", q});
+  if(!S.session || S.pf!==pf || fd.asked!==q) return;
+  fd.busy=false;
+  if(r.data) fd.matches=Array.isArray(r.data.matches)?r.data.matches.filter(m=>m&&typeof m==="object"):[];
+  else if(r.err!=="signin") fd.err="Couldn't look that up. "+errText(r);
+  render();
+}
+function pfChoose(code, name){
+  const pf=S.pf; if(!naicOk(code)) return;
+  pf.code=String(code).trim(); pf.name=blank(name)?"":String(name); pf.formErr=""; pf.find.matches=null; render();
+  document.getElementById("pf_get")?.focus();
+}
+document.addEventListener("input", e=>{   // a code typed by hand is no longer the one found by name
+  if(e.target.id!=="pf_code") return;
+  S.pf.code=e.target.value; S.pf.name=""; const el=document.getElementById("pf_chosen"); if(el) el.innerHTML=pfChosenHTML();
+});
+function pfChosenHTML(){
+  const pf=S.pf, code=pf.code.trim();
+  if(!naicOk(code)) return "";
+  return `Chosen: <b>${esc(pf.name||pfEntLabel(pf.kind, code))}</b>${pf.name?` <span class="t2">${esc(pfEntLabel(pf.kind, code))}</span>`:""}`;
+}
+function pfFinderHTML(){
+  const pf=S.pf, fd=pf.find, group=pf.kind==="group";
+  let found="";
+  if(fd.busy) found=`<p class="t2" role="status">Looking for matches…</p>`;
+  else if(fd.matches!==null && !fd.matches.length) found=`<div class="info" id="pf_noMatch" role="status"><span>No company in the app's company list matches "${esc(fd.asked)}". Try a shorter part of the name, or type the NAIC code above.</span></div>`;
+  else if(fd.matches!==null && group){
+    const gs=statGroups(fd.matches).filter(g=>naicOk(g.code));
+    found = gs.length ? `<ul class="matches" id="pf_matches" aria-label="Matching groups">${gs.map(g=>`<li><div><div class="t1">${esc(g.name||`NAIC group ${g.code}`)}</div><div class="t2">NAIC group ${esc(g.code)} · ${plural(g.n,"matching company","matching companies")}</div></div><button type="button" class="btn sm" data-act="pf-choose" data-code="${esc(g.code)}" data-name="${esc(g.name)}">Choose</button></li>`).join("")}</ul>`
+      : `<div class="info" id="pf_noMatch" role="status"><span>The companies that match "${esc(fd.asked)}" have no NAIC group code in the company list. Type the group code above, or profile a company instead.</span></div>`;
+  }
+  else if(fd.matches!==null){
+    const ms=fd.matches.filter(m=>naicOk(m.naicCompanyCode));
+    found = ms.length ? `<ul class="matches" id="pf_matches" aria-label="Matching companies">${ms.map(m=>`<li><div><div class="t1">${esc(m.companyName||"n/d")}</div><div class="t2">${esc([`NAIC ${String(m.naicCompanyCode).trim()}`, blank(m.naicGroupName)?"":`group ${m.naicGroupName}`].filter(Boolean).join(" · "))}</div></div><button type="button" class="btn sm" data-act="pf-choose" data-code="${esc(String(m.naicCompanyCode).trim())}" data-name="${esc(m.companyName)}">Choose</button></li>`).join("")}</ul>`
+      : `<div class="info" id="pf_noMatch" role="status"><span>The companies that match "${esc(fd.asked)}" have no NAIC company code in the company list. Type the code above.</span></div>`;
+  }
+  return `<div class="f"><label for="pf_find">Find by name <em>part of a company or group name</em></label>
+    <div class="toolbar"><div class="grow"><input type="text" id="pf_find" data-bind="pf.find.q" value="${esc(fd.q)}" autocomplete="off" spellcheck="false" placeholder="For example Calloway"></div>
+      <button type="button" class="btn" data-act="pf-find" ${fd.busy?"disabled":""}>Find</button></div>
+    ${fd.err?`<p class="err" id="pf_findErr" role="alert">${esc(fd.err)}</p>`:""}${found}</div>`;
+}
+
+/* ----- the figures, Claude's draft, and the file ----- */
+function pfReset(pf){ pf.res=null; pf.err=null; pf.plan=null; pf.libsErr=""; pf.drafted=null; pf.draftErr=null; pf.built=null; pf.buildErr=""; }
+async function pfFacts(){
+  const pf=S.pf; if(pf.busy) return;
+  const code=pf.code.trim(), kind=pf.kind;
+  if(!naicOk(code)){ pf.formErr = code ? "NAIC codes are numbers of up to 6 digits, like 90001." : `Choose a ${kind}: find it by name, or type its NAIC ${kind} code.`; render(); return; }
+  pf.formErr=""; pfReset(pf); pf.busy="facts"; pf.asked={kind, code, name:pf.name}; render();
+  const r=await callFn("snl-profile",{action:"facts", kind, code});
+  if(!S.session || S.pf!==pf) return;
+  pf.busy="";
+  if(r.data && r.data.facts && typeof r.data.facts==="object" && r.data.text){ pfTake(pf, r.data); loadStatus(); }
+  else if(r.err!=="signin"){ pf.err = r.data ? {err:"bad_answer", msg:"The profile function sent back something the page can't read. Try again."} : r; if(r.err==="not_configured"||r.err==="not_mapped"){ pf.status=null; loadProfileStatus(); } }
+  render();
+}
+function pfTake(pf, data){ pf.res={facts:data.facts, text:data.text}; pf.plan=null; pf.libsErr=""; if(pfHasData(data.facts)) pfPlan(pf); }
+async function pfPlan(pf){
+  try{ await loadProfileLibs(); }catch{ if(S.pf===pf){ pf.libsErr=PF_LIBS_ERR; render(); } return; }
+  if(S.pf!==pf || !pf.res) return;
+  let plan=null; try{ plan=window.SNLProfile.plan(pf.res.facts); }catch{}
+  if(!Array.isArray(plan)){ pf.libsErr="Couldn't work out which slides these figures fill. Try again."; render(); return; }
+  pf.plan=plan.filter(s=>s&&typeof s==="object"); pf.libsErr=""; render();
+}
+async function pfSample(){
+  const pf=S.pf; if(pf.busy) return;
+  pfReset(pf); pf.busy="sample"; pf.asked=null; render();
+  const r=await callFn("snl-profile",{action:"sample"});
+  if(!S.session || S.pf!==pf) return;
+  pf.busy="";
+  if(r.data && r.data.facts && typeof r.data.facts==="object" && r.data.text){ pfTake(pf, r.data); if(pfHasTemplate()){ await pfMake(pf); return; } }
+  else if(r.err!=="signin") pf.err = r.data ? {err:"bad_answer", msg:"The profile function sent back something the page can't read. Try again."} : r;
+  render();
+}
+/* Build: Claude drafts the text first when that is chosen (once per set of figures), then the file is made. plain:
+   build with the plain text, after a draft couldn't be had. */
+async function pfBuild(plain){
+  const pf=S.pf; if(pf.busy || !pf.res || !pfHasData(pf.res.facts)) return;
+  if(!pfHasTemplate()){ pf.buildErr=tplErrText("nofile"); render(); return; }
+  if(plain){ pf.draft=false; pf.draftErr=null; }
+  if(!plain && pfDraftWanted() && !pf.drafted){
+    pf.busy="draft"; pf.draftErr=null; pf.built=null; pf.buildErr=""; render();
+    const e=pf.res.facts.entity||{};
+    const r=await callFn("snl-profile",{action:"draft", kind:e.kind==="group"?"group":"company", code:String(e.code??"")});
+    if(!S.session || S.pf!==pf) return;
+    pfChatUse();   // the day's count and cost, now with this draft
+    if(r.data && r.data.facts && typeof r.data.facts==="object" && r.data.text){
+      pf.drafted={facts:r.data.facts, text:r.data.text, usage:r.data.usage||null};
+    } else if(r.err!=="signin"){ pf.busy=""; pf.draftErr = r.data ? {err:"bad_answer", msg:"Claude's draft came back in a form the page can't read."} : r; render(); return; }
+    else return;
+  }
+  await pfMake(pf);
+}
+function pfFileName(spec){
+  const n=String(spec&&spec.fileName||"").replace(/[\\/:*?"<>|\u0000-\u001f]+/g,"-").trim();
+  return n ? (/\.pptx$/i.test(n) ? n : n+".pptx") : `profile-${TODAY()}.pptx`;
+}
+async function pfMake(pf){
+  pf.busy="build"; pf.buildErr=""; pf.built=null; render();
+  const use = pf.drafted && pfDraftWanted() ? pf.drafted : pf.res;
+  const fail=msg=>{ if(!S.session || S.pf!==pf) return; pf.busy=""; pf.buildErr=msg; render(); };
+  let bytes; try{ bytes=await templateBytes(pf); }catch(e){ fail(e.message); return; }
+  if(!S.session || S.pf!==pf) return;
+  try{ await loadProfileLibs(); }catch{ fail(PF_LIBS_ERR); return; }
+  if(!S.session || S.pf!==pf) return;
+  let spec; try{ spec=window.SNLProfile.spec(use.facts, use.text); }catch(e){ fail("Couldn't lay out the slides from these figures. "+((e&&e.message)||"")); return; }
+  let out; try{ out=await window.SNLDeck.build(bytes.slice(0), spec); }catch(e){ fail("Couldn't build the PowerPoint file. "+((e&&e.message)||"Try again.")); return; }
+  if(!S.session || S.pf!==pf) return;
+  pf.busy=""; pf.built={blob:new Blob([out],{type:PPTX_TYPE}), name:pfFileName(spec), by:use.text&&use.text.by==="claude"?"claude":"plain"};
+  render(); saveBlob(pf.built.blob, pf.built.name);
+}
+function pfDownloadAgain(){ const b=S.pf.built; if(b) saveBlob(b.blob, b.name); }
+
+/* What Claude is told when asked from this view: the figures behind the profile, as the Statutory view describes its
+   own (the questions function knows that shape). Nothing for the sample, whose figures are made up. */
+function pfScreen(){
+  const pf=S.pf, f=pf.drafted ? pf.drafted.facts : pf.res&&pf.res.facts;
+  if(!f || f.sample || !pfHasData(f) || !pfLive()) return null;
+  const e=f.entity||{}, ys=f.years.filter(isNum).map(Number);
+  if(!naicOk(e.code) || !ys.length) return null;
+  return {view:"statutory", query:{kind:e.kind==="group"?"group":"company", codes:[String(e.code)], fromYear:Math.min(...ys), toYear:Math.max(...ys)}, companies:blank(e.name)?[]:[String(e.name)]};
+}
+
+/* ----- drawing the view ----- */
+function pfLatest(f, key){
+  const ys=f.years||[], a=f.series&&f.series[key]; if(!Array.isArray(a)) return null;
+  for(let i=Math.min(a.length, ys.length)-1; i>=0; i--) if(isNum(a[i])) return {year:ys[i], v:+a[i]};
+  return null;
+}
+function pfHeadlineHTML(f){
+  const tile=(label, key, fmt)=>{ const l=pfLatest(f, key);
+    return `<div class="pftile" data-k="${key}"><span class="t2">${label}${l?` ${esc(l.year)}`:""}</span><b>${l?fmt(l.v):"n/d"}</b></div>`; };
+  return `<div class="pftiles" id="pfHead">${tile("Direct premiums written","dpw",usdM)}${tile("Combined ratio","combined_ratio",pct)}${tile("Policyholder surplus","surplus",usdM)}</div>`;
+}
+function pfPlanHTML(pf){
+  if(pf.libsErr) return `<div class="banner" id="pfLibsErr" role="alert"><span>${esc(pf.libsErr)}</span><button type="button" class="btn sm" data-act="pf-libs-retry">Try again</button></div>`;
+  if(!pf.plan) return `<p class="t2" role="status">Working out which slides these figures fill…</p>`;
+  const n=pf.plan.filter(s=>s.included).length;
+  return `<div class="f"><span>The slides <em>${plural(n,"slide")} of ${count(pf.plan.length)} can be filled from these figures</em></span>
+    <ol class="pfplan" id="pfPlan">${pf.plan.map(s=>`<li class="${s.included?"in":"out"}"><span class="t1">${esc(s.label||s.id)}</span>${s.included?`<span class="pill in">Included</span>`:`<span class="pfwhy">Left out: ${esc(blank(s.reason)?"its figures aren't available":s.reason)}</span>`}</li>`).join("")}</ol></div>`;
+}
+function pfMissingHTML(f){
+  const miss=(Array.isArray(f.missing)?f.missing:[]).filter(m=>m&&typeof m==="object");
+  if(!miss.length) return "";
+  const items=miss.map(m=>`<li>${esc(m.label||m.field)}${blank(m.reason)?"":` <span class="t2">(${esc(m.reason)})</span>`}</li>`).join("");
+  return `<div class="notes" id="pfMissing" role="status"><b>Some figures aren't available, so the slides that need them are left out.</b><ul>${items}</ul>
+    <p class="t2" style="margin:6px 0 0">${isCorpDev()?`Map them in the field set-up on the <a href="#statutory">Statutory view</a>, then get the figures again.`:"Ask Corp Dev to map them in the statutory field set-up."}</p></div>`;
+}
+function pfDraftHTML(pf){
+  const f=pf.res.facts;
+  if(f.sample) return `<p class="t2" id="pfDraftNote">The sample uses plain text written from its figures.</p>`;
+  if(!pfClaude()) return `<p class="t2" id="pfDraftNote">Claude isn't set up, so the slides use plain titles and points written from the figures.</p>`;
+  const c=S.chatUse;
+  if(chatAtLimit(c)) return `<div class="info" id="pfDraftNote" role="status"><span>You've reached today's limit of ${plural(c.dailyLimit,"question")}, so the slides use plain titles and points written from the figures. Questions come back at midnight UTC.</span></div>`;
+  const on=S.pf.draft!==false;
+  const today = c && isNum(c.askedToday) ? ` You've asked ${isNum(c.dailyLimit)?`${count(c.askedToday)} of ${plural(c.dailyLimit,"question")}`:plural(c.askedToday,"question")} today${isNum(c.costToday)?`, ${costText(c.costToday)} in all`:""}.` : "";
+  const avg = c && isNum(c.costToday) && isNum(c.askedToday) && +c.askedToday>0 ? ` Today's answers have cost ${costText(+c.costToday/+c.askedToday)} each on average.` : " It costs about as much as a question.";
+  const done = pf.drafted ? (pf.drafted.text.by==="claude" ? `<p class="t2" id="pfDrafted">Claude has drafted the text for these figures${pfCostLine(pf.drafted.usage)}</p>` : "") : "";
+  return `<div class="pfdraft"><label class="pfcheck"><input type="checkbox" id="pf_draft" data-act="pf-draft" ${on?"checked":""} ${pf.busy?"disabled":""}>
+      <span><b>Ask Claude to draft the slide titles, takeaways and diligence questions</b> <span class="t2">from this company's figures only. Without it, the slides get plain titles and points written from the figures.</span></span></label>
+    <p class="t2" id="pfDraftCost">Counts as one of today's questions to Claude.${today}${avg}</p>${done}</div>`;
+}
+function pfCostLine(u){ u=u||{}; const tok=isNum(u.inputTokens)||isNum(u.outputTokens); return tok||isNum(u.costUsd) ? `. It cost ${costText(u.costUsd)}${tok?` (${count(u.inputTokens)} tokens read, ${count(u.outputTokens)} written)`:""}.` : "."; }
+function pfDraftErrText(r){
+  if(r.err==="limit"||r.err==="daily_limit") return "You've reached today's limit of questions to Claude, so it can't draft the text now. Build with plain text instead, or try again tomorrow.";
+  if(r.err==="busy") return "Claude is busy with other work just now. Build with plain text, or try the draft again in a few minutes.";
+  if(r.err==="not_configured") return "Claude isn't set up, so it can't draft the text. Build with plain text instead.";
+  return `Claude couldn't draft the text. ${errText(r)} You can build with plain text instead.`;
+}
+function pfOutHTML(){
+  const pf=S.pf;
+  if(pf.busy==="facts") return `<div class="info" id="pfBusy" role="status"><span><b>Getting the figures for ${esc(pf.asked&&pf.asked.name||pfEntLabel(pf.asked.kind, pf.asked.code))}…</b> This can take a minute when they haven't been fetched before.</span></div>`;
+  if(pf.busy==="sample") return `<div class="info" id="pfBusy" role="status"><span><b>Getting the sample figures…</b></span></div>`;
+  if(!pf.res){
+    if(!pf.err) return "";
+    if(pf.err.err==="not_configured"||pf.err.err==="not_mapped") return `<div class="info" id="pfErr" role="status"><span>${esc(errText(pf.err))}</span></div>`;
+    if(pf.err.err==="not_deployed") return `<div class="info" id="pfErr" role="status"><span>${esc(errText(pf.err))}</span></div>`;
+    return `<div id="pfErr">${problemHTML(pf.err, "Couldn't get the figures.", pf.asked?"pf-facts":"pf-sample")}</div>`;
+  }
+  const f=pf.res.facts, e=f.entity||{};
+  if(!pfHasData(f)) return `<div class="info" id="pfNoData" role="status"><span><b>S&amp;P returned nothing for this code.</b> No statutory figures came back for ${esc(pfEntLabel(e.kind, e.code))} in the years asked for. Check the code${e.kind==="group"?", or profile one of the group's companies":", or try its NAIC group code"}.</span></div>`;
+  const shown=pf.drafted&&pfDraftWanted() ? pf.drafted.facts : f;
+  let h=`<section class="tcard" id="pfContents" aria-label="What the profile will contain">`;
+  if(f.sample) h+=`<div class="info" id="pfSample" role="status"><span><b>This is a sample profile.</b> The company and every figure in it are made up, so you can check how your template comes out.</span></div>`;
+  h+=`<div class="blk-h"><div><h3 id="pfName">${esc(pfName(shown))}</h3><p class="t2" id="pfMeta">${esc([pfEntLabel(e.kind, e.code), !blank(e.groupName)&&e.kind!=="group"?`part of ${e.groupName}`:"", `figures for ${pfYears(shown)}`].filter(Boolean).join(" · "))}</p></div></div>`;
+  h+=pfHeadlineHTML(shown)+pfPlanHTML(pf)+pfMissingHTML(shown);
+  h+=`<p class="source">Source: ${esc(f.source||"S&P Global Market Intelligence")}. US dollars are shown in $M.</p></section>`;
+  // the text, then building
+  h+=`<section class="tcard" id="pfBuild" aria-label="Build the PowerPoint file">${pfDraftHTML(pf)}`;
+  if(pf.busy==="draft") h+=`<div class="info" id="pfDrafting" role="status"><span><b>Claude is drafting the slide text…</b> This can take up to two minutes. Keep this tab open.</span></div>`;
+  else if(pf.busy==="build") h+=`<div class="info" id="pfBuilding" role="status"><span><b>Building the PowerPoint file…</b> This takes a few seconds, a little longer the first time.</span></div>`;
+  if(pf.draftErr){ const r=pf.draftErr, calm=["limit","daily_limit","busy","not_configured"].includes(r.err);
+    h+=`<div class="${calm?"info":"banner"}" id="pfDraftErr" role="${calm?"status":"alert"}"><span>${esc(pfDraftErrText(r))}</span><span class="inline"><button type="button" class="btn sm primary" data-act="pf-build-plain" ${pf.busy?"disabled":""}>Build with plain text</button>${r.err==="busy"||!calm?`<button type="button" class="btn sm" data-act="pf-build">Try the draft again</button>`:""}</span></div>`; }
+  if(pf.drafted && pf.drafted.text.by!=="claude" && !blank(pf.drafted.text.note) && pfDraftWanted()) h+=`<div class="info" id="pfNote" role="status"><span><b>The slides use plain text.</b> ${esc(pf.drafted.text.note)}</span></div>`;
+  if(pf.buildErr) h+=`<div class="banner" id="pfBuildErr" role="alert"><span>${esc(pf.buildErr)}</span>${pfHasTemplate()?`<button type="button" class="btn sm" data-act="pf-build">Try again</button>`:""}</div>`;
+  if(pf.built && !pf.busy) h+=`<div class="info" id="pfBuilt" role="status"><span><b>Your profile is ready.</b> ${esc(pf.built.name)} was saved to your downloads. It was made in this browser and isn't stored or sent anywhere.</span><button type="button" class="btn sm" data-act="pf-again">Download again</button></div>`;
+  const tpl=pfHasTemplate(), label=pfDraftWanted()&&!pf.drafted ? "Draft with Claude and build" : pf.built ? "Build again" : "Build the PowerPoint file";
+  if(!tpl) h+=`<p class="t2" id="pfNoTplNote">${isCorpDev()?"Upload your PowerPoint template below to build the file.":"The file can be built once Corp Dev uploads the template."}</p>`;
+  if(!pf.draftErr) h+=`<div class="toolbar"><button type="button" class="btn primary" id="pf_buildBtn" data-act="pf-build" ${pf.busy||!tpl?"disabled":""}>${label}</button></div>`;
+  return h+`</section>`;
+}
+function pfTemplateHTML(){
+  const pf=S.pf, tp=pf.tpl, cd=isCorpDev(), fnOk=!(pf.statusErr&&pf.statusErr.err==="not_deployed");
+  let h=`<section class="tcard" id="pfTpl" aria-label="PowerPoint template"><div><h3>PowerPoint template</h3><p class="t2">Every profile is built on your team's own template, kept privately for this site's logins.</p></div>`;
+  if(tp.loading && !tp.checked) h+=`<p class="t2" id="pfTplState" role="status">Checking for the template…</p>`;
+  else if(tp.err) h+= tp.errKind==="nobucket" ? `<div class="info" id="pfTplState" role="status"><span>${esc(tp.err)}</span><button type="button" class="btn sm" data-act="pf-tpl-retry">Check again</button></div>` : `<div class="banner" id="pfTplState" role="alert"><span>${esc(tp.err)}</span><button type="button" class="btn sm" data-act="pf-tpl-retry">Try again</button></div>`;
+  else if(tp.info) h+=`<p id="pfTplState" style="margin:0"><b>The template is uploaded.</b> <span class="t2">${tp.info.at?`Last changed ${esc(whenAt(tp.info.at))}`:"Ready to use"}${isNum(tp.info.size)?`, ${+tp.info.size<104858?"under 0.1":(+tp.info.size/1048576).toFixed(1)} MB`:""}.</span></p>`;
+  else h+=`<p id="pfTplState" style="margin:0"><b>No template yet.</b> <span class="t2">${cd?"Upload your team's PowerPoint template (.pptx, up to 50 MB). Profiles can be built once it is here.":"Ask Corp Dev to upload the template. Until then you can get the figures, but not build the file."}</span></p>`;
+  if(cd && tp.errKind!=="nobucket"){
+    const up=tp.uploading;
+    h+=`<div class="toolbar"><input type="file" id="pf_tplFile" class="sr" tabindex="-1" aria-hidden="true" accept=".pptx,${PPTX_TYPE}">
+      <button type="button" class="btn" data-act="pf-tpl-pick" ${up||tp.loading?"disabled":""}>${up==="checking"?"Checking the file…":up==="uploading"?"Uploading…":tp.info?"Replace template":"Upload template"}</button>
+      <span class="t2 grow">The file is checked here first: it must be a PowerPoint file with the cover and content layouts the builder uses.</span></div>`;
+  }
+  if(tp.upErr) h+=`<p class="err" id="pfTplErr" role="alert">${esc(tp.upErr)}</p>`;
+  if(tp.upNote) h+=`<div class="info" id="pfTplDone" role="status"><span>${esc(tp.upNote)}</span></div>`;
+  h+=`<div class="pfsample"><div><b>Check the template with a sample profile</b><p class="t2" id="pfSampleNote">The sample uses made-up figures for a made-up company. It works before statutory data is set up.</p></div>
+    <button type="button" class="btn" data-act="pf-sample" ${pf.busy||!fnOk?"disabled":""}>${pf.busy==="sample"||(pf.busy==="build"&&pf.res&&pf.res.facts.sample)?"Building the sample…":"Build a sample profile"}</button></div>`;
+  return h+`</section>`;
+}
+function renderProfile(){
+  const pf=S.pf, s=pf.status, st=s&&s.statutory;
+  let h=`<div><h2 class="action-title">Company profile as a PowerPoint file</h2>
+    <p class="sub">Choose a company or group, check what the profile will hold, then download it built on your team's template, with charts and tables you can edit.</p></div>`;
+  if(pf.statusErr) h+= pf.statusErr.err==="not_deployed" ? `<div class="info" id="pfOff" role="status"><span>${esc(errText(pf.statusErr))}</span></div>` : `<div id="pfOff">${problemHTML(pf.statusErr, "Couldn't check whether profiles are set up.", "pf-status-retry")}</div>`;
+  else if(!s) h+=`<div class="info" id="pfOff" role="status"><span>Checking whether statutory data is set up…</span></div>`;
+  else if(!st||!st.configured) h+=`<div class="info" id="pfOff" role="status"><span><b>Statutory data isn't set up yet,</b> so profiles of real companies can't be built. It needs a Snowflake reader account from S&amp;P. Until then, build a sample profile below to check how your template comes out.</span></div>`;
+  else if(!st.mapped) h+=`<div class="info" id="pfOff" role="status"><span><b>Snowflake is connected, but the statutory fields aren't mapped yet,</b> so profiles can't be built. ${isCorpDev()?`Map them in the field set-up on the <a href="#statutory">Statutory view</a>.`:"Ask Corp Dev to finish the set-up."} You can build a sample profile below meanwhile.</span></div>`;
+  else {
+    const group=pf.kind==="group";
+    h+=`<form class="tcard" id="pfForm" novalidate aria-label="Choose a company or group">
+      <div class="f"><span>Profile a</span><div class="seg"><button type="button" class="btn sm" data-act="pf-kind" data-k="company" aria-pressed="${!group}">Company</button><button type="button" class="btn sm" data-act="pf-kind" data-k="group" aria-pressed="${group}">Group</button></div></div>
+      <div class="fgrid"><label class="f"><span>NAIC ${group?"group":"company"} code <em>one ${group?"group":"company"} per profile</em></span><input type="text" id="pf_code" data-bind="pf.code" value="${esc(pf.code)}" autocomplete="off" spellcheck="false" inputmode="numeric" placeholder="For example ${group?"9001":"90001"}"></label>
+        <div class="f"><span class="pfsp" aria-hidden="true">&nbsp;</span><div class="pfchosen" id="pf_chosen">${pfChosenHTML()}</div></div></div>
+      ${pfFinderHTML()}
+      ${pf.formErr?`<p class="err" id="pfFormErr" role="alert">${esc(pf.formErr)}</p>`:""}
+      <div class="toolbar"><button type="button" class="btn primary" id="pf_get" data-act="pf-facts" ${pf.busy?"disabled":""}>${pf.busy==="facts"?"Getting figures…":"Get figures"}</button><span class="t2 grow">Shows what the profile will hold before anything is built.</span></div>
+    </form>`;
+  }
+  h+=`<div id="pfOut" class="pfout" aria-live="polite">${pfOutHTML()}</div>`;
+  return h+pfTemplateHTML();
+}
+
 /* ---------- render ---------- */
 /* The view (or the Ask Claude panel) is rebuilt from state each time: keep the cursor, the scroll position of boxes
    marked data-keep, and anything half-typed in boxes that aren't bound to state (the sign-in form). */
@@ -1901,7 +2296,7 @@ function render(){
   if(!on){ v.innerHTML=loginHTML(); keep(); renderDrawer(); renderAsk(); renderConn(); return; }
   document.querySelectorAll("nav.tabs a").forEach(a=>a.setAttribute("aria-current", a.dataset.view===S.view ? "page" : "false"));
   document.getElementById("stripIn").innerHTML=stripHTML();
-  v.innerHTML = S.view==="statutory" ? renderStatutory() : renderFilings();
+  v.innerHTML = S.view==="statutory" ? renderStatutory() : S.view==="profile" ? renderProfile() : renderFilings();
   keep(); renderDrawer(); renderAsk();
   renderConn();
 }
@@ -1939,6 +2334,7 @@ function enterView(){
   if(S.view==="filings" && !S.refs && !S.refsLoading) loadRefs(false);
   if(S.view==="filings" && !S.w.loaded && !S.w.loading) loadWatch();
   if(S.view==="statutory" && !S.st.status && !S.st.loading) loadStatStatus();
+  if(S.view==="profile") enterProfile();
 }
 function route(){
   const h=location.hash.replace(/^#/,""); let v=VIEWS.includes(h)?h:null;
@@ -2039,6 +2435,20 @@ document.addEventListener("click", e=>{
     case "su-views": discover(null, !!t.dataset.refresh); break;
     case "su-view": discover(t.dataset.name, false); break;
     case "su-save": saveMapping(); break;
+
+    case "pf-kind": S.pf.kind=t.dataset.k==="group"?"group":"company"; S.pf.name=""; S.pf.find.matches=null; S.pf.formErr=""; render(); break;
+    case "pf-find": pfLookup(); break;
+    case "pf-choose": pfChoose(t.dataset.code, t.dataset.name); break;
+    case "pf-facts": pfFacts(); break;
+    case "pf-status-retry": loadProfileStatus(); break;
+    case "pf-libs-retry": S.pf.libsErr=""; render(); pfPlan(S.pf); break;
+    case "pf-draft": S.pf.draft=!!t.checked; render(); break;
+    case "pf-build": pfBuild(false); break;
+    case "pf-build-plain": pfBuild(true); break;
+    case "pf-again": pfDownloadAgain(); break;
+    case "pf-sample": pfSample(); break;
+    case "pf-tpl-pick": document.getElementById("pf_tplFile")?.click(); break;
+    case "pf-tpl-retry": S.pf.tpl.checked=false; checkTemplate(); break;
   }
 });
 function onInput(e){
@@ -2061,6 +2471,8 @@ document.addEventListener("submit", e=>{
 document.addEventListener("keydown", e=>{
   if(e.target.id==="f_q" && e.key==="Enter"){ e.preventDefault(); resolveCompany(); return; }
   if(e.target.id==="st_find" && e.key==="Enter"){ e.preventDefault(); statLookup(); return; }
+  if(e.target.id==="pf_find" && e.key==="Enter"){ e.preventDefault(); pfLookup(); return; }
+  if(e.target.id==="pf_code" && e.key==="Enter"){ e.preventDefault(); pfFacts(); return; }
   if(e.target.id==="su_like" && e.key==="Enter"){ e.preventDefault(); discover(null, false); return; }
   if(e.target.id==="ask_input" && e.key==="Enter" && !e.shiftKey && !e.isComposing){ e.preventDefault(); askQuestion(); return; }
   if(e.key==="Enter" && e.target.closest && e.target.closest("#pwForm")){ e.preventDefault(); savePassword(); return; }
@@ -2081,6 +2493,7 @@ function resetState(){
   S.conn=null;
   S.past=freshPast();
   S.w=freshWatch();
+  S.pf=freshProfile();   // the template's bytes and any built file go with it
 }
 async function onSignedIn(session){
   const {data, error}=await S.sb.from("profiles").select("username,display_name,role").eq("id", session.user.id).maybeSingle();
