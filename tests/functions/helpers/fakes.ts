@@ -2,6 +2,7 @@
 // Anthropic API. Nothing here touches a real service, and every company, filing and figure is made up.
 
 import type { Db, Entity, Job, JobPatch, JobStatus, StoreKind, StoreRow } from "../../../supabase/functions/_shared/db.ts";
+import type { FoundFiling, WatchRun, WatchRunPatch } from "../../../supabase/functions/_shared/db.ts";
 
 export const read = (name: string) => JSON.parse(Deno.readTextFileSync(new URL(`../../fixtures/${name}`, import.meta.url)));
 export const J = (o: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", ...headers } });
@@ -47,6 +48,7 @@ export function memoryDb(clock: Clock) {
     },
     async putEntities(entities) { for (const e of entities) { const key = e.companyId ? String(e.companyId) : e.institutionId ? `i.${e.institutionId}` : null; if (key) store.set(`entity:${key}`, { id: `entity:${key}`, kind: "entity", label: e.companyName, doc: e as unknown as Record<string, unknown>, fetched_at: iso() }); } },
     async getSetting(id) { return settings.get(id) ?? null; },
+    ...watchTables(clock),
     async createJob(owner, question) {
       const id = `00000000-0000-4000-8000-${String(++jobSeq).padStart(12, "0")}`;
       jobs.set(id, { id, owner, status: "queued", question, progress: [], partial: "", result: null, error: null, segments: 0, created_at: iso(), updated_at: iso(), heartbeat_at: iso() });
@@ -76,6 +78,38 @@ export function memoryDb(clock: Clock) {
   return db;
 }
 export type MemoryDb = ReturnType<typeof memoryDb>;
+
+/** The watchlist's two tables (migration 0003) in memory, with the same one-running-check rule. runs and found are
+    the rows, for tests to look at. */
+export function watchTables(clock: Clock) {
+  const runs: WatchRun[] = [], found = new Map<string, FoundFiling>();
+  let seq = 0;
+  const iso = () => new Date(clock.now).toISOString();
+  const t: Pick<Db, "startWatchRun" | "finishWatchRun" | "addWatchRun" | "watchRuns" | "lastWatchScope" | "seenFilings" | "addFoundFilings" | "foundFilings" | "dropOldWatch"> & { runs: WatchRun[]; found: Map<string, FoundFiling> } = {
+    runs, found,
+    async startWatchRun(trigger, staleMs, staleMessage) {
+      for (const r of runs) if (r.status === "running" && Date.parse(r.started_at) < clock.now - staleMs) Object.assign(r, { status: "failed", finished_at: iso(), message: staleMessage });
+      if (runs.some((r) => r.status === "running")) return null;
+      const id = `00000000-0000-4000-9000-${String(++seq).padStart(12, "0")}`;
+      runs.push({ id, status: "running", trigger, started_at: iso(), finished_at: null, requests: 0, found: 0, new_count: 0, baseline: false, complete: true, emailed: 0, message: null, scope: null });
+      return id;
+    },
+    async finishWatchRun(id, patch: WatchRunPatch) { const r = runs.find((x) => x.id === id); if (r) Object.assign(r, structuredClone(patch), { finished_at: iso() }); },
+    async addWatchRun(run) { runs.push({ ...structuredClone(run), id: `00000000-0000-4000-9000-${String(++seq).padStart(12, "0")}` }); },
+    async watchRuns(limit) { return structuredClone([...runs].sort((a, b) => b.started_at.localeCompare(a.started_at) || b.id.localeCompare(a.id)).slice(0, limit)); },
+    async lastWatchScope() { return structuredClone([...runs].filter((r) => r.status === "ok" && r.complete && r.scope).sort((a, b) => b.started_at.localeCompare(a.started_at) || b.id.localeCompare(a.id))[0]?.scope ?? null); },
+    async seenFilings(ids) { return ids.filter((id) => found.has(id)); },
+    async addFoundFilings(rows) { for (const r of rows) if (!found.has(r.filing_version_id)) found.set(r.filing_version_id, structuredClone(r)); },
+    async foundFilings(limit) {
+      return structuredClone([...found.values()].filter((r) => !r.baseline).sort((a, b) => b.first_seen_at.localeCompare(a.first_seen_at) || String(b.publish_date ?? "").localeCompare(String(a.publish_date ?? ""))).slice(0, limit));
+    },
+    async dropOldWatch(before) {
+      for (const [k, r] of found) if (r.first_seen_at < before) found.delete(k);
+      for (let i = runs.length - 1; i >= 0; i--) if (runs[i].status !== "running" && runs[i].started_at < before) runs.splice(i, 1);
+    },
+  };
+  return t;
+}
 
 // ---------- fake S&P ----------
 

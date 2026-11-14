@@ -287,6 +287,13 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
   table.cards tbody tr:nth-child(even) td{background:transparent}
   table.cards td[data-label]::before{content:attr(data-label);display:block;font-size:11px;font-weight:bold;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin-bottom:2px}
 }
+/* Watchlist: a compact card above the search form */
+.watch{gap:10px}
+.watch .blk-h h3{color:var(--ink)}
+.watch .wlist{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;font-size:13px;min-width:0}
+.watch .wlist>b{font-size:12px}
+.watch .wmanage{border-top:1px solid var(--grid);padding-top:10px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.watch .pill.on{color:var(--teal)}.watch .pill.off{color:var(--muted)}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
@@ -337,6 +344,7 @@ const TIMING = {poll:2000, stale:45000, again:30000};
 const VIEWS = ["filings","statutory"];
 const ROLES = {corpdev:"Corp Dev", reader:"Reader"};
 const FN = {"snl-filings":"the filings function", "snl-chat":"the questions function", "snl-statutory":"the statutory function"};
+FN["snl-watch"]="the watchlist function";
 const US_STATES = "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY".split(" ");
 const PAGE = 100, MAX_COMPANIES = 50, MAX_YEARS = 10, MAX_QUESTION = 4000, MAX_HISTORY = 6, MAX_HISTORY_ANSWER = 20000, MAX_CODES = 8, MAX_STAT_YEARS = 15;
 const XLSX_SRC = "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.mini.min.js";
@@ -370,6 +378,7 @@ const S = {
   f:null, ask:freshAsk(), st:null, docs:{}
 };
 S.chatUse=null; S.chatUseAt=0;   // the login's questions today and their cost, from the questions function
+S.w=freshWatch();
 
 /* ---------- helpers ---------- */
 function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
@@ -786,6 +795,7 @@ function filingsResultsHTML(){
 function renderFilings(){
   return `<div><h2 class="action-title">Search rate, rule and form filings</h2>
     <p class="sub">S&amp;P's SNL Insurance Product Filings by company, state, type of insurance, filing type and date. Open any filing's original document.</p></div>
+    ${watchHTML()}
     ${recentHTML()}${filingsFormHTML()}<div id="results" style="display:flex;flex-direction:column;gap:14px;min-width:0" aria-live="polite">${filingsResultsHTML()}</div>`;
 }
 function filingsExport(){
@@ -904,6 +914,169 @@ function reopenRecent(i){
   if(se.length) payload.spStatEntityIds=se;
   runSearch(false, payload);
   document.getElementById("results")?.scrollIntoView({block:"start"});
+}
+
+/* ---------- Filings: the watchlist ----------
+   What is watched is the shared setting "watchlist" (snl_settings): every login reads it, Corp Dev edits it here.
+   The snl-watch function checks it every day and says what it found (status), or checks now (run). */
+const WATCH_BUDGET = 30, WATCH_SHOWN = 5, WATCH_CHIPS = 12, WATCH_MAX_RECIPIENTS = 10;
+function freshWatch(){ return {loaded:false, loading:false, doc:null, problems:[], readErr:"", status:null, statusErr:null, checking:false, saving:false, saveErr:"", recips:null, manage:false, showAll:false, allCos:false, runNote:null}; }
+const isEmailAddr = s => s.length<=254 && /^[A-Za-z0-9._%+'-]{1,64}@[A-Za-z0-9-]{1,63}(\.[A-Za-z0-9-]{1,63})*\.[A-Za-z]{2,24}$/.test(s);
+/* The saved document is typed by people: keep only what can be used, the same way the function reads it. */
+function cleanWatch(raw){
+  const d=raw && typeof raw==="object" && !Array.isArray(raw) ? raw : {}, problems=[], arr=v=>Array.isArray(v)?v:[];
+  const name=v=>(typeof v==="string"||typeof v==="number"?String(v):"").replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]+/g," ").replace(/\s+/g," ").trim().slice(0,120);
+  const companies=[];
+  for(const c of arr(d.companies)){
+    const o=c&&typeof c==="object"?c:{}, id=typeof o.id==="number"&&Number.isInteger(o.id)&&o.id>=0?String(o.id):typeof o.id==="string"?o.id.trim():"";
+    if(!["companyId","institutionId"].includes(o.kind) || !/^\d{1,12}$/.test(id)){ problems.push("company"); continue; }
+    const nid=String(Number(id)); if(!companies.some(x=>x.kind===o.kind&&x.id===nid)) companies.push({kind:o.kind, id:nid, name:name(o.name)});
+  }
+  const states=[]; for(const s of arr(d.states)){ const v=typeof s==="string"?s.trim().toUpperCase():""; if(!/^[A-Z]{2}$/.test(v)){ problems.push("state"); continue; } if(!states.includes(v)) states.push(v); }
+  const ids=v=>[...new Set(arr(v).map(x=>typeof x==="string"&&/^\d{1,12}$/.test(x.trim())?Number(x):x).filter(x=>typeof x==="number"&&Number.isInteger(x)&&x>=0&&x<1e12))];
+  const recipients=[]; for(const r of arr(d.recipients)){ const v=typeof r==="string"?r.trim().toLowerCase():""; if(!isEmailAddr(v)){ problems.push("email"); continue; } if(!recipients.includes(v)) recipients.push(v); }
+  return {list:{enabled:d.enabled===true, companies:companies.slice(0,500), states:states.slice(0,60), typeOfInsuranceIds:ids(d.typeOfInsuranceIds).slice(0,100), filingTypeIds:ids(d.filingTypeIds).slice(0,50), recipients:recipients.slice(0,WATCH_MAX_RECIPIENTS)}, problems};
+}
+function watchCostOf(l){ const n=k=>Math.ceil(l.companies.filter(c=>c.kind===k).length/10); return n("companyId")+n("institutionId")+2; }
+async function readWatchDoc(){
+  try{ const {data, error}=await S.sb.from("snl_settings").select("doc").eq("id","watchlist").maybeSingle(); if(error) return {error}; return cleanWatch(data&&data.doc); }
+  catch(e){ return {error:e}; }
+}
+async function loadWatch(){
+  const w=S.w; if(w.loading) return;
+  w.loading=true; render();
+  const [doc, st]=await Promise.all([readWatchDoc(), callFn("snl-watch",{action:"status"})]);
+  if(!S.session || S.w!==w) return;
+  w.loading=false; w.loaded=true;
+  if(doc.error) w.readErr="Couldn't read the watchlist: "+((doc.error&&doc.error.message)||"unknown error")+".";
+  else { w.doc=doc.list; w.problems=doc.problems; w.readErr=""; }
+  if(st.data){ w.status=st.data; w.statusErr=null; } else if(st.err!=="signin") w.statusErr=st;
+  render();
+}
+async function watchRefreshStatus(){
+  const w=S.w, st=await callFn("snl-watch",{action:"status"});
+  if(!S.session || S.w!==w) return;
+  if(st.data){ w.status=st.data; w.statusErr=null; } else if(st.err!=="signin") w.statusErr=st;
+  render();
+}
+/* Every change starts from what is saved now, so two people editing at once don't undo each other's changes. */
+async function changeWatch(change, done){
+  const w=S.w; if(w.saving) return;
+  w.saving=true; w.saveErr=""; render();
+  const cur=await readWatchDoc();
+  if(!S.session || S.w!==w) return;
+  if(cur.error){ w.saving=false; w.saveErr="Couldn't read the watchlist: "+((cur.error&&cur.error.message)||"unknown error")+". Nothing was changed."; render(); return; }
+  const next=change(JSON.parse(JSON.stringify(cur.list)));
+  if(!next){ w.saving=false; render(); return; }
+  let error=null;
+  try{ ({error}=await S.sb.from("snl_settings").upsert({id:"watchlist", doc:next})); }catch(e){ error=e; }
+  w.saving=false;
+  if(error){ w.saveErr = /42501|row-level security|permission/i.test(`${error.code||""} ${error.message||""}`) ? "Only Corp Dev logins can change the watchlist." : "Couldn't save the watchlist: "+(error.message||"unknown error")+". Nothing was changed."; render(); return; }
+  w.doc=next; w.problems=[]; render();
+  if(done) toast(typeof done==="function" ? done() : done);
+  watchRefreshStatus();
+}
+function watchAddFromForm(){
+  const f=S.f;
+  if(!f.chips.length || !f.states.length){ S.w.saveErr="Choose companies and states in the search form below first, then add them."; render(); return; }
+  let cos=0, sts=0, switched=false;
+  changeWatch(l=>{
+    const was=!l.companies.length;
+    for(const c of f.chips) if(!l.companies.some(x=>x.kind===c.kind && x.id===c.id)){ l.companies.push({kind:c.kind, id:c.id, name:c.name||""}); cos++; }
+    for(const s of f.states) if(!l.states.includes(s)){ l.states.push(s); sts++; }
+    if(!cos && !sts) return null;
+    if(was && !l.enabled){ l.enabled=true; switched=true; }
+    return l;
+  }, ()=>`Added ${[cos?plural(cos,"company","companies"):"", sts?plural(sts,"state"):""].filter(Boolean).join(" and ")} to the watchlist.${switched?" It is switched on.":""}`)
+  .then(()=>{ if(!cos && !sts && !S.w.saveErr) toast("Those companies and states are already watched."); });
+}
+function watchSaveRecipients(){
+  const w=S.w, list=[...new Set(String(w.recips??"").split(/[\s,;]+/).map(s=>s.trim().toLowerCase()).filter(Boolean))];
+  const bad=list.find(s=>!isEmailAddr(s));
+  if(bad){ w.saveErr=`"${bad}" isn't an email address. Separate addresses with commas.`; render(); return; }
+  if(list.length>WATCH_MAX_RECIPIENTS){ w.saveErr=`Add at most ${WATCH_MAX_RECIPIENTS} email recipients.`; render(); return; }
+  changeWatch(l=>{ l.recipients=list; return l; }, list.length?`Email recipients saved (${list.length}).`:"Email recipients removed.").then(()=>{ if(!S.w.saveErr) S.w.recips=null; });
+}
+async function watchCheckNow(){
+  const w=S.w; if(w.checking) return;
+  w.checking=true; w.runNote=null; render();
+  const r=await callFn("snl-watch",{action:"run"});
+  if(!S.session || S.w!==w) return;
+  w.checking=false;
+  if(r.data && r.data.run){ w.runNote=r.data.run; takeUsage(r.data); loadStatus(); }
+  else if(r.err!=="signin") w.runNote={status:r.err==="busy"?"busy":"error", message:errText(r)};
+  render(); watchRefreshStatus();
+}
+const whenAt = s => blank(s) ? "n/d" : `${fmtAt(s)}${fmtTime(s)?` at ${fmtTime(s)}`:""}`;
+/* A found filing in the shape the results table reads, so it shows and opens the same way. */
+const watchRow = r => ({companies:(Array.isArray(r.companies)?r.companies:[]).map(n=>({companyName:n})), serffFilingStateId:r.state, serffFilingState:r.state_name, serffFilingType:r.filing_type,
+  typeOfInsurance:r.type_of_insurance, subTypeOfInsurance:r.sub_type_of_insurance, filingStatus:r.filing_status, dateSubmitted:r.date_submitted, publishDate:r.publish_date,
+  newBusReqEffDate:r.effective_new, renewBusReqEffDate:r.effective_renewal, dispOverallRateImpact:r.rate_impact, filingDescription:r.description, trackingNumber:r.tracking_number,
+  documentId:r.document_id, filingVersionId:r.filing_version_id});
+function watchFoundHTML(st){
+  const w=S.w, found=(Array.isArray(st.found)?st.found:[]).filter(r=>r&&!blank(r.filing_version_id)), last=st.lastCheck;
+  let h="";
+  if(!last) h+=`<p class="t2" id="wNever">${st.configured===false?"":"Not checked yet. "}The first check records the filings already there as the starting point; after that, new filings show here.</p>`;
+  else if(last.baseline) h+=`<p class="t2" id="wBaseline">The first check, on ${esc(whenAt(last.started_at))}, recorded ${plural(last.found,"filing")} as the starting point. Filings that appear after it show here as new.</p>`;
+  else if(!(+last.new_count)) h+=`<p id="wNothing" style="margin:0"><b>Nothing new since the last check</b> <span class="t2">on ${esc(whenAt(last.started_at))}.</span></p>`;
+  else h+=`<p id="wNew" style="margin:0"><b>The last check, on ${esc(whenAt(last.started_at))}, found ${plural(last.new_count,"new filing")}.</b></p>`;
+  if(!found.length) return h;
+  const shown=w.showAll?found:found.slice(0,WATCH_SHOWN);
+  h+=`<div class="t2">New filings found in the last ${count(st.keepDays||90)} days, the latest found first:</div>
+    <div class="tbl-wrap cardwrap" id="watchWrap" data-keep><table class="cards filings" id="watchTable"><thead><tr><th>Company</th><th>State</th><th>Filing type</th><th>Type of insurance</th><th>Status</th><th>Dates</th><th class="num">Rate impact</th><th>Description</th><th>Tracking number</th><th>Document</th></tr></thead>
+    <tbody>${shown.map(r=>filingRowHTML({r:watchRow(r), key:"w"+r.filing_version_id})).join("")}</tbody></table></div>`;
+  if(found.length>WATCH_SHOWN) h+=`<div class="inline"><button type="button" class="btn sm" data-act="w-all">${w.showAll?"Show fewer":`Show all ${count(found.length)}`}</button></div>`;
+  return h+`<p class="source">Source: S&amp;P Global Market Intelligence, SNL Insurance Product Filings, found by the watchlist check. Opening a document uses one S&amp;P request the first time.</p>`;
+}
+function watchManageHTML(l, st, empty){
+  const w=S.w, recips=w.recips===null ? l.recipients.join(", ") : w.recips, cost=watchCostOf(l);
+  return `<div class="wmanage" id="wManage">
+    <div class="toolbar">${empty?"":`<button type="button" class="btn" data-act="w-add" ${w.saving?"disabled":""}>Add the companies and states chosen below</button>`}
+      <button type="button" class="btn" data-act="w-toggle" ${w.saving||!l.companies.length?"disabled":""}>${l.enabled?"Switch off":"Switch on"}</button></div>
+    ${l.companies.length?`<p class="t2" id="wCost">Each check uses about ${plural(cost,"S&amp;P request")} (one for each batch of 10 companies, plus 2), more if S&amp;P has many results. A check may use at most ${WATCH_BUDGET}.</p>`:""}
+    <label class="f"><span>Email the new filings to <em>optional; up to ${WATCH_MAX_RECIPIENTS} addresses, separated with commas</em></span>
+      <div class="toolbar"><div class="grow"><input type="text" id="w_recips" data-bind="w.recips" value="${esc(recips)}" autocomplete="off" spellcheck="false" placeholder="For example corpdev1@yourco.com"></div>
+      <button type="button" class="btn sm" data-act="w-recips-save" ${w.saving?"disabled":""}>Save recipients</button></div></label>
+    <p class="t2" id="wEmailNote">${st&&st.emailConfigured===false?"Email isn't set up for the app yet, so nobody is emailed. ":""}An email lists only the company, state, filing type, a line of description and the tracking number of each new filing, with a link here. Everything shows on this page either way.</p>
+  </div>`;
+}
+function watchHTML(){
+  const w=S.w, cd=isCorpDev(), st=w.status, l=w.doc;
+  const head=(extra)=>`<div class="blk-h"><div><h3>Watchlist</h3><p class="t2" id="wSummary">${extra}</p></div>
+    <span class="inline">${cd?`<button type="button" class="btn sm" data-act="w-manage" aria-expanded="${w.manage}">${w.manage?"Done":"Manage"}</button>`:""}</span></div>`;
+  if(!w.loaded) return `<section class="tcard watch" id="watch" aria-label="Watchlist">${head("Loading the watchlist…")}</section>`;
+  if(w.readErr && !l) return `<section class="tcard watch" id="watch" aria-label="Watchlist">${head("")}<div class="banner" role="alert" id="wReadErr"><span>${esc(w.readErr)}</span><button class="btn sm" data-act="w-retry">Try again</button></div></section>`;
+  const list=l||{enabled:false, companies:[], states:[], typeOfInsuranceIds:[], filingTypeIds:[], recipients:[]}, empty=!list.companies.length||!list.states.length;
+  const running=w.checking || !!(st&&st.running);
+  const summary = empty ? "Name companies and states once; a daily check shows any new rate, rule or form filing here."
+    : `${list.enabled?`<span class="pill on">On</span> Checked every day for filings published in the last ${count(st&&st.windowDays||14)} days.`:`<span class="pill off">Off</span> Not being checked.`}${st&&st.lastRun?` Last checked ${esc(whenAt(st.lastRun.started_at))}.`:""}`;
+  let h=`<section class="tcard watch" id="watch" aria-label="Watchlist">${head(summary)}`;
+  if(w.runNote){ const n=w.runNote, bad=n.status==="failed"||n.status==="error";
+    h+=`<div class="${bad?"banner":"info"}" id="wRun" role="${bad?"alert":"status"}"><span>${bad?"<b>The check didn't finish.</b> ":""}${esc(n.message||"")}${isNum(n.requests)&&+n.requests?` ${plural(n.requests,"S&amp;P request")} used.`:""}</span></div>`; }
+  if(running) h+=`<div class="info" id="wRunning" role="status"><span><b>A check is running.</b> It asks S&amp;P for filings published in the last ${count(st&&st.windowDays||14)} days. This can take a minute.</span></div>`;
+  if(empty) h+=`<div class="empty" id="wEmpty"><p><b>Nothing is watched yet.</b> ${cd?"Choose companies and states in the search form below, then add them here.":"Corp Dev can add companies and states to watch."}</p>${cd?`<button type="button" class="btn" data-act="w-add" ${w.saving?"disabled":""}>Add the companies and states chosen below</button>`:""}</div>`;
+  else {
+    const cos=w.allCos?list.companies:list.companies.slice(0,WATCH_CHIPS), label=c=>c.name||`${c.kind==="companyId"?"Company":"Institution"} id ${c.id}`;
+    h+=`<div class="wlist" id="wCos"><b>Companies (${count(list.companies.length)})</b><div class="chips">${cos.map(c=>`<span class="cchip"><b>${esc(label(c))}</b>${w.manage&&cd?`<button type="button" data-act="w-co-remove" data-k="${esc(c.kind+":"+c.id)}" aria-label="Stop watching ${esc(label(c))}" ${w.saving?"disabled":""}>×</button>`:""}</span>`).join("")}
+      ${list.companies.length>WATCH_CHIPS?`<button type="button" class="lnk t2" data-act="w-more">${w.allCos?"Show fewer":`and ${count(list.companies.length-WATCH_CHIPS)} more`}</button>`:""}</div></div>
+      <div class="wlist" id="wStates"><b>States (${count(list.states.length)})</b><div class="chips">${list.states.map(s=>`<span class="cchip"><b>${esc(s)}</b>${w.manage&&cd?`<button type="button" data-act="w-st-remove" data-s="${esc(s)}" aria-label="Stop watching ${esc(s)}" ${w.saving?"disabled":""}>×</button>`:""}</span>`).join("")}</div></div>
+      ${list.typeOfInsuranceIds.length||list.filingTypeIds.length?`<p class="t2" id="wFilters">Only ${[list.typeOfInsuranceIds.length?plural(list.typeOfInsuranceIds.length,"type of insurance","types of insurance"):"", list.filingTypeIds.length?plural(list.filingTypeIds.length,"filing type"):""].filter(Boolean).join(" and ")} chosen in S&amp;P's lists.</p>`:""}`;
+  }
+  const problems=(st&&Array.isArray(st.problems)&&st.problems.length?st.problems:w.problems.length?["Some entries in the saved watchlist couldn't be used and are left out."]:[]);
+  if(problems.length && !empty) h+=`<div class="notes" id="wProblems" role="status"><b>Part of the saved watchlist can't be used</b><ul>${problems.map(p=>`<li>${esc(p)}</li>`).join("")}</ul></div>`;
+  if(w.statusErr){ const e=w.statusErr;
+    h+= e.err==="not_deployed" ? `<div class="info" id="wNoFn" role="status"><span>${esc(errText(e))}</span></div>` : problemHTML(e, "Couldn't get the last check.", "w-retry"); }
+  else if(st){
+    if(st.configured===false && !empty) h+=`<div class="info" id="wNotSetUp" role="status"><span><b>Checks start once S&amp;P API access is set up.</b> The watchlist is kept until then.</span></div>`;
+    if(st.tooBig && !empty) h+=`<div class="banner" id="wTooBig" role="alert"><span>${esc(st.tooBig)}</span></div>`;
+    else if(st.lastRun && st.lastRun.status==="failed" && !running) h+=`<div class="banner" id="wFailed" role="alert"><span><b>The last check, on ${esc(whenAt(st.lastRun.started_at))}, failed.</b> ${esc(st.lastRun.message||"No reason was recorded.")}</span></div>`;
+    if(!empty && !list.enabled) h+=`<div class="info" id="wOff" role="status"><span><b>Switched off.</b> ${cd?"Switch it on under Manage to check every day.":"Corp Dev can switch it on."}</span></div>`;
+    if(!empty || (st.found&&st.found.length)) h+=watchFoundHTML(st);
+  }
+  if(cd && !empty) h+=`<div class="toolbar"><button type="button" class="btn sm primary" data-act="w-check" id="wCheck" ${running||w.saving?"disabled":""}>${w.checking?"Checking…":"Check now"}</button><span class="t2 grow">Uses a few S&amp;P requests. The daily check runs by itself once it is set up.</span></div>`;
+  if(w.saveErr) h+=`<p class="err" id="wErr" role="alert">${esc(w.saveErr)}</p>`;
+  if(cd && w.manage) h+=watchManageHTML(list, st, empty);
+  return h+`</section>`;
 }
 
 /* ---------- documents: fetched once with the login, then opened from memory ---------- */
@@ -1764,6 +1937,7 @@ const VIEW_KEY="snl.view";
 function enterView(){
   if(!S.session) return;
   if(S.view==="filings" && !S.refs && !S.refsLoading) loadRefs(false);
+  if(S.view==="filings" && !S.w.loaded && !S.w.loading) loadWatch();
   if(S.view==="statutory" && !S.st.status && !S.st.loading) loadStatStatus();
 }
 function route(){
@@ -1827,6 +2001,17 @@ document.addEventListener("click", e=>{
     case "recent-open": reopenRecent(+t.dataset.i); break;
     case "recent-more": { const R=recentOf(); R.limit+=RECENT_PAGE; loadRecent(); break; }
     case "recent-retry": loadRecent(); break;
+
+    case "w-add": watchAddFromForm(); break;
+    case "w-co-remove": { const k=t.dataset.k; changeWatch(l=>{ l.companies=l.companies.filter(c=>`${c.kind}:${c.id}`!==k); return l; }, "Removed from the watchlist."); break; }
+    case "w-st-remove": { const s=t.dataset.s; changeWatch(l=>{ l.states=l.states.filter(x=>x!==s); return l; }, `${s} removed from the watchlist.`); break; }
+    case "w-toggle": changeWatch(l=>{ l.enabled=!l.enabled; return l; }, S.w.doc&&S.w.doc.enabled?"The watchlist is switched off.":"The watchlist is switched on."); break;
+    case "w-recips-save": watchSaveRecipients(); break;
+    case "w-check": watchCheckNow(); break;
+    case "w-manage": S.w.manage=!S.w.manage; S.w.saveErr=""; render(); break;
+    case "w-all": S.w.showAll=!S.w.showAll; render(); break;
+    case "w-more": S.w.allCos=!S.w.allCos; render(); break;
+    case "w-retry": S.w.loaded=false; S.w.readErr=""; S.w.statusErr=null; loadWatch(); break;
 
     case "ask-open": openAsk(); break;
     case "ask-close": closeAsk(); break;
@@ -1895,6 +2080,7 @@ function resetState(){
   S.chatUse=null; S.chatUseAt=0;
   S.conn=null;
   S.past=freshPast();
+  S.w=freshWatch();
 }
 async function onSignedIn(session){
   const {data, error}=await S.sb.from("profiles").select("username,display_name,role").eq("id", session.user.id).maybeSingle();

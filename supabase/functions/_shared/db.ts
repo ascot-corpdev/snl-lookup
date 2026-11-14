@@ -26,6 +26,21 @@ export type Job = {
 };
 export type JobPatch = Partial<Pick<Job, "status" | "progress" | "partial" | "result" | "error" | "segments">>;
 
+/** The watchlist (migration 0003). A check and what it did; scope is what it covered (see watch.ts). */
+export type WatchScope = { companies: string[]; states: string[]; filters: string };
+export type WatchRun = {
+  id: string; status: "running" | "ok" | "failed" | "skipped"; trigger: "schedule" | "manual"; started_at: string; finished_at: string | null;
+  requests: number; found: number; new_count: number; baseline: boolean; complete: boolean; emailed: number; message: string | null; scope: WatchScope | null;
+};
+export type WatchRunPatch = Partial<Pick<WatchRun, "status" | "requests" | "found" | "new_count" | "baseline" | "complete" | "emailed" | "message" | "scope">>;
+/** A filing a check found: enough to show it and open its document. baseline: part of the starting point, not new. */
+export type FoundFiling = {
+  filing_version_id: string; run_id: string | null; first_seen_at: string; baseline: boolean; companies: string[];
+  state: string | null; state_name: string | null; filing_type: string | null; type_of_insurance: string | null; sub_type_of_insurance: string | null;
+  filing_status: string | null; date_submitted: string | null; publish_date: string | null; effective_new: string | null; effective_renewal: string | null;
+  rate_impact: string | null; description: string | null; tracking_number: string | null; document_id: number | null;
+};
+
 export interface Db {
   /** Takes the next one-second S&P slot and counts the request (migration 0001, snl_take_slot). */
   takeSlot(limits: Usage): Promise<Slot>;
@@ -39,6 +54,24 @@ export interface Db {
   findEntities(q: string, limit: number): Promise<Entity[]>;
   putEntities(entities: Entity[]): Promise<void>;
   getSetting(id: string): Promise<Record<string, unknown> | null>;
+  // ---------- the watchlist (migration 0003) ----------
+  /** Starts a check, first closing any check still "running" after staleMs (with staleMessage). Returns its id, or
+      null when another check is running (only one may run at a time). */
+  startWatchRun(trigger: WatchRun["trigger"], staleMs: number, staleMessage: string): Promise<string | null>;
+  finishWatchRun(id: string, patch: WatchRunPatch): Promise<void>;
+  /** Records a check that ended before it started (not set up, nothing watched, switched off, too big). */
+  addWatchRun(run: Omit<WatchRun, "id">): Promise<void>;
+  /** The latest checks, newest first. */
+  watchRuns(limit: number): Promise<WatchRun[]>;
+  /** What the latest complete, successful check covered. null before the first one. */
+  lastWatchScope(): Promise<WatchScope | null>;
+  /** Which of these filing version ids a check has found before. */
+  seenFilings(ids: string[]): Promise<string[]>;
+  addFoundFilings(rows: FoundFiling[]): Promise<void>;
+  /** New filings found (not the starting point), the latest found first. */
+  foundFilings(limit: number): Promise<FoundFiling[]>;
+  /** Clears found filings and finished checks from before the given time. */
+  dropOldWatch(before: string): Promise<void>;
   createJob(owner: string, question: string): Promise<string | null>;
   getJob(id: string): Promise<Job | null>;
   /** Updates a job and its heartbeat. */
@@ -156,6 +189,56 @@ export function supabaseDb(sb: SupabaseClient, now: () => number = Date.now): Db
     async getSetting(id) {
       const { data } = await sb.from("snl_settings").select("doc").eq("id", id).maybeSingle();
       return (data?.doc as Record<string, unknown> | undefined) ?? null;
+    },
+    async startWatchRun(trigger, staleMs, staleMessage) {
+      await sb.from("snl_watch_runs").update({ status: "failed", finished_at: nowIso(), message: staleMessage }).eq("status", "running").lt("started_at", new Date(now() - staleMs).toISOString());
+      const { data, error } = await sb.from("snl_watch_runs").insert({ status: "running", trigger, started_at: nowIso() }).select("id").single();
+      if (error?.code === "23505") return null;   // the one-running-check index: another check holds it
+      if (error) throw new Error(`Couldn't record the check: ${error.message}`);
+      return data.id as string;
+    },
+    async finishWatchRun(id, patch) {
+      const { error } = await sb.from("snl_watch_runs").update({ ...patch, finished_at: nowIso() }).eq("id", id);
+      if (error) throw new Error(`Couldn't record the end of the check: ${error.message}`);
+    },
+    async addWatchRun(run) {
+      const { error } = await sb.from("snl_watch_runs").insert(run);
+      if (error) throw new Error(`Couldn't record the check: ${error.message}`);
+    },
+    async watchRuns(limit) {
+      const { data, error } = await sb.from("snl_watch_runs").select("*").order("started_at", { ascending: false }).limit(limit);
+      if (error) throw new Error(`Couldn't read the record of checks: ${error.message}`);
+      return (data ?? []) as WatchRun[];
+    },
+    async lastWatchScope() {
+      const { data, error } = await sb.from("snl_watch_runs").select("scope").eq("status", "ok").eq("complete", true).not("scope", "is", null).order("started_at", { ascending: false }).limit(1);
+      if (error) throw new Error(`Couldn't read the last check: ${error.message}`);
+      return (data?.[0]?.scope as WatchScope | undefined) ?? null;
+    },
+    async seenFilings(ids) {
+      const out: string[] = [];
+      for (let i = 0; i < ids.length; i += 200) {
+        const { data, error } = await sb.from("snl_watch_found").select("filing_version_id").in("filing_version_id", ids.slice(i, i + 200));
+        if (error) throw new Error(`Couldn't read the filings found before: ${error.message}`);
+        out.push(...(data ?? []).map((r) => r.filing_version_id as string));
+      }
+      return out;
+    },
+    async addFoundFilings(rows) {
+      if (!rows.length) return;
+      const { error } = await sb.from("snl_watch_found").upsert(rows, { onConflict: "filing_version_id", ignoreDuplicates: true });
+      if (error) throw new Error(`Couldn't save the filings found: ${error.message}`);
+    },
+    async foundFilings(limit) {
+      const { data, error } = await sb.from("snl_watch_found").select("*").eq("baseline", false).order("first_seen_at", { ascending: false }).order("publish_date", { ascending: false }).limit(limit);
+      if (error) throw new Error(`Couldn't read the filings found: ${error.message}`);
+      return (data ?? []) as FoundFiling[];
+    },
+    async dropOldWatch(before) {
+      try {
+        await sb.from("snl_watch_found").delete().lt("first_seen_at", before);
+        await sb.from("snl_watch_runs").delete().neq("status", "running").lt("started_at", before);
+      } catch { /* housekeeping: tried again at the next check */ }
     },
     async createJob(owner, question) {
       const { data, error } = await sb.from("snl_jobs").insert({ owner, question, status: "queued" }).select("id").single();
