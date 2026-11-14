@@ -7,7 +7,7 @@
   const clone = o => JSON.parse(JSON.stringify(o));
   const O = window.__opts || {};
   const ME = "u1";
-  const store = { profiles:{ [ME]:{id:ME, username:"corpdev1", display_name:"Corp Dev 1", role:O.role||"corpdev"} }, snl_jobs:{}, snl_settings:{} };
+  const store = { profiles:{ [ME]:{id:ME, username:"corpdev1", display_name:"Corp Dev 1", role:O.role||"corpdev"} }, snl_jobs:{}, snl_settings:{}, snl_store:{} };
   if(O.noProfile) delete store.profiles[ME];
   (O.seed||[]).forEach(([t,id,row]) => { store[t][id] = {id, ...clone(row)}; });
   const authCbs = [];
@@ -27,6 +27,10 @@
       return clone(store.snl_jobs[id]);
     },
     row(table, id){ return store[table][id] ? clone(store[table][id]) : null; },
+    // snl_store (saved S&P results): every read is recorded in storeReads as {cols, eqs, ord, lim}, so a test can
+    // see exactly what the page asked for. failStore: a message, and reading snl_store fails with it.
+    // storeDelay: milliseconds a read of snl_store waits before answering.
+    storeReads:[], failStore:"", storeDelay:0,
     // An auth event from elsewhere, for example the session ending in another tab: fire("SIGNED_OUT")
     fire(event){ authCbs.forEach(cb => cb(event, event==="SIGNED_OUT" ? null : session())); }
   };
@@ -34,7 +38,7 @@
   function query(table){
     const st = {op:"select", eqs:[], ins:[], ord:null, lim:null, single:false, vals:null};
     const b = {
-      select(){ return b; },
+      select(c){ st.cols=c; return b; },
       eq(c, v){ st.eqs.push([c, v]); return b; },
       in(c, v){ st.ins.push([c, v]); return b; },
       order(c, o){ st.ord=[c, !(o&&o.ascending===false)]; return b; },
@@ -53,10 +57,30 @@
         T[st.vals.id] = {...clone(st.vals), updated_at:new Date().toISOString(), updated_by:ME};
         return {data:null, error:null};
       }
+      if(table === "snl_store") return storeRun();
       if(table === "snl_jobs"){ M.jobReads++; if(M.failJobs) return {data:null, error:{message:"TypeError: Failed to fetch"}}; }
       let rows = Object.values(T).filter(match).map(clone);
       if(st.ord){ const [c,asc]=st.ord; rows.sort((x,y)=>(String(x[c])<String(y[c])?-1:String(x[c])>String(y[c])?1:0)*(asc?1:-1)); }
       if(st.lim) rows = rows.slice(0, st.lim);
+      return st.single ? {data:rows[0]||null, error:null} : {data:rows, error:null};
+    }
+    // snl_store answers the way PostgREST would: only the columns asked for, where "alias:doc->a->b" is a JSON
+    // path into a jsonb column and a plain name is the whole column (so "doc" alone returns every saved row).
+    async function storeRun(){
+      M.storeReads.push({cols:st.cols===undefined?"*":String(st.cols), eqs:clone(st.eqs), ord:st.ord, lim:st.lim});
+      if(M.storeDelay) await new Promise(r=>setTimeout(r, M.storeDelay));
+      if(M.failStore) return {data:null, error:{message:M.failStore}};
+      let rows = Object.values(store.snl_store).filter(match).map(clone);
+      if(st.ord){ const [c,asc]=st.ord; rows.sort((x,y)=>(String(x[c])<String(y[c])?-1:String(x[c])>String(y[c])?1:0)*(asc?1:-1)); }
+      if(st.lim) rows = rows.slice(0, st.lim);
+      const cols = st.cols===undefined||st.cols==="*" ? null : String(st.cols).split(",").map(s=>s.trim()).filter(Boolean).map(s=>{
+        const m=s.match(/^(?:([A-Za-z_]\w*):)?([A-Za-z_]\w*)((?:->>?\w+)*)$/); if(!m) throw new Error("bad select "+s);
+        const path=[...m[3].matchAll(/->(>?)(\w+)/g)].map(x=>[x[2], !!x[1]]);
+        return {as:m[1]||(path.length?path[path.length-1][0]:m[2]), col:m[2], path};
+      });
+      if(cols) rows = rows.map(r=>Object.fromEntries(cols.map(({as,col,path})=>{ let v=r[col];
+        for(const [k,txt] of path){ v = v!==null && typeof v==="object" && k in v ? v[k] : null; if(txt && v!==null) v = typeof v==="object" ? JSON.stringify(v) : String(v); }
+        return [as, v===undefined ? null : v]; })));
       return st.single ? {data:rows[0]||null, error:null} : {data:rows, error:null};
     }
     return b;
