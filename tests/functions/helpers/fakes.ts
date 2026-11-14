@@ -47,6 +47,7 @@ export function memoryDb(clock: Clock) {
         .filter((e) => /^\d+$/.test(t) ? [e.naicCompanyCode, e.companyId, e.institutionId].includes(t) : t.length >= 2 && e.companyName.toLowerCase().includes(t)).slice(0, limit);
     },
     async putEntities(entities) { for (const e of entities) { const key = e.companyId ? String(e.companyId) : e.institutionId ? `i.${e.institutionId}` : null; if (key) store.set(`entity:${key}`, { id: `entity:${key}`, kind: "entity", label: e.companyName, doc: e as unknown as Record<string, unknown>, fetched_at: iso() }); } },
+    async entitiesInGroup(groupCode, limit) { return [...store.values()].filter((r) => r.kind === "entity").map((r) => r.doc as unknown as Entity).filter((e) => e.naicGroupCode === groupCode).slice(0, limit); },
     async getSetting(id) { return settings.get(id) ?? null; },
     ...watchTables(clock),
     async createJob(owner, question) {

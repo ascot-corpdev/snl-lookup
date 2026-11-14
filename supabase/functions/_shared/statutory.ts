@@ -18,9 +18,23 @@ export const STAT_FIELDS = [
   { id: "loss_ratio", label: "Loss ratio", unit: "pct", by: "year" },
   { id: "expense_ratio", label: "Expense ratio", unit: "pct", by: "year" },
   { id: "combined_ratio", label: "Combined ratio", unit: "pct", by: "year" },
+  // Added for company profiles. App-level names only: the owner maps each to S&P's real view and column.
+  { id: "gpw", label: "Gross premiums written", unit: "usd", by: "year" },
+  { id: "npe", label: "Net premiums earned", unit: "usd", by: "year" },
+  { id: "net_income", label: "Net income", unit: "usd", by: "year" },
+  { id: "paid_in_capital", label: "Paid-in capital (common stock plus paid-in and contributed surplus)", unit: "usd", by: "year" },
+  { id: "total_assets", label: "Total assets", unit: "usd", by: "year" },
+  { id: "rbc_ratio", label: "Risk-based capital ratio", unit: "pct", by: "year" },
+  { id: "net_reserves", label: "Net loss and LAE reserves", unit: "usd", by: "year" },
+  { id: "pyd", label: "Prior-year reserve development (positive is adverse)", unit: "usd", by: "year" },
+  { id: "reins_recoverable", label: "Reinsurance recoverables", unit: "usd", by: "year" },
+  { id: "ceded_by_reinsurer", label: "Ceded premiums by reinsurer", unit: "usd", by: "item" },
 ] as const;
 export type StatFieldId = typeof STAT_FIELDS[number]["id"];
 export const MAPPING_ID = "statutory_mapping";
+/** The fields a query gets when it names none: the original seven, which the Statutory view shows. The fields
+    added for company profiles are there when asked for by name. */
+export const DEFAULT_STAT_FIELDS: StatFieldId[] = ["dpw_by_line", "npw_by_line", "dpw_by_state", "surplus", "loss_ratio", "expense_ratio", "combined_ratio"];
 
 /** How one app field maps to a Snowflake view. Column names are whatever Discover shows for the account.
     scale multiplies the stored value: 1000 when the view holds thousands of dollars, 100 when a ratio is held
@@ -31,6 +45,8 @@ export type FieldMap = {
   year: string; yearIsDate?: boolean;
   value: string;
   line?: string; state?: string;
+  /** For a field by counterparty (by "item", such as ceded premiums by reinsurer): the column naming it. */
+  item?: string;
   where?: { column: string; equals: string }[];
   scale?: number;
 };
@@ -53,6 +69,8 @@ export function mapProblem(id: StatFieldId, m: unknown): string | null {
   if (by === "state" && !ident(f.state)) return "state must be a column name";
   if (f.line !== undefined && !ident(f.line)) return "line must be a column name";
   if (f.state !== undefined && !ident(f.state)) return "state must be a column name";
+  if (by === "item" && !ident(f.item)) return "item must be a column name";
+  if (f.item !== undefined && !ident(f.item)) return "item must be a column name";
   if (f.where !== undefined && (!Array.isArray(f.where) || f.where.length > 8 || f.where.some((w) => !w || !ident(w.column) || typeof w.equals !== "string" || w.equals.length > 200))) return "where must be a list of {column, equals}";
   if (f.scale !== undefined && !(typeof f.scale === "number" && Number.isFinite(f.scale) && f.scale !== 0)) return "scale must be a number";
   return null;
@@ -78,7 +96,7 @@ export function parseStatQuery(b: Record<string, unknown>, thisYear: number): { 
   const toYear = b.toYear === undefined ? thisYear - 1 : Number(b.toYear), fromYear = b.fromYear === undefined ? toYear - 4 : Number(b.fromYear);
   if (!Number.isInteger(fromYear) || !Number.isInteger(toYear) || fromYear < 1990 || toYear > thisYear || fromYear > toYear || toYear - fromYear > 14) return bad("Years must be whole years, at most 15 at a time.");
   const all = STAT_FIELDS.map((f) => f.id) as StatFieldId[];
-  const fields = b.fields === undefined ? all : Array.isArray(b.fields) && b.fields.every((f) => all.includes(f as StatFieldId)) ? [...new Set(b.fields as StatFieldId[])] : null;
+  const fields = b.fields === undefined ? [...DEFAULT_STAT_FIELDS] : Array.isArray(b.fields) && b.fields.every((f) => all.includes(f as StatFieldId)) ? [...new Set(b.fields as StatFieldId[])] : null;
   if (!fields || !fields.length) return bad(`fields must be from: ${all.join(", ")}.`);
   return { ok: true, q: { kind, codes, fromYear, toYear }, fields };
 }
@@ -90,6 +108,7 @@ export function buildSql(database: string, schema: string, m: FieldMap, q: StatQ
   if (!entityCol || !ident(database) || !ident(schema)) return null;
   const year = m.yearIsDate ? `YEAR(${m.year})` : m.year;
   const cols = [`${entityCol} AS CODE`, `${m.entity.name ?? "NULL"} AS NAME`, `${year} AS YR`, `${m.line ?? "NULL"} AS LINE`, `${m.state ?? "NULL"} AS STATE`, `${m.value} AS VAL`];
+  if (m.item !== undefined) cols.push(`${m.item} AS ITEM`);   // only fields by counterparty map an item column
   const bindings: Binding[] = q.codes.map((c) => ({ type: "TEXT", value: c }));
   let where = `${entityCol} IN (${q.codes.map(() => "?").join(", ")}) AND ${year} BETWEEN ? AND ?`;
   bindings.push({ type: "FIXED", value: String(q.fromYear) }, { type: "FIXED", value: String(q.toYear) });
@@ -97,8 +116,8 @@ export function buildSql(database: string, schema: string, m: FieldMap, q: StatQ
   return { statement: `SELECT ${cols.join(", ")} FROM ${database}.${schema}.${m.view} WHERE ${where} ORDER BY 1, 3 LIMIT 20000`, bindings };
 }
 
-export type StatRow = { code: string; year: number; line: string | null; state: string | null; value: number | null };
-export type StatField = { id: StatFieldId; label: string; unit: "usd" | "pct"; by: "year" | "line" | "state"; mapped: boolean; error: string | null; rows: StatRow[] };
+export type StatRow = { code: string; year: number; line: string | null; state: string | null; value: number | null; item?: string | null };
+export type StatField = { id: StatFieldId; label: string; unit: "usd" | "pct"; by: "year" | "line" | "state" | "item"; mapped: boolean; error: string | null; rows: StatRow[] };
 export type StatResult = {
   kind: "company" | "group"; codes: string[]; fromYear: number; toYear: number;
   entities: { code: string; name: string | null }[]; fields: StatField[]; loaded: { view: string; at: string }[]; truncated: boolean; source: string;
@@ -120,7 +139,7 @@ export async function runStatutory(sf: Snowflake, database: string, schema: stri
     const problem = mapProblem(id, m);
     const base = { id, label: meta.label, unit: meta.unit, by: meta.by };
     if (problem || !m) { out.push({ ...base, mapped: false, error: null, rows: [] }); continue; }
-    const sql = buildSql(database, schema, m, q);
+    const sql = buildSql(database, schema, meta.by === "item" ? m : { ...m, item: undefined }, q);
     if (!sql) {
       const error = !ident(database) || !ident(schema) ? "SNOWFLAKE_DATABASE or SNOWFLAKE_SCHEMA isn't a valid name. Check those two secrets on Supabase."
         : `This field has no ${q.kind} column mapped, so it can't be looked up by ${q.kind} code.`;
@@ -137,7 +156,9 @@ export async function runStatutory(sf: Snowflake, database: string, schema: stri
       const rows: StatRow[] = res.rows.map((r) => {
         const code = String(r.CODE ?? "").trim(), raw = r.VAL === null || r.VAL === "" ? NaN : Number(r.VAL);
         if (r.NAME && names.has(code) && !names.get(code)) names.set(code, String(r.NAME));
-        return { code, year: Number(r.YR), line: r.LINE === null ? null : String(r.LINE), state: r.STATE === null ? null : String(r.STATE), value: Number.isFinite(raw) ? Math.round(raw * (m.scale ?? 1) * 1e6) / 1e6 : null };
+        const row: StatRow = { code, year: Number(r.YR), line: r.LINE === null ? null : String(r.LINE), state: r.STATE === null ? null : String(r.STATE), value: Number.isFinite(raw) ? Math.round(raw * (m.scale ?? 1) * 1e6) / 1e6 : null };
+        if (meta.by === "item") row.item = r.ITEM === null || r.ITEM === undefined ? null : String(r.ITEM);
+        return row;
       }).filter((r) => Number.isInteger(r.year));
       out.push({ ...base, mapped: true, error: null, rows });
     } catch (e) {

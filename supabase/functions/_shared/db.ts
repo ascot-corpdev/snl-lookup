@@ -53,6 +53,8 @@ export interface Db {
   /** Companies seen before whose name contains the text, or whose NAIC code or S&P id equals it. */
   findEntities(q: string, limit: number): Promise<Entity[]>;
   putEntities(entities: Entity[]): Promise<void>;
+  /** Companies in the company list (or seen before) whose NAIC group code equals the code, for company profiles. */
+  entitiesInGroup(groupCode: string, limit: number): Promise<Entity[]>;
   getSetting(id: string): Promise<Record<string, unknown> | null>;
   // ---------- the watchlist (migration 0003) ----------
   /** Starts a check, first closing any check still "running" after staleMs (with staleMessage). Returns its id, or
@@ -185,6 +187,11 @@ export function supabaseDb(sb: SupabaseClient, now: () => number = Date.now): Db
       const rows = entities.filter((e) => entityKey(e)).map((e) => ({ id: `entity:${entityKey(e)}`, kind: "entity", label: entityLabel(e), doc: e, fetched_at: nowIso() }));
       if (!rows.length) return;
       try { await sb.from("snl_store").upsert(rows, { onConflict: "id" }); } catch { /* the directory is a convenience; a failed save never fails a search */ }
+    },
+    async entitiesInGroup(groupCode, limit) {
+      if (!isNaicCode(groupCode)) return [];
+      const { data } = await sb.from("snl_store").select("doc").eq("kind", "entity").eq("doc->>naicGroupCode", groupCode).order("label").limit(limit);
+      return (data ?? []).map((r) => r.doc as Entity).filter((e) => e && entityKey(e));
     },
     async getSetting(id) {
       const { data } = await sb.from("snl_settings").select("doc").eq("id", id).maybeSingle();
