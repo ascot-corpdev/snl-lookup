@@ -21,7 +21,7 @@ npm test
 | `functions/e2e_test.ts`, `web/e2e.test.cjs` | One whole question, end to end on fixtures: the form filings of two made-up insurers in one state, and whether one of them files separate forms for two customer segments. The search, the documents with page citations, the comparison table and the export. |
 | `functions/resilience_test.ts`, `functions/pages_test.ts` | What keeps an answer safe when things go wrong: limits, time running out, a failed save, oversized documents, clearing up. |
 | `functions/migration_test.ts` | The migration keeps row-level security on and gives anonymous visitors nothing. It reads the SQL as text; to see it run, apply the migrations to a scratch Postgres database. |
-| `scripts/*.test.mjs` | The login script against a local stand-in for Supabase, and the shell steps of the Pages and keep-awake workflows. |
+| `scripts/*.test.mjs` | The login script and the company-list import against a local stand-in for Supabase, and the shell steps of the Pages and keep-awake workflows. |
 | `fixtures/` | Test data. **Every company, NAIC code, id, tracking number and filing text in it is made up.** |
 | `out/` | Screenshots from the last run. Not committed. |
 

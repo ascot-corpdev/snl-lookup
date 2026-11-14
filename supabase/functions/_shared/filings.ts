@@ -324,12 +324,13 @@ export function entitiesFrom(rows: Filing[]): Entity[] {
 // ---------- resolve ----------
 
 export const NO_MATCH = (q: string) =>
-  `No saved company matches "${q}". S&P's filings API has no company search, so the app only knows companies it has already seen in results. Search by the company's S&P company id or institution id instead; the app remembers the name after that.`;
+  `No saved company matches "${q}". S&P's filings API has no company search, so the app only knows companies loaded from a company list or seen in earlier results. Search by the company's S&P company id or institution id instead; the app remembers the name after that.`;
 
 /** UNCONFIRMED: S&P's Physical Documents API has no endpoint that turns a name or NAIC code into a companyId.
-    Until S&P confirms one (or Snowflake's Entity view is mapped), this looks only at companies saved from
-    earlier search results. It never calls S&P. */
-export async function resolveEntity(db: Db, q: string, limit = 20): Promise<{ query: string; matches: Entity[]; note: string | null }> {
+    Until S&P confirms one (or Snowflake's Entity view is mapped), this looks only at companies loaded from a
+    company list (scripts/companies.mjs) or saved from earlier search results. It never calls S&P. Up to 50
+    matches come back, the most one search can take, so a whole group can be chosen at once. */
+export async function resolveEntity(db: Db, q: string, limit = 50): Promise<{ query: string; matches: Entity[]; note: string | null }> {
   const query = q.trim().slice(0, 100);
   const matches = query.length >= 2 || /^\d+$/.test(query) ? await db.findEntities(query, limit) : [];
   return { query, matches, note: matches.length ? null : NO_MATCH(query) };

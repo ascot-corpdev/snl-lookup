@@ -13,12 +13,14 @@
 // Deploy: supabase functions deploy snl-chat --no-verify-jwt
 //
 // POST /functions/v1/snl-chat
-//   {"action": "ask", "question": "...", "history": [{"question", "answer"}]}  -> 202 {jobId}
+//   {"action": "ask", "question": "...", "history": [{"question", "answer"}], "screen": {...}}  -> 202 {jobId}
+//     screen is optional: the filings search or statutory query the user has in front of them, so Claude can
+//     open the same data ({view: "filings", search, total, companies} or {view: "statutory", query, companies})
 //   {"action": "continue", "jobId": "..."}                                     -> 202 {jobId, resumed}
 
 import { adminClient, type Env, type Json, readBody, sleep, type WhoIs, whoIs, withCors } from "../_shared/http.ts";
 import { type Db, supabaseDb } from "../_shared/db.ts";
-import { type ChatCtx, clearOld, deleteFiles, fileIdsOf, LIMITS, makeClient, newState, runJob, type Turn } from "../_shared/chat.ts";
+import { type ChatCtx, clearOld, deleteFiles, fileIdsOf, LIMITS, makeClient, newState, runJob, screenNote, type Turn } from "../_shared/chat.ts";
 import type { Gate } from "../_shared/spgmi.ts";
 
 export type Deps = {
@@ -73,7 +75,9 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
     if (going) return json(409, { error: "busy", message: "You already have an answer in progress. Wait for it to finish, then ask again. If you closed its tab, you can ask again in ten minutes.", jobId: going });
     const jobId = await db.createJob(who.id, question);
     if (!jobId) return json(500, { error: "server", message: "The answer couldn't be started. Try again." });
-    await db.putJobState(jobId, newState(question, turns, new Date(nowFn()).toISOString().slice(0, 10)) as unknown as Record<string, unknown>);
+    // What is on the user's screen is passed on only if it passes the same checks as a search or a query.
+    const today = new Date(nowFn()).toISOString().slice(0, 10);
+    await db.putJobState(jobId, newState(question, turns, today, screenNote(body.screen, today)) as unknown as Record<string, unknown>);
     run((async () => {
       await clearOld(db, ctx);
       if (await db.claimJob(jobId, ["queued"])) await runJob(jobId, ctx);

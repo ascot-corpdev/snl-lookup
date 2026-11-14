@@ -9,7 +9,7 @@ const FNS="https://a.supabase.co/functions/v1/";
 const CONFIG='window.SNL_CONFIG={supabaseUrl:"https://a.supabase.co",supabaseAnonKey:"sb_publishable_k",usernameDomain:"snl-lookup.test"};';
 // A stand-in for SheetJS: same calls, and the "file" it writes is JSON, so a test can read what was exported.
 const FAKE_XLSX='window.XLSX={utils:{aoa_to_sheet:a=>({aoa:a}),book_new:()=>({sheets:[]}),book_append_sheet:(wb,ws,name)=>{wb.sheets.push({name,aoa:ws.aoa});}},write:(wb,o)=>new TextEncoder().encode(JSON.stringify({opts:o,sheets:wb.sheets}))};';
-const NO_MATCH=q=>`No saved company matches "${q}". S&P's filings API has no company search, so the app only knows companies it has already seen in results. Search by the company's S&P company id or institution id instead; the app remembers the name after that.`;
+const NO_MATCH=q=>`No saved company matches "${q}". S&P's filings API has no company search, so the app only knows companies loaded from a company list or seen in earlier results. Search by the company's S&P company id or institution id instead; the app remembers the name after that.`;
 const NOT_SET_UP="S&P API access isn't set up yet. It needs API credentials from S&P. When they arrive, the owner sets SPGMI_API_USERNAME and SPGMI_API_PASSWORD on Supabase (README, step 5). Saved results still open.";
 const GA_NOTE=SEARCH.notes[0], FL_NOTE=GA_NOTE.replace("for GA","for FL");
 const copy=o=>JSON.parse(JSON.stringify(o));
@@ -97,6 +97,27 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   await p.click('#matches li >> nth=1 >> button[data-kind="companyId"]'); await p.waitForTimeout(100);
   await p.click('#chips .cchip >> nth=3 >> button'); await p.waitForTimeout(100);
   ok("a chip can be removed", (await p.$$("#chips .cchip")).length===3);
+
+  // ----- a whole group at once, and a company known only by its institution id -----
+  const keepResolve=t.resolve;
+  t.resolve=q=>({query:q, note:null, matches:[...copy(RESOLVE).matches.slice(0,2), {companyId:null, companyName:"Calloway Coastal Co", naicCompanyCode:"90003", institutionId:"5000003", spStatEntityId:null, naicGroupCode:"9001", naicGroupName:"Calloway Group"}]});
+  await p.fill("#f_q","Calloway Group"); await p.press("#f_q","Enter"); await p.waitForTimeout(250);
+  ok("a company with no company id shows its institution id, and Add uses it", (await t.txt("#matches li >> nth=2 >> .t2"))==="NAIC 90003 · S&P institution id 5000003 · group Calloway Group"
+    && same(await p.$$eval("#matches li:nth-child(3) button",b=>b.map(x=>[x.textContent,x.dataset.kind,x.dataset.id])),[["Add","institutionId","5000003"]]), await t.txt("#matches li >> nth=2"));
+  ok("several matches offer to add the whole group", (await t.txt("#addAll"))==="Add all 3 to search a whole group at once.");
+  await p.click('button[data-act="co-add-all"]'); await p.waitForTimeout(150);
+  ok("Add all adds every match not already chosen, each by the id it has", same(await p.evaluate(()=>S.f.chips.map(c=>c.kind+":"+c.id)),["companyId:4000001","companyId:4000107","institutionId:5000001","companyId:4000002","institutionId:5000003"])
+    && (await t.txt("#toastRoot"))==="Added 2 companies." && !(await p.$("#matches")) && (await p.inputValue("#f_q"))==="", await p.evaluate(()=>S.f.chips));
+  ok("the added companies carry their names", same((await t.all("#chips .cchip b")).slice(3),["Calloway Home Co","Calloway Coastal Co"]));
+  await p.fill("#f_q","Calloway Group"); await p.press("#f_q","Enter"); await p.waitForTimeout(250);
+  await p.click('button[data-act="co-add-all"]'); await p.waitForTimeout(150);
+  ok("Add all a second time adds nothing and says so", (await p.$$("#chips .cchip")).length===5 && (await t.txt("#toastRoot"))==="Those companies are already chosen.");
+  await p.setViewportSize({width:390,height:844}); await p.fill("#f_q","Calloway Group"); await p.press("#f_q","Enter"); await p.waitForTimeout(250);
+  ok("phone: no sideways scroll with Add all showing", !!(await p.$("#addAll")) && await t.noScroll(), await p.evaluate(()=>document.documentElement.scrollWidth));
+  await p.setViewportSize({width:1440,height:900}); await p.fill("#f_q","");
+  await p.click('#chips .cchip >> nth=4 >> button'); await p.waitForTimeout(80); await p.click('#chips .cchip >> nth=3 >> button'); await p.waitForTimeout(80);
+  t.resolve=keepResolve;
+  ok("back to three chosen companies", (await p.$$("#chips .cchip")).length===3);
 
   // ----- states, dates, filters -----
   await p.click('button[data-act="state-all"]'); await p.waitForTimeout(80);
@@ -360,6 +381,9 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   // ----- phone -----
   t=await open(); p=t.p; await p.setViewportSize({width:390,height:844}); await t.quick(["FL","GA"]);
   ok("phone: no sideways scroll on the results", await t.noScroll(), await p.evaluate(()=>document.documentElement.scrollWidth));
+  await p.evaluate(()=>window.scrollTo(0, document.documentElement.scrollHeight)); await p.waitForTimeout(80);
+  ok("phone: the Ask Claude button is there, and the last filing scrolls clear of it", (await t.txt("#askFab"))==="Ask Claude" && await p.evaluate(()=>{ const a=document.getElementById("askFab").getBoundingClientRect(), last=[...document.querySelectorAll("#results *")].pop().getBoundingClientRect(); return last.bottom<=a.top && a.right<=innerWidth; }));
+  await p.evaluate(()=>window.scrollTo(0,0));
   ok("phone: each filing is a card with labelled lines", await p.evaluate(()=>getComputedStyle(document.querySelector("#resTable thead")).display==="none" && getComputedStyle(document.querySelector("#resTable tbody tr")).display==="grid" && getComputedStyle(document.querySelector('#resTable td[data-label="Rate impact"]'),"::before").content==='"Rate impact"'));
   await p.click('#resTable tbody tr >> nth=0 >> button[data-act="desc-toggle"]'); await p.click('#resTable tbody tr >> nth=4 >> button[data-act="co-toggle"]'); await p.waitForTimeout(100);
   ok("phone: still no sideways scroll with a long description and every company open", await t.noScroll());

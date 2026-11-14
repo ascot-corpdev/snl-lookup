@@ -1,5 +1,6 @@
-// The frame around the three views: blank settings, sign-in and sign-out, change password, the nav and the remembered
-// view, the status strip on every view, and what happens when a function says the login is no longer good.
+// The frame around the two views: blank settings, sign-in and sign-out, change password, the nav and the remembered
+// view, the status strip and the Ask Claude button on every view, and what happens when a function says the login is
+// no longer good. The Ask Claude panel itself is covered in ask.test.cjs.
 const OUTDIR=require("path").join(__dirname,"../out"); require("fs").mkdirSync(OUTDIR,{recursive:true});
 const { chromium } = require("playwright"); const fs=require("fs"); const path=require("path");
 const WEB=path.join(__dirname,"../../web"); const MOCK=fs.readFileSync(__dirname+"/mock-supabase.js","utf8"); const BASE="http://localhost:8123/";
@@ -47,7 +48,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   // ----- blank settings: says how to set it up -----
   let t=await open({}, {config:fs.readFileSync(WEB+"/config.js","utf8")}); let p=t.p;
   ok("blank config: says it isn't connected and how to fix it", (await t.txt(".login h2"))==="Not connected yet" && (await t.txt(".login")).includes("SUPABASE_URL") && (await t.txt(".login")).includes("SUPABASE_PUBLISHABLE_KEY") && (await t.txt(".login")).includes("web/config.js"), await t.txt(".login"));
-  ok("blank config: no sign-in form, nav or status strip, and no call to any function", !(await p.$("#loginForm")) && !(await p.isVisible("#tabs")) && !(await p.isVisible("#strip")) && t.calls.length===0);
+  ok("blank config: no sign-in form, nav, status strip or Ask Claude button, and no call to any function", !(await p.$("#loginForm")) && !(await p.isVisible("#tabs")) && !(await p.isVisible("#strip")) && !(await p.$("#askFab")) && t.calls.length===0);
   await p.setViewportSize({width:390,height:844}); await p.waitForTimeout(100);
   ok("blank config, phone: no sideways scroll", await t.noScroll());
   await p.screenshot({path:OUTDIR+"/shell-noconfig-390.png",fullPage:true});
@@ -55,7 +56,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
 
   // ----- sign-in -----
   t=await open({signedOut:true}); p=t.p;
-  ok("signed out: the sign-in form, nothing else", (await t.txt(".login h2"))==="Sign in to SNL lookup" && !(await p.isVisible("#tabs")) && !(await p.isVisible("#strip")) && !(await p.isVisible("#signoutBtn")) && t.calls.length===0);
+  ok("signed out: the sign-in form, nothing else", (await t.txt(".login h2"))==="Sign in to SNL lookup" && !(await p.isVisible("#tabs")) && !(await p.isVisible("#strip")) && !(await p.isVisible("#signoutBtn")) && !(await p.$("#askFab")) && t.calls.length===0);
   ok("no self sign-up on offer", !/sign up|create an account|register/i.test((await t.txt(".login")).replace("there is no sign-up","")) && (await t.txt(".login")).includes("there is no sign-up"));
   const pwStyle=await p.evaluate(()=>{ const a=getComputedStyle(document.getElementById("li_user")), b=getComputedStyle(document.getElementById("li_pw")); return [a.borderTopColor,b.borderTopColor,a.borderTopWidth,b.borderTopWidth,a.paddingLeft,b.paddingLeft,b.borderRadius]; });
   ok("the password box is styled like the username box", pwStyle[0]===pwStyle[1] && pwStyle[2]===pwStyle[3] && pwStyle[4]===pwStyle[5] && pwStyle[6]==="0px", pwStyle);
@@ -85,17 +86,20 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
 
   // ----- signed in: nav, strip, remembered view -----
   t=await open(); p=t.p;
-  ok("three views in the nav", (await p.$$eval("nav.tabs a",a=>a.map(x=>x.textContent.trim()))).join("|")==="Filings|Ask|Statutory");
+  ok("two views in the nav, and Ask Claude as a button beside them", (await p.$$eval("nav.tabs a",a=>a.map(x=>x.textContent.trim()))).join("|")==="Filings|Statutory" && (await t.txt("#askFab"))==="Ask Claude" && await p.isVisible("#askFab"));
   const st0=t.calls.find(c=>c.body.action==="status");
   ok("status asked once after sign-in, with the login's token and the publishable key", t.calls.filter(c=>c.fn==="snl-filings"&&c.body.action==="status").length===1 && st0.auth==="Bearer t" && st0.apikey==="sb_publishable_k", t.calls.map(c=>c.fn+":"+c.body.action));
   const strip=async()=>(await p.$$eval("#stripIn .s-i",e=>e.map(x=>x.textContent.replace(/\s+/g," ").trim())));
   ok("strip: requests used against the limits, and when each source was refreshed", JSON.stringify(await strip())===JSON.stringify(["S&P requests: 12 of 500 this hour, 40 of 12,000 today (trial account)","Reference lists refreshed 5 Nov","Last search 13 Nov","Statutory data: not set up yet"]), await strip());
   await p.screenshot({path:OUTDIR+"/shell-filings-1440.png",fullPage:true});
-  await p.click('nav.tabs a[data-view="ask"]'); await p.waitForTimeout(200);
-  ok("Ask opens from the nav; the strip stays", (await t.txt(".action-title"))==="Ask a question about filings and statutory data" && (await p.getAttribute('nav.tabs a[data-view="ask"]',"aria-current"))==="page" && (await strip()).length===4 && p.url().endsWith("#ask"));
   await p.click('nav.tabs a[data-view="statutory"]'); await p.waitForTimeout(250);
-  ok("Statutory opens from the nav; the strip stays", (await t.txt(".action-title"))==="Statutory financials by NAIC company or group" && (await strip()).length===4);
-  ok("headings and buttons are in sentence case", (await p.$$eval("h1,h2,h3,button,nav a",e=>e.map(x=>x.textContent.trim()).filter(s=>s && /\s[A-Z][a-z]+/.test(s.replace(/\b(S&P|NAIC|Ask|Claude|Corp Dev|Snowflake|SNL|Filings|Statutory|CSV|XLSX|Ascot)\b/g,"x"))))).length===0);
+  ok("Statutory opens from the nav; the strip and the Ask Claude button stay", (await t.txt(".action-title"))==="Statutory financials by NAIC company or group" && (await p.getAttribute('nav.tabs a[data-view="statutory"]',"aria-current"))==="page" && (await strip()).length===4 && p.url().endsWith("#statutory") && await p.isVisible("#askFab"));
+  await p.click("#askFab"); await p.waitForTimeout(150);
+  ok("headings and buttons are in sentence case, in the view and in the Ask Claude panel", (await p.$$("#askPanel h2, #askPanel button")).length>=4 && (await p.$$eval("h1,h2,h3,button,nav a",e=>e.map(x=>x.textContent.trim()).filter(s=>s && /\s[A-Z][a-z]+/.test(s.replace(/\b(S&P|NAIC|Ask|Claude|Corp Dev|Snowflake|SNL|Filings|Statutory|CSV|XLSX|Ascot)\b/g,"x"))))).length===0);
+  await p.click("#pwBtn"); await p.waitForTimeout(150);
+  ok("change password opens over the Ask Claude panel", await p.evaluate(()=>{ const d=document.querySelector(".drawer").getBoundingClientRect(), el=document.elementFromPoint(d.left+d.width/2, d.top+d.height/2); return !!el.closest(".drawer"); }));
+  await p.keyboard.press("Escape"); await p.waitForTimeout(100);
+  ok("Esc closes the drawer first, and leaves the panel", !(await p.$(".drawer")) && await p.isVisible("#askPanel"));
   await p.goto(BASE); await p.waitForTimeout(350);
   ok("the last view is remembered when the address names none", (await t.txt(".action-title"))==="Statutory financials by NAIC company or group");
   await p.goto(BASE+"#nonsense"); await p.waitForTimeout(350);
@@ -141,7 +145,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
 
   // ----- sign out -----
   await p.click("#signoutBtn"); await p.waitForTimeout(300);
-  ok("sign out: back to the form with no scolding, state cleared", (await t.txt(".login h2"))==="Sign in to SNL lookup" && !(await p.$(".login .err")) && !(await p.isVisible("#strip")) && await p.evaluate(()=>!S.session && !S.status && !S.refs && __mock.signedOut));
+  ok("sign out: back to the form with no scolding, state cleared", (await t.txt(".login h2"))==="Sign in to SNL lookup" && !(await p.$(".login .err")) && !(await p.isVisible("#strip")) && !(await p.$("#askFab")) && await p.evaluate(()=>!S.session && !S.status && !S.refs && __mock.signedOut));
   await p.fill("#li_user","corpdev1"); await p.fill("#li_pw","correct horse battery"); await p.press("#li_pw","Enter"); await p.waitForTimeout(400);
   ok("can sign in again", await p.isVisible("#tabs"));
   await p.evaluate(()=>__mock.fire("SIGNED_OUT")); await p.waitForTimeout(150);
@@ -185,8 +189,8 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   await t.ctx.close();
 
   // storage blocked: the page still works
-  t=await open({}, {init:()=>{ Object.defineProperty(window,"localStorage",{get(){ throw new Error("blocked"); }}); }, hash:"#ask"}); p=t.p;
-  ok("storage blocked: the page still opens the view", (await t.txt(".action-title"))==="Ask a question about filings and statutory data");
+  t=await open({}, {init:()=>{ Object.defineProperty(window,"localStorage",{get(){ throw new Error("blocked"); }}); }, hash:"#statutory"}); p=t.p;
+  ok("storage blocked: the page still opens the view", (await t.txt(".action-title"))==="Statutory financials by NAIC company or group");
   await p.goto(BASE); await p.waitForTimeout(350);
   ok("storage blocked: falls back to Filings", (await t.txt(".action-title"))==="Search rate, rule and form filings");
   ok("nothing fetched from outside except supabase-js", t.scripts.every(u=>/cdn\.jsdelivr\.net\/npm\/@supabase\/supabase-js@2\.119\.0\//.test(u)), t.scripts);
@@ -195,4 +199,4 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   ok("no page errors", errs.length===0, errs);
   console.log(`${pass} passed, ${fail} failed`); await b.close(); process.exit(fail?1:0);
 })().catch(e=>{ console.error(e); process.exit(1); });
-function VIEWS_(){ return ["filings","ask","statutory"]; }
+function VIEWS_(){ return ["filings","statutory"]; }
