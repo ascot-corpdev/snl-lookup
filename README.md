@@ -3,7 +3,7 @@
 A small web app for Ascot's Strategy & Corporate Development team. It answers insurance questions from S&P Global Market Intelligence data.
 
 - **Filings:** search S&P's SNL Insurance Product Filings (rate, rule and form filings) by company, state, type of insurance, filing type and date. See the rate impact and description, and open the filing's original document.
-- **Ask:** type a question in plain English. Claude searches filings, reads the documents, and answers with page citations, its sources and a comparison table you can export to CSV or Excel.
+- **Ask Claude:** a panel that opens over either view. Type a question in plain English. Claude is told what is on your screen (the filings search or the statutory figures), searches filings, reads the documents, and answers with page citations, its sources and a comparison table you can export to CSV or Excel.
 - **Statutory:** direct and net premiums written by line and state, policyholder surplus, and loss, expense and combined ratios by NAIC company or group code, with peers side by side. This view is built and waiting: it goes live when the Snowflake secrets are set (step 7).
 
 It is a standalone app with its own repository and its own Supabase project. It never stores or sends deal, banker or pipeline information. Claude sees only the question typed and what S&P returns.
@@ -215,7 +215,7 @@ After step 5:
 1. Sign in and open **Filings**. Click **Refresh lists**. This loads S&P's lists of states, types of insurance, filing types and statuses (4 S&P requests). **Check that FL is in the state list.** S&P's own example searches Florida, so it is probably covered; this is the confirmation.
 2. Add a company by its S&P company id or institution id (see the next paragraph), choose Florida and a date range, and search.
 3. Open a document from a result row.
-4. Open **Ask** and type the question. Say in the question anything Claude can't know from the filings, for example which product is the private client one and which is middle market.
+4. Click **Ask Claude** and type the question. With the search still on screen, Claude knows which filings you mean. Say in the question anything Claude can't know from the filings, for example which product is the private client one and which is middle market.
 
 **Company ids.** S&P's filings API has no company search: every search needs S&P's own company id or institution id. Load a company list (step 2a) and you can find companies by name or NAIC code from the start. Without a list, the app still remembers the name, NAIC code and ids of every company it sees in results, so after one search by id you can find that company by name.
 
