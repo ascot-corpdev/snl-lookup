@@ -1,0 +1,32 @@
+{
+  "_about": "Made-up companies for the find-by-name tests, in the shape the snl-filings function answers {action: \"resolve\"} with. Calloway Coastal Co and Calloway Lone Co come from a company list with a NAIC code but no S&P id.",
+  "calloway": {
+    "query": "Calloway",
+    "matches": [
+      { "companyId": "4000001", "companyName": "Calloway Insurance Co", "naicCompanyCode": "90001", "institutionId": "5000001", "spStatEntityId": null, "naicGroupCode": "9001", "naicGroupName": "Calloway Group" },
+      { "companyId": "4000002", "companyName": "Calloway Home Co", "naicCompanyCode": "90002", "institutionId": null, "spStatEntityId": null, "naicGroupCode": "9001", "naicGroupName": "Calloway Group" },
+      { "companyId": null, "companyName": "Calloway Coastal Co", "naicCompanyCode": "90003", "institutionId": null, "spStatEntityId": null, "naicGroupCode": "9001", "naicGroupName": "Calloway Group" },
+      { "companyId": "4000004", "companyName": "Calloway Specialty Co", "naicCompanyCode": null, "institutionId": null, "spStatEntityId": null, "naicGroupCode": "9001", "naicGroupName": "Calloway Group" },
+      { "companyId": "4000005", "companyName": "Calloway Re Co", "naicCompanyCode": "90005", "institutionId": null, "spStatEntityId": null, "naicGroupCode": "9002", "naicGroupName": "Calloway Re Group" },
+      { "companyId": null, "companyName": "Calloway Lone Co", "naicCompanyCode": "90006", "institutionId": null, "spStatEntityId": null, "naicGroupCode": null, "naicGroupName": null },
+      { "companyId": "4000007", "companyName": "Calloway <img src=x onerror=\"window.__xss=1\"> Co", "naicCompanyCode": "90007", "institutionId": null, "spStatEntityId": null, "naicGroupCode": null, "naicGroupName": "Nonesuch <b>Group</b>" }
+    ],
+    "note": null
+  },
+  "tarrow": {
+    "query": "Tarrow",
+    "matches": [
+      { "companyId": null, "companyName": "Tarrow Mutual Insurance Co", "naicCompanyCode": "90101", "institutionId": null, "spStatEntityId": null, "naicGroupCode": "9010", "naicGroupName": "Tarrow Group" },
+      { "companyId": null, "companyName": "Tarrow Mutual Fire Co", "naicCompanyCode": "90102", "institutionId": null, "spStatEntityId": null, "naicGroupCode": "9010", "naicGroupName": "Tarrow Group" },
+      { "companyId": null, "companyName": "Tarrow Mutual Casualty Co", "naicCompanyCode": "90103", "institutionId": null, "spStatEntityId": null, "naicGroupCode": "9010", "naicGroupName": "Tarrow Group" },
+      { "companyId": null, "companyName": "Tarrow Mutual Home Co", "naicCompanyCode": "90104", "institutionId": null, "spStatEntityId": null, "naicGroupCode": "9010", "naicGroupName": "Tarrow Group" },
+      { "companyId": null, "companyName": "Tarrow Mutual Auto Co", "naicCompanyCode": "90105", "institutionId": null, "spStatEntityId": null, "naicGroupCode": "9010", "naicGroupName": "Tarrow Group" },
+      { "companyId": null, "companyName": "Tarrow Mutual Life Co", "naicCompanyCode": "90106", "institutionId": null, "spStatEntityId": null, "naicGroupCode": "9010", "naicGroupName": "Tarrow Group" },
+      { "companyId": null, "companyName": "Tarrow Mutual Marine Co", "naicCompanyCode": "90107", "institutionId": null, "spStatEntityId": null, "naicGroupCode": "9010", "naicGroupName": "Tarrow Group" },
+      { "companyId": null, "companyName": "Tarrow Mutual Surety Co", "naicCompanyCode": "90108", "institutionId": null, "spStatEntityId": null, "naicGroupCode": "9010", "naicGroupName": "Tarrow Group" },
+      { "companyId": null, "companyName": "Tarrow Mutual Title Co", "naicCompanyCode": "90109", "institutionId": null, "spStatEntityId": null, "naicGroupCode": "9010", "naicGroupName": "Tarrow Group" },
+      { "companyId": null, "companyName": "Tarrow Mutual Farm Co", "naicCompanyCode": "90110", "institutionId": null, "spStatEntityId": null, "naicGroupCode": "9010", "naicGroupName": "Tarrow Group" }
+    ],
+    "note": null
+  }
+}

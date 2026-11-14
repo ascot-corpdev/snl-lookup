@@ -8,7 +8,7 @@ export type StoreRow = { id: string; kind: StoreKind; label: string; doc: Record
 
 /** A company the app knows: one S&P has returned before, or one loaded from a company list
     (scripts/companies.mjs). Field names are S&P's own search columns. It has a company id, an institution id,
-    or both. */
+    or both; or, from a company list, only a NAIC company code (statutory figures only, no filing search). */
 export type Entity = {
   companyId: string | null; companyName: string; naicCompanyCode: string | null; institutionId: string | null;
   spStatEntityId: string | null; naicGroupCode: string | null; naicGroupName: string | null;
@@ -66,10 +66,16 @@ const unpack = (v: unknown): Record<string, unknown> | null => {
   return typeof json === "string" ? JSON.parse(json) : v as Record<string, unknown>;
 };
 
-/** What a company is saved under: its company id, or "i." and its institution id when it has no company id. */
-export function entityKey(e: Pick<Entity, "companyId" | "institutionId">): string | null {
-  return e.companyId ? String(e.companyId) : e.institutionId ? `i.${e.institutionId}` : null;
+/** What a company is saved under: its company id, or "i." and its institution id when it has no company id, or
+    "n." and its NAIC company code when it has neither. A company with only a NAIC code can't be searched for
+    filings, but its statutory figures can be found by name (scripts/companies-lib.mjs keeps the same key). */
+export function entityKey(e: Pick<Entity, "companyId" | "institutionId"> & Partial<Pick<Entity, "naicCompanyCode">>): string | null {
+  return e.companyId ? String(e.companyId) : e.institutionId ? `i.${e.institutionId}` : isNaicCode(e.naicCompanyCode) ? `n.${e.naicCompanyCode}` : null;
 }
+/** A NAIC company code as the Statutory view takes it: 1 to 6 digits. */
+export const isNaicCode = (v: unknown): v is string => typeof v === "string" && /^[0-9]{1,6}$/.test(v);
+/** Whether a filing search can use the company: it needs an S&P company id or institution id. */
+export const canSearchFilings = (e: Pick<Entity, "companyId" | "institutionId">): boolean => !!(e.companyId || e.institutionId);
 
 export function entityLabel(e: Entity): string {
   return [e.companyName, e.naicCompanyCode ? `NAIC ${e.naicCompanyCode}` : "", e.naicGroupName ?? ""].filter(Boolean).join(" | ").slice(0, 400);
@@ -132,7 +138,10 @@ export function supabaseDb(sb: SupabaseClient, now: () => number = Date.now): Db
       }
       // A company loaded by institution id alone, and later seen in results with its company id, is shown once.
       const withCompanyId = new Set(found.filter((e) => e.companyId && e.institutionId).map((e) => String(e.institutionId)));
-      return found.filter((e) => e.companyId || !withCompanyId.has(String(e.institutionId))).slice(0, limit);
+      // Likewise a company loaded by NAIC code alone, and later seen with an S&P id: the one with the id is kept.
+      const withSpId = new Set(found.filter((e) => canSearchFilings(e) && isNaicCode(e.naicCompanyCode)).map((e) => String(e.naicCompanyCode)));
+      return found.filter((e) => e.companyId || !withCompanyId.has(String(e.institutionId)))
+        .filter((e) => canSearchFilings(e) || !withSpId.has(String(e.naicCompanyCode))).slice(0, limit);
     },
     async putEntities(entities) {
       if (!entities.length) return;
