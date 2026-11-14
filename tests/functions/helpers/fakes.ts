@@ -45,7 +45,7 @@ export function memoryDb(clock: Clock) {
       return [...store.values()].filter((r) => r.kind === "entity").map((r) => r.doc as unknown as Entity)
         .filter((e) => /^\d+$/.test(t) ? [e.naicCompanyCode, e.companyId, e.institutionId].includes(t) : t.length >= 2 && e.companyName.toLowerCase().includes(t)).slice(0, limit);
     },
-    async putEntities(entities) { for (const e of entities) store.set(`entity:${e.companyId}`, { id: `entity:${e.companyId}`, kind: "entity", label: e.companyName, doc: e as unknown as Record<string, unknown>, fetched_at: iso() }); },
+    async putEntities(entities) { for (const e of entities) { const key = e.companyId ? String(e.companyId) : e.institutionId ? `i.${e.institutionId}` : null; if (key) store.set(`entity:${key}`, { id: `entity:${key}`, kind: "entity", label: e.companyName, doc: e as unknown as Record<string, unknown>, fetched_at: iso() }); } },
     async getSetting(id) { return settings.get(id) ?? null; },
     async createJob(owner, question) {
       const id = `00000000-0000-4000-8000-${String(++jobSeq).padStart(12, "0")}`;

@@ -9,6 +9,11 @@ supabase/.temp/
 *.key
 *.p8
 
+# Company lists and other exports may be S&P's data: load them with scripts/companies.mjs, never commit them
+*.csv
+*.xlsx
+*.xls
+
 # Test output (screenshots)
 tests/out/
 deno.lock

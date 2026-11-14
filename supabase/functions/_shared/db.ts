@@ -6,9 +6,11 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2.119.0";
 export type StoreKind = "reference" | "search" | "entity" | "discover" | "statutory";
 export type StoreRow = { id: string; kind: StoreKind; label: string; doc: Record<string, unknown>; fetched_at: string };
 
-/** A company S&P has returned before. Field names are S&P's own search columns. */
+/** A company the app knows: one S&P has returned before, or one loaded from a company list
+    (scripts/companies.mjs). Field names are S&P's own search columns. It has a company id, an institution id,
+    or both. */
 export type Entity = {
-  companyId: string; companyName: string; naicCompanyCode: string | null; institutionId: string | null;
+  companyId: string | null; companyName: string; naicCompanyCode: string | null; institutionId: string | null;
   spStatEntityId: string | null; naicGroupCode: string | null; naicGroupName: string | null;
 };
 
@@ -64,6 +66,11 @@ const unpack = (v: unknown): Record<string, unknown> | null => {
   return typeof json === "string" ? JSON.parse(json) : v as Record<string, unknown>;
 };
 
+/** What a company is saved under: its company id, or "i." and its institution id when it has no company id. */
+export function entityKey(e: Pick<Entity, "companyId" | "institutionId">): string | null {
+  return e.companyId ? String(e.companyId) : e.institutionId ? `i.${e.institutionId}` : null;
+}
+
 export function entityLabel(e: Entity): string {
   return [e.companyName, e.naicCompanyCode ? `NAIC ${e.naicCompanyCode}` : "", e.naicGroupName ?? ""].filter(Boolean).join(" | ").slice(0, 400);
 }
@@ -118,16 +125,19 @@ export function supabaseDb(sb: SupabaseClient, now: () => number = Date.now): Db
       const byName = safe.length >= 2
         ? await sb.from("snl_store").select("doc").eq("kind", "entity").ilike("label", `%${safe.replace(/[%_]/g, " ")}%`).order("label").limit(limit)
         : { data: [] as { doc: Entity }[] };
-      const seen = new Set<string>(), out: Entity[] = [];
+      const seen = new Set<string>(), found: Entity[] = [];
       for (const r of [...(byId.data ?? []), ...(byName.data ?? [])]) {
-        const e = r.doc as Entity;
-        if (e?.companyId && !seen.has(e.companyId)) { seen.add(e.companyId); out.push(e); }
+        const e = r.doc as Entity, key = e ? entityKey(e) : null;
+        if (key && !seen.has(key)) { seen.add(key); found.push(e); }
       }
-      return out.slice(0, limit);
+      // A company loaded by institution id alone, and later seen in results with its company id, is shown once.
+      const withCompanyId = new Set(found.filter((e) => e.companyId && e.institutionId).map((e) => String(e.institutionId)));
+      return found.filter((e) => e.companyId || !withCompanyId.has(String(e.institutionId))).slice(0, limit);
     },
     async putEntities(entities) {
       if (!entities.length) return;
-      const rows = entities.map((e) => ({ id: `entity:${e.companyId}`, kind: "entity", label: entityLabel(e), doc: e, fetched_at: nowIso() }));
+      const rows = entities.filter((e) => entityKey(e)).map((e) => ({ id: `entity:${entityKey(e)}`, kind: "entity", label: entityLabel(e), doc: e, fetched_at: nowIso() }));
+      if (!rows.length) return;
       try { await sb.from("snl_store").upsert(rows, { onConflict: "id" }); } catch { /* the directory is a convenience; a failed save never fails a search */ }
     },
     async getSetting(id) {

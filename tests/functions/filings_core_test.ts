@@ -473,7 +473,7 @@ function client(answer: Parameters<typeof spStub>[1]) {
   const clock = fakeClock(), db = memoryDb(clock);
   await db.putEntities(ents);
   const none = await resolveEntity(db, "Nonesuch Mutual");
-  ok("no match gives no companies and a note that explains why", none.matches.length === 0 && none.note === NO_MATCH("Nonesuch Mutual") && none.note!.includes("S&P's filings API has no company search") && none.note!.includes("only knows companies it has already seen") && none.note!.includes("S&P company id or institution id"), none.note);
+  ok("no match gives no companies and a note that explains why", none.matches.length === 0 && none.note === NO_MATCH("Nonesuch Mutual") && none.note!.includes("S&P's filings API has no company search") && none.note!.includes("only knows companies loaded from a company list or seen in earlier results") && none.note!.includes("S&P company id or institution id"), none.note);
   ok("the no-match note doesn't say the company doesn't exist or has no filings", !/doesn't exist|no filings/i.test(none.note!));
   const byName = await resolveEntity(db, "  calloway ");
   ok("part of a name finds every match, whatever its case", byName.matches.length === 3 && byName.note === null && byName.query === "calloway", byName.matches.map((x) => x.companyName));

@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "logins": "node scripts/logins.mjs",
+    "companies": "node scripts/companies.mjs",
     "serve": "npx --yes http-server@14.1.1 web -p 8080 -c-1",
     "test": "node tests/run.mjs"
   },

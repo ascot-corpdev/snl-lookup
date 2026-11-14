@@ -187,4 +187,25 @@ const ENT = (id: string, name: string, over: Partial<Entity> = {}): Entity => ({
   ok("old answers are removed only when finished and created before the given time", sb.ops[0].table === "snl_jobs" && !!sb.has(sb.ops[0], "delete") && same(sb.has(sb.ops[0], "in"), ["in", "status", ["done", "error"]]) && same(sb.has(sb.ops[0], "lt"), ["lt", "created_at", "2026-10-14T00:00:00.000Z"]), sb.ops[0]);
 }
 
+{
+  // Companies loaded from a list may have an institution id and no company id
+  const { entityKey } = await import("../../supabase/functions/_shared/db.ts");
+  const INST = ENT("x", "Calloway Coastal Co", { companyId: null, institutionId: "5000003", naicCompanyCode: "90003", naicGroupName: "Calloway Group" });
+  ok("a company is keyed by its company id, or by i.<institution id> when it has none", entityKey(ENT("9100001", "A", { institutionId: "810001" })) === "9100001" && entityKey(INST) === "i.5000003" && entityKey(ENT("x", "A", { companyId: null })) === null);
+  let sb = fakeSb();
+  await supabaseDb(sb.client, () => NOW).putEntities([INST, ENT("x", "No ids at all", { companyId: null })]);
+  const up = sb.has(sb.ops[0], "upsert")!;
+  ok("an institution-only company is saved under entity:i.<institution id>, and one with no id at all is not saved", same((up[1] as any[]).map((r) => [r.id, r.label]), [["entity:i.5000003", "Calloway Coastal Co | NAIC 90003 | Calloway Group"]]), up[1]);
+  sb = fakeSb();
+  await supabaseDb(sb.client, () => NOW).putEntities([ENT("x", "No ids at all", { companyId: null })]);
+  ok("nothing to save means nothing is sent", sb.ops.length === 0);
+
+  const both = ENT("9100003", "Calloway Coastal Co", { institutionId: "5000003" });
+  sb = fakeSb(() => ({ data: [{ doc: INST }, { doc: both }, { doc: ENT("9100001", "Calloway Insurance Co") }] }));
+  const found = await supabaseDb(sb.client).findEntities("Calloway", 50);
+  ok("a company loaded by institution id alone and later seen with its company id is listed once, with the company id", same(found.map((e) => e.companyId), ["9100003", "9100001"]), found);
+  sb = fakeSb(() => ({ data: [{ doc: INST }] }));
+  ok("an institution-only company is found like any other", same((await supabaseDb(sb.client).findEntities("Coastal", 50)).map((e) => [e.companyId, e.institutionId]), [[null, "5000003"]]));
+}
+
 done();

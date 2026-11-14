@@ -20,6 +20,7 @@ House rules for anyone changing the code are in [.github/copilot-instructions.md
 | `snl-statutory` | Supabase Edge Function | Statutory financials from S&P's data on Snowflake. Holds the Snowflake credentials. |
 | `supabase/migrations/0001_snl.sql` | Supabase Postgres | Logins and roles, saved S&P results, the S&P request counter, Claude answers in progress. |
 | `scripts/logins.mjs` | Your computer | Creates logins. There is no self sign-up. |
+| `scripts/companies.mjs` | Your computer | Loads a company list so companies can be found by name or NAIC code. |
 
 Security in one paragraph: the repository is public and holds no secret. Every credential lives in Supabase secrets and is used only inside the functions. Each function checks the caller's login itself. Saved S&P data sits in Supabase tables that only signed-in logins can read and only the functions can write (row-level security is on everywhere, and anonymous visitors get nothing). Filing documents are never stored: they pass straight through to the browser, and the copies Claude reads are deleted from Anthropic when the answer finishes. If an answer is abandoned part-way, its copies are deleted the next time anyone opens the app or asks a question, once it has been idle for an hour. Finished answers (the question, the answer and its quotes) are kept in Supabase for 30 days, readable only by the login that asked.
 
@@ -57,6 +58,28 @@ SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co SUPABASE_SECRET_KEY=sb_secret_
 ```
 
 The role is `corpdev` (can also set up the statutory mapping) or `reader` (can search and ask, nothing else). `reset USERNAME`, `remove USERNAME` and `list` work the same way.
+
+### 2a. Load a company list (optional, recommended)
+
+S&P's filings search needs S&P's own company id or institution id for every company, and it has no search by name. Loading a list once lets everyone find a company, or a whole group, by name or NAIC code.
+
+1. Export the list from S&P Capital IQ Pro with these columns where you have them: company name, S&P company id, institution id, NAIC company code, NAIC group code and group name. It needs the name and at least one of the two S&P ids.
+2. Save it as a CSV (in Excel: **File > Save As > CSV UTF-8**). Keep the file out of this repository: it may be S&P's data, and `.csv` files are ignored by git here for that reason.
+3. See what would be loaded. This changes nothing and needs no key:
+
+```bash
+npm run companies -- check PATH/TO/LIST.csv
+```
+
+It prints which column it took for each field and the first three companies. If it picked the wrong column, name it yourself, for example `--company-id "Your heading"` (the full list of options is at the top of `scripts/companies.mjs`).
+
+4. Load it, with the same address and secret key as for logins:
+
+```bash
+SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co SUPABASE_SECRET_KEY=sb_secret_... npm run companies -- load PATH/TO/LIST.csv
+```
+
+Loading again updates companies and never duplicates or removes any. On the Filings view, type a group name and click **Add all** to search the whole group at once (up to 50 companies a search).
 
 ### 3. Deploy the three functions
 
@@ -194,7 +217,7 @@ After step 5:
 3. Open a document from a result row.
 4. Open **Ask** and type the question. Say in the question anything Claude can't know from the filings, for example which product is the private client one and which is middle market.
 
-**Company ids.** S&P's filings API has no company search: every search needs S&P's own company id or institution id. The app remembers the name, NAIC code and ids of every company it sees in results, so after one search by id you can find that company by name. Getting the first ids is a question for S&P (see [unconfirmed](#what-is-still-unconfirmed)).
+**Company ids.** S&P's filings API has no company search: every search needs S&P's own company id or institution id. Load a company list (step 2a) and you can find companies by name or NAIC code from the start. Without a list, the app still remembers the name, NAIC code and ids of every company it sees in results, so after one search by id you can find that company by name.
 
 **If something fails,** the message on screen says what S&P answered and gives S&P's reference number. Quote that reference to S&P support.
 
@@ -260,7 +283,8 @@ Nothing in this list is guessed in the code: each item is either handled both wa
 | **Florida coverage.** | The state list in step 1 of the first live search | First live call |
 | **The columns of S&P's reference lists.** The specification does not give them. The app takes the first column ending in "Id" as the id and the next as the name, and keeps the raw rows. | `referenceOptions` in `_shared/filings.ts` | First live call |
 | **Paging fields in search results** (`totalPages` and so on). They are in S&P's user guide but not the public specification. The app works with or without them. | `searchFilings` in `_shared/filings.ts` | First live call |
-| **How to find a company's S&P company id or institution id**, and which identifiers these are in Capital IQ Pro. The filings API has no company search and cannot search by NAIC code. | `resolveEntity` in `_shared/filings.ts` | S&P |
+| **How to find a company's S&P company id or institution id**, and which identifiers these are in Capital IQ Pro. The filings API has no company search and cannot search by NAIC code, so names are looked up in a list you load (step 2a) and in companies seen in earlier results. | `resolveEntity` in `_shared/filings.ts` | S&P |
+| **The column headings of a Capital IQ Pro export.** The import matches likely headings and shows what it matched before loading; any column can be named outright. | `matchColumns` in `scripts/companies-lib.mjs` | Your first export |
 | **Date and rate-impact formats** in results. The app shows what S&P sends and "n/d" when it is missing. | The Filings view | First live call |
 | **How S&P counts requests**: whether sign-ins count, and when its day starts. The app counts every call and uses UTC days, so it can only over-count. S&P's public API specification also limits document downloads to 500 an hour on a trial account (1,000 in production); the app does not count those separately. | `makeGate` in `_shared/spgmi.ts` | S&P |
 | **Ids are whole numbers and filters are lists.** S&P's specification gives no types; the app follows its examples (company, institution, status, type and filing type ids as numbers; states as two-letter codes). If a live reference list shows text ids, searches by that filter will be refused until this is changed. | `parseSearch` in `_shared/filings.ts` | First live call |
