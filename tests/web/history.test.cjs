@@ -80,6 +80,7 @@ const answerText=r=>r.answer.map(s=>s.text).join("\n");
   await t.openPanel();
   ok("opened: the question, the steps so far and the text so far", (await t.txt("#turn-0 .ccmsg.u"))===Q1 && (await p.$$(".steps li")).length===2 && (await t.txt(".partial b"))==="So far:" && (await t.txt(".ccmsg.run")).startsWith("Claude is working on this."));
   ok("Ask waits while it runs, as before the reload", await p.isDisabled('button[data-act="ask-send"]') && (await t.txt('button[data-act="ask-send"]'))==="Answering…");
+  ok("an answer picked up again keeps when it was asked, for the exported answer", await p.evaluate(()=>{ const t=S.ask.turns[0]; return !!t && !t.saved && !Number.isNaN(Date.parse(t.asked)); }));
   ok("no saved-answer label on an answer picked up again, and no list over it", !(await p.$(".turn .asked")) && !(await p.$("#askPast")));
   await t.job("job-r",{progress:JOB.progress.slice(0,3)});
   ok("new steps keep arriving", (await p.$$(".steps li")).length===3);

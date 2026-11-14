@@ -85,6 +85,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   const acts=await p.$$eval("#turn-0 .ansacts button",l=>l.map(x=>x.textContent));
   ok("a finished answer has Export answer and Copy answer", same(acts,["Export answer","Copy answer"]), acts);
   ok("the controls sit after the sources", await p.evaluate(()=>{ const s=document.querySelector("#turn-0 .srcs"), a=document.querySelector("#turn-0 .ansacts"); return !!(s.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING); }));
+  ok("a freshly asked answer is not labelled as a saved answer", !(await p.$(".turn .asked")));
   ok("the Word library isn't fetched before it is needed", t.docxLoads===0 && await p.evaluate(()=>window.docx===undefined));
   ok("the table's own CSV and XLSX buttons are still there", same(await p.$$eval(".anstable .blk-h button",l=>l.map(x=>x.textContent)),["Export CSV","Export XLSX"]));
   ok("panel at 480px: the buttons fit without sideways scroll", await t.noScroll() && await p.evaluate(()=>{ const pr=document.getElementById("askPanel").getBoundingClientRect(); return [...document.querySelectorAll(".ansacts button,.anstable .blk-h button")].every(x=>{ const r=x.getBoundingClientRect(); return r.left>=pr.left && r.right<=pr.right; }); }));

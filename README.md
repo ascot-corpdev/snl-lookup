@@ -18,7 +18,9 @@ House rules for anyone changing the code are in [.github/copilot-instructions.md
 | `snl-filings` | Supabase Edge Function | Filing search, reference lists and documents from S&P's Physical Documents API. Holds the S&P API credentials. |
 | `snl-chat` | Supabase Edge Function | Claude, with the filing search, filing documents and statutory data as tools. Holds the Anthropic key. |
 | `snl-statutory` | Supabase Edge Function | Statutory financials from S&P's data on Snowflake. Holds the Snowflake credentials. |
+| `snl-watch` | Supabase Edge Function | Optional. The daily watchlist check: new filings for the companies and states the team follows. |
 | `supabase/migrations/0001_snl.sql` | Supabase Postgres | Logins and roles, saved S&P results, the S&P request counter, Claude answers in progress. |
+| `supabase/migrations/0003_watchlist.sql` | Supabase Postgres | Optional. The filings the watchlist found and the record of its checks. |
 | `scripts/logins.mjs` | Your computer | Creates logins. There is no self sign-up. |
 | `scripts/companies.mjs` | Your computer | Loads a company list so companies can be found by name or NAIC code. |
 
@@ -221,6 +223,50 @@ S&P's documents do not give the view or column names for SNL Insurance Regulator
 ### 8. Keep Supabase awake (optional, free plan only)
 
 The free plan pauses a project after about a week with no activity. To prevent that, run `supabase/migrations/0002_keepalive.sql` in the **SQL editor**. The "Keep Supabase awake" workflow then calls it once a day. It returns only the time and reads no data. Skip this on a paid plan.
+
+### 9. Watchlist (optional)
+
+Name the companies and states the team follows once; a daily check shows any new rate, rule or form filing on the Filings view, and can email it. It works before S&P is set up (it says "not set up yet" and asks S&P nothing) and starts checking when the S&P secrets are set.
+
+The watchlist is visible to every login on the site and is kept in your Supabase project. It names companies the team follows, so decide whether a name belongs on it before adding it.
+
+1. **SQL editor:** run `supabase/migrations/0003_watchlist.sql`. It stores the filings found and the record of checks for 90 days. Logins can read them; only the function writes.
+2. Set the secret the daily schedule sends. Use any long random string (at least 24 characters) and keep a copy for step 4.
+
+   ```bash
+   supabase secrets set WATCH_SECRET=...
+   ```
+
+   Optional, to email new filings to the recipients set on the page. You need a Resend account with your sending domain verified:
+
+   ```bash
+   supabase secrets set RESEND_API_KEY=...
+   ```
+
+   ```bash
+   supabase secrets set WATCH_FROM="SNL lookup <watch@yourco.com>"
+   ```
+
+   ```bash
+   supabase secrets set SITE_URL=https://YOUR_GITHUB_USER.github.io/REPO_NAME/
+   ```
+
+   Without `WATCH_FROM`, Resend only delivers to the Resend account's own address. Without `SITE_URL`, the email links to the first address in `ALLOWED_ORIGIN`.
+3. Deploy the function. `--no-verify-jwt` is safe: it checks the login, or the secret, itself.
+
+   ```bash
+   supabase functions deploy snl-watch --no-verify-jwt
+   ```
+
+4. **SQL editor:** open `supabase/watch_schedule.sql`, replace `YOUR_PROJECT_REF` and `YOUR_WATCH_SECRET` (the same value as `WATCH_SECRET`), and run it. It checks every day at 06:23 UTC. Don't commit the file with your values in it.
+
+On the site, a Corp Dev login chooses companies and states in the search form and clicks **Manage**, then **Add the companies and states chosen below**. **Check now** runs a check straight away.
+
+**What a check costs.** Each check asks S&P for filings published in the last 14 days. It uses one S&P request for every 10 company ids, one for every 10 institution ids, and up to 2 more (the sign-in and S&P's list of filing statuses, often reused), plus one for each extra page of results. For example, 25 companies by company id and 3 by institution id cost 3 + 1 + 2 = 6 requests a day, about 180 a month. A check may use at most 30 requests, so it covers up to 280 companies. A bigger watchlist is refused before any request is spent, with how many companies to remove. Checks go through the same one-a-second throttle and hourly and daily counter as every other S&P call.
+
+**The first check only records a starting point.** A filing counts as new only if its company and state were already covered by the last complete check, so adding a company never floods the list.
+
+**Email and S&P's licence.** Emailing S&P's data out of the app is a licence question for the owner: check that your S&P agreement allows it before setting `RESEND_API_KEY`. The email is kept to the company, state, filing type, one line of description and the tracking number of each new filing, with a link to the app. Without email, the Filings view shows the same information.
 
 ## The first live search
 
