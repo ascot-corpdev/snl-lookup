@@ -326,6 +326,7 @@ npm test
 ## Notes
 
 - **Saved results.** A search, a reference list or a statutory query is saved the first time and reopened from Supabase after that, with the date it was fetched. Refresh asks S&P again.
+- **Recent searches.** The Filings view lists the searches anyone on the team has run, newest first. Clicking one fills the form and opens its saved result, so it costs no S&P request; Refresh asks S&P again.
 - **Empty results.** When S&P returns nothing for a state or a company, the app says exactly that. It never says no filings exist.
 - **Documents.** Usually PDFs. Claude can read PDFs and plain text of up to 100 pages each; anything else opens from the Filings view. When S&P gives no page count, the app counts the pages in the file itself, and refuses a file over 5 MB whose pages it can't count.
 - **Follow-up questions** in the same conversation carry the earlier questions and answers, not the documents. Claude re-reads a document if it needs it again (1 S&P request).
