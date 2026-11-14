@@ -378,7 +378,7 @@
     series.push(ser("Surplus", sp.map(m1), NAVY));
     var rows = [["Surplus", sp, millions, null, true]];
     if (any(pic)) rows.push(["Paid-in capital", pic, millions]);
-    if (any(def)) rows.push(["Accumulated deficit (derived)", def, millions, negative]);
+    if (any(def)) rows.push(["Surplus less paid-in (derived)", def, millions, negative]);
     if (any(ta)) rows.push(["Total assets", ta, millions]);
     if (any(lev)) rows.push(["NPW to surplus (x, derived)", lev, mult]);
     if (any(rbc)) rows.push(["RBC ratio (%)", rbc, pctCell]);
@@ -459,7 +459,7 @@
     };
     items = items.concat(mini("By filing type", fl.byType, "type", L), mini("By state", fl.byState, "state", L + 3.11));
     items = items.concat(takeaways(pointsOf(t, "filings"), QX2, TOP, QW, 3.6 - TOP));
-    var colW = [0.7, 1.15, 2.85, 1.45, 1.2, 1.2, 1.15, 2.58];
+    var colW = [0.7, 1.15, 2.35, 1.95, 1.2, 1.2, 1.15, 2.58];   // the status is often two words ("Closed - Approved")
     var shown = rows.slice(0, 8), y2 = 3.7;
     var trs = [["State", "Filing type", "Type of insurance", "Status", "Published", "Effective", "Rate impact", "Tracking number"]].concat(shown.map(function (r) {
       var ri = pct(r.rateImpact);

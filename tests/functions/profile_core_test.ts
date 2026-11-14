@@ -229,6 +229,12 @@ function within(t: P.ProfileText): string[] {
   ok("reinsurers and filings are included", s.reinsurers!.items.length === 8 && !("unavailable" in s.filings) && (s.filings as any).rows.length === 8 && (s.filings as any).total === 23 && (s.filings as any).from === "2025-11-14");
   ok("nothing is missing", s.missing.length === 0);
   ok("names are made up: Calloway, Nonesuch and Tarrow only", s.reinsurers!.items.every((r) => /^(Nonesuch|Tarrow|Other)/.test(r.name)) && (s.filings as any).rows.every((r: any) => /^CALL-/.test(r.tracking) && /Made-up/.test(r.description)));
+  {
+    // tests/web/profile_e2e.test.cjs builds a real deck from this file, so it must stay what the function gives
+    const saved = JSON.parse(await Deno.readTextFile(new URL("../fixtures/profile_sample_answer.json", import.meta.url)));
+    const now = P.sampleFacts("2026-11-14");
+    ok("the saved sample answer is what the function gives today", same(saved, JSON.parse(JSON.stringify({ facts: now, text: P.plainText(now) }))));
+  }
   ok("the sample follows the date it is made on", P.sampleFacts("2030-02-01").years[4] === 2029 && (P.sampleFacts("2030-02-01").filings as any).to === "2030-01-31");
 }
 
