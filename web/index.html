@@ -57,6 +57,17 @@ nav.tabs a:hover{background:var(--alt)}
 .strip .wrap{display:flex;flex-wrap:wrap;gap:4px 22px;padding-block:7px}
 .strip .s-i{min-width:0;overflow-wrap:anywhere}
 .strip .s-i.warn{color:var(--magenta);font-weight:bold}
+/* S&P connection check: a small link in the strip, and its report just under the strip */
+.strip .s-conn{margin-left:auto;min-width:0}
+.strip .s-conn .lnk:disabled{color:var(--muted);text-decoration:none;cursor:default}
+#connRoot .wrap{padding-block:10px}
+.conn{font-size:13px}
+.conn>div{flex:1 1 100%;min-width:0;display:flex;flex-direction:column;gap:6px}
+.conn p{margin:0}
+.conn ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px}
+.conn .mk{font-weight:bold}
+.conn .mk.no{color:var(--magenta)}
+.conn textarea{min-height:140px;font-size:12px}
 
 main .wrap{padding-block:22px 28px;display:flex;flex-direction:column;gap:22px}
 footer.foot{border-top:1px solid var(--grid)}
@@ -273,6 +284,7 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
   </div>
 </header>
 <div class="strip" id="strip" hidden><div class="wrap" id="stripIn" role="status" aria-label="S&amp;P usage and data freshness"></div></div>
+<div id="connRoot"></div>
 
 <main><div class="wrap" id="view"></div></main>
 <footer class="foot"><div class="wrap"><span>2026 Ascot Group</span><span>Confidential: strategy and corporate development use only. Data: S&amp;P Global Market Intelligence.</span></div></footer>
@@ -430,7 +442,64 @@ function stripHTML(){
   items.push(`<span class="s-i" id="s_search">${rf.search?`Last search ${fmtAt(rf.search)}`:"No searches yet"}</span>`);
   items.push(`<span class="s-i" id="s_stat">${st.statutory&&st.statutory.configured ? (rf.statutory?`Statutory data refreshed ${fmtAt(rf.statutory)}`:"Statutory data: connected, nothing fetched yet") : "Statutory data: not set up yet"}</span>`);
   if(st.claude && st.claude.configured===false) items.push(`<span class="s-i" id="s_claude">Questions: not set up yet</span>`);
+  items.push(connButtonHTML());
   return items.join("");
+}
+
+/* ---------- S&P connection check: signs in, checks the entitlement and loads the four lists, then says what happened ---------- */
+function connButtonHTML(){
+  const busy=!!(S.conn&&S.conn.busy);
+  return `<span class="s-conn" id="s_conn"><button type="button" class="lnk" id="connBtn" data-act="conn-check" ${busy?"disabled":""} title="Signs in to S&amp;P and loads the four lists, to show whether the S&amp;P connection works (at most five S&amp;P requests)">${busy?"Checking S&amp;P connection…":"Check S&amp;P connection"}</button></span>`;
+}
+async function runConnCheck(){
+  if(S.conn&&S.conn.busy) return;
+  S.conn={busy:true}; render();
+  const r=await callFn("snl-filings",{action:"check"});
+  if(!S.session) return;
+  if(r.data){
+    S.conn={report:r.data, focus:true}; takeUsage(r.data);
+    if(r.data.configured){ loadStatus(); if((r.data.steps||[]).some(s=>s.ok&&(s.id==="states"||s.id==="lists"))){ S.refs=null; if(S.view==="filings") loadRefs(false); } }
+  } else if(r.err!=="signin") S.conn={err:errText(r), focus:true};
+  render();
+}
+// for the email to S&P: the full date and the time in UTC, since it is read somewhere else and later
+const connAt = s => { const d=new Date(s); return isNaN(d) ? "n/d" : `${d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:"UTC"})}, ${d.toISOString().slice(11,16)} UTC`; };
+const connRef = s => s.requestId && !String(s.detail||"").includes(s.requestId) ? ` S&P reference: ${s.requestId}.` : "";
+/* A short plain-text version for an email to S&P support. */
+function connText(r){
+  const lines=["S&P API connection check (SNL lookup)", `Checked: ${connAt(r.checkedAt)}`,
+    "Product: SNL Insurance Product Filings, Physical Documents API (docType INSPRODFILINGS_DOCUMENTS_API)",
+    `Account: ${r.account||"n/d"} (${count(r.limits&&r.limits.hour)} requests an hour, ${count(r.limits&&r.limits.day)} a day)`,
+    `Result: ${r.summary}`, ""];
+  (r.steps||[]).forEach((s,i)=>lines.push(`${i+1}. ${s.ok?"Done":"Failed"}: ${s.title}. ${s.detail}${connRef(s)}`));
+  return lines.join("\n");
+}
+function connHTML(){
+  const c=S.conn; if(!c||c.busy) return "";
+  const close=`<button type="button" class="btn sm ghost" data-act="conn-close">Close</button>`;
+  if(c.err) return `<div class="wrap"><div class="banner conn" id="connPanel" role="alert" tabindex="-1"><span><b>Couldn't run the S&amp;P connection check.</b> ${esc(c.err)}</span><span class="inline"><button type="button" class="btn sm" data-act="conn-check">Try again</button>${close}</span></div></div>`;
+  const r=c.report;
+  if(!r.configured) return `<div class="wrap"><div class="info conn" id="connPanel" role="status" tabindex="-1"><span>${esc(r.summary)}</span>${close}</div></div>`;
+  const bad=(r.steps||[]).some(s=>!s.ok);
+  const steps=(r.steps||[]).map(s=>`<li><span class="mk${s.ok?"":" no"}">${s.ok?"Done":"Failed"}:</span> <b>${esc(s.title)}.</b> ${esc(s.detail)}${esc(connRef(s))}</li>`).join("");
+  const acct=r.account==="production"?"Production":"Trial";
+  return `<div class="wrap"><div class="${bad?"banner":"info"} conn" id="connPanel" role="${bad?"alert":"status"}" tabindex="-1" aria-label="S&amp;P connection check"><div>
+    <p><b>${esc(r.summary)}</b></p>
+    <ol id="connSteps">${steps}</ol>
+    <p class="t2">${acct} account: ${count(r.limits&&r.limits.hour)} S&amp;P requests an hour and ${count(r.limits&&r.limits.day)} a day. This check used ${esc(plural(r.requests,"S&P request"))}. Checked ${fmtAt(r.checkedAt)} at ${esc(fmtTime(r.checkedAt))}.</p>
+    ${c.showText?`<label class="f">Select this and copy it into your email to S&amp;P<textarea id="connText" readonly>${esc(connText(r))}</textarea></label>`:""}
+    <div class="inline"><button type="button" class="btn sm" data-act="conn-copy">Copy for S&amp;P</button><button type="button" class="btn sm ghost" data-act="conn-check">Check again</button>${close}</div>
+  </div></div></div>`;
+}
+function renderConn(){
+  const root=document.getElementById("connRoot"), h=S.session?connHTML():"";
+  if(renderConn.shown!==h){ root.innerHTML=h; renderConn.shown=h; }   // redrawn only when it changes, so focus and selection stay
+  if(S.conn&&S.conn.focus){ S.conn.focus=false; document.getElementById("connPanel")?.focus({preventScroll:true}); }
+}
+async function copyConn(){
+  const r=S.conn&&S.conn.report; if(!r) return;
+  try{ await navigator.clipboard.writeText(connText(r)); toast("Copied. Paste it into your email to S&P support."); }
+  catch{ S.conn.showText=true; renderConn(); const t=document.getElementById("connText"); if(t){ t.focus(); t.select(); } toast("Couldn't copy here. Select the text below and copy it."); }
 }
 
 /* ---------- Filings: the search form ---------- */
@@ -1161,11 +1230,12 @@ function render(){
   else setMenu(false);
   document.body.classList.toggle("signed", on);
   const keep=keepUi("view");
-  if(!on){ v.innerHTML=loginHTML(); keep(); renderDrawer(); renderAsk(); return; }
+  if(!on){ v.innerHTML=loginHTML(); keep(); renderDrawer(); renderAsk(); renderConn(); return; }
   document.querySelectorAll("nav.tabs a").forEach(a=>a.setAttribute("aria-current", a.dataset.view===S.view ? "page" : "false"));
   document.getElementById("stripIn").innerHTML=stripHTML();
   v.innerHTML = S.view==="statutory" ? renderStatutory() : renderFilings();
   keep(); renderDrawer(); renderAsk();
+  renderConn();
 }
 function renderDrawer(){
   const root=document.getElementById("drawerRoot"), dr=S.session?S.drawer:null;
@@ -1235,6 +1305,9 @@ document.addEventListener("click", e=>{
     case "close": closeDrawer(); break;
     case "save-pw": savePassword(); break;
     case "status-retry": S.statusErr=""; render(); loadStatus(); break;
+    case "conn-check": runConnCheck(); break;
+    case "conn-copy": copyConn(); break;
+    case "conn-close": S.conn=null; render(); document.getElementById("connBtn")?.focus(); break;
 
     case "co-find": resolveCompany(); break;
     case "co-add": addChip(t.dataset.kind, t.dataset.id, t.dataset.name); break;
@@ -1309,6 +1382,7 @@ function resetState(){
   for(const d of Object.values(S.docs)) if(d.url){ try{ URL.revokeObjectURL(d.url); }catch{} }
   S.session=null; S.drawer=null; S.status=null; S.statusErr=""; S.refs=null; S.refsLoading=false; S.refsMsg=""; S.refsErr=""; S.docs={};
   S.f=freshFilings(); S.ask=freshAsk(); S.st=freshStat();
+  S.conn=null;
 }
 async function onSignedIn(session){
   const {data, error}=await S.sb.from("profiles").select("username,display_name,role").eq("id", session.user.id).maybeSingle();
