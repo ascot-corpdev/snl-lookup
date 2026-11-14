@@ -1,0 +1,40 @@
+{
+  "_about": "Made-up answer for the profile page tests, in the shape the snl-profile function answers {action: \"facts\"} with (contracts 1 and 2). The company, codes, figures, reinsurer and filings are invented.",
+  "facts": {
+    "version": 1,
+    "sample": false,
+    "asOf": "2026-11-13",
+    "entity": { "kind": "company", "code": "90001", "name": "Calloway Insurance Co", "groupName": "Calloway Group", "naicGroupCode": "9001" },
+    "years": [2021, 2022, 2023, 2024, 2025],
+    "source": "S&P Global Market Intelligence, SNL Insurance Regulatory Data",
+    "series": {
+      "dpw": [74200000, 85100000, 97800000, 110300000, 122500000],
+      "npw": [55000000, 62100000, 70400000, 79900000, 88800000],
+      "loss_ratio": [64.2, 71.8, 69.0, 66.5, 62.9],
+      "expense_ratio": [33.1, 32.4, 31.9, 31.2, 30.8],
+      "combined_ratio": [97.3, 104.2, 100.9, 97.7, 93.7],
+      "surplus": [48000000, 45500000, 47100000, 52300000, 58900000]
+    },
+    "derived": { "combined_avg": 98.8, "years_above_100": 2, "dpw_growth_pct": 13.3 },
+    "mix": { "year": 2025, "lines": [ { "name": "Homeowners", "dpw": 81000000, "npw": 60000000, "share": 66.1 } ], "states": [ { "state": "FL", "dpw": 70000000, "share": 57.1 } ], "topStateShare": 57.1, "top3StateShare": 81.0 },
+    "filings": { "from": "2025-11-13", "to": "2026-11-12", "total": 3, "capped": false, "byType": [ { "type": "Rate", "count": 2 } ], "byState": [ { "state": "FL", "count": 3 } ],
+      "rows": [ { "state": "FL", "type": "Rate", "toi": "Homeowners", "status": "Approved", "published": "2026-10-10", "effective": "2027-01-01", "rateImpact": 4.5, "description": "Made-up homeowners rate revision.", "tracking": "CALL-FL-1" } ] },
+    "missing": [
+      { "field": "net_reserves", "label": "Net loss and LAE reserves", "reason": "not mapped" },
+      { "field": "ceded_by_reinsurer", "label": "Ceded premiums by reinsurer", "reason": "not mapped" }
+    ]
+  },
+  "text": {
+    "by": "plain",
+    "note": null,
+    "cover": { "subtitle": "Homeowners insurer with $122.5M of direct premiums in 2025" },
+    "summary": { "title": "Executive summary", "points": [ { "lead": "Scale", "text": "Direct premiums written of $122.5M in 2025." }, { "lead": "Growth", "text": "Direct premiums grew 13.3% a year from 2021 to 2025 (derived)." }, { "lead": "Underwriting", "text": "Combined ratio of 93.7% in 2025." }, { "lead": "Capital", "text": "Policyholder surplus of $58.9M in 2025." }, { "lead": "Filings", "text": "3 rate and form filings in the last year." } ] },
+    "premium": { "title": "Premium, 2021 to 2025", "points": [ { "lead": "Growth", "text": "Direct premiums grew 13.3% a year (derived)." }, { "lead": "Mix", "text": "Homeowners is 66.1% of direct premiums." } ] },
+    "underwriting": { "title": "Underwriting results, 2021 to 2025", "points": [ { "lead": "Combined ratio", "text": "93.7% in 2025." }, { "lead": "Average", "text": "98.8% over five years (derived)." } ] },
+    "capital": { "title": "Capital, 2021 to 2025", "points": [ { "lead": "Surplus", "text": "$58.9M in 2025." }, { "lead": "Trend", "text": "Up from $48.0M in 2021." } ] },
+    "reserves": { "title": "Reserves", "points": [ { "lead": "Reserves", "text": "n/d" }, { "lead": "Development", "text": "n/d" } ] },
+    "reinsurance": { "title": "Reinsurance", "points": [ { "lead": "Ceded", "text": "n/d" }, { "lead": "Reinsurers", "text": "n/d" } ] },
+    "filings": { "title": "Recent rate and form filings", "points": [ { "lead": "Count", "text": "3 filings in the last year." }, { "lead": "States", "text": "All in FL." } ] },
+    "questions": { "title": "Key diligence questions", "items": [ { "title": "Growth", "text": "What drove premium growth?" }, { "title": "Concentration", "text": "How is Florida exposure managed?" }, { "title": "Reserves", "text": "How have reserves developed?" }, { "title": "Reinsurance", "text": "What does the reinsurance programme look like?" } ] }
+  }
+}

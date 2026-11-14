@@ -36,6 +36,8 @@ export const LIMITS = {
 };
 const DEFAULT_MODEL = "claude-opus-5-5";
 const FALLBACK_BETA = "server-side-fallback-2026-07-01";
+/** The same model default and fallback beta for the profile text (profile.ts). */
+export { DEFAULT_MODEL, FALLBACK_BETA };
 
 /** The company's name, from the optional ORG_NAME secret. Blank leaves the prompts neutral. */
 export const orgName = (env: Env): string => (env("ORG_NAME") ?? "").trim();
@@ -121,7 +123,7 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
   },
   {
     name: "query_statutory",
-    description: "Statutory financials by NAIC company code or group code over a range of years: premiums written by line and state, policyholder surplus, and loss, expense and combined ratios. Answers that it isn't set up yet until the Snowflake account is set up.",
+    description: "Statutory financials by NAIC company code or group code over a range of years: premiums written by line and state, policyholder surplus, and loss, expense and combined ratios. With an empty fields list it returns those seven. Name other fields to get them: gross premiums written, net premiums earned, net income, paid-in capital, total assets, risk-based capital ratio, net loss and LAE reserves, prior-year reserve development, reinsurance recoverables and ceded premiums by reinsurer. Answers that it isn't set up yet until the Snowflake account is set up.",
     strict: true,
     input_schema: {
       type: "object",

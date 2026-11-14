@@ -19,8 +19,11 @@ House rules for anyone changing the code are in [.github/copilot-instructions.md
 | `snl-chat` | Supabase Edge Function | Claude, with the filing search, filing documents and statutory data as tools. Holds the Anthropic key. |
 | `snl-statutory` | Supabase Edge Function | Statutory financials from S&P's data on Snowflake. Holds the Snowflake credentials. |
 | `snl-watch` | Supabase Edge Function | Optional. The daily watchlist check: new filings for the companies and states the team follows. |
+| `snl-profile` | Supabase Edge Function | Optional. The figures and the text for a company profile. |
+| `web/deck.js`, `web/profile-slides.js` | The browser | Build the profile as a PowerPoint file on your template. The file is made in the browser and never stored on the server. |
 | `supabase/migrations/0001_snl.sql` | Supabase Postgres | Logins and roles, saved S&P results, the S&P request counter, Claude answers in progress. |
 | `supabase/migrations/0003_watchlist.sql` | Supabase Postgres | Optional. The filings the watchlist found and the record of its checks. |
+| `supabase/migrations/0004_profile_template.sql` | Supabase Storage | Optional. A private place for the PowerPoint template. |
 | `scripts/logins.mjs` | Your computer | Creates logins. There is no self sign-up. |
 | `scripts/companies.mjs` | Your computer | Loads a company list so companies can be found by name or NAIC code. |
 
@@ -268,6 +271,28 @@ On the site, a Corp Dev login chooses companies and states in the search form an
 
 **Email and S&P's licence.** Emailing S&P's data out of the app is a licence question for the owner: check that your S&P agreement allows it before setting `RESEND_API_KEY`. The email is kept to the company, state, filing type, one line of description and the tracking number of each new filing, with a link to the app. Without email, the Filings view shows the same information.
 
+### 10. Company profiles (optional)
+
+The **Profile** view builds a company profile as a PowerPoint file on your team's own template, with charts and tables you can edit: cover, executive summary, premium, underwriting, capital, reserves, reinsurance, recent rate and form filings, and key diligence questions. The template is kept in private storage, never in this repository. A built profile is made in the browser and is never stored on the server.
+
+1. **SQL editor:** run `supabase/migrations/0004_profile_template.sql`. It adds a private storage bucket for the template. Any login can read it; only Corp Dev logins can change it.
+2. Deploy the function:
+
+   ```bash
+   supabase functions deploy snl-profile --no-verify-jwt
+   ```
+
+   The profile adds statutory fields the other functions also list, so deploy `snl-statutory` and `snl-chat` again too (step 3).
+
+3. Sign in with a Corp Dev login, open **Profile** and choose **Upload template**. Pick your team's PowerPoint template (.pptx, up to 50 MB). The page checks the file before it uploads it: the template needs a cover layout named "Title White" and a content layout named "Spectrum Title Only White".
+4. Choose **Build a sample profile** to see how your template comes out. The sample uses made-up figures, so it works before statutory data is set up. Open the file in PowerPoint and check the slides before relying on the builder.
+5. When Snowflake is set up, map the extra statutory fields on **Statutory > Field set-up**, as in step 7: gross premiums written, net premiums earned, net income, paid-in capital, total assets, risk-based capital ratio, net loss and LAE reserves, prior-year reserve development, reinsurance recoverables, and ceded premiums by reinsurer. The last of these also names an `item` column, the reinsurer's name. A slide whose figures aren't mapped is left out, and the page says why.
+6. Find a company or group, choose **Get figures** to see which slides it fills, then build the file.
+
+**The text on the slides.** With an Anthropic key set, Claude drafts the slide titles, takeaways and diligence questions from that company's figures only. The function checks every figure Claude writes against the data; a section with a figure it can't match is replaced with plain text, and the page says so. A draft counts as one of the login's questions for the day (`CHAT_DAILY_LIMIT`) and appears in Past answers. Without a key, the slides use plain text. Read the drafted text before you use it: it is a first draft, and judgements are marked "(inferred)".
+
+**What a profile leaves out on purpose.** No comparisons with past deals, no teaser claims, no ownership or management pages: the app holds no deal information and only S&P's data. Add those in PowerPoint.
+
 ## The first live search
 
 After step 5:
@@ -293,6 +318,7 @@ After step 5:
 | A search | 1 for each batch of 10 companies, for each year of dates, for each 500 rows. Four companies over five years is 6. |
 | The same search again | 0. It opens from the saved result until you click Refresh. |
 | Opening a document | 1. The page keeps it until you close the tab. |
+| Building a profile | At most 6 for its filings page (sign-in, the reference lists if they aren't saved, and up to 3 pages of results). 0 when the same profile was built earlier that day. The statutory figures use no S&P request. |
 | Asking Claude | Whatever Claude looks up: the searches above plus 1 for each document it reads, and 2 the first time for the lists of insurance types and filing types if they aren't saved yet. One question is capped at 150 S&P requests, 24 lookups, 8 documents, 100 pages a document and 150 document pages in all. |
 
 The app waits its turn so calls are at least a second apart, and stops with a plain message, before calling S&P, when the hour's or day's limit is used up. A search that would need more than 60 S&P requests (40 inside a Claude answer) is refused before any is spent, with the reason. A search with very many pages of results, or one where S&P answers slowly, stops early and says the results are incomplete; an incomplete result is never saved. Each login can have one Claude answer running at a time.
@@ -301,6 +327,7 @@ The app waits its turn so calls are at least a second apart, and stops with a pl
 
 - A question answered from search results alone: a few cents.
 - A question that reads documents: Anthropic counts 1,500 to 3,000 text tokens a page plus an image of each page. Three filings of about 50 pages each is roughly 400,000 to 600,000 tokens, or about $2 to $3 for the answer. Later steps of the same answer re-read the documents from Anthropic's cache at a twentieth of the price.
+- Claude's text for a profile: one short request with no documents, a few cents. It counts as one question.
 - Under each answer the page shows what it cost in US dollars, worked out from Anthropic's list prices for the model that served each request, with the tokens read and written and the S&P requests used. A model not in the price list shows "cost n/d". The line under the question box shows the questions asked today and what they cost. These are estimates; the Anthropic console is the record of what was charged. To update a price, edit `PRICES` in `supabase/functions/_shared/chat.ts`.
 
 **Snowflake credits.** S&P's guide says an X-Small warehouse uses 1 credit an hour while it runs. Snowflake bills a minimum of one minute each time the warehouse wakes, so a statutory query (up to 8 short statements) costs about 0.02 credit, and Discover about the same. A repeated query opens from the saved result and costs nothing, whether it comes from the Statutory view or from Claude. In a reader account the provider (S&P) pays for credits; ask S&P whether use is capped or recharged.
@@ -360,6 +387,9 @@ Nothing in this list is guessed in the code: each item is either handled both wa
 | **Whether S&P limits API access to fixed IP addresses.** Supabase functions do not have fixed addresses. | n/a | S&P |
 | **The Snowflake reader account**: the account identifier, the service user with key-pair sign-in, and the warehouse name. | Step 7 | S&P |
 | **Every SNL Insurance Regulatory view and column name.** | The mapping (step 7); `buildSql` in `_shared/statutory.ts` | Discover, then Corp Dev |
+| **The extra statutory figures a profile uses** (net premiums earned, net income, reserves, reserve development, RBC ratio, ceded premiums by reinsurer and the rest in step 10). They are the app's own names; whether S&P's views hold each one, and in which column, is not known until Discover. | The mapping (step 7) | Discover, then Corp Dev |
+| **The storage rules for the template.** The migration uses the statements Supabase documents for storage policies, but has not been run against a real project. | `0004_profile_template.sql` | First upload of the template |
+| **How the profile comes out on the real template.** It is tested on a made-up stand-in with the same layout names. | `web/deck.js` | The sample profile, opened in PowerPoint |
 | **Who pays for Snowflake credits** and whether use is capped. | n/a | S&P |
 | **Claude reading real filings.** Tested against a stand-in for Anthropic's API only. Watch the first live answer: the page citations, the cost and how long each step takes. | `_shared/chat.ts` | First live answer |
 
