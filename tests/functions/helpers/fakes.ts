@@ -290,7 +290,7 @@ export function sse(message: Record<string, any>): string {
 /** The Messages API and Files API. Each call to /v1/messages takes the next reply from the script; a reply can
     be a function of the request body, so a test can check what Claude was sent before answering. */
 export function fakeAnthropic(script: (Reply | ((body: any, n: number) => Reply))[]) {
-  const state = { calls: [] as ClaudeCall[], uploads: [] as { id: string; size: number; type: string }[], deleted: [] as string[], left: [...script] };
+  const state = { calls: [] as ClaudeCall[], uploads: [] as { id: string; size: number; type: string; bytes?: Uint8Array; name?: string }[], deleted: [] as string[], left: [...script] };
   const fetch = (async (input: string | URL | Request, init: RequestInit = {}) => {
     const url = new URL(String(input instanceof Request ? input.url : input));
     const method = init.method ?? "GET", headers = new Headers(init.headers);
@@ -298,7 +298,7 @@ export function fakeAnthropic(script: (Reply | ((body: any, n: number) => Reply)
       const form = init.body as FormData;
       const file = form.get("file") as File;
       const id = `file_test${state.uploads.length + 1}`;
-      state.uploads.push({ id, size: file.size, type: file.type });
+      state.uploads.push({ id, size: file.size, type: file.type, bytes: new Uint8Array(await file.arrayBuffer()), name: file.name });
       return J({ id, type: "file", filename: file.name, mime_type: file.type, size_bytes: file.size, created_at: "2026-11-13T12:00:00Z", downloadable: false });
     }
     if (url.pathname.startsWith("/v1/files/") && method === "DELETE") {
@@ -349,4 +349,48 @@ export function checks() {
   const ok = (name: string, cond: boolean, detail?: unknown) => { if (cond) pass++; else { fail++; console.log("FAIL " + name, JSON.stringify(detail)); } };
   const done = () => { console.log(`${pass} passed, ${fail} failed`); if (fail) Deno.exit(1); };
   return { ok, done };
+}
+
+// ---------- a stand-in for Anthropic's prompt cache ----------
+
+/** Works out the usage Anthropic would report for a request, as its prompt cache is documented to behave: the
+    request is read as tools, then system blocks, then the tool_choice, thinking and effort settings, then each
+    message block. A breakpoint is a block with cache_control, plus the last block when the request has a top-level
+    cache_control. The longest prefix that an earlier request wrote at one of its breakpoints is read from the
+    cache; what follows, up to this request's last breakpoint, is written; the rest is uncached. A document counts
+    pageTokens for each page of the uploaded file (pages counted from its page objects), or docTokens when it has
+    none; any other block counts a token for every four characters. Each call takes one request body. */
+export function promptCache(claude: { uploads: { id: string; bytes?: Uint8Array }[] }, pageTokens = 3000, docTokens = 2000) {
+  const written = new Set<string>();
+  const pagesOf = (fileId: string) => {
+    const bytes = claude.uploads.find((u) => u.id === fileId)?.bytes;
+    return bytes ? (new TextDecoder("latin1").decode(bytes).match(/\/Type\s*\/Page(?![A-Za-z])/g) ?? []).length : 0;
+  };
+  const strip = (b: unknown) => (b && typeof b === "object" && !Array.isArray(b) ? Object.fromEntries(Object.entries(b as Record<string, unknown>).filter(([k]) => k !== "cache_control")) : b);
+  return (body: any) => {
+    const units: { key: string; tokens: number; bp: boolean }[] = [];
+    const add = (b: any) => {
+      const key = JSON.stringify(strip(b));
+      const pages = b?.type === "document" && b.source?.type === "file" ? pagesOf(b.source.file_id) : 0;
+      units.push({ key, tokens: b?.type === "document" ? (pages ? pages * pageTokens : docTokens) : Math.ceil(key.length / 4), bp: !!b?.cache_control });
+    };
+    for (const t of body.tools ?? []) add(t);
+    for (const b of typeof body.system === "string" ? [{ type: "text", text: body.system }] : body.system ?? []) add(b);
+    units.push({ key: JSON.stringify({ tool_choice: body.tool_choice ?? null, thinking: body.thinking ?? null, effort: body.output_config?.effort ?? null }), tokens: 0, bp: false });
+    for (const m of body.messages ?? []) {
+      units.push({ key: "role:" + m.role, tokens: 0, bp: false });
+      for (const b of typeof m.content === "string" ? [{ type: "text", text: m.content }] : m.content) add(b);
+    }
+    if (body.cache_control && units.length) units[units.length - 1].bp = true;
+    const prefixes: string[] = [];
+    let acc = "";
+    for (const u of units) { acc += u.key + "\u0000"; prefixes.push(acc); }
+    let hit = -1;
+    for (let i = units.length - 1; i >= 0; i--) if (written.has(prefixes[i])) { hit = i; break; }
+    const lastBp = units.map((u) => u.bp).lastIndexOf(true);
+    const sum = (from: number, to: number) => units.slice(from, to + 1).reduce((n, u) => n + u.tokens, 0);
+    units.forEach((u, i) => { if (u.bp) written.add(prefixes[i]); });
+    const read = sum(0, hit), write = lastBp > hit ? sum(hit + 1, lastBp) : 0, rest = sum(Math.max(hit, lastBp) + 1, units.length - 1);
+    return { input_tokens: rest, cache_creation_input_tokens: write, cache_read_input_tokens: read, output_tokens: 200 };
+  };
 }

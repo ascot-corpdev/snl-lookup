@@ -10,9 +10,9 @@ const { ok, done } = checks();
 const enc = (s: string) => new TextEncoder().encode(s);
 /** A made-up PDF with n page objects, padded to at least `bytes` long. */
 const pdf = (n: number, bytes = 0) => {
-  let body = "%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Count " + n + " >> endobj\n";
+  let body = "%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Count " + n + " /Kids [" + Array.from({ length: n }, (_, i) => `${i + 3} 0 R`).join(" ") + "] >> endobj\n";
   for (let i = 0; i < n; i++) body += `${i + 3} 0 obj << /Type /Page /Parent 2 0 R >> endobj\n`;
-  return enc(body + "%".padEnd(Math.max(0, bytes - body.length), " ") + "\n%%EOF\n");
+  return enc(body + "%".padEnd(Math.max(0, bytes - body.length), " ") + "\nstartxref\n0\n%%EOF\n");
 };
 
 // ---------- counting ----------
@@ -53,8 +53,8 @@ ok("its progress line still says the count wasn't listed", small.job.progress.so
 ok("no limit is reported", (small.job.result as any).caps.length === 0);
 
 const long = await ask(pdf(LIMITS.docPages + 20));
-ok("a document that turns out to be over the page limit is not sent to Claude", long.seen.read.isError === true && long.seen.docs.length === 0 && long.claude.uploads.length === 0, long.seen.read);
-ok("Claude is told why, and the answer says so", /over the limit of 100 for one document/.test(long.seen.read.value.error) && (long.job.result as any).caps.some((c: string) => c === `Filing TARR-135000002 has ${LIMITS.docPages + 20} pages, over the limit of ${LIMITS.docPages} pages for one document, so Claude didn't read it. Open it from the Filings view.`), (long.job.result as any).caps);
+ok("a document that turns out to be longer than one read is sent from its front, cut to one read", long.seen.read.isError === false && long.seen.docs.length === 1 && long.claude.uploads.length === 1 && long.seen.read.value.firstPage === 1 && long.seen.read.value.lastPage === LIMITS.docPages && long.seen.read.value.pages === LIMITS.docPages + 20, long.seen.read);
+ok("Claude is told which pages it has, and the answer says so", long.seen.read.value.note.includes(`pages 1 to ${LIMITS.docPages} of ${LIMITS.docPages + 20}`) && (long.job.result as any).caps.some((c: string) => c === `Claude read pages 1 to ${LIMITS.docPages} of ${LIMITS.docPages + 20} of filing TARR-135000002, not the whole document. Open it from the Filings view for the rest.`), (long.job.result as any).caps);
 
 const opaque = await ask(enc("%PDF-1.7\n" + "x".repeat(LIMITS.docPages * LIMITS.bytesPerPage + 10)));
 ok("a large document whose pages can't be counted is not sent to Claude", opaque.seen.read.isError === true && opaque.claude.uploads.length === 0 && /no page count and is too large/.test(opaque.seen.read.value.error), opaque.seen.read);
@@ -85,8 +85,8 @@ async function askListed(bytes: Uint8Array) {
   return { job: db.jobs.get(jobId)!, seen, claude };
 }
 const understated = await askListed(pdf(400));
-ok("a document S&P lists at 30 pages that really has 400 is not sent to Claude", understated.seen.read.isError === true && understated.claude.uploads.length === 0 && /has 400 pages, over the limit/.test(understated.seen.read.value.error), understated.seen.read);
-ok("and the answer says so", (understated.job.result as any).caps.some((c: string) => c.startsWith("Filing CALL-134000003 has 400 pages")), (understated.job.result as any).caps);
+ok("a document S&P lists at 30 pages that really has 400 is not sent whole: only its first pages go to Claude", understated.seen.read.isError === false && understated.claude.uploads.length === 1 && understated.seen.read.value.pages === 400 && understated.seen.read.value.lastPage === LIMITS.docPages, understated.seen.read);
+ok("and the answer says so", (understated.job.result as any).caps.some((c: string) => c.startsWith(`Claude read pages 1 to ${LIMITS.docPages} of 400 of filing CALL-134000003`)), (understated.job.result as any).caps);
 const overstated = await askListed(pdf(12));
 ok("when the two counts differ the larger one is recorded", overstated.seen.read.isError === false && overstated.seen.read.value.pages === 30 && overstated.claude.uploads.length === 1, overstated.seen.read);
 
