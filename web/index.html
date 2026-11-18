@@ -287,6 +287,27 @@ body.signed footer.foot .wrap{padding-bottom:calc(68px + env(safe-area-inset-bot
 .pastq .pq{font-weight:bold;color:var(--ink)}
 .pastq .stopped{color:var(--magenta)}
 .turn .asked{margin:0;justify-self:end;text-align:right;overflow-wrap:anywhere}
+/* Team library: answers colleagues chose to share, beside Past answers; the save form under a finished answer */
+.libtabs{display:flex;min-width:0}.libtabs .btn{flex:1 1 0;justify-content:center;min-width:0}
+.libtabs .btn[aria-selected="true"]{background:var(--ink);color:var(--surface)}
+.libtabs+section>h3{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.lib{border-top:0;padding-top:0}
+.lib .intro{margin:0}
+.libsearch{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:6px;align-items:center;min-width:0}
+.libsearch input{width:100%;min-width:0}
+.libtags{display:flex;flex-wrap:wrap;gap:4px;min-width:0}
+.libtag{display:inline-block;padding:1px 6px;background:var(--tile);font-size:11px;color:var(--ink);max-width:100%;overflow-wrap:anywhere}
+.libbox{border:1px solid var(--grid);padding:10px 12px;display:grid;gap:8px;min-width:0;overflow-wrap:anywhere}
+.libbox h3{margin:0;font-size:14px}
+.libbox p{margin:0}
+.libbox input{width:100%;min-width:0}
+.libnotice{border-left:4px solid var(--magenta);background:var(--tile);padding:8px 10px;font-size:13px}
+.libhead{display:grid;gap:6px;min-width:0;overflow-wrap:anywhere;border-left:4px solid var(--blue);background:var(--tile);padding:8px 12px}
+.libhead p{margin:0}
+.libhead .lt{font-weight:bold;font-size:15px;color:var(--ink)}
+.libhead .libtag{background:var(--surface)}
+.libhead .nw{white-space:nowrap}
+@media (max-width:560px){.libsearch{grid-template-columns:minmax(0,1fr) auto}.libsearch .btn.ghost{grid-column:1/-1;justify-self:start}}
 
 /* Drawer (change password) */
 .scrim{position:fixed;inset:0;background:var(--overlay);z-index:40}
@@ -1596,7 +1617,7 @@ async function askQuestion(){
   if(!q){ toast("Type a question first."); return; }
   if(q.length>MAX_QUESTION){ toast(`Keep the question under ${count(MAX_QUESTION)} characters.`); return; }
   // earlier finished answers go along as plain text, so a follow-up question makes sense
-  const history=a.turns.filter(t=>t.status==="done"&&t.result).slice(-MAX_HISTORY).map(t=>({question:t.question, answer:answerText(t.result).slice(0, MAX_HISTORY_ANSWER).trim()})).filter(h=>h.answer);
+  const history=a.turns.filter(t=>t.status==="done"&&t.result).slice(-MAX_HISTORY).map(t=>({question:t.lib?libHistoryQuestion(t.question):t.question, answer:answerText(t.result).slice(0, MAX_HISTORY_ANSWER).trim()})).filter(h=>h.answer);
   const screen=askScreen();
   const t={question:q, told:askToldText(screen, true), status:"starting", progress:[], partial:"", result:null, error:"", calm:false, jobId:null, lastContinue:0, note:"", contNote:""};
   t.asked=new Date().toISOString();   // shown in the exported or copied answer
@@ -1686,7 +1707,7 @@ function answerHTML(t, ti){
       return `<li value="${esc(s.n)}" id="src-${ti}-${esc(s.n)}"><div class="t1">${blank(s.title)?"Filing document":esc(s.title)}</div>${meta?`<div class="t2">${meta}</div>`:""}
         ${!blank(s.quote)?`<blockquote class="quote">“${esc(s.quote)}”</blockquote>`:""}
         ${key?docButtonHTML(key, isNum(s.startPage)&&+s.startPage>0?`Open at page ${count(s.startPage)}`:"Open document", isNum(s.startPage)?s.startPage:""):""}</li>`; }).join("")}</ol></div>`;
-  h+=answerActsHTML(ti);
+  h+=answerActsHTML(ti)+libSaveHTML(t, ti);
   const bits=[];
   if(lookups.length) bits.push("Looked up: "+lookups.map(l=>esc(l&&(l.detail||l.tool)||"")).filter(Boolean).join("; ")+".");
   const spent=answerCostText(u); if(spent) bits.push(spent);
@@ -1833,7 +1854,7 @@ async function copyAnswer(t){
   }catch{ toast("Your browser didn't allow copying. Use Export answer to download it as a Word document instead."); }
 }
 function turnHTML(t, ti){
-  const q=`${t.saved?pastLabelHTML(t):""}<div class="ccmsg u">${esc(t.question)}</div>${t.told?`<p class="t2 told">${esc(t.told)}</p>`:""}`;
+  const q=`${t.saved?pastLabelHTML(t):""}${t.lib?libLabelHTML(t, ti):""}<div class="ccmsg u">${esc(t.question)}</div>${t.told?`<p class="t2 told">${esc(t.told)}</p>`:""}`;
   const wrap=inner=>`<div class="turn" id="turn-${ti}">${q}${inner}</div>`;
   if(t.status==="error") return wrap(t.calm ? `<div class="info ask-calm" role="status"><span>${esc(t.error)}</span></div>` : `<div class="ccmsg err" role="alert">${esc(t.error)}</div>`);
   if(t.status==="done") return wrap(`<div class="ccmsg a done">${answerHTML(t, ti)}</div>`);
@@ -1867,7 +1888,7 @@ function askPanelHTML(){
     <div class="ask-b" id="askBody" data-keep>
       ${off?`<div class="info" id="askOff" role="status"><span><b>Questions aren't set up yet.</b> ${isCorpDev()?"Set ANTHROPIC_API_KEY on Supabase and deploy the snl-chat function (see the README).":"Ask Corp Dev to finish the set-up."}</span></div>`:""}
       <p class="t2" id="askSees">Claude sees only your question, a short description of what is on this screen, and what S&amp;P returns for it: nothing else from this site${ORG?` or from ${esc(ORG)}`:""}. Check figures against the source before you use them.</p>
-      ${a.turns.length?`<div class="cclog" id="askLog" aria-live="polite">${a.turns.map(turnHTML).join("")}</div>`:start+pastHTML()}
+      ${a.turns.length?`<div class="cclog" id="askLog" aria-live="polite">${a.turns.map(turnHTML).join("")}</div>`:start+libStartHTML()}
     </div>
     <div class="ask-f">
       <div class="ccform"><textarea id="ask_input" data-bind="ask.draft" rows="2" maxlength="${MAX_QUESTION}" aria-label="${a.turns.length?"Follow-up question":"Question"}" placeholder="${a.turns.length?"Ask a follow-up question":"Type a question"}"${limited?" disabled":""}>${esc(a.draft)}</textarea>
@@ -1996,6 +2017,211 @@ function pastHTML(){
       + problem + (p.more && !p.err ? `<div><button type="button" class="btn sm" id="pastMore" data-act="past-more" ${p.loading?"disabled":""}>${p.loading?"Loading…":"Show more"}</button></div>` : "");
   return `<section class="past" id="askPast" aria-labelledby="pastH"><h3 id="pastH">Past answers</h3>
     ${p.openErr?`<p class="err" id="pastOpenErr" role="alert">${esc(p.openErr)}</p>`:""}${body}</section>`;
+}
+
+/* ---------- Ask Claude: the team library ----------
+   Answers a login chose to share with everyone who has a login on this site (migration 0007). The list and an opened
+   entry are read straight from snl_library, as Past answers are read from snl_jobs: row-level security lets every
+   login read it, so the list needs no function call and works even before snl-chat is redeployed. Saving, renaming
+   and removing go through the snl-chat function, which copies the answer and checks who is asking.
+   An entry was written by someone else: every part of it is shown through esc(), and when a reader follows it up it
+   goes back to Claude only as one labelled turn of history, as bounded as any other. */
+const LIB_COLS = "id,job_id,title,tags,companies,saved_by,saved_by_name,saved_at,answered_at";
+const LIB_PAGE = 10, LIB_TITLE = 120, LIB_TAGS = 5, LIB_TAG = 30;
+const LIB_NOTICE = "Everyone with a login on this site will be able to read this question and its answer, including which companies it is about. It stays until you or Corp Dev remove it.";
+const LIB_GONE = "That entry is no longer in the team library. Someone may have removed it.";
+// tab: which list an empty conversation starts with; rows: the list (null until loaded); seq: the latest load, so an
+// older answer is dropped; q: the search box; applied: the search the rows are for; missing: the table isn't there
+// (migration not run); form: the save or edit form {turn, mode, title, tags, busy, err}; confirm: a removal being
+// confirmed {turn, busy, err}
+function freshLib(){ return {tab:"past", rows:null, loading:false, seq:0, err:"", failedMore:false, more:false, q:"", applied:"", missing:false, opening:"", openErr:"", form:null, confirm:null}; }
+S.lib = freshLib();
+const libMissingErr = e => !!e && (e.code==="PGRST205" || e.code==="42P01" || (/snl_library/.test(String(e.message||"")) && /does not exist|schema cache/.test(String(e.message||""))));
+const libMissingText = () => "The team library isn't set up yet, so answers can't be shared. " + (isCorpDev() ? "To set it up, run supabase/migrations/0007_answer_library.sql in the Supabase SQL editor (see the README)." : "Ask Corp Dev to set it up.") + " Everything else here works as before.";
+const libMayChange = savedBy => !!S.session && (isCorpDev() || savedBy===S.session.uid);
+const libTagsHTML = tags => { const a=(Array.isArray(tags)?tags:[]).filter(x=>!blank(x)).map(String); return a.length ? `<span class="libtags">${a.map(x=>`<span class="libtag">${esc(x)}</span>`).join("")}</span>` : ""; };
+/* What a library entry's question is sent to Claude as when a reader follows it up: labelled as a colleague's, and
+   no longer than any question. */
+const libHistoryQuestion = q => ("(A colleague's question, saved in the team library) "+String(q??"")).slice(0, MAX_QUESTION);
+/* The words in the search box, each made safe to use inside a pattern: no wildcards, commas, brackets or quotes. */
+function libWords(q){ return String(q||"").toLowerCase().replace(/[%_\\*,()"'.:;]/g," ").split(/\s+/).filter(Boolean).slice(0,6); }
+function libQuery(){
+  let q=S.sb.from("snl_library").select(LIB_COLS);
+  for(const w of libWords(S.lib.applied)) q=q.ilike("search_text", `%${w}%`);
+  return q.order("saved_at",{ascending:false});
+}
+/* The first page of the list (again), or the next one with "Show more". */
+async function loadLib(more){
+  const l=S.lib; if(!S.session || (more && l.loading)) return;
+  const from = more && l.rows ? l.rows.length : 0, seq=++l.seq;
+  l.loading=true; l.err=""; renderAsk();
+  let data=null, error=null;
+  try{ ({data, error}=await libQuery().range(from, from+LIB_PAGE)); }catch(e){ error=e; }
+  if(S.lib!==l || !S.session || seq!==l.seq) return;   // signed out, or a newer search meanwhile
+  l.loading=false;
+  if(libMissingErr(error)){ l.missing=true; l.rows=[]; l.more=false; renderAsk(); return; }
+  if(error || !Array.isArray(data)){ l.err="Couldn't load the team library. Check your connection and try again."; l.failedMore=!!from; renderAsk(); return; }
+  l.missing=false;
+  const base=from ? l.rows : [], ids=new Set(base.map(r=>r.id));
+  l.rows=base.concat(data.slice(0, LIB_PAGE).filter(r=>r && !ids.has(r.id))); l.more=data.length>LIB_PAGE;
+  renderAsk();
+}
+function libSearch(){ const l=S.lib; l.applied=String(l.q||"").replace(/\s+/g," ").trim(); l.rows=null; l.openErr=""; loadLib(false); }
+function libClear(){ const l=S.lib; l.q=""; l.applied=""; l.rows=null; l.openErr=""; loadLib(false); }
+function libTab(tab){ const l=S.lib; l.tab=tab==="lib"?"lib":"past"; if(l.tab==="lib" && l.rows===null && !l.loading) loadLib(false); renderAsk(); }
+/* Back to an empty conversation, showing the library. */
+function libShowList(){ S.lib.form=null; S.lib.confirm=null; S.lib.tab="lib"; S.lib.openErr=""; newConversation(); loadLib(false); }
+/* A library entry as a turn of the conversation, the same shape jobTurn makes; lib says where it came from. */
+function libTurn(row){
+  const a=row.answer&&typeof row.answer==="object"&&!Array.isArray(row.answer)?row.answer:{};
+  return {question:String(row.question??""), told:"", status:"done", progress:[], partial:"", result:{...a, model:blank(row.model)?"":String(row.model)}, error:"", calm:false, jobId:null, lastContinue:0, note:"", contNote:"",
+    asked:String(row.asked_at||""), saved:false, lib:{id:row.id, title:String(row.title??""), tags:Array.isArray(row.tags)?row.tags.map(String):[], savedBy:row.saved_by, savedByName:String(row.saved_by_name??""), savedAt:row.saved_at, answeredAt:row.answered_at, removed:false, note:""}};
+}
+async function openLib(id){
+  const l=S.lib, a=S.ask;
+  if(!id || l.opening || a.turns.length) return;
+  l.opening=id; l.openErr=""; renderAsk();
+  let data=null, error=null;
+  try{ ({data, error}=await S.sb.from("snl_library").select("*").eq("id", id).maybeSingle()); }catch(e){ error=e; }
+  if(S.lib!==l || !S.session) return;
+  l.opening="";
+  if(error || !data){ l.openErr = error ? "Couldn't open that entry. Check your connection and try again." : LIB_GONE; if(!error) libDropRow(id); renderAsk(); return; }
+  if(S.ask!==a || a.turns.length){ renderAsk(); return; }
+  a.turns=[libTurn(data)]; a.scroll=0; renderAsk();
+}
+function libDropRow(id){ if(S.lib.rows) S.lib.rows=S.lib.rows.filter(r=>r.id!==id); }
+function libPatchRow(e){ if(S.lib.rows) S.lib.rows=S.lib.rows.map(r=>r.id===e.id?{...r, title:e.title, tags:e.tags}:r); }
+/* Whether one of the login's own answers is already in the library, asked once when the answer is first shown. */
+async function libCheck(t){
+  let data=null, error=null;
+  try{ ({data, error}=await S.sb.from("snl_library").select(LIB_COLS).eq("job_id", t.jobId).maybeSingle()); }catch(e){ error=e; }
+  if(!S.session) return;
+  if(libMissingErr(error)) S.lib.missing=true;
+  t.libChk = error ? "failed" : "done";
+  if(!error) t.libEntry=data||null;
+  renderAsk();
+}
+function libSuggestTitle(q){ const s=String(q??"").replace(/\s+/g," ").trim(); return s.length>LIB_TITLE ? s.slice(0,LIB_TITLE-1).trimEnd()+"…" : s; }
+function libParseTags(s){ const out=[], seen=new Set(); for(const x of String(s||"").split(",")){ const v=x.replace(/\s+/g," ").trim(); if(v && !seen.has(v.toLowerCase())){ seen.add(v.toLowerCase()); out.push(v); } } return out; }
+function libOpenForm(t){
+  if(!t) return;
+  S.lib.confirm=null; t.libJust="";
+  S.lib.form = t.lib ? {turn:t, mode:"edit", title:t.lib.title, tags:t.lib.tags.join(", "), busy:false, err:""}
+    : {turn:t, mode:"save", title:libSuggestTitle(t.question), tags:"", busy:false, err:""};
+  renderAsk(); const el=document.getElementById("lib_title"); if(el){ el.focus({preventScroll:true}); el.select(); }
+  document.getElementById("libForm")?.scrollIntoView({block:"nearest"});
+}
+/* An older snl-chat (before the library) answers "Unknown action": say what to do about it. */
+const libOld = r => r.err==="bad" && /^Unknown action/.test(String(r.msg||""));
+const libNotDeployed = () => isCorpDev() ? "Saving to the team library needs the latest questions function. Run: supabase functions deploy snl-chat --no-verify-jwt (see the README), then try again." : "Saving to the team library isn't switched on yet. Ask Corp Dev to update the site.";
+async function libSubmit(){
+  const f=S.lib.form; if(!f || f.busy) return;
+  const t=f.turn, title=f.title.replace(/\s+/g," ").trim(), tags=libParseTags(f.tags);
+  f.err = !title ? "Give the entry a title." : title.length>LIB_TITLE ? `Keep the title to ${LIB_TITLE} characters.` : tags.length>LIB_TAGS ? `Use up to ${LIB_TAGS} tags.` : tags.some(x=>x.length>LIB_TAG) ? `Keep each tag to ${LIB_TAG} characters.` : "";
+  if(f.err){ renderAsk(); return; }
+  f.busy=true; renderAsk();
+  const r=await callFn("snl-chat", f.mode==="edit" ? {action:"library_update", id:t.lib.id, title, tags} : {action:"library_save", jobId:t.jobId, title, tags});
+  if(!S.session || S.lib.form!==f) return;   // signed out, or the form was closed meanwhile
+  f.busy=false;
+  if(r.data && r.data.entry){
+    const e=r.data.entry; S.lib.form=null;
+    if(f.mode==="edit"){ t.lib.title=String(e.title??""); t.lib.tags=Array.isArray(e.tags)?e.tags.map(String):[]; libPatchRow(e); }
+    else { t.libEntry=e; t.libChk="done"; t.libJust=r.data.existing?"existing":"saved"; S.lib.rows=null; }   // the list is read again when it is next shown
+    renderAsk(); return;
+  }
+  if(r.err==="signin") return;
+  if(r.err==="library_missing"){ S.lib.missing=true; S.lib.form=null; renderAsk(); return; }
+  if(r.err==="not_found" && f.mode==="edit"){ S.lib.form=null; libGone(t, false); renderAsk(); return; }
+  f.err = libOld(r) ? libNotDeployed() : errText(r);
+  renderAsk();
+}
+function libGone(t, already){
+  if(!t.lib) return;
+  t.lib.removed=true; libDropRow(t.lib.id);
+  t.lib.note = already===true ? "Removed from the team library. It is gone for everyone." : "This entry is no longer in the team library: someone removed it. You can still read it here and follow it up.";
+}
+async function libRemove(){
+  const c=S.lib.confirm; if(!c || c.busy) return;
+  const t=c.turn, id=t.lib ? t.lib.id : t.libEntry && t.libEntry.id; if(!id) return;
+  c.busy=true; c.err=""; renderAsk();
+  const r=await callFn("snl-chat",{action:"library_remove", id});
+  if(!S.session || S.lib.confirm!==c) return;
+  c.busy=false;
+  if(r.err==="signin") return;
+  if((r.data && r.data.removed) || r.err==="not_found"){
+    S.lib.confirm=null;
+    if(t.lib) libGone(t, !r.err);
+    else { libDropRow(id); t.libEntry=null; t.libJust="removed"; }
+    renderAsk(); return;
+  }
+  if(r.err==="library_missing"){ S.lib.missing=true; S.lib.confirm=null; renderAsk(); return; }
+  c.err = libOld(r) ? libNotDeployed() : errText(r); renderAsk();
+}
+function libFormHTML(f){
+  const edit=f.mode==="edit";
+  return `<div class="libbox" id="libForm" role="group" aria-labelledby="libFormH"><h3 id="libFormH">${edit?"Edit title and tags":"Save to team library"}</h3>
+    <label class="f">Title<input type="text" id="lib_title" data-bind="lib.form.title" maxlength="${LIB_TITLE}" value="${esc(f.title)}"></label>
+    <label class="f">Tags (optional)<input type="text" id="lib_tags" data-bind="lib.form.tags" maxlength="200" value="${esc(f.tags)}" placeholder="For example: Florida, homeowners, forms"></label>
+    <p class="t2">Up to ${LIB_TAGS} tags, separated by commas, to help colleagues find it.</p>
+    ${edit?"":`<p class="libnotice" id="libNotice">${esc(LIB_NOTICE)}</p>`}
+    ${f.err?`<p class="err" id="libFormErr" role="alert">${esc(f.err)}</p>`:""}
+    <div class="inline"><button type="button" class="btn primary sm" data-act="lib-save" ${f.busy?"disabled":""}>${f.busy?"Saving…":edit?"Save changes":"Save"}</button><button type="button" class="btn sm ghost" data-act="lib-cancel" ${f.busy?"disabled":""}>Cancel</button></div></div>`;
+}
+function libConfirmHTML(c){
+  return `<div class="libbox" id="libConfirm" role="group" aria-label="Remove from the team library"><p><b>Remove this from the team library?</b> It is gone for everyone, straight away.</p>
+    ${c.err?`<p class="err" id="libRemoveErr" role="alert">${esc(c.err)}</p>`:""}
+    <div class="inline"><button type="button" class="btn primary sm" data-act="lib-remove-yes" ${c.busy?"disabled":""}>${c.busy?"Removing…":"Yes, remove it"}</button><button type="button" class="btn sm ghost" data-act="lib-remove-no" ${c.busy?"disabled":""}>Keep it</button></div></div>`;
+}
+/* Under one of the login's own finished answers: Save to team library, the form, or where it already is. */
+function libSaveHTML(t, ti){
+  if(!t || t.lib || !t.jobId || t.status!=="done" || !S.session) return "";
+  const l=S.lib, c=l.confirm&&l.confirm.turn===t ? l.confirm : null;
+  if(l.missing) return `<p class="t2" id="libMissingNote">${esc(libMissingText())}</p>`;
+  if(t.libChk===undefined){ t.libChk="checking"; setTimeout(()=>libCheck(t), 0); }
+  if(l.form && l.form.turn===t) return libFormHTML(l.form);
+  const e=t.libEntry;
+  if(e){
+    const lead = t.libJust==="saved" ? "<b>Saved to the team library.</b> Colleagues find it under Team library at the start of a new conversation in this panel."
+      : t.libJust==="existing" ? "<b>This answer was already in the team library.</b>" : "<b>This answer is in the team library.</b>";
+    return `<div class="libbox" id="libSaved" role="status"><p>${lead} Title: “${esc(e.title)}”. Saved by ${esc(e.saved_by_name||"a colleague")} on ${esc(fmtAt(e.saved_at))}.</p>
+      ${c?libConfirmHTML(c):`<div class="inline"><button type="button" class="btn sm" data-act="lib-goto">Go to the team library</button>${libMayChange(e.saved_by)?`<button type="button" class="btn sm" data-act="lib-remove" data-turn="${ti}">Remove from library</button>`:""}</div>`}</div>`;
+  }
+  return (t.libJust==="removed" ? `<p class="t2" id="libRemoved" role="status">Removed from the team library. It is gone for everyone.</p>` : "")
+    + `<div class="inline libsave"><button type="button" class="btn sm" data-act="lib-open-form" data-turn="${ti}" ${t.libChk==="checking"?"disabled":""} title="Shares this question and answer with everyone who has a login on this site">Save to team library</button></div>`;
+}
+/* Above a library entry opened from the list: who saved it, when, how old the facts are, and what may be done. */
+function libLabelHTML(t, ti){
+  const e=t.lib, l=S.lib, f=l.form&&l.form.turn===t ? l.form : null, c=l.confirm&&l.confirm.turn===t ? l.confirm : null;
+  const single=S.ask.turns.length===1 && !activeTurn();
+  let acts="";
+  if(e.removed) acts=`<p class="t2" id="libRemoved" role="status">${esc(e.note)}</p>`;
+  else if(c) acts=libConfirmHTML(c);
+  else if(f) acts=libFormHTML(f);
+  else if(libMayChange(e.savedBy)) acts=`<div class="inline"><button type="button" class="btn sm" data-act="lib-edit" data-turn="${ti}">Edit title and tags</button><button type="button" class="btn sm" data-act="lib-remove" data-turn="${ti}">Remove from library</button></div>`;
+  return `<div class="libhead" id="libHead"><p class="lt">${esc(e.title)}</p>${libTagsHTML(e.tags)}
+    <p id="libSavedBy">Saved to the team library by ${esc(e.savedByName||"a colleague")} on ${esc(fmtAt(e.savedAt))}. <span class="nw">Answered ${esc(fmtAt(e.answeredAt))}.</span></p>
+    <p class="t2">The figures are as S&amp;P had them when it was answered: check them against the source before you use them. A follow-up question starts a conversation of your own, which only you can see unless you save it.</p>
+    ${acts}${single?`<p class="t2"><button type="button" class="lnk" data-act="lib-back">Back to team library</button></p>`:""}</div>`;
+}
+/* The start of an empty conversation: Past answers and Team library as two tabs (the panel is 480px wide at most). */
+function libStartHTML(){
+  const lib=S.lib.tab==="lib";
+  return `<div class="seg libtabs" role="tablist" aria-label="Earlier answers"><button type="button" class="btn sm" role="tab" id="tabPast" aria-selected="${!lib}" data-act="lib-tab" data-tab="past">Past answers</button><button type="button" class="btn sm" role="tab" id="tabLib" aria-selected="${lib}" data-act="lib-tab" data-tab="lib">Team library</button></div>`
+    + (lib ? libListHTML() : pastHTML());
+}
+function libListHTML(){
+  const l=S.lib, problem = l.err ? `<div class="banner" id="libErr" role="alert"><span>${esc(l.err)}</span><button class="btn sm" data-act="lib-retry">Try again</button></div>` : "";
+  let body;
+  if(l.missing) body=`<div class="info" id="libMissing" role="status"><span>${esc(libMissingText())}</span></div>`;
+  else if(l.rows===null) body = problem || `<p class="t2" id="libLoading">Loading the team library…</p>`;
+  else if(!l.rows.length) body = problem || `<p class="t2" id="libEmpty">${l.applied ? `Nothing in the team library matches “${esc(l.applied)}”. Try fewer or different words.` : "Nothing in the team library yet. To share a good answer, open it and choose Save to team library."}</p>`;
+  else body = `<ul class="pastlist" id="libList">${l.rows.map(r=>`<li><button type="button" class="pastq" data-act="lib-open" data-id="${esc(r.id)}"${l.opening?` aria-disabled="true"`:""}><span class="pq">${esc(shortText(r.title, 140))}</span>
+      <span class="t2">${l.opening===r.id?"Opening…":`Saved by ${esc(r.saved_by_name||"a colleague")} on ${esc(fmtAt(r.saved_at))} · Answered ${esc(fmtAt(r.answered_at))}`}</span>${libTagsHTML(r.tags)}</button></li>`).join("")}</ul>`
+      + problem + (l.more && !l.err ? `<div><button type="button" class="btn sm" id="libMore" data-act="lib-more" ${l.loading?"disabled":""}>${l.loading?"Loading…":"Show more"}</button></div>` : "");
+  const search = l.missing ? "" : `<div class="libsearch" role="search"><input type="search" id="lib_q" data-bind="lib.q" value="${esc(l.q)}" maxlength="200" placeholder="Search titles, questions, tags, companies" aria-label="Search the team library"><button type="button" class="btn sm" data-act="lib-search">Search</button>${l.applied?`<button type="button" class="btn sm ghost" data-act="lib-clear">Clear search</button>`:""}</div>`;
+  return `<section class="past lib" id="askLib" aria-labelledby="libH"><h3 id="libH">Team library</h3>
+    <p class="t2 intro">Answers colleagues chose to share with everyone who has a login on this site, newest first.</p>${search}
+    ${l.openErr?`<p class="err" id="libOpenErr" role="alert">${esc(l.openErr)}</p>`:""}${body}</section>`;
 }
 
 /* ---------- Statutory ---------- */
@@ -3266,6 +3492,19 @@ document.addEventListener("click", e=>{
     case "past-open": openPast(t.dataset.id); break;
     case "past-more": loadPast(true); break;
     case "past-retry": loadPast(S.past.failedMore); break;
+    case "lib-tab": libTab(t.dataset.tab); break;
+    case "lib-search": libSearch(); break;
+    case "lib-clear": libClear(); break;
+    case "lib-more": loadLib(true); break;
+    case "lib-retry": loadLib(S.lib.failedMore); break;
+    case "lib-open": openLib(t.dataset.id); break;
+    case "lib-back": case "lib-goto": libShowList(); break;
+    case "lib-open-form": case "lib-edit": libOpenForm(S.ask.turns[+t.dataset.turn]); break;
+    case "lib-save": libSubmit(); break;
+    case "lib-cancel": S.lib.form=null; renderAsk(); break;
+    case "lib-remove": { const at=S.ask.turns[+t.dataset.turn]; if(at){ S.lib.form=null; S.lib.confirm={turn:at, busy:false, err:""}; renderAsk(); } break; }
+    case "lib-remove-yes": libRemove(); break;
+    case "lib-remove-no": S.lib.confirm=null; renderAsk(); break;
     case "answer-export": { const at=S.ask.turns[+t.dataset.turn]; if(at && at.status==="done") exportAnswer(at); break; }
     case "answer-copy": { const at=S.ask.turns[+t.dataset.turn]; if(at && at.status==="done") copyAnswer(at); break; }
     case "goto-source": { const el=document.getElementById(`src-${t.dataset.turn}-${t.dataset.n}`); if(el){ document.querySelectorAll(".srcs li.hit").forEach(x=>x.classList.remove("hit")); el.classList.add("hit"); el.scrollIntoView({block:"center"}); el.querySelector("button")?.focus({preventScroll:true}); } break; }
@@ -3335,6 +3574,8 @@ document.addEventListener("keydown", e=>{
   if(e.target.id==="pf_code" && e.key==="Enter"){ e.preventDefault(); pfFacts(); return; }
   if(e.target.id==="sn_find" && e.key==="Enter"){ e.preventDefault(); snapLookup(); return; }
   if(e.target.id==="su_like" && e.key==="Enter"){ e.preventDefault(); discover(null, false); return; }
+  if(e.target.id==="lib_q" && e.key==="Enter"){ e.preventDefault(); libSearch(); return; }
+  if((e.target.id==="lib_title" || e.target.id==="lib_tags") && e.key==="Enter"){ e.preventDefault(); libSubmit(); return; }
   if(e.target.id==="ask_input" && e.key==="Enter" && !e.shiftKey && !e.isComposing){ e.preventDefault(); askQuestion(); return; }
   if(e.key==="Enter" && e.target.closest && e.target.closest("#pwForm")){ e.preventDefault(); savePassword(); return; }
   if(e.key==="Escape" && S.drawer){ closeDrawer(); return; }
@@ -3355,6 +3596,7 @@ function resetState(){
   S.conn=null;
   S.live=null;
   S.past=freshPast();
+  S.lib=freshLib();
   S.w=freshWatch();
   S.pf=freshProfile();   // the template's bytes and any built file go with it
   S.snap=freshSnap();
