@@ -17,6 +17,7 @@ import type { Env } from "./http.ts";
 import { credsReady, Snowflake, snowflakeCreds, SnowflakeError } from "./snowflake.ts";
 import { type Gate, makeGate, NOT_CONFIGURED, planLimits, Spgmi, SpgmiError } from "./spgmi.ts";
 import { getMapping, parseStatQuery, savedOrFreshStatutory, STAT_FIELDS } from "./statutory.ts";
+import { cutPages, openPdf, originalPage, rangeText } from "./pdf.ts";
 
 
 
@@ -24,10 +25,18 @@ import { getMapping, parseStatQuery, savedOrFreshStatutory, STAT_FIELDS } from "
 export const LIMITS = {
   toolCalls: 24,        // lookups (searches, documents, statutory queries) for one question
   rounds: 14,           // back-and-forth steps with Claude
-  docs: 8,              // filing documents read
-  docPages: 100,        // pages in one document
-  totalPages: 150,      // document pages for one question (Anthropic: 1,500 to 3,000 text tokens a page, plus an image of the page)
-  docBytes: 30_000_000, // size of one document
+  docs: 8,              // filing documents read (each part of a long document counts as one)
+  // Pages in one read: a whole document up to this length, or a range of a longer one. Anthropic counts 1,500 to
+  // 3,000 text tokens a page plus an image of the page (about 3,100 to 4,600 tokens in all), so 150 pages is
+  // about 465,000 to 690,000 tokens. The API itself takes up to 600 pages a PDF on a 1M-token model, but 600
+  // dense pages would not fit in the context window.
+  docPages: 150,
+  totalPages: 200,      // document pages for one question: about 620,000 to 920,000 tokens, most of the 1M window
+  contextTokens: 900_000, // a read is refused if the request would pass this (leaves room for Claude's reply)
+  tokensPerPage: 4_000, // the estimate for pages not yet sent; pages already sent are measured
+  docBytes: 40_000_000, // size of one download: a cut holds the file about twice over in 256 MB of memory
+  sendBytes: 32_000_000, // size of one document or part sent to Claude (Anthropic's 32 MB request limit)
+  cutMs: 1_000,         // time spent cutting PDFs in one function call (2 seconds of CPU a call)
   bytesPerPage: 50_000, // a document whose pages can't be counted is charged one page for each 50 KB
   rowsToClaude: 150,    // filings from one search shown to Claude
   searchRequests: 40,   // S&P requests for one search
@@ -46,7 +55,7 @@ export const orgName = (env: Env): string => (env("ORG_NAME") ?? "").trim();
 export const systemPrompt = (org = ""): string => `You answer questions for ${org ? org + "'s" : "an insurer's"} Strategy and Corporate Development team from S&P Global Market Intelligence data. The people asking are corporate development professionals, not engineers.
 
 What you can use
-- SNL Insurance Product Filings: rate, rule and form filings that insurers make with US state regulators. search_filings finds them; read_filing_document attaches a filing's original document so you can read it.
+- SNL Insurance Product Filings: rate, rule and form filings that insurers make with US state regulators. search_filings finds them; read_filing_document attaches a filing's original document, or a range of its pages, so you can read it.
 - SNL statutory financials (premiums by line and state, policyholder surplus, loss, expense and combined ratios) through query_statutory, when it is set up.
 - resolve_entity turns a company name or NAIC code into the S&P ids that search_filings needs. resolve_entities does the same for several names in one call, and turns an insurer group's name into all of its member companies.
 Take facts about filings, forms, rates and statutory figures only from these tools. Don't fill gaps from other knowledge. If the data doesn't cover something, say so and say what would answer it. You have no access to ${org ? org + "'s" : "the team's"} deals, pipeline or internal information; if asked, say this tool only covers S&P's insurance data.
@@ -58,6 +67,8 @@ Rules that matter
 - S&P can't list every company that filed in a market, so a question about a market or a segment rather than named companies (for example "which carriers filed high net worth homeowners forms in Florida this year") needs a list of companies to check. Choosing that list is the one place to use your general knowledge: pick the carriers or groups most likely to write that business there, usually 10 to 15, and look them all up in one resolve_entities call, with insurer groups under groups so every member company comes back. Then search the searchBatches it returns. In the answer, say plainly that the carriers checked are your own choice, not a list from S&P, and may miss carriers. Describe the results as covering the carriers checked, never the whole market. Name the candidates that weren't in the company list and tell the user they can add them on the Filings view by S&P company id or institution id.
 - Narrow a search before you run it, so it fits the limits on one question: only the states asked about, dates no wider than the question needs (each 364 days of dates costs one S&P request for every 10 companies, so "this year" is one request for each 10), and the type_of_insurance_ids and filing_type_ids that fit the question (for example homeowners and form filings). You see at most ${LIMITS.rowsToClaude} filings from one search, so a wide search hides the rest. One search takes up to ${MAX_IDS} ids. To find a filing you already know again, put its tracking number in tracking_numbers, with its company and state.
 - Reading documents is slow and counts against S&P's request limit, so read the filings that decide the answer, not every filing. Start from the search results (filing type, description, sub-type and dates), then read what you need. When you state something a document says, rely on the document so the page citation is recorded.
+- Long filings are read in parts. One read takes up to ${LIMITS.docPages} pages and one question up to ${LIMITS.totalPages} pages in all; a search row gives each filing's page count. A SERFF filing usually opens with the filing summary, then the rate information and the form schedule; the long tail is actuarial exhibits and supporting documents. So start with the front of a long filing (a read without first_page and last_page gives you its first pages), look there for the form schedule and the rate information, and read a further range only when the question needs it, for example an exhibit the front pages point to. Keep ranges as short as the question allows, so the pages last for every filing you need.
+- When you read only part of a document, say in the answer which pages of how many you read (for example "pages 1 to 120 of 842"), and don't imply that you read the rest. Give page numbers as the filing numbers them: the tool result says which page of the filing a part starts at.
 - Insurers often file separate programs for different customers, for example a private client or high net worth program alongside a standard program. When asked whether forms differ by customer segment, work from the program, product and form names and numbers in the filings, say what you based each classification on, and follow any mapping the user gives (for example which product is the private client one). If the filings don't settle it, say so.
 - There are limits on lookups and document pages for one question. If a tool says a limit is reached, answer from what you have and say what you couldn't check.
 - The user asks from the Filings view or the Statutory view. When a search or a set of figures is on their screen, a note after their question says what it is. Treat "these filings" or "these companies" as that. Use the same inputs with your tools to see the data before you answer about it.
@@ -129,12 +140,16 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
   },
   {
     name: "read_filing_document",
-    description: "Attach one filing's original document (usually a PDF) so you can read it and cite its pages. Give the documentId from a search row, or its filingVersionId when it has no documentId. Each read costs one S&P request and counts against the page limit.",
+    description: `Attach one filing's original document (usually a PDF), or a range of its pages, so you can read it and cite its pages. Give the documentId from a search row, or its filingVersionId when it has no documentId. One read takes up to ${LIMITS.docPages} pages: a longer document is read in parts, and a read without first_page and last_page attaches its first pages. Page numbers are the filing's own, counting from 1. Each read costs one S&P request, counts as one of the ${LIMITS.docs} documents and counts its pages against the ${LIMITS.totalPages}-page limit for the question.`,
     strict: true,
     input_schema: {
       type: "object",
-      properties: { document_id: { type: ["integer", "null"], description: "documentId from a search row" }, filing_version_id: { type: ["string", "null"], description: "filingVersionId from a search row, when there is no documentId" } },
-      required: ["document_id", "filing_version_id"],
+      properties: {
+        document_id: { type: ["integer", "null"], description: "documentId from a search row" }, filing_version_id: { type: ["string", "null"], description: "filingVersionId from a search row, when there is no documentId" },
+        first_page: { type: ["integer", "null"], description: "First page to read, or null to start at page 1" },
+        last_page: { type: ["integer", "null"], description: `Last page to read, or null for as many as one read takes (${LIMITS.docPages})` },
+      },
+      required: ["document_id", "filing_version_id", "first_page", "last_page"],
       additionalProperties: false,
     },
   },
@@ -159,7 +174,9 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
 
 // ---------- what an answer keeps between steps ----------
 
-export type DocRec = { documentId: number | null; filingVersionId: string | null; fileId: string; title: string; company: string | null; state: string | null; trackingNumber: string | null; pages: number | null };
+export type DocRec = { documentId: number | null; filingVersionId: string | null; fileId: string; title: string; company: string | null; state: string | null; trackingNumber: string | null; pages: number | null;
+  /** For part of a document: the filing's pages that were sent (page firstPage is page 1 of the part). Missing for a whole document. */
+  firstPage?: number; lastPage?: number };
 export type Source = { n: number; documentId: number | null; filingVersionId: string | null; title: string; company: string | null; state: string | null; trackingNumber: string | null; pages: string | null; startPage: number | null; quote: string | null };
 export type Segment = { text: string; cites: number[] };
 export type Table = { title: string; columns: string[]; rows: string[][]; notes: string[] };
@@ -186,6 +203,9 @@ export type ChatState = {
   byModel?: Record<string, ModelTokens>;
   /** Some tokens were counted before costs were tracked, so the answer's cost can't be known. */
   unpriced?: boolean;
+  /** The input tokens of the latest request to Claude, and the document pages attached since, so a read that
+      would not fit in the context window is refused before it is sent. */
+  promptTokens?: number; pendingPages?: number;
 };
 export type Turn = { question: string; answer: string };
 
@@ -382,8 +402,9 @@ export function buildAnswer(content: Anthropic.Beta.BetaContentBlock[], docs: Do
       if (c.type !== "page_location" && c.type !== "char_location") continue;
       const d = docs[c.document_index];
       if (!d) continue;
-      const first = c.type === "page_location" ? c.start_page_number : null;
-      const lastPage = c.type === "page_location" ? Math.max(c.start_page_number, c.end_page_number - 1) : null;
+      // A part of a long document restarts at page 1: its pages are given back as the filing numbers them.
+      const first = c.type === "page_location" ? originalPage(c.start_page_number, d.firstPage ?? 1) : null;
+      const lastPage = c.type === "page_location" ? originalPage(Math.max(c.start_page_number, c.end_page_number - 1), d.firstPage ?? 1) : null;
       const key = `${c.document_index}|${first}|${lastPage}`;
       let n = byKey.get(key);
       if (!n) {
@@ -457,6 +478,25 @@ export function fileIdsOf(state: Record<string, unknown> | null): string[] {
   return [...(s?.docs ?? []).map((d) => d.fileId), ...(s?.orphans ?? [])].filter((x) => typeof x === "string" && x);
 }
 
+/** One line for each document Claude read only part of, for the notes under the answer: "Claude read pages 1 to
+    150 of 842 of filing CALL-1, not the whole document. ..." Ranges of the same document are listed together. */
+export function partReadNotes(docs: DocRec[]): string[] {
+  const groups = new Map<string, DocRec[]>();
+  for (const d of docs) {
+    if (d.firstPage === undefined || d.lastPage === undefined) continue;
+    const key = d.documentId !== null ? `d:${d.documentId}` : `v:${d.filingVersionId}`;
+    groups.set(key, [...(groups.get(key) ?? []), d]);
+  }
+  return [...groups.values()].map((parts) => {
+    const sorted = [...parts].sort((a, b) => a.firstPage! - b.firstPage!), of = Math.max(...parts.map((p) => p.pages ?? 0)) || null;
+    const ranges = sorted.map((p) => (p.firstPage === p.lastPage ? `${p.firstPage}` : `${p.firstPage} to ${p.lastPage}`));
+    const list = ranges.length === 1 ? ranges[0] : `${ranges.slice(0, -1).join(", ")} and ${ranges.at(-1)}`;
+    const word = sorted.length === 1 && sorted[0].firstPage === sorted[0].lastPage ? "page" : "pages";
+    const d = sorted[0], name = d.trackingNumber ?? (d.documentId !== null ? `document ${d.documentId}` : `version ${d.filingVersionId}`);
+    return `Claude read ${word} ${list}${of ? ` of ${of.toLocaleString("en-US")}` : ""} of filing ${name}, not the whole document. Open it from the Filings view for the rest.`;
+  });
+}
+
 // ---------- one slice of an answer ----------
 
 /** Runs an answer until it finishes, fails, or this function call's time slice is used up (status "paused").
@@ -495,7 +535,9 @@ export async function runJob(jobId: string, ctx: ChatCtx): Promise<void> {
     const api = makeApi(ctx, st, cap);
     // Worked out once and kept: Claude must see the same system prompt on every step of an answer.
     if (st.refs === undefined) { st.refs = await referenceText(db, api, ctx.now()); await commit(); }
-    const system: Anthropic.Beta.BetaTextBlockParam[] = [{ type: "text", text: systemPrompt(orgName(ctx.env)) }, { type: "text", text: st.refs }];
+    // The tools and the system prompt are cached at their own breakpoint; the top-level cache_control below caches
+    // the conversation so far, documents included, so a later step reads them from the cache.
+    const system: Anthropic.Beta.BetaTextBlockParam[] = [{ type: "text", text: systemPrompt(orgName(ctx.env)) }, { type: "text", text: st.refs, cache_control: { type: "ephemeral" } }];
     const tools = makeTools(ctx, st, api, client, started + ctx.sliceMs, step, cap, noteUpload);
     let stepsThisCall = 0;
     let table: Table | null = null;
@@ -537,8 +579,9 @@ export async function runJob(jobId: string, ctx: ChatCtx): Promise<void> {
         output_config: { effort: "high" },
         cache_control: { type: "ephemeral" },
         system, tools: TOOLS, messages: st.messages,
-        // Once the lookup limit is reached the next reply must be the answer.
-        ...(st.noTools ? { tool_choice: { type: "none" as const } } : {}),
+        // Once the lookup limit is reached the next reply must be the answer. Changing tool_choice would throw away
+        // the cached conversation, so with documents attached the tools stay offered and refuse to run instead.
+        ...(st.noTools && !st.docs.length ? { tool_choice: { type: "none" as const } } : {}),
       });
       stream.on("text", (delta) => {
         partial += delta;
@@ -549,6 +592,8 @@ export async function runJob(jobId: string, ctx: ChatCtx): Promise<void> {
       st.tries = 0;
       st.model = message.model;
       addUsage(st, message.model, message.usage);
+      st.promptTokens = (message.usage.input_tokens ?? 0) + (message.usage.cache_creation_input_tokens ?? 0) + (message.usage.cache_read_input_tokens ?? 0);
+      st.pendingPages = 0;
 
       if (message.stop_reason === "refusal") throw new Plain("Claude declined this question. Try rephrasing it.");
       const { content, calls } = echoable(message.content);
@@ -588,6 +633,7 @@ export async function runJob(jobId: string, ctx: ChatCtx): Promise<void> {
       await step("Building the comparison table");
     }
 
+    for (const line of partReadNotes(st.docs)) cap(line);
     const result = {
       answer: st.final!.answer, sources: st.final!.sources, table, lookups: st.lookups, caps: st.caps, model: st.model,
       usage: answerUsage(st),
@@ -734,34 +780,65 @@ function makeTools(ctx: ChatCtx, st: ChatState, api: Spgmi | null, client: Anthr
     return { result: { source: found.source, fetchedAt: found.fetchedAt, fromSavedResult: found.fromStore, total: found.total, shown: shown.length, byState: found.byState, byCompany: found.byCompany, notes, filings: shown.map(compactFiling) } };
   }
 
+  // Time spent cutting PDFs in this function call, kept under LIMITS.cutMs so the call stays inside its CPU allowance.
+  let cutSpent = 0;
+
+  /** The pages asked for: null for the whole document (or its front, when it is long), or a message for Claude. */
+  function pagesAsked(input: Record<string, unknown>): { first: number; last: number } | null | string {
+    const num = (v: unknown) => (v === null || v === undefined ? null : Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 100_000 ? (v as number) : NaN);
+    const first = num(input.first_page), last = num(input.last_page);
+    if (Number.isNaN(first) || Number.isNaN(last)) return "first_page and last_page are page numbers, counting from 1, or null.";
+    if (first === null && last === null) return null;
+    const from = first ?? 1, to = last ?? from + LIMITS.docPages - 1;
+    if (to < from) return "last_page comes before first_page. Ask for a range from the first page to the last.";
+    if (to - from + 1 > LIMITS.docPages) return `One read takes at most ${LIMITS.docPages} pages. Ask for a shorter range, for example pages ${from} to ${from + LIMITS.docPages - 1}.`;
+    return { first: from, last: to };
+  }
+
   async function read(input: Record<string, unknown>): Promise<ToolOut> {
     const ref = parseDocRef({ documentId: input.document_id ?? undefined, filingVersionId: input.filing_version_id ?? undefined });
     if (!ref) return fail("Give the documentId (a number) or the filingVersionId from a search row.");
+    const asked = pagesAsked(input);
+    if (typeof asked === "string") return fail(asked);
     const row = st.seen[docKey(ref.documentId, ref.filingVersionId)] ?? Object.values(st.seen).find((r) => (ref.documentId !== undefined ? Number(r.documentId) === ref.documentId : r.filingVersionId === ref.filingVersionId)) ?? {};
     // A filing can be asked for by its document id or its version id: both are kept, so it is only read once.
     const rowDocId = row.documentId !== null && row.documentId !== undefined && Number.isInteger(Number(row.documentId)) ? Number(row.documentId) : null;
     const docId = ref.documentId ?? rowDocId, versionId = ref.filingVersionId ?? text(row.filingVersionId);
-    const already = st.docs.find((d) => (docId !== null && d.documentId === docId) || (versionId !== null && d.filingVersionId === versionId));
-    if (already) return { result: { attached: true, note: `This document is already attached above as "${already.title}". Use that copy.` } };
+    const sameDoc = st.docs.filter((d) => (docId !== null && d.documentId === docId) || (versionId !== null && d.filingVersionId === versionId));
+    const whole = sameDoc.find((d) => d.firstPage === undefined);
+    if (whole) return { result: { attached: true, note: `This document is already attached above as "${whole.title}". Use that copy.` } };
+    const covering = sameDoc.find((d) => (asked ? d.firstPage! <= asked.first && d.lastPage! >= asked.last : d.firstPage === 1));
+    if (covering) return { result: { attached: true, note: `${rangeText(covering.firstPage!, covering.lastPage!, covering.pages)} of this document are already attached above as "${covering.title}". Use that copy, or ask for pages you haven't read.` } };
     const tracking = text(row.trackingNumber), listed = Number.isFinite(Number(row.pages)) && row.pages !== null ? Number(row.pages) : null;
     let pages = listed;
     const name = tracking ?? (ref.documentId !== undefined ? `document ${ref.documentId}` : `version ${ref.filingVersionId}`);
+    const left = LIMITS.totalPages - st.pages;
+    const more = sameDoc.length ? "more of " : "";
+    const overTotal = (rangeHint: boolean): ToolOut => {
+      cap(`Claude stopped at the limit of ${LIMITS.totalPages} document pages for one question, so it didn't read ${more}filing ${name}.`);
+      return fail(`Reading this would pass the limit of ${LIMITS.totalPages} document pages for one question.${rangeHint && left > 0 ? ` ${plural(left, "page is", "pages are")} left: ask for a shorter range, or answer from what you have and say which filings you didn't read.` : " Answer from what you have and say which filings you didn't read."}`);
+    };
+    // Pages already sent are counted by Claude's last reply; pages not yet sent are estimated.
+    const tooBigForClaude = (n: number) => (st.promptTokens ?? 0) + ((st.pendingPages ?? 0) + n) * LIMITS.tokensPerPage > LIMITS.contextTokens;
+    const overContext = (): ToolOut => {
+      cap(`Claude had read as much as it can hold at once in one answer, so it didn't read ${more}filing ${name}.`);
+      return fail("This would be more than you can read at once in this answer. Answer from what you have and say which filings or pages you didn't read.");
+    };
 
     if (st.docs.length >= LIMITS.docs) {
       cap(`Claude stopped at the limit of ${LIMITS.docs} documents for one question. Open the others from the Filings view.`);
       return fail(`The limit of ${LIMITS.docs} documents for one question is reached. Answer from what you have and say which filings you didn't read.`);
     }
-    if (pages !== null && pages > LIMITS.docPages) {
-      cap(`Filing ${name} has ${pages} pages, over the limit of ${LIMITS.docPages} pages for one document, so Claude didn't read it. Open it from the Filings view.`);
-      return fail(`This document has ${pages} pages, over the limit of ${LIMITS.docPages} for one document. Don't read it; tell the user to open it from the Filings view.`);
-    }
-    if (pages !== null && st.pages + pages > LIMITS.totalPages) {
-      cap(`Claude stopped at the limit of ${LIMITS.totalPages} document pages for one question, so it didn't read filing ${name}.`);
-      return fail(`Reading this would pass the limit of ${LIMITS.totalPages} document pages for one question. Answer from what you have and say which filings you didn't read.`);
-    }
+    // What this read will send, as far as is known before downloading: a range, a whole document, or the front
+    // of a long one (as much of it as the question has pages left for).
+    const planned = asked ? asked.last - asked.first + 1 : pages === null ? null : pages > LIMITS.docPages ? Math.min(LIMITS.docPages, Math.max(left, 0)) : pages;
+    if (left <= 0 || (planned !== null && planned > left && (asked || pages! <= LIMITS.docPages))) return overTotal(asked !== null);
+    if (planned !== null && tooBigForClaude(planned)) return overContext();
     if (!api) return fail(NOT_CONFIGURED);
+    const putOff = () => fail("This lookup was put off because this step ran out of time. Ask for it again and it will run.");
+    if (cutSpent >= LIMITS.cutMs && (asked !== null || (pages ?? 0) > LIMITS.docPages)) return putOff();
 
-    await step(`Reading filing ${name} (${pages !== null ? plural(pages, "page", "pages") : "page count n/d"})`);
+    await step(`Reading filing ${name} (${asked ? rangeText(asked.first, asked.last, pages) : pages !== null ? plural(pages, "page", "pages") : "page count n/d"})`);
     const res = await downloadDocument(api, ref);
     const type = (res.headers.get("content-type") || "").toLowerCase();
     const bytes = await readUpTo(res, LIMITS.docBytes);
@@ -776,29 +853,81 @@ function makeTools(ctx: ChatCtx, st: ChatState, api: Spgmi | null, client: Anthr
     // is used. A file whose pages can't be counted is charged by its size.
     const counted = isPdf ? countPdfPages(bytes) : null;
     pages = Math.max(listed ?? 0, counted ?? 0) || null;
-    const charge = pages ?? Math.max(1, Math.ceil(bytes.length / LIMITS.bytesPerPage));
-    if (pages !== null && pages > LIMITS.docPages) {
-      cap(`Filing ${name} has ${pages} pages, over the limit of ${LIMITS.docPages} pages for one document, so Claude didn't read it. Open it from the Filings view.`);
-      return fail(`This document has ${pages} pages, over the limit of ${LIMITS.docPages} for one document. Tell the user to open it from the Filings view.`);
+    let charge = pages ?? Math.max(1, Math.ceil(bytes.length / LIMITS.bytesPerPage));
+    let send = bytes, part: { first: number; last: number } | null = null;
+    // A short document whose pages can be seen is sent as it is. A long one, a range, a large file, or a file whose
+    // pages can't be seen (packed in compressed object streams) is opened to count its pages for certain and, when
+    // needed, cut to the pages asked for. A short file opened only to count it, that can't be opened, is sent as
+    // before, charged by its size.
+    const countOnly = !asked && charge <= LIMITS.docPages && bytes.length <= LIMITS.sendBytes;
+    let pdf: Awaited<ReturnType<typeof openPdf>> | null = null;
+    if (isPdf && (!countOnly || counted === null)) {
+      if (cutSpent >= LIMITS.cutMs && !countOnly) return putOff();
+      if (cutSpent < LIMITS.cutMs) {
+        const started = performance.now();
+        pdf = await openPdf(bytes);
+        cutSpent += performance.now() - started;
+      }
     }
-    if (pages === null && charge > LIMITS.docPages) {
-      cap(`Filing ${name} has no page count and is too large to read safely, so Claude didn't read it. Open it from the Filings view.`);
-      return fail("This document has no page count and is too large to read here. Tell the user to open it from the Filings view.");
-    }
-    if (st.pages + charge > LIMITS.totalPages) {
-      cap(`Claude stopped at the limit of ${LIMITS.totalPages} document pages for one question, so it didn't read filing ${name}.`);
-      return fail(`Reading this would pass the limit of ${LIMITS.totalPages} document pages for one question. Answer from what you have and say which filings you didn't read.`);
+    if (pdf && !(countOnly && !pdf.ok)) {
+      if (!pdf.ok && pdf.reason === "encrypted") {
+        cap(`Filing ${name} is protected with a password, so Claude couldn't read it. Open it from the Filings view.`);
+        return fail("This document is protected with a password, so it can't be read here. Tell the user to open it from the Filings view.");
+      }
+      if (!pdf.ok && pages === null) {
+        cap(`Filing ${name} has no page count and is too large to read safely, so Claude didn't read it. Open it from the Filings view.`);
+        return fail("This document has no page count and is too large to read here. Tell the user to open it from the Filings view.");
+      }
+      if (!pdf.ok) {
+        cap(`Filing ${name} couldn't be opened as a PDF, so Claude couldn't read part of it. Open it from the Filings view.`);
+        return fail("This document couldn't be opened to read part of it. Tell the user to open it from the Filings view.");
+      }
+      pages = pdf.pages;   // the file's own page tree is the count that matters now
+      if (asked && asked.first > pages) return fail(`This document has ${plural(pages, "page", "pages")}, so there is no page ${asked.first}. Ask for pages 1 to ${Math.min(pages, LIMITS.docPages)} or a range inside the document.`);
+      const range = asked ? { first: asked.first, last: Math.min(asked.last, pages) } : { first: 1, last: Math.min(pages, LIMITS.docPages, Math.max(left, 0)) };
+      charge = range.last - range.first + 1;
+      if (charge > left || (!asked && pages <= LIMITS.docPages && pages > left)) return overTotal(asked !== null || pages > LIMITS.docPages);
+      if (tooBigForClaude(charge)) return overContext();
+      if (range.first !== 1 || range.last !== pages || bytes.length > LIMITS.sendBytes) {
+        if (cutSpent >= LIMITS.cutMs) return putOff();
+        const at = performance.now();
+        const cut = await cutPages(pdf.doc, range.first, range.last);
+        cutSpent += performance.now() - at;
+        if (!cut) {
+          cap(`Filing ${name} couldn't be opened as a PDF, so Claude couldn't read part of it. Open it from the Filings view.`);
+          return fail("This document couldn't be opened to read part of it. Tell the user to open it from the Filings view.");
+        }
+        if (cut.length > LIMITS.sendBytes) {
+          return fail(`${rangeText(range.first, range.last, null).replace(/^p/, "P")} come to ${Math.ceil(cut.length / 1_000_000)} MB, over the ${LIMITS.sendBytes / 1_000_000} MB you can read at once. Ask for a shorter range.`);
+        }
+        send = cut;
+        // A whole document that was only rewritten to fit in one request is not a part.
+        if (range.first !== 1 || range.last !== pages) part = range;
+      }
+    } else {
+      if (pages === null && charge > LIMITS.docPages) {
+        cap(`Filing ${name} has no page count and is too large to read safely, so Claude didn't read it. Open it from the Filings view.`);
+        return fail("This document has no page count and is too large to read here. Tell the user to open it from the Filings view.");
+      }
+      if (charge > left) return overTotal(false);
+      if (tooBigForClaude(charge)) return overContext();
     }
     const companies = Array.isArray(row.companies) ? row.companies.map(String).join(", ") : null;
-    const title = [tracking ?? name, companies, text(row.state), text(row.filingType)].filter(Boolean).join(", ");
-    const file = await client.files.upload({ file: await toFile(bytes, isPdf ? "filing.pdf" : "filing.txt", { type: isPdf ? "application/pdf" : "text/plain" }) });
+    const base = [tracking ?? name, companies, text(row.state), text(row.filingType)].filter(Boolean).join(", ");
+    const title = part ? `${base}, ${rangeText(part.first, part.last, pages)}` : base;
+    const file = await client.files.upload({ file: await toFile(send, isPdf ? "filing.pdf" : "filing.txt", { type: isPdf ? "application/pdf" : "text/plain" }) });
     // Noted straight away, so the upload is cleaned up even if this function call dies before the step ends.
     await noteUpload(file.id);
-    st.docs.push({ documentId: docId, filingVersionId: versionId, fileId: file.id, title, company: companies, state: text(row.state), trackingNumber: tracking, pages });
-    st.pages += pages ?? 0;
-    st.lookups.push({ tool: "read_filing_document", detail: `${name}${pages !== null ? `, ${plural(pages, "page", "pages")}` : ""}` });
+    st.docs.push({ documentId: docId, filingVersionId: versionId, fileId: file.id, title, company: companies, state: text(row.state), trackingNumber: tracking, pages, ...(part ? { firstPage: part.first, lastPage: part.last } : {}) });
+    const sent = part ? part.last - part.first + 1 : pages ?? charge;
+    st.pages += sent;
+    st.pendingPages = (st.pendingPages ?? 0) + (part ? sent : charge);
+    st.lookups.push({ tool: "read_filing_document", detail: `${name}${part ? `, ${rangeText(part.first, part.last, pages)}` : pages !== null ? `, ${plural(pages, "page", "pages")}` : ""}` });
+    const note = part
+      ? `${rangeText(part.first, part.last, pages)} of this document follow these results${part.first > 1 ? `: page 1 of the attachment is page ${part.first} of the filing, and the citations are mapped back to the filing's pages. Give the filing's page numbers in your answer` : ""}. Say in your answer that you read ${rangeText(part.first, part.last, pages)}, not the whole document.${part.last < pages! ? ` To read further, ask for first_page ${part.last + 1} onward.` : ""} Cite the pages you rely on.`
+      : "The document follows these results. Cite the pages you rely on.";
     return {
-      result: { attached: true, title, pages, note: "The document follows these results. Cite the pages you rely on." },
+      result: { attached: true, title, pages, ...(part ? { firstPage: part.first, lastPage: part.last } : {}), note },
       document: { type: "document", source: { type: "file", file_id: file.id }, title, citations: { enabled: true } },
     };
   }
@@ -820,7 +949,7 @@ function makeTools(ctx: ChatCtx, st: ChatState, api: Spgmi | null, client: Anthr
     async run(c: Anthropic.Beta.BetaToolUseBlock): Promise<ToolOut> {
       // Out of time for this function call: the lookup is put off, not lost. Claude asks again after the pause.
       if (ctx.now() > sliceEnd) return fail("This lookup was put off because this step ran out of time. Ask for it again and it will run.");
-      if (st.toolCalls >= LIMITS.toolCalls) return fail("The lookup limit for this question is reached. Answer from what you have and say what you couldn't check.");
+      if (st.toolCalls >= LIMITS.toolCalls || st.noTools) return fail("The lookup limit for this question is reached. Answer from what you have and say what you couldn't check.");
       st.toolCalls++;
       const input = (c.input && typeof c.input === "object" ? c.input : {}) as Record<string, unknown>;
       try {

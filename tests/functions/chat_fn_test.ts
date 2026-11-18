@@ -310,15 +310,14 @@ function world(script: Parameters<typeof fakeAnthropic>[0], opts: Opts = {}) {
   let sum = 0;
   const fits = order.map((id) => { if (sum + pagesOf[id] > LIMITS.totalPages) return false; sum += pagesOf[id]; return true; });
   const seen: Record<string, any> = {};
-  const w = world([{ content: [SEARCH_ALL("s1")] }, { content: [READ("big", 70000004), ...order.map((id) => READ(`p${id}`, id))] }, (body) => { seen.r = toolResults(body); seen.docs = documentsIn(body); return { content: [say("Read what fitted.")] }; }, NO_TABLE]);
+  const w = world([{ content: [SEARCH_ALL("s1")] }, { content: [toolUse("big", "read_filing_document", { document_id: 70000004, filing_version_id: null, first_page: 1, last_page: 310 }), ...order.map((id) => READ(`p${id}`, id))] }, (body) => { seen.r = toolResults(body); seen.docs = documentsIn(body); return { content: [say("Read what fitted.")] }; }, NO_TABLE]);
   const a = await w.ask();
-  ok(`a ${310}-page document is over the limit of ${LIMITS.docPages} pages for one document: Claude is told and it is never downloaded`, seen.r.big.isError && seen.r.big.value.error === `This document has 310 pages, over the limit of ${LIMITS.docPages} for one document. Don't read it; tell the user to open it from the Filings view.`
+  ok(`a read of all 310 pages is over the limit of ${LIMITS.docPages} pages for one read: Claude is told and it is never downloaded`, seen.r.big.isError && seen.r.big.value.error === `One read takes at most ${LIMITS.docPages} pages. Ask for a shorter range, for example pages 1 to ${LIMITS.docPages}.`
     && !w.sp.calls("/api/v1/download").some((c) => c.body.properties.documentId === 70000004), seen.r.big);
   ok(`documents are read until the next one would pass ${LIMITS.totalPages} pages in total; those are refused and Claude is told`, order.every((id, i) => seen.r[`p${id}`].isError === !fits[i]) && fits.includes(false) && fits.includes(true)
     && order.filter((_, i) => !fits[i]).every((id) => seen.r[`p${id}`].value.error === `Reading this would pass the limit of ${LIMITS.totalPages} document pages for one question. Answer from what you have and say which filings you didn't read.`), { fits, results: order.map((id) => seen.r[`p${id}`].isError) });
   ok("a smaller document after a refused one can still be read if it fits", seen.docs.length === fits.filter(Boolean).length && w.claude.uploads.length === fits.filter(Boolean).length);
-  ok("the answer names each limit hit in plain words", a.result.caps.includes(`Filing CALL-134000004 has 310 pages, over the limit of ${LIMITS.docPages} pages for one document, so Claude didn't read it. Open it from the Filings view.`)
-    && a.result.caps.filter((c: string) => c.startsWith(`Claude stopped at the limit of ${LIMITS.totalPages} document pages for one question, so it didn't read filing `)).length === fits.filter((f) => !f).length && a.result.caps.length === 1 + fits.filter((f) => !f).length, a.result.caps);
+  ok("the answer names each limit hit in plain words", a.result.caps.filter((c: string) => c.startsWith(`Claude stopped at the limit of ${LIMITS.totalPages} document pages for one question, so it didn't read filing `)).length === fits.filter((f) => !f).length && a.result.caps.length === fits.filter((f) => !f).length, a.result.caps);
 }
 {
   // look-ups in one question
