@@ -87,7 +87,7 @@ const TPL={text:"PK made-up template", updated_at:"2026-11-05T09:30:00Z"};
 
   // ----- Corp Dev, everything set up, a template uploaded: the whole way through -----
   let t=await open({template:TPL}); let p=t.p;
-  ok("a view of its own in the nav, and it is the one open", same(await t.list("nav.tabs a"),["Filings","Snapshot","Compare","Statutory","Profile"]) && (await p.getAttribute('nav.tabs a[data-view="profile"]',"aria-current"))==="page" && (await t.txt(".action-title"))==="Company profile as a PowerPoint file");
+  ok("a view of its own in the nav, and it is the one open", same(await t.list("nav.tabs a"),["Filings","Snapshot","Compare","Market","Statutory","Profile"]) && (await p.getAttribute('nav.tabs a[data-view="profile"]',"aria-current"))==="page" && (await t.txt(".action-title"))==="Company profile as a PowerPoint file");
   ok("the status strip and the Ask Claude button stay over it", await p.isVisible("#s_usage") && await p.isVisible("#askFab"));
   ok("the profile function is asked for its status once", same(t.of("status").map(c=>c.body),[{action:"status"}]));
   ok("the template is looked for once, by listing, not downloaded yet", same(await p.evaluate(()=>__mock.storage.calls),[{op:"list",bucket:"snl-template",path:"",opts:{limit:100,search:"template.pptx"}}]));

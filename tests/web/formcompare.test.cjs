@@ -103,7 +103,8 @@ const bigGroup=n=>({name:"Nonesuch Group", code:null, companies:n, searchable:n,
 
   // ----- the view as it opens -----
   let t=await open(); let p=t.p;
-  ok("the view opens at #forms with no tab of its own", (await t.txt(".action-title"))==="Programs and forms side by side" && same(await t.list("nav.tabs a"),["Filings","Snapshot","Compare","Statutory","Profile"]) && (await p.$$('nav.tabs a[aria-current="page"]')).length===0);
+  ok("the view opens at #forms as the second page of the Compare tab", (await t.txt(".action-title"))==="Programs and forms side by side" && same(await t.list("nav.tabs a"),["Filings","Snapshot","Compare","Market","Statutory","Profile"]) && (await p.getAttribute('nav.tabs a[href="#compare"]',"aria-current"))==="page" && (await p.$$('nav.tabs a[aria-current="page"]')).length===1);
+  ok("a switch at the top goes between the two Compare pages, and marks this one", same(await t.list("#cmpSwitch a"),["Rates and filings","Programs and forms"]) && (await p.getAttribute('#cmpSwitch a[href="#forms"]',"aria-current"))==="page" && (await p.getAttribute('#cmpSwitch a[href="#compare"]',"aria-current"))===null);
   ok("on opening: S&P's lists once, the summaries function's status once, and the day's questions", same(t.of("snl-filings","reference").map(c=>c.body),[{action:"reference"}]) && same(t.of("snl-digest","status").map(c=>c.body),[{action:"status"}]) && t.of("snl-chat","status").length===1 && t.of("snl-digest","get").length===0);
   ok("nothing chosen; no state, no type of insurance, with a plain prompt to choose one; 3 years", (await t.txt("#fc_none"))==="No carriers chosen yet." && (await p.inputValue("#fc_state"))==="" && (await p.inputValue("#fc_toi"))==="" && (await t.txt("#fc_toiHint"))==="Choose one, such as Homeowners: the comparison is for one type of insurance." && (await p.getAttribute('[data-act="fc-years"][data-y="3"]',"aria-pressed"))==="true");
   ok("type of insurance offers S&P's list", same((await t.list("#fc_toi option")).slice(0,3),["Choose a type of insurance","Homeowners","Private passenger auto"]) && (await p.$$("#fc_toi option")).length===REFS.lists.typeOfInsurance.options.length+1);
@@ -115,7 +116,7 @@ const bigGroup=n=>({name:"Nonesuch Group", code:null, companies:n, searchable:n,
   ok("find with an empty box: says what to type", (await t.txt("#fc_findErr"))==="Type part of a company or group name." && t.of("snl-filings","resolve").length===0);
   await t.find("Zzz");
   ok("no match: plain words", (await t.txt("#fc_noMatch"))==='No company in the app\'s company list matches "Zzz". Try a shorter part of the name.');
-  ok("without the sets block on the page: no saved-set control, and no errors", !(await p.$("#setPick")) && errs.length===0, errs);
+  ok("with no saved sets: no saved-set control, and no errors", !(await p.$("#setpick_forms")) && errs.length===0, errs);
 
   // ----- choosing carriers -----
   await t.find("Calloway");
@@ -417,8 +418,8 @@ const bigGroup=n=>({name:"Nonesuch Group", code:null, companies:n, searchable:n,
   await ctx_close(t);
 
   // ----- saved carrier sets (Contract A), with a stand-in for the sets block -----
-  t=await open({sets:true}); p=t.p;
-  ok("sets: the control for this view is shown", (await p.getAttribute("#setPick","data-target"))==="forms" && await p.evaluate(()=>window.__setCalls.includes("forms")));
+  t=await open({seed:[["snl_settings","carrier_sets",{doc:{sets:[{id:"s-1", name:"Florida peers", note:"", companies:[{companyName:"Calloway Home Co", companyId:null, institutionId:"5000002"}], groups:[], updatedAt:"2026-11-13T10:00:00Z"}]}}]]}); p=t.p; await p.waitForTimeout(300);
+  ok("sets: the control for this view is shown", !!(await p.$('#setpick_forms [data-act="set-use"][data-target="forms"]')));
   ok("sets: this view is a target", await p.evaluate(()=>typeof SET_TARGETS.forms==="function"));
   await p.evaluate(()=>SET_TARGETS.forms([{kind:"institutionId", id:"5000002", name:"Calloway Home Co"},{kind:"institutionId", id:"5100001", name:"Tarrow Mutual Insurance Co"},{kind:"institutionId", id:"5100001", name:"Tarrow Mutual Insurance Co"},{kind:"bogus", id:"x"}],{id:"s-1", name:"Florida peers"})); await p.waitForTimeout(100);
   ok("sets: a small set gives one carrier a company", same(await t.list("#fc_chips .cchip b"),["Calloway Home Co","Tarrow Mutual Insurance Co"]));

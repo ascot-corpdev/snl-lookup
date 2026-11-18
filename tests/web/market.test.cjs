@@ -75,7 +75,7 @@ const TYPES=q=>({coverage:COV(q.state), total:60, group:"type", groupTotal:2, gr
 
   // ----- a reader: search, results, coverage, by company, export, documents; no manager -----
   let t=await open({role:"reader"}); let p=t.p;
-  ok("#market shows the market index, with no nav tab of its own", (await t.txt("#view h2.action-title"))==="Market index" && !(await p.$('nav.tabs a[href="#market"]')));
+  ok("#market shows the market index, and its tab is the one lit", (await t.txt("#view h2.action-title"))==="Market index" && (await p.getAttribute('nav.tabs a[href="#market"]',"aria-current"))==="page" && (await p.$$('nav.tabs a[aria-current="page"]')).length===1);
   ok("the status is asked once, and the types of insurance for the first state", t.icalls("status").length===1 && same(t.queries("type").map(q=>q.state),["FL"]));
   ok("a reader sees no index manager", !(await p.$("#mkMgr")) && !(await p.$('[data-act="mk-start"]')) && !(await p.$('[data-act="mk-topup"]')));
   ok("the state list holds the indexed states only", same(await p.$$eval("#mk_state option",o=>o.map(x=>x.value)),["FL","GA"]) && (await t.txt("#mk_state option >> nth=0"))==="FL Florida");

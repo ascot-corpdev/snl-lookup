@@ -84,7 +84,8 @@ const PART2={...copy(SEARCH), rows:[row(3,5000001,"Calloway Insurance Co","TX","
 
   // ----- the view as it opens -----
   let t=await open(); let p=t.p;
-  ok("a Compare tab after Snapshot, and it is the one open", same(await t.list("nav.tabs a"),["Filings","Snapshot","Compare","Statutory","Profile"]) && (await p.getAttribute('nav.tabs a[data-view="compare"]',"aria-current"))==="page" && (await t.txt(".action-title"))==="Compare carriers' filings side by side");
+  ok("a switch at the top goes between the two Compare pages, and marks this one", same(await t.list("#cmpSwitch a"),["Rates and filings","Programs and forms"]) && (await p.getAttribute('#cmpSwitch a[href="#compare"]',"aria-current"))==="page" && (await p.getAttribute('#cmpSwitch a[href="#forms"]',"href"))==="#forms");
+  ok("a Compare tab after Snapshot, and it is the one open", same(await t.list("nav.tabs a"),["Filings","Snapshot","Compare","Market","Statutory","Profile"]) && (await p.getAttribute('nav.tabs a[data-view="compare"]',"aria-current"))==="page" && (await t.txt(".action-title"))==="Compare carriers' filings side by side");
   ok("S&P's lists are loaded once, for the states", same(t.of("reference").map(c=>c.body),[{action:"reference"}]));
   ok("nothing chosen yet, 3 years by default, and no cost until two are chosen", (await t.txt("#cm_count"))==="none chosen yet; choose 2 to 8" && (await p.getAttribute('[data-act="cmp-years"][data-y="3"]',"aria-pressed"))==="true"
     && (await t.txt("#cm_cost"))==="Choose at least 2 carriers to see what the comparison costs." && (await t.txt("#cm_dates"))==="Filings published 15 Nov 2023 to 13 Nov, in all 7 states in S&P's list, every filing type and status.");
@@ -296,10 +297,10 @@ const PART2={...copy(SEARCH), rows:[row(3,5000001,"Calloway Insurance Co","TX","
   await p.screenshot({path:SCRATCH+"/compare-390.png",fullPage:true}).catch(()=>{});
   await t.ctx.close();
 
-  // ----- the nav with seven tabs (two stand-ins for the addresses still to get one) -----
+  // ----- the nav with seven tabs (the six real ones and one stand-in, to prove there is room for one more) -----
   for(const w of [390, 1440]){
     t=await open({}, {width:w}); p=t.p;
-    await p.evaluate(()=>{ const n=document.getElementById("tabs"); for(const [v,l] of [["forms","Forms"],["market","Market"]]){ const a=document.createElement("a"); a.href="#"+v; a.dataset.view=v; a.textContent=l; n.appendChild(a); } });
+    await p.evaluate(()=>{ const n=document.getElementById("tabs"); for(const [v,l] of [["extra","One more"]]){ const a=document.createElement("a"); a.href="#"+v; a.dataset.view=v; a.textContent=l; n.appendChild(a); } });
     await p.waitForTimeout(100);
     const geo=await p.evaluate(()=>[...document.querySelectorAll("nav.tabs a")].map(a=>{ const r=a.getBoundingClientRect(); return {l:r.left, r:r.right, t:r.top, b:r.bottom}; }));
     const overlap=geo.some((x,i)=>geo.some((y,j)=>i<j && x.l<y.r-0.5 && y.l<x.r-0.5 && x.t<y.b-0.5 && y.t<x.b-0.5));

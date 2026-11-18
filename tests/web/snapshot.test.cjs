@@ -63,7 +63,7 @@ const member=(i, group)=>({companyId:null, companyName:`Nonesuch Member ${i} Co`
 
   // ----- the view as it opens -----
   let t=await open(); let p=t.p;
-  ok("a fourth view in the nav, beside Filings, and it is the one open", same(await t.list("nav.tabs a"),["Filings","Snapshot","Compare","Statutory","Profile"]) && (await p.getAttribute('nav.tabs a[data-view="snapshot"]',"aria-current"))==="page" && (await t.txt(".action-title"))==="Filings snapshot for a company or group");
+  ok("a fourth view in the nav, beside Filings, and it is the one open", same(await t.list("nav.tabs a"),["Filings","Snapshot","Compare","Market","Statutory","Profile"]) && (await p.getAttribute('nav.tabs a[data-view="snapshot"]',"aria-current"))==="page" && (await t.txt(".action-title"))==="Filings snapshot for a company or group");
   ok("S&P's lists are loaded once, for the states", same(t.of("reference").map(c=>c.body),[{action:"reference"}]));
   ok("nothing chosen yet, the 3 years shown by default", (await t.txt("#sn_chosen"))==="Nothing chosen yet." && (await p.getAttribute('[data-act="snap-years"][data-y="3"]',"aria-pressed"))==="true");
   ok("says what the snapshot covers: the dates, every state in S&P's list, every type and status", (await t.txt("#sn_dates"))==="Filings published 15 Nov 2023 to 13 Nov, in all 6 states in S&P's list, every filing type and status.", await t.txt("#sn_dates"));

@@ -21,7 +21,7 @@ const ix = (db: MemoryDb) => db as unknown as { putIndexRows(r: IndexRow[]): Pro
 {
   const t = tool("query_market_index"), names = TOOLS.map((x: any) => x.name);
   ok("query_market_index is offered, straight after search_filings", !!t && names.indexOf("query_market_index") === names.indexOf("search_filings") + 1);
-  ok("the other tools keep their order", same(names.filter((n: string) => n !== "query_market_index"), ["resolve_entity", "resolve_entities", "search_filings", "read_filing_document", "query_statutory"]), names);
+  ok("the other tools keep their order", same(names.filter((n: string) => n !== "query_market_index"), ["resolve_entity", "resolve_entities", "search_filings", "read_filing_document", "get_filing_summaries", "query_statutory"]), names);
   ok("it is strict: every property required, nothing else allowed", t.strict === true && t.input_schema.additionalProperties === false && same([...t.input_schema.required].sort(), Object.keys(t.input_schema.properties).sort()));
   const p = t.input_schema.properties;
   ok("its inputs: one state, a grouping, three text filters, dates, words and the rate range, each nullable where it may be left out",
@@ -33,7 +33,7 @@ const ix = (db: MemoryDb) => db as unknown as { putIndexRows(r: IndexRow[]): Pro
 // ---------- the prompt ----------
 {
   const lines = SYSTEM.split("\n"), market = lines.findIndex((l: string) => l.startsWith("- S&P can't list every company that filed in a market"));
-  ok("one new sentence, as its own line, at the end of the market-question guidance", lines[market + 1] === "- For a question about a market in a state the market index covers (listed under \"Market index\" at the start, when any state is), ask query_market_index first and say in the answer what the index covers and when it was last completed; choose carriers yourself only for states it does not cover.", lines[market + 1]);
+  ok("one new sentence, as its own line, in the market-question guidance (after the line on saved carrier sets)", lines.slice(market + 1, market + 3).includes("- For a question about a market in a state the market index covers (listed under \"Market index\" at the start, when any state is), ask query_market_index first and say in the answer what the index covers and when it was last completed; choose carriers yourself only for states it does not cover."), lines.slice(market + 1, market + 3));
   ok("the guidance for states the index doesn't cover is unchanged", lines[market].includes("Choosing that list is the one place to use your general knowledge") && lines[market].includes("never the whole market"));
 }
 

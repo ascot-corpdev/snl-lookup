@@ -558,6 +558,9 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 .setitem{border:1px solid var(--grid);padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-width:0;overflow-wrap:anywhere}
 .setedit,.setrename{border-top:1px solid var(--grid);padding-top:10px;display:flex;flex-direction:column;gap:10px;min-width:0}
 .setedit .wlist{display:flex;flex-direction:column;gap:6px;font-size:13px;min-width:0}
+.cmpswitch{display:inline-flex;gap:0;align-self:flex-start}
+.cmpswitch a{text-decoration:none}
+.cmpswitch a[aria-current="page"]{background:var(--ink);border-color:var(--ink);color:#fff}
 /* Market index (#market) */
 .mkmgr{gap:12px}
 .mkopen{border:1px solid var(--grid);padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-width:0}
@@ -593,6 +596,7 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
       <a href="#filings" data-view="filings">Filings</a>
       <a href="#snapshot" data-view="snapshot">Snapshot</a>
       <a href="#compare" data-view="compare">Compare</a>
+      <a href="#market" data-view="market">Market</a>
       <a href="#statutory" data-view="statutory">Statutory</a>
       <a href="#profile" data-view="profile">Profile</a>
     </nav>
@@ -4501,7 +4505,7 @@ function fcOutHTML(){
 function renderForms(){
   fcSetHook();
   const fst=S.status&&S.status.filings;
-  let h=`<div><h2 class="action-title">Programs and forms side by side</h2>
+  let h=compareSwitchHTML()+`<div><h2 class="action-title">Programs and forms side by side</h2>
     <p class="sub">Two to four carriers' form filings in one state for one type of insurance, with the programs, forms and notes their saved summaries record. Every item names its filing and page, so it can be checked in the document.</p></div>`;
   if(fst && fst.configured===false) h+=`<div class="info" id="fcOff" role="status"><span><b>S&amp;P filings aren't set up yet,</b> so a new search can't be run. Searches run before still open from their saved results.</span></div>`;
   return h+fcFormHTML()+`<div id="fcOut" class="fcout" aria-live="polite">${fcOutHTML()}</div>`;
@@ -5004,9 +5008,17 @@ function cmpSetHTML(){
     return typeof setPickHTML==="function" ? String(setPickHTML("compare")||"") : "";
   }catch{ return ""; }
 }
+/* The Compare tab has two pages: rates and filings (#compare) and programs and forms (#forms). The same switch
+   sits at the top of both. */
+function compareSwitchHTML(){
+  const on=S.view==="forms" ? "forms" : "compare";
+  return `<nav class="seg cmpswitch" id="cmpSwitch" aria-label="What to compare">
+    <a class="btn sm" href="#compare" ${on==="compare"?'aria-current="page"':""}>Rates and filings</a>
+    <a class="btn sm" href="#forms" ${on==="forms"?'aria-current="page"':""}>Programs and forms</a></nav>`;
+}
 function renderCompare(){
   const cm=S.cmp, fst=S.status&&S.status.filings, waitStates=S.refsLoading&&!S.refs;
-  let h=`<div><h2 class="action-title">Compare carriers' filings side by side</h2>
+  let h=compareSwitchHTML()+`<div><h2 class="action-title">Compare carriers' filings side by side</h2>
     <p class="sub">Two to eight carriers, each a company or a whole group: who is filing where, who is raising rates and by how much, and how each sits against the others. Worked out from S&amp;P's filings alone.</p></div>`;
   if(fst && fst.configured===false) h+=`<div class="info" id="cmOff" role="status"><span><b>S&amp;P filings aren't set up yet,</b> so a new comparison can't be run. Comparisons run before still open from their saved results.</span></div>`;
   h+=`<form class="tcard" id="cmForm" novalidate aria-label="Choose carriers and a period">${cmpSetHTML()}${cmpFinderHTML()}${cmpChosenHTML()}
@@ -5497,7 +5509,8 @@ function render(){
   renderSets();
   const keep=keepUi("view");
   if(!on){ v.innerHTML=loginHTML(); keep(); renderDrawer(); renderAsk(); renderConn(); renderLive(); renderDigest(); return; }
-  document.querySelectorAll("nav.tabs a").forEach(a=>a.setAttribute("aria-current", a.dataset.view===S.view ? "page" : "false"));
+  const tab = S.view==="forms" ? "compare" : S.view;   // Programs and forms is the Compare tab's second page
+  document.querySelectorAll("nav.tabs a").forEach(a=>a.setAttribute("aria-current", a.dataset.view===tab ? "page" : "false"));
   document.getElementById("stripIn").innerHTML=stripHTML();
   v.innerHTML = S.view==="statutory" ? renderStatutory() : S.view==="profile" ? renderProfile() : S.view==="snapshot" ? renderSnapshot() : S.view==="forms" ? renderForms() : S.view==="compare" ? renderCompare() : S.view==="market" ? renderMarket() : renderFilings();
   keep(); renderDrawer(); renderAsk();
