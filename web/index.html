@@ -321,6 +321,11 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 .watch .wlist>b{font-size:12px}
 .watch .wmanage{border-top:1px solid var(--grid);padding-top:10px;display:flex;flex-direction:column;gap:10px;min-width:0}
 .watch .pill.on{color:var(--teal)}.watch .pill.off{color:var(--muted)}
+.watch .wmarks{display:flex;flex-direction:column;gap:4px;margin-bottom:6px;min-width:0}
+.watch .wmark{font-size:12px;line-height:1.35;overflow-wrap:anywhere}
+.watch .pill.mark{color:var(--purple);margin-right:6px;white-space:normal}
+@media (min-width:701px){.watch .filings .c-co{min-width:230px}}
+.watch .wmarked{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;min-width:0}
 /* Profile: the figures at a glance, the slides in or out, the draft choice and the template */
 .pfout{display:flex;flex-direction:column;gap:18px;min-width:0}
 .pfout:empty{display:none}
@@ -1061,7 +1066,7 @@ function reopenRecent(i){
    What is watched is the shared setting "watchlist" (snl_settings): every login reads it, Corp Dev edits it here.
    The snl-watch function checks it every day and says what it found (status), or checks now (run). */
 const WATCH_BUDGET = 30, WATCH_SHOWN = 5, WATCH_CHIPS = 12, WATCH_MAX_RECIPIENTS = 10;
-function freshWatch(){ return {loaded:false, loading:false, doc:null, problems:[], readErr:"", status:null, statusErr:null, checking:false, saving:false, saveErr:"", recips:null, manage:false, showAll:false, allCos:false, runNote:null}; }
+function freshWatch(){ return {loaded:false, loading:false, doc:null, problems:[], readErr:"", status:null, statusErr:null, checking:false, saving:false, saveErr:"", recips:null, manage:false, showAll:false, allCos:false, runNote:null, onlyMarked:false}; }
 const isEmailAddr = s => s.length<=254 && /^[A-Za-z0-9._%+'-]{1,64}@[A-Za-z0-9-]{1,63}(\.[A-Za-z0-9-]{1,63})*\.[A-Za-z]{2,24}$/.test(s);
 /* The saved document is typed by people: keep only what can be used, the same way the function reads it. */
 function cleanWatch(raw){
@@ -1154,8 +1159,17 @@ const watchRow = r => ({companies:(Array.isArray(r.companies)?r.companies:[]).ma
   typeOfInsurance:r.type_of_insurance, subTypeOfInsurance:r.sub_type_of_insurance, filingStatus:r.filing_status, dateSubmitted:r.date_submitted, publishDate:r.publish_date,
   newBusReqEffDate:r.effective_new, renewBusReqEffDate:r.effective_renewal, dispOverallRateImpact:r.rate_impact, filingDescription:r.description, trackingNumber:r.tracking_number,
   documentId:r.document_id, filingVersionId:r.filing_version_id});
+/* Marks come from the function (flagFiling in watch.ts): hints, never facts, each with the words that triggered it. */
+const watchFlags = r => (Array.isArray(r&&r.flags)?r.flags:[]).filter(f=>f&&!blank(f.label)).slice(0,5);
+const WATCH_FLAG_MEANING = {new_program:"a new program or product", new_state:"a company new to the state", new_form:"a new form or coverage", withdrawal:"a withdrawal", large_rate:"a large rate change"};
+function watchMarksHTML(r){
+  const fl=watchFlags(r); if(!fl.length) return "";
+  return `<div class="wmarks">${fl.map(f=>`<div class="wmark"><span class="pill mark">${esc(f.label)}</span><span class="t2">May be ${esc(WATCH_FLAG_MEANING[f.kind]||"worth a closer look")}${blank(f.reason)?"":`: ${esc(f.reason)}`}.</span></div>`).join("")}</div>`;
+}
 function watchFoundHTML(st){
-  const w=S.w, found=(Array.isArray(st.found)?st.found:[]).filter(r=>r&&!blank(r.filing_version_id)), last=st.lastCheck;
+  const w=S.w, last=st.lastCheck, listed=(Array.isArray(st.found)?st.found:[]).filter(r=>r&&!blank(r.filing_version_id));
+  const marked=listed.filter(r=>watchFlags(r).length), only=w.onlyMarked&&marked.length>0;
+  const found=only?marked:[...marked, ...listed.filter(r=>!watchFlags(r).length)];
   let h="";
   if(!last) h+=`<p class="t2" id="wNever">${st.configured===false?"":"Not checked yet. "}The first check records the filings already there as the starting point; after that, new filings show here.</p>`;
   else if(last.baseline) h+=`<p class="t2" id="wBaseline">The first check, on ${esc(whenAt(last.started_at))}, recorded ${plural(last.found,"filing")} as the starting point. Filings that appear after it show here as new.</p>`;
@@ -1163,9 +1177,12 @@ function watchFoundHTML(st){
   else h+=`<p id="wNew" style="margin:0"><b>The last check, on ${esc(whenAt(last.started_at))}, found ${plural(last.new_count,"new filing")}.</b></p>`;
   if(!found.length) return h;
   const shown=w.showAll?found:found.slice(0,WATCH_SHOWN);
-  h+=`<div class="t2">New filings found in the last ${count(st.keepDays||90)} days, the latest found first:</div>
+  if(listed.some(r=>Array.isArray(r.flags))) h+=`<div class="wmarked" id="wMarked"><span>${marked.length?`<b>${count(marked.length)} of ${count(listed.length)}</b> may be worth a closer look: a new program or form, a company new to a state, a withdrawal or a large rate change.`:`${listed.length===1?"The new filing isn't":`None of the ${count(listed.length)} new filings is`} marked as a new program, new form, withdrawal or large rate change.`}</span>
+    ${marked.length?`<button type="button" class="btn sm" data-act="w-marked" aria-pressed="${only}">${only?`Show all ${count(listed.length)} new filings`:`Show only the ${count(marked.length)} marked`}</button>`:""}</div>
+    <p class="t2" id="wMarkNote" style="margin:0">A mark is a hint from the filing type, status, rate impact and description, not a fact: it says which words or figures triggered it, so check the filing. A filing without a mark can still matter.</p>`;
+  h+=`<div class="t2">${only?`Showing ${plural(marked.length,"marked new filing")}, the latest found first:`:`New filings found in the last ${count(st.keepDays||90)} days, ${marked.length?"marked ones first, then ":""}the latest found first:`}</div>
     <div class="tbl-wrap cardwrap" id="watchWrap" data-keep><table class="cards filings" id="watchTable"><thead><tr><th>Company</th><th>State</th><th>Filing type</th><th>Type of insurance</th><th>Status</th><th>Dates</th><th class="num">Rate impact</th><th>Description</th><th>Tracking number</th><th>Document</th></tr></thead>
-    <tbody>${shown.map(r=>filingRowHTML({r:watchRow(r), key:"w"+r.filing_version_id})).join("")}</tbody></table></div>`;
+    <tbody>${shown.map(r=>filingRowHTML({r:watchRow(r), key:"w"+r.filing_version_id}).replace('<td class="c-co">', ()=>`<td class="c-co">${watchMarksHTML(r)}`)).join("")}</tbody></table></div>`;
   if(found.length>WATCH_SHOWN) h+=`<div class="inline"><button type="button" class="btn sm" data-act="w-all">${w.showAll?"Show fewer":`Show all ${count(found.length)}`}</button></div>`;
   return h+`<p class="source">Source: S&amp;P Global Market Intelligence, SNL Insurance Product Filings, found by the watchlist check. Opening a document uses one S&amp;P request the first time.</p>`;
 }
@@ -1178,7 +1195,8 @@ function watchManageHTML(l, st, empty){
     <label class="f"><span>Email the new filings to <em>optional; up to ${WATCH_MAX_RECIPIENTS} addresses, separated with commas</em></span>
       <div class="toolbar"><div class="grow"><input type="text" id="w_recips" data-bind="w.recips" value="${esc(recips)}" autocomplete="off" spellcheck="false" placeholder="For example corpdev1@yourco.com"></div>
       <button type="button" class="btn sm" data-act="w-recips-save" ${w.saving?"disabled":""}>Save recipients</button></div></label>
-    <p class="t2" id="wEmailNote">${st&&st.emailConfigured===false?"Email isn't set up for the app yet, so nobody is emailed. ":""}An email lists only the company, state, filing type, a line of description and the tracking number of each new filing, with a link here. Everything shows on this page either way.</p>
+    <p class="t2" id="wEmailNote">${st&&st.emailConfigured===false?"Email isn't set up for the app yet (RESEND_API_KEY, README, Watchlist, step 2), so nobody is emailed. ":""}An email lists the company, state, filing type, a line of description, the tracking number and any mark of each new filing, marked ones first, with a link here. Everything shows on this page either way.</p>
+    <p class="t2" id="wVisible">Every login on the site can see this watchlist, so it shows which companies the team follows. Leave off any company the team would not want named.</p>
   </div>`;
 }
 function watchHTML(){
@@ -1190,7 +1208,7 @@ function watchHTML(){
   const list=l||{enabled:false, companies:[], states:[], typeOfInsuranceIds:[], filingTypeIds:[], recipients:[]}, empty=!list.companies.length||!list.states.length;
   const running=w.checking || !!(st&&st.running);
   const summary = empty ? "Name companies and states once; a daily check shows any new rate, rule or form filing here."
-    : `${list.enabled?`<span class="pill on">On</span> Checked every day for filings published in the last ${count(st&&st.windowDays||14)} days.`:`<span class="pill off">Off</span> Not being checked.`}${st&&st.lastRun?` Last checked ${esc(whenAt(st.lastRun.started_at))}.`:""}`;
+    : `${list.enabled?`<span class="pill on">On</span> ${st&&st.scheduleReady===false?"Checked when Corp Dev clicks Check now,":"Checked every day"} for filings published in the last ${count(st&&st.windowDays||14)} days.`:`<span class="pill off">Off</span> Not being checked.`}${st&&st.lastRun?` Last checked ${esc(whenAt(st.lastRun.started_at))}.`:""}`;
   let h=`<section class="tcard watch" id="watch" aria-label="Watchlist">${head(summary)}`;
   if(w.runNote){ const n=w.runNote, bad=n.status==="failed"||n.status==="error";
     h+=`<div class="${bad?"banner":"info"}" id="wRun" role="${bad?"alert":"status"}"><span>${bad?"<b>The check didn't finish.</b> ":""}${esc(n.message||"")}${isNum(n.requests)&&+n.requests?` ${plural(n.requests,"S&amp;P request")} used.`:""}</span></div>`; }
@@ -1206,15 +1224,19 @@ function watchHTML(){
   const problems=(st&&Array.isArray(st.problems)&&st.problems.length?st.problems:w.problems.length?["Some entries in the saved watchlist couldn't be used and are left out."]:[]);
   if(problems.length && !empty) h+=`<div class="notes" id="wProblems" role="status"><b>Part of the saved watchlist can't be used</b><ul>${problems.map(p=>`<li>${esc(p)}</li>`).join("")}</ul></div>`;
   if(w.statusErr){ const e=w.statusErr;
-    h+= e.err==="not_deployed" ? `<div class="info" id="wNoFn" role="status"><span>${esc(errText(e))}</span></div>` : problemHTML(e, "Couldn't get the last check.", "w-retry"); }
+    h+= e.err==="not_deployed" ? `<div class="info" id="wNoFn" role="status"><span>${cd?`<b>The daily check isn't set up yet: the watchlist function isn't deployed.</b> Do steps 1 to 3 of the README's Watchlist section: run migration 0003, set WATCH_SECRET, then run: supabase functions deploy snl-watch --no-verify-jwt. After that, this card shows the last check and Check now works. You can choose what to watch already.`:"<b>The daily check isn't set up yet.</b> Corp Dev can set it up; what is watched still shows here."}</span></div>`
+      : e.err==="no_tables" ? `<div class="info" id="wNoTables" role="status"><span>${cd?`<b>The daily check isn't set up yet.</b> ${esc(e.msg||"")}`:"<b>The daily check isn't set up yet.</b> Corp Dev can set it up; what is watched still shows here."}</span></div>`
+      : problemHTML(e, "Couldn't get the last check.", "w-retry"); }
   else if(st){
     if(st.configured===false && !empty) h+=`<div class="info" id="wNotSetUp" role="status"><span><b>Checks start once S&amp;P API access is set up.</b> The watchlist is kept until then.</span></div>`;
+    else if(!empty && list.enabled && st.scheduleReady===false) h+=`<div class="info" id="wNoSchedule" role="status"><span><b>Daily checks aren't set up yet, so the list is checked only when ${cd?"you click":"Corp Dev clicks"} Check now.</b>${cd?" Missing: WATCH_SECRET on Supabase (README, Watchlist, step 2), then the daily schedule (step 4, supabase/watch_schedule.sql). After both, a check runs by itself every day.":""}</span></div>`;
+    else if(!empty && list.enabled && st.scheduleQuiet===true && cd) h+=`<div class="info" id="wQuiet" role="status"><span><b>No daily check has run ${st.lastScheduled?`since ${esc(whenAt(st.lastScheduled))}`:"yet"}.</b> If step 4 of the README's Watchlist section (supabase/watch_schedule.sql) is done, the next one runs at the time set there (06:23 UTC unless you changed it). If not, run that file in the Supabase SQL editor.</span></div>`;
     if(st.tooBig && !empty) h+=`<div class="banner" id="wTooBig" role="alert"><span>${esc(st.tooBig)}</span></div>`;
     else if(st.lastRun && st.lastRun.status==="failed" && !running) h+=`<div class="banner" id="wFailed" role="alert"><span><b>The last check, on ${esc(whenAt(st.lastRun.started_at))}, failed.</b> ${esc(st.lastRun.message||"No reason was recorded.")}</span></div>`;
     if(!empty && !list.enabled) h+=`<div class="info" id="wOff" role="status"><span><b>Switched off.</b> ${cd?"Switch it on under Manage to check every day.":"Corp Dev can switch it on."}</span></div>`;
     if(!empty || (st.found&&st.found.length)) h+=watchFoundHTML(st);
   }
-  if(cd && !empty) h+=`<div class="toolbar"><button type="button" class="btn sm primary" data-act="w-check" id="wCheck" ${running||w.saving?"disabled":""}>${w.checking?"Checking…":"Check now"}</button><span class="t2 grow">Uses a few S&amp;P requests. The daily check runs by itself once it is set up.</span></div>`;
+  if(cd && !empty && !(w.statusErr&&["not_deployed","no_tables"].includes(w.statusErr.err))) h+=`<div class="toolbar"><button type="button" class="btn sm primary" data-act="w-check" id="wCheck" ${running||w.saving?"disabled":""}>${w.checking?"Checking…":"Check now"}</button><span class="t2 grow">Uses a few S&amp;P requests. The daily check runs by itself once it is set up.</span></div>`;
   if(w.saveErr) h+=`<p class="err" id="wErr" role="alert">${esc(w.saveErr)}</p>`;
   if(cd && w.manage) h+=watchManageHTML(list, st, empty);
   return h+`</section>`;
@@ -2523,6 +2545,7 @@ document.addEventListener("click", e=>{
     case "w-check": watchCheckNow(); break;
     case "w-manage": S.w.manage=!S.w.manage; S.w.saveErr=""; render(); break;
     case "w-all": S.w.showAll=!S.w.showAll; render(); break;
+    case "w-marked": S.w.onlyMarked=!S.w.onlyMarked; S.w.showAll=false; render(); break;
     case "w-more": S.w.allCos=!S.w.allCos; render(); break;
     case "w-retry": S.w.loaded=false; S.w.readErr=""; S.w.statusErr=null; loadWatch(); break;
 

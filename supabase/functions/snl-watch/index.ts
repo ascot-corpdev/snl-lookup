@@ -13,13 +13,14 @@
 // Deploy: supabase functions deploy snl-watch --no-verify-jwt
 //
 // POST /functions/v1/snl-watch  {"action": ...}
-//   status  (any login)                     -> what is watched, the last check, the new filings found
+//   status  (any login)                     -> what is watched, the last check, the new filings found, each with
+//                                              its marks (flagFiling in watch.ts: hints such as "New program")
 //   run     (Corp Dev login, or the secret)  -> one check now: {run: {status, message, requests, newCount, ...}}
 
 import { adminClient, type Env, type Json, readBody, sleep, type WhoIs, whoIs, withCors } from "../_shared/http.ts";
 import { type Db, supabaseDb } from "../_shared/db.ts";
 import { type Gate, makeGate, planLimits, Spgmi, SpgmiError } from "../_shared/spgmi.ts";
-import { runWatch, sameSecret, WATCH_MAX_REQUESTS, watchStatus } from "../_shared/watch.ts";
+import { missingTables, NO_TABLES, runWatch, sameSecret, WATCH_MAX_REQUESTS, watchStatus } from "../_shared/watch.ts";
 
 export type Deps = { env: Env; fetch: typeof fetch; mailFetch?: typeof fetch; now?: () => number; whoIs?: WhoIs; db?: Db; gate?: Gate; sleep?: (ms: number) => Promise<void> };
 
@@ -57,7 +58,8 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
   switch (action) {
     case "status": {
       if (trigger === "schedule") return json(400, { error: "bad", message: "The scheduler may only run a check." });
-      return json(200, { ...(await watchStatus(db, deps.env, configured, clock())), role });
+      try { return json(200, { ...(await watchStatus(db, deps.env, configured, clock())), role }); }
+      catch (e) { if (missingTables(e)) return json(503, { error: "no_tables", message: NO_TABLES }); throw e; }
     }
     case "run": {
       if (trigger === "manual" && role !== "corpdev") return json(403, { error: "forbidden", message: "Only Corp Dev logins can run a check. Once it is set up, it runs by itself every day." });
@@ -70,7 +72,9 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
         used++;
       };
       const api = configured ? new Spgmi(creds, { fetch: deps.fetch, gate, sleep: wait }) : null;
-      const run = await runWatch({ db, api, env: deps.env, mailFetch: deps.mailFetch ?? deps.fetch, now: clock, trigger, used: () => used });
+      let run;
+      try { run = await runWatch({ db, api, env: deps.env, mailFetch: deps.mailFetch ?? deps.fetch, now: clock, trigger, used: () => used }); }
+      catch (e) { if (missingTables(e)) return json(503, { error: "no_tables", message: NO_TABLES }); throw e; }
       if (run.status === "busy") return json(409, { error: "busy", message: run.message, run });
       return json(200, { run, used: await db.usage(), limits: { hour: limits.hour, day: limits.day }, account: limits.plan });
     }
