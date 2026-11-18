@@ -1,0 +1,1241 @@
+{
+ "_about": "Made-up: the sample group's filings narrowed to Florida and Texas, homeowners. Made by viewfilters_profile_test.ts's rule; every name and figure is invented.",
+ "facts": {
+  "version": 1,
+  "profile": "filings",
+  "sample": false,
+  "asOf": "2026-11-18",
+  "entity": {
+   "kind": "group",
+   "name": "Calloway Group",
+   "groupName": "Calloway Group",
+   "companies": 3,
+   "noId": 0
+  },
+  "period": {
+   "years": 5,
+   "from": "2021-11-20",
+   "to": "2026-11-18"
+  },
+  "source": "S&P Global Market Intelligence, SNL Insurance Product Filings",
+  "search": {
+   "capped": false,
+   "statesSearched": 2,
+   "fromStore": false,
+   "fetchedAt": null
+  },
+  "scope": {
+   "narrowed": true,
+   "states": [
+    "FL",
+    "TX"
+   ],
+   "types": [
+    {
+     "id": 101,
+     "name": "Homeowners"
+    }
+   ],
+   "words": "Florida and Texas, homeowners",
+   "short": "FL and TX, homeowners"
+  },
+  "totals": {
+   "filings": 16,
+   "rate": 9,
+   "rule": 5,
+   "form": 6,
+   "other": 0,
+   "states": 2,
+   "latest": "2026-10-10",
+   "undated": 0
+  },
+  "largest": {
+   "date": "2024-02-18",
+   "state": "FL",
+   "toi": "Homeowners",
+   "rate": 9.2,
+   "status": "Approved",
+   "approved": true,
+   "filingNo": "S&P no. CAL1197975"
+  },
+  "approval": {
+   "rateFilings": 9,
+   "approved": 9,
+   "share": 100
+  },
+  "rates": {
+   "filings": 9,
+   "withImpact": 6,
+   "notApproved": 0,
+   "noDate": 0,
+   "lo": 0.5,
+   "hi": 9.2,
+   "points": [
+    {
+     "date": "2022-01-15",
+     "state": "TX",
+     "toi": "Homeowners",
+     "rate": 7.8,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2022-07-05",
+     "state": "TX",
+     "toi": "Homeowners",
+     "rate": 0.5,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2023-06-22",
+     "state": "FL",
+     "toi": "Homeowners",
+     "rate": 9,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2024-02-18",
+     "state": "FL",
+     "toi": "Homeowners",
+     "rate": 9.2,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2025-09-13",
+     "state": "TX",
+     "toi": "Homeowners",
+     "rate": 2.3,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2026-03-25",
+     "state": "TX",
+     "toi": "Homeowners",
+     "rate": 9,
+     "status": "Approved",
+     "approved": true
+    }
+   ],
+   "pointsTotal": 6,
+   "rows": [
+    {
+     "state": "TX",
+     "toi": "Homeowners",
+     "n": 5,
+     "withRate": 4,
+     "lo": 0.5,
+     "hi": 9,
+     "latest": {
+      "date": "2026-03-25",
+      "state": "TX",
+      "toi": "Homeowners",
+      "rate": 9,
+      "status": "Approved",
+      "approved": true
+     }
+    },
+    {
+     "state": "FL",
+     "toi": "Homeowners",
+     "n": 4,
+     "withRate": 2,
+     "lo": 9,
+     "hi": 9.2,
+     "latest": {
+      "date": "2024-02-18",
+      "state": "FL",
+      "toi": "Homeowners",
+      "rate": 9.2,
+      "status": "Approved",
+      "approved": true
+     }
+    }
+   ],
+   "rowsTotal": 2
+  },
+  "states": {
+   "rows": [
+    {
+     "state": "FL",
+     "n": 9,
+     "rate": 4,
+     "latest": {
+      "date": "2024-02-18",
+      "state": "FL",
+      "toi": "Homeowners",
+      "rate": 9.2,
+      "status": "Approved",
+      "approved": true
+     }
+    },
+    {
+     "state": "TX",
+     "n": 7,
+     "rate": 5,
+     "latest": {
+      "date": "2026-03-25",
+      "state": "TX",
+      "toi": "Homeowners",
+      "rate": 9,
+      "status": "Approved",
+      "approved": true
+     }
+    }
+   ],
+   "noState": 0
+  },
+  "years": {
+   "years": [
+    2021,
+    2022,
+    2023,
+    2024,
+    2025,
+    2026
+   ],
+   "types": [
+    "Rate",
+    "Rule",
+    "Form",
+    "Rate/Rule"
+   ],
+   "counts": [
+    [
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     2,
+     0,
+     2,
+     1
+    ],
+    [
+     0,
+     0,
+     0,
+     2
+    ],
+    [
+     1,
+     0,
+     1,
+     0
+    ],
+    [
+     1,
+     0,
+     2,
+     1
+    ],
+    [
+     1,
+     1,
+     1,
+     0
+    ]
+   ],
+   "totals": [
+    0,
+    5,
+    2,
+    2,
+    4,
+    3
+   ],
+   "byType": [
+    5,
+    1,
+    6,
+    4
+   ]
+  },
+  "latest": {
+   "rows": [
+    {
+     "company": "Calloway Home Co",
+     "state": "FL",
+     "toi": "Homeowners",
+     "type": "Rule",
+     "status": "Withdrawn",
+     "published": "2026-10-10",
+     "filingNo": "S&P no. CAL1316760"
+    },
+    {
+     "company": "Calloway Coastal Co",
+     "state": "FL",
+     "toi": "Homeowners",
+     "type": "Form",
+     "status": "Approved",
+     "published": "2026-10-04",
+     "filingNo": "S&P no. CAL1443464"
+    },
+    {
+     "company": "Calloway Home Co",
+     "state": "TX",
+     "toi": "Homeowners",
+     "type": "Rate/Rule",
+     "status": "Approved",
+     "published": "2025-09-13",
+     "filingNo": "S&P no. CAL1435545"
+    },
+    {
+     "company": "Calloway Coastal Co",
+     "state": "FL",
+     "toi": "Homeowners",
+     "type": "Form",
+     "status": "Approved",
+     "published": "2025-06-05",
+     "filingNo": "S&P no. CAL1205894"
+    },
+    {
+     "company": "Calloway Insurance Co",
+     "state": "TX",
+     "toi": "Homeowners",
+     "type": "Form",
+     "status": "Approved",
+     "published": "2025-04-07",
+     "filingNo": "CALL-0037"
+    },
+    {
+     "company": "Calloway Insurance Co",
+     "state": "TX",
+     "toi": "Homeowners",
+     "type": "Form",
+     "status": "Approved",
+     "published": "2024-10-05",
+     "filingNo": "CALL-0055"
+    },
+    {
+     "company": "Calloway Insurance Co",
+     "state": "FL",
+     "toi": "Homeowners",
+     "type": "Rate/Rule",
+     "status": "Approved",
+     "published": "2023-12-19",
+     "filingNo": "S&P no. CAL1166299"
+    },
+    {
+     "company": "Calloway Coastal Co",
+     "state": "FL",
+     "toi": "Homeowners",
+     "type": "Rate/Rule",
+     "status": "Approved",
+     "published": "2023-06-22",
+     "filingNo": "S&P no. CAL1015838"
+    },
+    {
+     "company": "Calloway Insurance Co",
+     "state": "FL",
+     "toi": "Homeowners",
+     "type": "Form",
+     "status": "Approved",
+     "published": "2022-11-29",
+     "filingNo": "S&P no. CAL1023757"
+    },
+    {
+     "company": "Calloway Insurance Co",
+     "state": "FL",
+     "toi": "Homeowners",
+     "type": "Form",
+     "status": "Approved",
+     "published": "2022-03-30",
+     "filingNo": "S&P no. CAL1190056"
+    },
+    {
+     "company": "Calloway Insurance Co",
+     "state": "TX",
+     "toi": "Homeowners",
+     "type": "Rate/Rule",
+     "status": "Approved",
+     "published": "2022-01-15",
+     "filingNo": "S&P no. CAL1475140"
+    }
+   ],
+   "total": 11
+  },
+  "regulator": {
+   "rows": [
+    {
+     "state": "FL",
+     "n": 9,
+     "median": 112,
+     "lo": 32,
+     "hi": 150
+    },
+    {
+     "state": "TX",
+     "n": 7,
+     "median": 73,
+     "lo": 31,
+     "hi": 127
+    }
+   ],
+   "all": {
+    "state": null,
+    "n": 16,
+    "median": 100,
+    "lo": 31,
+    "hi": 150
+   },
+   "left": 0
+  },
+  "map": {
+   "searched": [
+    "FL",
+    "TX"
+   ]
+  },
+  "summaries": {
+   "checked": true,
+   "version": 2,
+   "note": null,
+   "rate": {
+    "filings": 9,
+    "withDocument": 9,
+    "summarised": 9,
+    "older": 2
+   },
+   "form": {
+    "filings": 6,
+    "withDocument": 6,
+    "summarised": 6,
+    "older": 0
+   }
+  },
+  "exposure": {
+   "rows": [
+    {
+     "filingNo": "S&P no. CAL1039595",
+     "state": "FL",
+     "toi": "Homeowners",
+     "published": "2022-01-04",
+     "status": "Approved",
+     "approved": true,
+     "premium": 48200000,
+     "policyholders": 61400,
+     "exposures": 63856,
+     "rate": null,
+     "page": 5,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1475140",
+     "state": "TX",
+     "toi": "Homeowners",
+     "published": "2022-01-15",
+     "status": "Approved",
+     "approved": true,
+     "premium": 25083000,
+     "policyholders": 35471,
+     "exposures": null,
+     "rate": 7.8,
+     "page": 4,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1411788",
+     "state": "TX",
+     "toi": "Homeowners",
+     "published": "2022-07-05",
+     "status": "Approved",
+     "approved": true,
+     "premium": 27305000,
+     "policyholders": 38614,
+     "exposures": 40159,
+     "rate": 0.5,
+     "page": 3,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1015838",
+     "state": "FL",
+     "toi": "Homeowners",
+     "published": "2023-06-22",
+     "status": "Approved",
+     "approved": true,
+     "premium": 44826000,
+     "policyholders": 57102,
+     "exposures": 59386,
+     "rate": 9,
+     "page": 5,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1166299",
+     "state": "FL",
+     "toi": "Homeowners",
+     "published": "2023-12-19",
+     "status": "Approved",
+     "approved": true,
+     "premium": 48200000,
+     "policyholders": 61400,
+     "exposures": 63856,
+     "rate": null,
+     "page": 4,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1197975",
+     "state": "FL",
+     "toi": "Homeowners",
+     "published": "2024-02-18",
+     "status": "Approved",
+     "approved": true,
+     "premium": 38078000,
+     "policyholders": 48506,
+     "exposures": null,
+     "rate": 9.2,
+     "page": 3,
+     "exposuresPage": 3
+    },
+    {
+     "filingNo": "S&P no. CAL1293003",
+     "state": "TX",
+     "toi": "Homeowners",
+     "published": "2025-02-16",
+     "status": "Approved",
+     "approved": true,
+     "premium": 27305000,
+     "policyholders": 38614,
+     "exposures": 40159,
+     "rate": null,
+     "page": 5,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1435545",
+     "state": "TX",
+     "toi": "Homeowners",
+     "published": "2025-09-13",
+     "status": "Approved",
+     "approved": true,
+     "premium": 29527000,
+     "policyholders": 41757,
+     "exposures": 43427,
+     "rate": 2.3,
+     "page": 4,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1380112",
+     "state": "TX",
+     "toi": "Homeowners",
+     "published": "2026-03-25",
+     "status": "Approved",
+     "approved": true,
+     "premium": 31750000,
+     "policyholders": 44900,
+     "exposures": 46696,
+     "rate": 9,
+     "page": 3,
+     "exposuresPage": 4
+    }
+   ],
+   "total": 9,
+   "latest": [
+    {
+     "filingNo": "S&P no. CAL1197975",
+     "state": "FL",
+     "toi": "Homeowners",
+     "published": "2024-02-18",
+     "status": "Approved",
+     "approved": true,
+     "premium": 38078000,
+     "policyholders": 48506,
+     "exposures": null,
+     "rate": 9.2,
+     "page": 3,
+     "exposuresPage": 3
+    },
+    {
+     "filingNo": "S&P no. CAL1380112",
+     "state": "TX",
+     "toi": "Homeowners",
+     "published": "2026-03-25",
+     "status": "Approved",
+     "approved": true,
+     "premium": 31750000,
+     "policyholders": 44900,
+     "exposures": 46696,
+     "rate": 9,
+     "page": 3,
+     "exposuresPage": 4
+    }
+   ],
+   "latestPremium": 69828000,
+   "latestPolicyholders": 93406,
+   "summarised": 9
+  },
+  "adequacy": {
+   "rows": [
+    {
+     "filingNo": "S&P no. CAL1380112",
+     "state": "TX",
+     "toi": "Homeowners",
+     "published": "2026-03-25",
+     "status": "Approved",
+     "approved": true,
+     "spRate": 9,
+     "lossCostRef": "Nonesuch Rating Bureau loss costs NRB-HO-2022-01",
+     "page": 3,
+     "pages": {
+      "overallPct": 3,
+      "requestedPct": 3,
+      "approvedPct": 3,
+      "indicatedPct": 14,
+      "maxPct": 22,
+      "minPct": 22,
+      "lossCostMultiplier": 9,
+      "targetLossRatio": 14,
+      "projectedLossRatio": 14,
+      "lossTrendPct": 15,
+      "expensePct": 16,
+      "profitPct": 16,
+      "lossCostRef": 9
+     },
+     "overallPct": 9,
+     "requestedPct": 9,
+     "approvedPct": 9,
+     "indicatedPct": 15.4,
+     "maxPct": 19,
+     "minPct": 1,
+     "lossCostMultiplier": 1.185,
+     "targetLossRatio": 62.5,
+     "projectedLossRatio": 71.8,
+     "lossTrendPct": 6.5,
+     "expensePct": 27.4,
+     "profitPct": 5
+    },
+    {
+     "filingNo": "S&P no. CAL1435545",
+     "state": "TX",
+     "toi": "Homeowners",
+     "published": "2025-09-13",
+     "status": "Approved",
+     "approved": true,
+     "spRate": 2.3,
+     "lossCostRef": "Nonesuch Rating Bureau loss costs NRB-HO-2023-02",
+     "page": 4,
+     "pages": {
+      "overallPct": 4,
+      "requestedPct": 4,
+      "approvedPct": 4,
+      "indicatedPct": 14,
+      "maxPct": 22,
+      "minPct": 22,
+      "lossCostMultiplier": 9,
+      "targetLossRatio": 14,
+      "projectedLossRatio": 14,
+      "lossTrendPct": 15,
+      "expensePct": 16,
+      "profitPct": 16,
+      "lossCostRef": 9
+     },
+     "overallPct": 2.3,
+     "requestedPct": 2.3,
+     "approvedPct": 2.3,
+     "indicatedPct": 4.4,
+     "maxPct": 12.3,
+     "minPct": -5.7,
+     "lossCostMultiplier": 1.25,
+     "targetLossRatio": 60,
+     "projectedLossRatio": 66.4,
+     "lossTrendPct": 5,
+     "expensePct": 29.1,
+     "profitPct": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1293003",
+     "state": "TX",
+     "toi": "Homeowners",
+     "published": "2025-02-16",
+     "status": "Approved",
+     "approved": true,
+     "spRate": null,
+     "lossCostRef": "Nonesuch Rating Bureau loss costs NRB-HO-2024-03",
+     "page": 5,
+     "pages": {
+      "lossCostMultiplier": 9,
+      "targetLossRatio": 14,
+      "projectedLossRatio": 14,
+      "lossTrendPct": 15,
+      "expensePct": 16,
+      "profitPct": 16,
+      "lossCostRef": 9
+     },
+     "lossCostMultiplier": 1.12,
+     "targetLossRatio": 64,
+     "projectedLossRatio": 59.9,
+     "lossTrendPct": 7.25,
+     "expensePct": 25.8,
+     "profitPct": 6
+    },
+    {
+     "filingNo": "S&P no. CAL1197975",
+     "state": "FL",
+     "toi": "Homeowners",
+     "published": "2024-02-18",
+     "status": "Approved",
+     "approved": true,
+     "spRate": 9.2,
+     "lossCostRef": null,
+     "page": 3,
+     "pages": {
+      "overallPct": 3,
+      "requestedPct": 3,
+      "approvedPct": 3
+     },
+     "overallPct": 9.2,
+     "requestedPct": 9.2,
+     "approvedPct": 9.2
+    },
+    {
+     "filingNo": "S&P no. CAL1166299",
+     "state": "FL",
+     "toi": "Homeowners",
+     "published": "2023-12-19",
+     "status": "Approved",
+     "approved": true,
+     "spRate": null,
+     "lossCostRef": "Nonesuch Rating Bureau loss costs NRB-HO-2022-02",
+     "page": 4,
+     "pages": {
+      "lossCostMultiplier": 9,
+      "targetLossRatio": 14,
+      "projectedLossRatio": 14,
+      "lossTrendPct": 15,
+      "expensePct": 16,
+      "profitPct": 16,
+      "lossCostRef": 9
+     },
+     "lossCostMultiplier": 1.185,
+     "targetLossRatio": 60,
+     "projectedLossRatio": 71.8,
+     "lossTrendPct": 5,
+     "expensePct": 29.1,
+     "profitPct": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1015838",
+     "state": "FL",
+     "toi": "Homeowners",
+     "published": "2023-06-22",
+     "status": "Approved",
+     "approved": true,
+     "spRate": 9,
+     "lossCostRef": "Nonesuch Rating Bureau loss costs NRB-HO-2023-03",
+     "page": 5,
+     "pages": {
+      "overallPct": 5,
+      "requestedPct": 5,
+      "approvedPct": 5,
+      "indicatedPct": 14,
+      "maxPct": 22,
+      "minPct": 22,
+      "lossCostMultiplier": 9,
+      "targetLossRatio": 14,
+      "projectedLossRatio": 14,
+      "lossTrendPct": 15,
+      "expensePct": 16,
+      "profitPct": 16,
+      "lossCostRef": 9
+     },
+     "overallPct": 9,
+     "requestedPct": 9,
+     "approvedPct": 9,
+     "indicatedPct": 18.2,
+     "maxPct": 19,
+     "minPct": 1,
+     "lossCostMultiplier": 1.25,
+     "targetLossRatio": 64,
+     "projectedLossRatio": 66.4,
+     "lossTrendPct": 7.25,
+     "expensePct": 25.8,
+     "profitPct": 6
+    },
+    {
+     "filingNo": "S&P no. CAL1411788",
+     "state": "TX",
+     "toi": "Homeowners",
+     "published": "2022-07-05",
+     "status": "Approved",
+     "approved": true,
+     "spRate": 0.5,
+     "lossCostRef": "Nonesuch Rating Bureau loss costs NRB-HO-2024-01",
+     "page": 3,
+     "pages": {
+      "overallPct": 3,
+      "requestedPct": 3,
+      "approvedPct": 3,
+      "indicatedPct": 14,
+      "maxPct": 22,
+      "minPct": 22,
+      "lossCostMultiplier": 9,
+      "targetLossRatio": 14,
+      "projectedLossRatio": 14,
+      "lossTrendPct": 15,
+      "expensePct": 16,
+      "profitPct": 16,
+      "lossCostRef": 9
+     },
+     "overallPct": 0.5,
+     "requestedPct": 0.5,
+     "approvedPct": 0.5,
+     "indicatedPct": 6.9,
+     "maxPct": 10.5,
+     "minPct": -7.5,
+     "lossCostMultiplier": 1.12,
+     "targetLossRatio": 62.5,
+     "projectedLossRatio": 59.9,
+     "lossTrendPct": 6.5,
+     "expensePct": 27.4,
+     "profitPct": 5
+    },
+    {
+     "filingNo": "S&P no. CAL1475140",
+     "state": "TX",
+     "toi": "Homeowners",
+     "published": "2022-01-15",
+     "status": "Approved",
+     "approved": true,
+     "spRate": 7.8,
+     "lossCostRef": null,
+     "page": 4,
+     "pages": {
+      "overallPct": 4,
+      "requestedPct": 4,
+      "approvedPct": 4
+     },
+     "overallPct": 7.8,
+     "requestedPct": 7.8,
+     "approvedPct": 7.8
+    },
+    {
+     "filingNo": "S&P no. CAL1039595",
+     "state": "FL",
+     "toi": "Homeowners",
+     "published": "2022-01-04",
+     "status": "Approved",
+     "approved": true,
+     "spRate": null,
+     "lossCostRef": "Nonesuch Rating Bureau loss costs NRB-HO-2022-03",
+     "page": 5,
+     "pages": {
+      "lossCostMultiplier": 9,
+      "targetLossRatio": 14,
+      "projectedLossRatio": 14,
+      "lossTrendPct": 15,
+      "expensePct": 16,
+      "profitPct": 16,
+      "lossCostRef": 9
+     },
+     "lossCostMultiplier": 1.185,
+     "targetLossRatio": 64,
+     "projectedLossRatio": 71.8,
+     "lossTrendPct": 7.25,
+     "expensePct": 25.8,
+     "profitPct": 6
+    }
+   ],
+   "total": 9,
+   "summarised": 9
+  },
+  "programs": {
+   "programs": [
+    {
+     "name": "Calloway Signature Home",
+     "segment": "private client",
+     "filingNo": "S&P no. CAL1443464",
+     "state": "FL",
+     "published": "2026-10-04",
+     "page": 4
+    },
+    {
+     "name": "Calloway Coastal Dwelling",
+     "segment": "standard",
+     "filingNo": "S&P no. CAL1205894",
+     "state": "FL",
+     "published": "2025-06-05",
+     "page": 5
+    },
+    {
+     "name": "Calloway Prestige Estates",
+     "segment": "private client",
+     "filingNo": "CALL-0037",
+     "state": "TX",
+     "published": "2025-04-07",
+     "page": 6
+    },
+    {
+     "name": "Calloway Landlord Select",
+     "segment": "middle market",
+     "filingNo": "CALL-0055",
+     "state": "TX",
+     "published": "2024-10-05",
+     "page": 7
+    }
+   ],
+   "programsTotal": 4,
+   "forms": [
+    {
+     "number": "CHO 30 01",
+     "edition": "06 25",
+     "title": "Homeowners policy",
+     "action": "new",
+     "filingNo": "S&P no. CAL1443464",
+     "state": "FL",
+     "published": "2026-10-04",
+     "page": 10
+    },
+    {
+     "number": "CHO 31 07",
+     "edition": "06 25",
+     "title": "Water backup endorsement",
+     "action": "replaced",
+     "filingNo": "S&P no. CAL1443464",
+     "state": "FL",
+     "published": "2026-10-04",
+     "page": 11
+    },
+    {
+     "number": "CHO 04 90",
+     "edition": "01 24",
+     "title": "Scheduled personal property",
+     "action": "revised",
+     "filingNo": "S&P no. CAL1443464",
+     "state": "FL",
+     "published": "2026-10-04",
+     "page": 12
+    },
+    {
+     "number": "CDP 00 02",
+     "edition": "03 25",
+     "title": "Dwelling property policy",
+     "action": "new",
+     "filingNo": "S&P no. CAL1205894",
+     "state": "FL",
+     "published": "2025-06-05",
+     "page": 13
+    },
+    {
+     "number": "CHO 32 11",
+     "edition": "06 25",
+     "title": "Wind and hail deductible",
+     "action": "new",
+     "filingNo": "CALL-0037",
+     "state": "TX",
+     "published": "2025-04-07",
+     "page": 14
+    }
+   ],
+   "formsTotal": 5,
+   "summaries": 15
+  },
+  "market": {
+   "checked": true,
+   "reason": "",
+   "indexed": [
+    "FL",
+    "TX"
+   ],
+   "rows": [
+    {
+     "state": "FL",
+     "toi": "Homeowners",
+     "from": "2024-11-19",
+     "to": "2026-11-18",
+     "truncated": false,
+     "market": {
+      "filings": 49,
+      "companies": 7,
+      "withRate": 33,
+      "lo": -2.5,
+      "q1": 0.5,
+      "median": 3.5,
+      "q3": 8.9,
+      "hi": 13
+     },
+     "carrier": {
+      "filings": 3,
+      "withRate": 0,
+      "lo": null,
+      "hi": null,
+      "latest": null
+     },
+     "share": 6.1224,
+     "rank": 5
+    },
+    {
+     "state": "TX",
+     "toi": "Homeowners",
+     "from": "2024-11-19",
+     "to": "2026-11-18",
+     "truncated": false,
+     "market": {
+      "filings": 38,
+      "companies": 6,
+      "withRate": 26,
+      "lo": -2.7,
+      "q1": -0.175,
+      "median": 2.8,
+      "q3": 6.25,
+      "hi": 11
+     },
+     "carrier": {
+      "filings": 4,
+      "withRate": 2,
+      "lo": 2.3,
+      "hi": 9,
+      "latest": {
+       "rate": 9,
+       "date": "2026-03-25",
+       "approved": true
+      }
+     },
+     "share": 10.5263,
+     "rank": 4
+    }
+   ],
+   "coverage": [
+    {
+     "state": "FL",
+     "from": "2024-11-19",
+     "to": "2026-11-18",
+     "lastComplete": "2026-11-18",
+     "covered": 2712,
+     "missed": 0
+    },
+    {
+     "state": "TX",
+     "from": "2024-11-19",
+     "to": "2026-11-18",
+     "lastComplete": "2026-11-18",
+     "covered": 2712,
+     "missed": 10
+    }
+   ]
+  }
+ },
+ "text": {
+  "by": "plain",
+  "note": null,
+  "cover": {
+   "subtitle": "FL and TX, homeowners: 3 companies in the group; 16 filings published 20 Nov 2021 to 18 Nov 2026"
+  },
+  "summary": {
+   "title": "16 filings in FL and TX, homeowners over the last 5 years",
+   "points": [
+    {
+     "lead": "Filings",
+     "text": "S&P returned 16 filings in Florida and Texas, homeowners published 20 Nov 2021 to 18 Nov 2026: 9 rate, 5 rule and 6 form."
+    },
+    {
+     "lead": "States",
+     "text": "Filings in 2 states; the most in FL (9)."
+    },
+    {
+     "lead": "Largest rate change",
+     "text": "9.2% in FL (Homeowners), published 18 Feb 2024, approved."
+    },
+    {
+     "lead": "Exposure",
+     "text": "The latest rate filings state $69.8M of written premium affected; the largest FL (Homeowners) at $38.1M (S&P no. CAL1197975, page 3)."
+    },
+    {
+     "lead": "Rate adequacy",
+     "text": "4 of 4 rate filings filed below the indicated change; TX (Homeowners) indicated 15.4%, filed 9.0%."
+    },
+    {
+     "lead": "Against the market",
+     "text": "FL Homeowners: 3 of 49 filings (6.1%), rank 5 of 7 companies; index median rate change 3.5% (derived)."
+    }
+   ]
+  },
+  "rates": {
+   "title": "Overall rate changes from 0.5% to 9.2% (FL and TX, homeowners)",
+   "points": [
+    {
+     "lead": "Range",
+     "text": "From 0.5% to 9.2% across 6 filings; each is S&P's overall figure for the filing, not weighted by premium."
+    },
+    {
+     "lead": "Approved",
+     "text": "Every filing with a rate impact shows an approved status."
+    },
+    {
+     "lead": "Latest",
+     "text": "9.0% in TX (Homeowners), published 25 Mar, approved."
+    }
+   ]
+  },
+  "states": {
+   "title": "Most filings in FL: 9 of 16 (homeowners)",
+   "points": [
+    {
+     "lead": "Top states",
+     "text": "FL 9, TX 7."
+    },
+    {
+     "lead": "Spread",
+     "text": "Filings in 2 states of the 2 searched (FL and TX only)."
+    },
+    {
+     "lead": "Rate filings",
+     "text": "4 of the 9 filings in FL are rate filings."
+    }
+   ]
+  },
+  "years": {
+   "title": "Most filings in 2022: 5 of 16 (FL and TX, homeowners)",
+   "points": [
+    {
+     "lead": "Busiest year",
+     "text": "2022: 5 filings."
+    },
+    {
+     "lead": "By type",
+     "text": "Form 6, Rate 5, Rate/Rule 4, Rule 1."
+    },
+    {
+     "lead": "Part years",
+     "text": "2021 and 2026 are part years."
+    }
+   ]
+  },
+  "forms": {
+   "title": "11 form and rule filings; latest 10 Oct (FL and TX, homeowners)",
+   "points": [
+    {
+     "lead": "Latest",
+     "text": "Rule filing in FL (Homeowners), published 10 Oct, withdrawn."
+    },
+    {
+     "lead": "In the period",
+     "text": "11 form and rule filings of 16 filings."
+    }
+   ]
+  },
+  "regulator": {
+   "title": "About 100 days with the regulator (median) (FL, TX homeowners)",
+   "points": [
+    {
+     "lead": "Median",
+     "text": "About 100 days from submitted to published over 16 filings, from 31 to 150 days (approximate)."
+    },
+    {
+     "lead": "Slowest state",
+     "text": "FL: about 112 days, the median of 9 filings."
+    }
+   ]
+  },
+  "rateMap": {
+   "title": "Latest change an increase in 2 of 2 states (FL, TX homeowners)",
+   "points": [
+    {
+     "lead": "Highest",
+     "text": "FL: 9.2%, published 18 Feb 2024, approved."
+    },
+    {
+     "lead": "Lowest",
+     "text": "TX: 9.0%, published 25 Mar, approved."
+    },
+    {
+     "lead": "Direction",
+     "text": "2 up, 0 down, 0 unchanged."
+    }
+   ]
+  },
+  "exposure": {
+   "title": "Latest rate filings state $69.8M of premium affected",
+   "points": [
+    {
+     "lead": "Largest book",
+     "text": "FL (Homeowners): $38.1M of written premium, 48,506 policyholders (S&P no. CAL1197975, page 3)."
+    },
+    {
+     "lead": "What it is",
+     "text": "What each rate filing says about the book it covers, from 9 summarised filings; not statutory premium. The total adds the latest filing for each state and type (derived)."
+    }
+   ]
+  },
+  "adequacy": {
+   "title": "Indicated above filed in 4 of 4 rate filings (FL, TX homeowners)",
+   "points": [
+    {
+     "lead": "Indicated and filed",
+     "text": "TX (Homeowners): indicated 15.4%, filed 9.0%, approved 9.0% (S&P no. CAL1380112, page 14)."
+    },
+    {
+     "lead": "Loss costs",
+     "text": "TX (Homeowners): adopts Nonesuch Rating Bureau loss costs NRB-HO-2022-01, multiplier 1.185 (S&P no. CAL1380112, page 9)."
+    },
+    {
+     "lead": "Assumptions",
+     "text": "TX (Homeowners): loss trend 6.5%, target loss ratio 62.5%, projected loss ratio 71.8%, expenses 27.4% (S&P no. CAL1380112)."
+    }
+   ]
+  },
+  "programs": {
+   "title": "4 programs and 5 forms in the saved summaries",
+   "points": [
+    {
+     "lead": "Segments",
+     "text": "private client 2, standard 1, middle market 1."
+    },
+    {
+     "lead": "Latest forms",
+     "text": "CHO 30 01, Homeowners policy, in FL, published 4 Oct (S&P no. CAL1443464, page 10)."
+    },
+    {
+     "lead": "Where from",
+     "text": "From 15 saved summaries; each item names its filing and page."
+    }
+   ]
+  },
+  "market": {
+   "title": "6.1% of indexed FL Homeowners filings",
+   "points": [
+    {
+     "lead": "Share",
+     "text": "FL Homeowners: 3 of 49 filings (6.1%), rank 5 of 7 companies; index median rate change 3.5% (derived)."
+    },
+    {
+     "lead": "Also",
+     "text": "TX Homeowners: 4 of 38 filings (10.5%), rank 4 of 6 companies; index median rate change 2.8% (derived), its latest 9.0%."
+    },
+    {
+     "lead": "Coverage",
+     "text": "The market index holds the companies in the app's company list only, so it isn't the whole market."
+    }
+   ]
+  },
+  "questions": {
+   "title": "Key diligence questions (FL and TX, homeowners)",
+   "items": [
+    {
+     "title": "Indicated above filed",
+     "text": "In TX a rate filing indicated 15.4% but filed 9.0% (S&P no. CAL1380112). How and when will the gap be closed?"
+    },
+    {
+     "title": "Rate versus the market",
+     "text": "Its latest TX Homeowners change is 9.0% against an index median of 2.8% (derived). What explains the difference?"
+    },
+    {
+     "title": "State concentration",
+     "text": "FL had 9 of the 16 filings. How exposed is the book to that state's regulator and weather?"
+    },
+    {
+     "title": "Product changes",
+     "text": "11 form and rule filings in the period in Florida and Texas, homeowners. Which programs are new or changing, and why?"
+    }
+   ]
+  }
+ }
+}
