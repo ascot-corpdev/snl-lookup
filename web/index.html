@@ -406,6 +406,8 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 .pfcheck{display:flex;gap:10px;align-items:flex-start;cursor:pointer;min-width:0;overflow-wrap:anywhere}
 .pfcheck input{margin-top:3px;flex:none;width:16px;height:16px}
 .pfdraft{display:flex;flex-direction:column;gap:6px;min-width:0}
+.fpsum{display:flex;flex-direction:column;gap:8px;min-width:0;border-top:1px solid var(--grid);padding-top:12px}
+.fpsum p{overflow-wrap:anywhere}
 .pfdraft p{margin:0}
 .pfsample{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;border-top:1px solid var(--grid);padding-top:12px;min-width:0}
 .pfsample>div{flex:1 1 260px;min-width:0}
@@ -1795,9 +1797,25 @@ function dgDigestHTML(d, key){
   const money=v=>isNum(v)?usdM(v):"n/d", rates=[["Overall rate change", isNum(rate.overallPct)?pct(rate.overallPct):"n/d"],["Requested", isNum(rate.requestedPct)?pct(rate.requestedPct):"n/d"],["Approved", isNum(rate.approvedPct)?pct(rate.approvedPct):"n/d"],
     ["Written premium affected", money(rate.premium)],["Policyholders affected", count(rate.policyholders)],["Effective, new business", fmtDay(rate.effectiveNew)],["Effective, renewals", fmtDay(rate.effectiveRenewal)]];
   h+=`<section id="dgRate"><h3>Rate figures</h3>${isNum(rate.page)?`<div class="rate">${rates.map(([k,v])=>`<span>${k}</span><b>${esc(v)}</b>`).join("")}</div><p class="t2" style="margin-top:4px">From ${dgPageBtn(key, rate.page)}.</p>`:`<p class="t2">No rate figures were found on the pages read.</p>`}</section>`;
+  h+=dgRateMoreHTML(d, key);
   h+=`<section id="dgElig"><h3>Eligibility</h3>${dgListHTML(elig, key, none, e=>esc(e.text))}</section>`;
   h+=`<section id="dgNotable"><h3>Notable points</h3>${dgListHTML(notable, key, none, n=>esc(n.text))}</section>`;
   return h;
+}
+/* The rate figures a summary holds from version 2 on (loss costs, the indicated change, assumptions), each with its
+   page; an older summary says it was made before these were read. */
+const DG_RATE_MORE = [["indicatedPct","Indicated rate change","pct"],["maxPct","Largest change for one policyholder","pct"],["minPct","Smallest change for one policyholder","pct"],["lossCostChangePct","Change in advisory loss costs adopted","pct"],
+  ["lossCostMultiplier","Loss cost multiplier","x3"],["lossCostRef","Advisory loss costs adopted","text"],["targetLossRatio","Permissible or target loss ratio","pct"],["projectedLossRatio","Projected loss ratio","pct"],
+  ["lossTrendPct","Annual loss trend","pct"],["expensePct","Expense provision","pct"],["profitPct","Profit and contingencies provision","pct"],["exposures","Exposures affected","count"]];
+function dgRateMoreList(rate){
+  const r=rate&&typeof rate==="object"?rate:{}, pages=r.pages&&typeof r.pages==="object"?r.pages:{};
+  return DG_RATE_MORE.filter(([k,,kind])=>kind==="text"?!blank(r[k]):isNum(r[k])).map(([k,label,kind])=>({k, label, page:isNum(pages[k])?+pages[k]:(isNum(r.page)?+r.page:null),
+    text: kind==="pct"?pct(r[k]):kind==="x3"?(+r[k]).toFixed(3):kind==="count"?count(r[k]):String(r[k]).slice(0,120)}));
+}
+function dgRateMoreHTML(d, key){
+  const list=dgRateMoreList(d.rate), v=isNum(d.v)?+d.v:1;
+  if(!list.length) return v<2 ? `<section id="dgRateMore"><h3>Loss costs and rate adequacy</h3><p class="t2">This summary was made before loss costs, the indicated change and the filing's assumptions were read. Making it again adds them where the filing gives them.</p></section>` : "";
+  return `<section id="dgRateMore"><h3>Loss costs and rate adequacy</h3><div class="rate">${list.map(x=>`<span>${esc(x.label)}</span><b>${esc(x.text)} ${x.page?dgPageBtn(key, x.page):""}</b>`).join("")}</div></section>`;
 }
 function dgDrawerHTML(){
   const dr=dgOf().dr, d=dr.digest, r=dr.row||{}, key=dr.key;
@@ -3214,7 +3232,8 @@ function renderProfile(){
 const FP_YEARS = [1,3,5];
 const FP_MAX_SP_REQUESTS = 60, FP_MAX_PLANNED = 50, FP_OVERHEAD = 3;   // the same in supabase/functions/_shared/profile.ts
 const FP_WINDOW_DAYS = 365;
-function freshFp(){ return {find:{q:"", asked:"", matches:null, groups:null, busy:false, err:""}, pick:null, years:3, formErr:"", busy:"", asked:null, res:null, err:null, plan:null, libsErr:"", draft:null, drafted:null, draftErr:null, built:null, buildErr:""}; }
+function freshFp(){ return {find:{q:"", asked:"", matches:null, groups:null, busy:false, err:""}, pick:null, years:3, formErr:"", busy:"", asked:null, res:null, err:null, plan:null, libsErr:"", draft:null, drafted:null, draftErr:null, built:null, buildErr:"",
+  cand:null, nRate:null, nForm:null, dst:null, dErr:null, mk:null, refreshErr:null}; }
 // which profile the view shows: the reader's choice, else the full one once statutory data is ready, else filings
 const pfMode = () => S.pf.mode || (pfLive() ? "full" : "filings");
 const fpFilingsOff = () => { const s=S.pf.status&&S.pf.status.filings; return !!s && s.configured===false; };
@@ -3285,11 +3304,12 @@ async function fpFacts(){
   else if(r.err!=="signin") fp.err = r.data ? {err:"bad_answer", msg:"The profile function sent back something the page can't read. Try again."} : r;
   render();
 }
-function fpTake(fp, data){ fp.res={facts:data.facts, text:data.text, search:data.search&&typeof data.search==="object"?data.search:null, spRequests:isNum(data.spRequests)?+data.spRequests:null}; fp.plan=null; fp.libsErr=""; fpPlan(fp); }
+function fpTake(fp, data){ fp.res={facts:data.facts, text:data.text, search:data.search&&typeof data.search==="object"?data.search:null, spRequests:isNum(data.spRequests)?+data.spRequests:null}; fp.plan=null; fp.libsErr=""; fpPlan(fp);
+  fp.cand=fpCandOf(data.candidates); if(!data.facts.sample && !fp.dst && !fp.dErr) fpDigestStatus(fp); }
 async function fpPlan(fp){
   try{ await loadProfileLibs(); }catch{ if(S.pf.fp===fp){ fp.libsErr=PF_LIBS_ERR; render(); } return; }
   if(S.pf.fp!==fp || !fp.res) return;
-  let plan=null; try{ plan=typeof window.SNLProfile.filingsPlan==="function" ? window.SNLProfile.filingsPlan(fp.res.facts) : null; }catch{}
+  let plan=null; try{ plan=typeof window.SNLProfile.filingsPlan==="function" ? window.SNLProfile.filingsPlan(fp.res.facts, {usMap:US_MAP}) : null; }catch{}
   if(!Array.isArray(plan)){ fp.libsErr="Couldn't work out which slides these filings fill. Reload the page and try again."; render(); return; }
   fp.plan=plan.filter(s=>s&&typeof s==="object"); fp.libsErr=""; render();
 }
@@ -3329,7 +3349,7 @@ async function fpMake(fp){
   if(!S.session || S.pf.fp!==fp) return;
   try{ await loadProfileLibs(); }catch{ fail(PF_LIBS_ERR); return; }
   if(!S.session || S.pf.fp!==fp) return;
-  let spec; try{ spec=window.SNLProfile.filingsSpec(use.facts, use.text); }catch(e){ fail("Couldn't lay out the slides from these filings. "+((e&&e.message)||"")); return; }
+  let spec; try{ spec=window.SNLProfile.filingsSpec(use.facts, use.text, {usMap:US_MAP}); }catch(e){ fail("Couldn't lay out the slides from these filings. "+((e&&e.message)||"")); return; }
   let out; try{ out=await window.SNLDeck.build(bytes.slice(0), spec); }catch(e){ fail("Couldn't build the PowerPoint file. "+((e&&e.message)||"Try again.")); return; }
   if(!S.session || S.pf.fp!==fp) return;
   fp.busy=""; fp.built={blob:new Blob([out],{type:PPTX_TYPE}), name:pfFileName(spec), by:use.text&&use.text.by==="claude"?"claude":"plain"};
@@ -3415,6 +3435,7 @@ function fpOutHTML(){
   else h+=`<div class="pftiles" id="fpHead"><div class="pftile" data-k="filings"><span class="t2">Filings</span><b>${count(T.filings)}</b></div><div class="pftile" data-k="rate"><span class="t2">Rate filings</span><b>${count(T.rate)}</b></div><div class="pftile" data-k="states"><span class="t2">States with filings</span><b>${count(T.states)}</b></div></div>`;
   if(sh.capped) h+=`<div class="banner" id="fpCapped" role="alert"><span><b>The search stopped early,</b> so these filings may be incomplete and the slides say so. Choose a shorter period or one company for a complete profile.</span></div>`;
   h+=fpPlanHTML(fp);
+  h+=fpSumHTML(fp);
   const used=fp.res.spRequests;
   h+=`<p class="source" id="fpSource">Source: S&amp;P Global Market Intelligence, SNL Insurance Product Filings. Rate impacts are S&amp;P's overall figure for each filing, not weighted by premium; for a filing that isn't approved it may be the change asked for.${sh.fromStore?` From the saved search${sh.fetchedAt?` of ${esc(whenAt(sh.fetchedAt))}`:""}: no new S&amp;P requests.`:isNum(used)?` ${plural(used,"S&amp;P request")} used.`:""}</p></section>`;
   h+=`<section class="tcard" id="fpBuild" aria-label="Build the PowerPoint file">${fpDraftHTML(fp)}`;
@@ -3428,7 +3449,7 @@ function fpOutHTML(){
   if(fp.built && !fp.busy) h+=`<div class="info" id="fpBuilt" role="status"><span><b>Your filings profile is ready.</b> ${esc(fp.built.name)} was saved to your downloads. It was made in this browser and isn't stored or sent anywhere.</span><button type="button" class="btn sm" data-act="fp-again">Download again</button></div>`;
   const tpl=pfHasTemplate(), label=fpDraftWanted()&&!fp.drafted ? "Draft with Claude and build" : fp.built ? "Build again" : "Build the PowerPoint file";
   if(!tpl) h+=`<p class="t2" id="fpNoTplNote">${isCorpDev()?"Upload your PowerPoint template below to build the file.":"The file can be built once Corp Dev uploads the template."}</p>`;
-  if(!fp.draftErr) h+=`<div class="toolbar"><button type="button" class="btn primary" id="fp_buildBtn" data-act="fp-build" ${fp.busy||!tpl||!fp.plan?"disabled":""}>${label}</button></div>`;
+  if(!fp.draftErr) h+=`<div class="toolbar"><button type="button" class="btn primary" id="fp_buildBtn" data-act="fp-build" ${fp.busy||!tpl||!fp.plan||(fp.mk&&fp.mk.busy)?"disabled":""}>${label}</button></div>`;
   return h+`</section>`;
 }
 function fpRender(){
@@ -3451,6 +3472,121 @@ function fpSampleHTML(){
   const pf=S.pf, fnOk=!(pf.statusErr&&pf.statusErr.err==="not_deployed"), fp=pf.fp;
   return `<div class="pfsample" id="fpSampleBox"><div><b>Check the template with a sample filings profile</b><p class="t2" id="fpSampleNote">Made-up filings for a made-up group. It works before S&amp;P filings are set up.</p></div>
     <button type="button" class="btn" data-act="fp-sample" ${fp.busy||pf.busy||!fnOk?"disabled":""}>${fp.busy==="sample"||(fp.busy==="build"&&fp.res&&fp.res.facts.sample)?"Building the sample…":"Build a sample filings profile"}</button></div>`;
+}
+
+/* ----- saved filing summaries: what the profile has, and summarising more before building, only when chosen -----
+   The profile function reads the saved summaries of the company's filings for free and says which rate and form
+   filings have none (candidates, newest first). Making one is the summaries function's "make": 1 S&P request and one
+   Claude read of up to 150 pages, and one of the day's questions, so nothing is made until the reader chooses how
+   many, with the cost stated first. Then the figures are worked out again from the saved search (no new S&P search).
+   Uses the Programs and forms page's helpers (fcEstimate, fcUsd, fcWhy) when they are there. */
+const FP_SUM_MAX = 10, FP_SUM_RATE = 5, FP_SUM_FORM = 3;
+function fpCandOf(c){
+  const ok=x=>x&&typeof x==="object"&&!Array.isArray(x)&&x.row&&typeof x.row==="object"&&!Array.isArray(x.row);
+  const list=v=>(Array.isArray(v)?v:[]).filter(ok).slice(0, 25);
+  return c&&typeof c==="object" ? {rate:list(c.rate), form:list(c.form)} : {rate:[], form:[]};
+}
+function fpSumNs(fp){
+  const c=fp.cand||{rate:[],form:[]}, n=(v, max, d)=>{ const k=v===null||v===undefined||v==="" ? d : Math.round(+v); return Number.isFinite(k)&&k>=0 ? Math.min(k, max) : Math.min(d, max); };
+  return {r:n(fp.nRate, Math.min(FP_SUM_MAX, c.rate.length), FP_SUM_RATE), f:n(fp.nForm, Math.min(FP_SUM_MAX, c.form.length), FP_SUM_FORM)};
+}
+function fpSumQueue(fp){ const c=fp.cand||{rate:[],form:[]}, n=fpSumNs(fp); return [...c.rate.slice(0,n.r), ...c.form.slice(0,n.f)]; }
+function fpSumEstimate(q){
+  const shaped=q.map(c=>({f:{r:{pages:isNum(c.pages)?+c.pages:null}}}));
+  if(typeof fcEstimate==="function"){ try{ return fcEstimate(shaped); }catch{} }
+  const pages=q.reduce((a,c)=>a+(isNum(c.pages)&&+c.pages>0?Math.min(+c.pages,150):150),0);
+  return {pages, lo:pages*2.30/150, hi:pages*3.50/150, unknown:q.filter(c=>!(isNum(c.pages)&&+c.pages>0)).length};
+}
+const fpUsd = v => typeof fcUsd==="function" ? fcUsd(v) : "$"+(+v).toLocaleString("en-US",{minimumFractionDigits:2, maximumFractionDigits:2});
+async function fpDigestStatus(fp){
+  const r=await callFn("snl-digest",{action:"status"});
+  if(!S.session || S.pf.fp!==fp) return;
+  if(r.data){ fp.dst=r.data; fp.dErr=null; } else if(r.err!=="signin") fp.dErr=r;
+  render();
+}
+function fpSumOff(fp){
+  const d=fp.dst, e=fp.dErr;
+  if(e && e.err==="not_deployed") return "Summaries can't be made here: the summaries function isn't on this site"+(isCorpDev()?" (deploy snl-digest; see the README).":".");
+  if(e && e.err==="no_tables") return "Summaries can't be made yet: their table isn't in the database (migration 0005).";
+  if(d && d.claude && d.claude.configured===false) return "New summaries can't be made yet: Claude isn't set up on this site.";
+  if(d && d.filings && d.filings.configured===false) return "New summaries can't be made yet: S&P isn't set up on this site.";
+  if(chatAtLimit(S.chatUse)) return "Today's limit on questions is reached, so no summary can be made until midnight UTC.";
+  return "";
+}
+function fpSumHTML(fp){
+  const f=fp.res.facts, U=f.summaries;
+  if(f.sample) return `<p class="t2" id="fpSumSample">The sample's filing summaries are made up, so none are made or saved.</p>`;
+  if(!U || typeof U!=="object") return "";
+  const c=k=>U[k]&&typeof U[k]==="object"?U[k]:{filings:0, summarised:0, older:0, withDocument:0};
+  const R=c("rate"), F=c("form"), older=(+R.older||0)+(+F.older||0);
+  let h=`<section class="fpsum" id="fpSum" aria-labelledby="fpSumH"><div class="f"><span id="fpSumH">Filing summaries <em>what the exposure, rate adequacy and programs slides rest on</em></span></div>`;
+  if(!U.checked){ h+=`<p class="t2" id="fpSumHave">${esc(blank(U.note)?"Saved summaries weren't looked up for this profile.":U.note)}</p>`; return h+`</section>`; }
+  h+=`<p style="margin:0" id="fpSumHave"><b>Saved summaries:</b> ${count(R.summarised)} of ${plural(R.filings,"rate filing")} and ${count(F.summarised)} of ${plural(F.filings,"form filing")}${older?`; ${plural(older,"was","were")} made before the newer rate figures (loss costs, indicated change, assumptions) were read, and can be made again`:""}. Saved summaries cost nothing to use.</p>`;
+  const mk=fp.mk;
+  if(fp.busy==="refresh") h+=`<div class="info" id="fpRefreshing" role="status"><span><b>Working out the figures again with the new summaries…</b> From the saved search: no new S&amp;P search.</span></div>`;
+  if(fp.refreshErr) h+=`<div class="banner" id="fpRefreshErr" role="alert"><span><b>The new summaries are saved, but the figures couldn't be worked out again.</b> ${esc(errText(fp.refreshErr))}</span><button type="button" class="btn sm" data-act="fp-refresh-retry">Try again</button></div>`;
+  if(mk && mk.busy){
+    const cur=mk.cur&&mk.cur.c;
+    return h+`<div class="banner" id="fpSumMaking" role="status"><span><b>Summarising ${count(mk.i)} of ${count(mk.n)}:</b> ${esc(cur?`${cur.filingNo||"a filing"} (${[cur.state, cur.toi].filter(Boolean).join(", ")||"n/d"})`:"")}… Each takes a minute or two. Keep this tab open.</span><button type="button" class="btn sm" data-act="fp-sum-stop" ${mk.stop?"disabled":""}>${mk.stop?"Stopping after this one…":"Stop"}</button></div></section>`;
+  }
+  if(fp.dErr && !["not_deployed","no_tables","signin"].includes(fp.dErr.err)) h+=`<div class="banner" id="fpSumErr" role="alert"><span><b>Couldn't check whether summaries can be made.</b> ${esc(errText(fp.dErr))}</span><button type="button" class="btn sm" data-act="fp-sum-retry">Try again</button></div>`;
+  const cand=fp.cand||{rate:[],form:[]}, n=fpSumNs(fp), q=fpSumQueue(fp), off=fpSumOff(fp);
+  if(!cand.rate.length && !cand.form.length){ h+=`<p class="t2" id="fpSumNone">Every rate and form filing with a document already has a current summary${R.withDocument<R.filings||F.withDocument<F.filings?", or has no document to summarise":""}.</p>`; return h+(mk?fpSumMadeHTML(mk):"")+`</section>`; }
+  const opts=(max, cur)=>Array.from({length:max+1},(_,i)=>`<option value="${i}" ${cur===i?"selected":""}>${i}</option>`).join("");
+  h+=`<div class="inline fpsumpick"><label for="fp_nRate" class="t2"><b>Summarise the latest</b></label><select id="fp_nRate" data-bind="pf.fp.nRate" data-live style="width:auto" ${fp.busy?"disabled":""}>${opts(Math.min(FP_SUM_MAX, cand.rate.length), n.r)}</select><label for="fp_nForm" class="t2"><b>rate filings and the latest</b></label><select id="fp_nForm" data-bind="pf.fp.nForm" data-live style="width:auto" ${fp.busy?"disabled":""}>${opts(Math.min(FP_SUM_MAX, cand.form.length), n.f)}</select><span class="t2"><b>form filings</b></span></div>`;
+  h+=`<p class="t2" id="fpSumWhich" style="margin:0">${plural(cand.rate.length,"rate filing")} and ${plural(cand.form.length,"form filing")} have no current summary${cand.rate.some(x=>x.older)||cand.form.some(x=>x.older)?" (older summaries are made again)":""}; the newest are taken first.</p>`;
+  if(q.length){
+    const est=fpSumEstimate(q), cu=S.chatUse, left = cu && isNum(cu.dailyLimit) && isNum(cu.askedToday) ? Math.max(0, +cu.dailyLimit - +cu.askedToday) : null;
+    h+=`<p style="margin:0" id="fpSumCost"><b>${plural(q.length,"new summary","new summaries")}: ${plural(q.length,"S&amp;P request")}, roughly ${fpUsd(est.lo)} to ${fpUsd(est.hi)} of Claude reading, and ${plural(q.length,"of today's questions","of today's questions")}.</b> <span class="t2">An estimate: up to the first 150 pages of each filing (${count(est.pages)} pages in all${est.unknown?`, counting ${plural(est.unknown,"filing")} with no page count as 150`:""}). What it really cost shows when it is done. Summaries are saved for everyone, so nobody pays to read these filings again.</span></p>`;
+    if(left!==null && left<q.length) h+=`<p class="t2 bigwarn" id="fpSumDaily" style="margin:0">Only ${plural(left,"question is","questions are")} left today, so at most ${count(left)} of these can be made today; the rest will say why.</p>`;
+  } else h+=`<p class="t2" id="fpSumCost" style="margin:0">Nothing chosen: the profile is built from the summaries already saved.</p>`;
+  if(off) h+=`<p class="t2" id="fpSumOff" style="margin:0">${esc(off)}</p>`;
+  h+=`<div class="toolbar"><button type="button" class="btn" id="fp_sumMake" data-act="fp-sum-make" ${!q.length||off||fp.busy?"disabled":""}>Summarise ${plural(q.length,"filing")}</button><span class="t2 grow">Then the figures are worked out again from the saved search. ${fp.drafted?"Claude's slide text is drafted again for them when you build.":""}</span></div>`;
+  return h+(mk?fpSumMadeHTML(mk):"")+`</section>`;
+}
+function fpSumMadeHTML(mk){
+  const made=mk.items.filter(x=>x.state==="made"), bad=mk.items.filter(x=>x.state!=="made");
+  const name=x=>`${esc(x.c.filingNo||"A filing")} (${esc([x.c.state, x.c.toi].filter(Boolean).join(", ")||"n/d")})`;
+  const spent=[mk.usdKnown?`cost ${costText(mk.usd)}`:"", mk.sp?`used ${plural(mk.sp,"S&amp;P request")}`:""].filter(Boolean).join(" and ");
+  return `<div class="${bad.length?"banner":"info"}" id="fpSumMade" role="status" style="display:block"><b>${made.length===mk.items.length?`All ${plural(made.length,"summary","summaries")} made`:`${count(made.length)} of ${plural(mk.items.length,"summary","summaries")} made`}.</b>${spent?` These ${spent}.`:""}
+    <ul class="fcres" id="fpSumList">${mk.items.map(x=>x.state==="made"?`<li>${name(x)}: summarised.</li>`:x.state==="failed"?`<li class="no">${name(x)}: not summarised: ${esc(x.why)}</li>`:`<li class="no">${name(x)}: not started: ${esc(x.why||"")}</li>`).join("")}</ul></div>`;
+}
+async function fpSumMake(){
+  const fp=S.pf.fp; if(fp.busy || (fp.mk&&fp.mk.busy) || !fp.res || fp.res.facts.sample || fpSumOff(fp)) return;
+  const q=fpSumQueue(fp); if(!q.length) return;
+  const mk=fp.mk={busy:true, stop:false, halt:"", n:q.length, i:0, cur:null, items:q.map(c=>({c, state:"queued", why:""})), made:0, usd:0, usdKnown:false, sp:0};
+  fp.refreshErr=null; render();
+  for(let i=0;i<mk.items.length;i++){
+    const x=mk.items[i];
+    if(mk.stop || mk.halt){ x.state="skipped"; x.why=mk.halt||"you pressed Stop."; continue; }
+    mk.i=i+1; mk.cur=x; x.state="running"; render();
+    const r=await callFn("snl-digest",{action:"make", filing:x.c.row, ...(x.c.older?{refresh:true}:{})});
+    if(!S.session || S.pf.fp!==fp) return;   // the session ended: everything here was forgotten with it
+    if(r.data && r.data.digest && typeof r.data.digest==="object"){
+      x.state="made"; mk.made++;
+      const u=r.data.usage&&typeof r.data.usage==="object"?r.data.usage:{};
+      if(isNum(u.costUsd)){ mk.usd+=+u.costUsd; mk.usdKnown=true; } if(isNum(u.spRequests)) mk.sp+=+u.spRequests;
+    } else {
+      const res=r.data ? {err:"bad_answer", msg:"The summaries function sent back something the page can't read."} : r;
+      x.state="failed"; x.why=typeof fcWhy==="function" ? fcWhy(res) : errText(res);
+      if(["limit","daily_limit"].includes(res.err)) mk.halt="today's limit on questions was reached.";
+      if(["not_configured","not_deployed","no_tables"].includes(res.err)){ mk.halt="summaries aren't set up yet."; fp.dErr=res; }
+    }
+  }
+  mk.busy=false; mk.cur=null; render();
+  pfChatUse(); loadStatus();
+  if(mk.made) await fpRefresh(fp);
+}
+/* The figures again, after new summaries: the same company and period, from the saved search (no new S&P search). */
+async function fpRefresh(fp){
+  if(!fp.asked || fp.busy) return;
+  fp.busy="refresh"; fp.refreshErr=null; render();
+  const r=await callFn("snl-profile", fpBody("filings_facts", fp.asked.pick, fp.asked.years));
+  if(!S.session || S.pf.fp!==fp) return;
+  fp.busy="";
+  if(r.data && r.data.facts && typeof r.data.facts==="object" && r.data.text){ const keep=fp.mk; fpTake(fp, r.data); fp.mk=keep; fp.drafted=null; fp.built=null; fp.nRate=null; fp.nForm=null; }
+  else if(r.err!=="signin") fp.refreshErr = r.data ? {err:"bad_answer", msg:"The profile function sent back something the page can't read. Try again."} : r;
+  render();
 }
 
 /* ---------- Snapshot: one company or group over 1, 3 or 5 years, on one page ----------
@@ -4359,6 +4495,7 @@ function fcRateText(rt){
   const day=v=>typeof v==="string"&&parseDay(v)?fmtDay(v):fcStr(v,30);
   if(!blank(rt.effectiveNew)&&day(rt.effectiveNew)) bits.push(`effective for new business ${day(rt.effectiveNew)}`);
   if(!blank(rt.effectiveRenewal)&&day(rt.effectiveRenewal)) bits.push(`for renewals ${day(rt.effectiveRenewal)}`);
+  if(typeof dgRateMoreList==="function") for(const x of dgRateMoreList(rt)) bits.push(`${x.label.toLowerCase()} ${x.text}${x.page&&x.page!==rt.page?` (page ${x.page})`:""}`);
   const s=bits.join("; "); return s ? s[0].toUpperCase()+s.slice(1)+"." : "";
 }
 function fcNotesHTML(c){
@@ -5981,6 +6118,10 @@ document.addEventListener("click", e=>{
     case "fp-build-plain": fpBuild(true); break;
     case "fp-again": { const b=S.pf.fp.built; if(b) saveBlob(b.blob, b.name); } break;
     case "fp-sample": fpSample(); break;
+    case "fp-sum-make": fpSumMake(); break;
+    case "fp-sum-stop": if(S.pf.fp.mk && S.pf.fp.mk.busy){ S.pf.fp.mk.stop=true; render(); } break;
+    case "fp-sum-retry": S.pf.fp.dErr=null; S.pf.fp.dst=null; fpDigestStatus(S.pf.fp); break;
+    case "fp-refresh-retry": fpRefresh(S.pf.fp); break;
 
     case "snap-find": snapLookup(); break;
     case "snap-co": snapChooseCompany(+t.dataset.i); break;

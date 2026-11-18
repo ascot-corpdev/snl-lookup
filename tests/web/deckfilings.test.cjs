@@ -15,7 +15,8 @@ const copy = o => JSON.parse(JSON.stringify(o));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else { fail++; console.log("FAIL " + n + "  " + JSON.stringify(x === undefined ? "" : x).slice(0, 700)); } };
 const NAVY = "262166", MAG = "EB008C", TEAL = "00857C", PURPLE = "944599";
-const IDS = ["cover", "summary", "rates", "states", "years", "forms", "regulator", "questions"];
+const IDS = ["cover", "summary", "states", "rates", "years", "forms", "regulator", "questions"];   // the eight slides filled without saved summaries, the market index or the map outlines
+const ALL = ["cover", "summary", "states", "rateMap", "rates", "exposure", "adequacy", "programs", "market", "years", "forms", "regulator", "questions"];
 const SRC = "Source: S&P Global Market Intelligence, SNL Insurance Product Filings, 20 Nov 2023 to 18 Nov 2026.";
 // Arial advance widths, as profile-slides.js estimates them: the source line must fit 11.7 in at 10pt
 const W = (() => { const w = {}, set = (c, v) => { for (const ch of c) w[ch] = v; };
@@ -76,13 +77,14 @@ function hostile() { const v = copy(BASE); v.facts.entity.name = "Calloway <b>In
 
   // ----- the plan -----
   let pl = await plan(BASE);
-  ok("plan: eight slides in deck order, all filled from these filings", same(pl.map(r => r.id), IDS) && pl.every(r => r.included && r.reason === "") && same(pl.map(r => r.label), ["Cover", "Summary", "Rate changes", "Where it files", "Filings by year and type", "Latest form and rule filings", "Time with the regulator", "Key diligence questions"]), pl);
+  ok("plan: thirteen slides in deck order; the eight from the filings alone are filled", same(pl.map(r => r.id), ALL) && pl.filter(r => r.included).map(r => r.id).join() === IDS.join() && pl.filter(r => r.included).every(r => r.reason === "")
+    && same(pl.filter(r => r.included).map(r => r.label), ["Cover", "Executive summary", "Where it files (map)", "Rate changes", "Filings by year and type", "Latest form and rule filings", "Time with the regulator", "Key diligence questions"]), pl);
   const why = (pl, id) => pl.find(r => r.id === id);
   pl = await plan(nothing());
   ok("plan, nothing returned: cover, summary and questions stay; the rest are left out because S&P returned nothing for this search",
     why(pl, "cover").included && why(pl, "summary").included && why(pl, "questions").included && ["rates", "states", "years", "forms", "regulator"].every(id => !why(pl, id).included && why(pl, id).reason === "S&P returned nothing for this search, so there are no filings to show. That doesn't prove nothing was filed."), pl);
   pl = await plan(noImpact());
-  ok("plan, no rate impact: the rate slide is left out, saying no filing carried one", !why(pl, "rates").included && why(pl, "rates").reason === "No filing carried an overall rate impact in S&P's data, so there are no rate changes to chart." && pl.filter(r => !r.included).length === 1);
+  ok("plan, no rate impact: the rate slide is left out, saying no filing carried one", !why(pl, "rates").included && why(pl, "rates").reason === "No filing carried an overall rate impact in S&P's data, so there are no rate changes to chart." && pl.filter(r => !r.included && IDS.includes(r.id)).length === 1);
   pl = await plan(noRate());
   ok("plan, no rate filings: said as S&P's answer", why(pl, "rates").reason === "S&P returned no rate filings for this search, so there are no rate changes to show.");
   pl = await plan(noForms());
@@ -96,7 +98,7 @@ function hostile() { const v = copy(BASE); v.facts.entity.name = "Calloway <b>In
   ok("spec: eight slides, cover first", s.slides.length === 8 && s.slides[0].kind === "cover" && same(s.slides.slice(1).map(x => x.id), IDS.slice(1)));
   ok("spec: the file is named after the company, the kind of profile and the day", s.fileName === "Calloway-Insurance-Co-filings-profile-2026-11-18.pptx", s.fileName);
   ok("cover: \"<company>: filings profile\", kicker with month and year, the one-line descriptor", same(s.slides[0], { kind: "cover", kicker: "Corporate development | November 2026", title: "Calloway Insurance Co: filings profile", subtitle: "7 filings published 20 Nov 2023 to 18 Nov 2026" }), s.slides[0]);
-  ok("titles: the text's action titles", same(s.slides.slice(1).map(x => x.title), ["7 filings in 3 states over the last 3 years", "Overall rate changes from (3.5%) to 9.8%", "Most filings in FL: 3 of 7", "Most filings in 2026: 2 of 7", "4 form and rule filings; latest 15 Jun 2025", "About 70 days with the regulator (median)", "Key diligence questions"]), s.slides.map(x => x.title));
+  ok("titles: the text's action titles", same(s.slides.slice(1).map(x => x.title), ["7 filings in 3 states over the last 3 years", "Most filings in FL: 3 of 7", "Overall rate changes from (3.5%) to 9.8%", "Most filings in 2026: 2 of 7", "4 form and rule filings; latest 15 Jun 2025", "About 70 days with the regulator (median)", "Key diligence questions"]), s.slides.map(x => x.title));
   ok("every content slide ends with a source line naming S&P, SNL Insurance Product Filings and the period", s.slides.slice(1).every(x => { const l = x.items[x.items.length - 1]; return l.type === "source" && l.text.startsWith(SRC); }), s.slides.map(x => x.items && x.items.at(-1).text));
   ok("the rate slides' source lines say impacts aren't weighted by premium and may be the change asked for", /not by premium; if not approved, may be the change asked for\./.test(src(s, "rates")) && /if not approved, may be the change asked for/.test(src(s, "summary")));
   ok("the regulator's source line says the days are approximate; the forms' says what the filing number is", /approximate/.test(src(s, "regulator")) && /S&P no\./.test(src(s, "forms")) && /2 without both dates left out\./.test(src(s, "regulator")));
@@ -205,7 +207,7 @@ function hostile() { const v = copy(BASE); v.facts.entity.name = "Calloway <b>In
   const names = Object.keys(z.files);
   const slides = await Promise.all(names.filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n)).sort((a, b) => +a.match(/\d+/)[0] - +b.match(/\d+/)[0]).map(n => z.file(n).async("string")));
   const charts = await Promise.all(names.filter(n => /^ppt\/charts\/chart\d+\.xml$/.test(n)).map(n => z.file(n).async("string")));
-  ok("sample build: eight slides; four native charts (rate changes, states, years, regulator), each with its workbook", slides.length === 8 && charts.length === 4 && names.filter(n => /\.xlsx$/.test(n)).length === 4, names.filter(n => /chart|xlsx/.test(n)));
+  ok("sample build: twelve slides (no map outlines here, so no rate map); nine native charts (states, rate changes, exposure twice, adequacy, market twice, years, regulator), each with its workbook", slides.length === 12 && charts.length === 9 && names.filter(n => /\.xlsx$/.test(n)).length === 9, names.filter(n => /chart|xlsx/.test(n)));
   ok("sample build: the cover and the sample marker", slides[0].includes("Calloway Group: filings profile (sample)") && slides.slice(1).every(x => /made-up figures\./i.test(x)));
   ok("sample build: the rate chart is a column chart with its category labels at the bottom", charts.some(x => x.includes('<c:barDir val="col"/>') && x.includes('<c:tickLblPos val="low"/>') && x.includes("<c:v>Increase, approved</c:v>")));
   ok("sample build: the state chart is a bar chart and no slide carries a picture", charts.some(x => x.includes('<c:barDir val="bar"/>') && x.includes("<c:v>Filings</c:v>")) && !slides.some(x => x.includes("<p:pic>")));

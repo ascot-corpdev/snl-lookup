@@ -18,9 +18,13 @@
 // The filings profile, from S&P filings alone (no statutory data). who is {kind:"company", companyId | institutionId}
 // or {kind:"group", group: the group's name in the company list}; years is 1, 3 or 5:
 //   filings_sample                     -> {facts, text}: a made-up group, no S&P or Claude call
-//   filings_facts {who..., years}      -> {facts, text, spRequests, search}: refused (400 too_big, 404 not_found) before any
-//                                         S&P request when it can't be built; at most FP_MAX_SP_REQUESTS S&P requests
-//   filings_draft {who..., years}      -> {facts, text, usage, jobId, spRequests, search}: as draft, counted and saved the same way
+//   filings_facts {who..., years}      -> {facts, text, spRequests, search, candidates}: refused (400 too_big, 404 not_found)
+//                                         before any S&P request when it can't be built; at most FP_MAX_SP_REQUESTS S&P requests
+//   filings_draft {who..., years}      -> {facts, text, usage, jobId, spRequests, search, candidates}: as draft, counted and
+//                                         saved the same way
+//   The facts include what the saved filing summaries (migration 0005) and the market index (migration 0006) add, read
+//   from the database at no S&P cost; candidates lists the company's rate and form filings that have no current summary,
+//   newest first, for the page to offer to summarise (snl-digest "make", one at a time, only when the reader chooses).
 
 import { adminClient, type Env, type Json, readBody, sleep, type WhoIs, whoIs, withCors } from "../_shared/http.ts";
 import { type Db, supabaseDb } from "../_shared/db.ts";
@@ -219,16 +223,16 @@ async function serveFilings(body: Record<string, unknown>, c: FilingsCtx): Promi
   };
   const api = c.spConfigured ? new Spgmi(c.spCreds, { fetch: deps.fetch, gate, sleep: wait, now: clock }) : null;
 
-  let facts, search;
+  let facts, search, candidates;
   try {
-    ({ facts, search } = await buildFilingsFacts({ db, api, now: clock, start, deadline: start + (drafting ? FP_DRAFT_SEARCH_MS : FP_SEARCH_MS) }, ask));
+    ({ facts, search, candidates } = await buildFilingsFacts({ db, api, now: clock, start, deadline: start + (drafting ? FP_DRAFT_SEARCH_MS : FP_SEARCH_MS) }, ask));
   } catch (e) {
     if (e instanceof FpRefused) return json(e.code === "not_found" ? 404 : 400, { error: e.code, message: e.message });
     const answer = spAnswer(e);
     if (answer) return json(answer.status, answer.body);
     throw e;
   }
-  if (!drafting) return json(200, { facts, text: filingsPlainText(facts), spRequests: used, search });
+  if (!drafting) return json(200, { facts, text: filingsPlainText(facts), spRequests: used, search, candidates });
 
   const b = await busy();
   if (b) return b;
@@ -246,7 +250,7 @@ async function serveFilings(body: Record<string, unknown>, c: FilingsCtx): Promi
   try { await db.updateJob(jobId, { status: "done", partial: "", result }); }
   catch (e) { console.error("couldn't record the profile text", (e as Error)?.message); }
   try { await db.dropOldJobs(new Date(clock() - KEEP_DAYS * 86_400_000).toISOString()); } catch { /* housekeeping: tried again next time */ }
-  return json(200, { facts, text: out.text, usage: out.usage, jobId, spRequests: used, search });
+  return json(200, { facts, text: out.text, usage: out.usage, jobId, spRequests: used, search, candidates });
 }
 
 // Tests import handle() with this flag set; in Supabase the server always starts.
