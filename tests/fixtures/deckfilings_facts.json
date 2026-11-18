@@ -1,0 +1,439 @@
+{
+ "facts": {
+  "version": 1,
+  "profile": "filings",
+  "sample": false,
+  "asOf": "2026-11-18",
+  "entity": {
+   "kind": "company",
+   "name": "Calloway Insurance Co",
+   "groupName": "Calloway Group",
+   "companies": 1,
+   "noId": 0
+  },
+  "period": {
+   "years": 3,
+   "from": "2023-11-20",
+   "to": "2026-11-18"
+  },
+  "source": "S&P Global Market Intelligence, SNL Insurance Product Filings",
+  "search": {
+   "capped": false,
+   "statesSearched": 51,
+   "fromStore": false,
+   "fetchedAt": "2026-11-18T12:00:00Z"
+  },
+  "totals": {
+   "filings": 7,
+   "rate": 4,
+   "rule": 2,
+   "form": 2,
+   "other": 0,
+   "states": 3,
+   "latest": "2026-11-05",
+   "undated": 1
+  },
+  "largest": {
+   "date": "2026-11-05",
+   "state": "FL",
+   "toi": "Homeowners",
+   "rate": 9.8,
+   "status": "Pending",
+   "approved": false,
+   "filingNo": "S&P no. CAL0000002"
+  },
+  "approval": {
+   "rateFilings": 4,
+   "approved": 2,
+   "share": 50
+  },
+  "rates": {
+   "filings": 4,
+   "withImpact": 4,
+   "notApproved": 2,
+   "noDate": 0,
+   "lo": -3.5,
+   "hi": 9.8,
+   "points": [
+    {
+     "date": "2024-08-20",
+     "state": "TX",
+     "toi": "Homeowners",
+     "rate": 2,
+     "status": "Disapproved",
+     "approved": false
+    },
+    {
+     "date": "2025-03-01",
+     "state": "TX",
+     "toi": "Commercial property",
+     "rate": -3.5,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2026-10-10",
+     "state": "FL",
+     "toi": "Homeowners",
+     "rate": 4.5,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2026-11-05",
+     "state": "FL",
+     "toi": "Homeowners",
+     "rate": 9.8,
+     "status": "Pending",
+     "approved": false
+    }
+   ],
+   "pointsTotal": 4,
+   "rows": [
+    {
+     "state": "FL",
+     "toi": "Homeowners",
+     "n": 2,
+     "withRate": 2,
+     "lo": 4.5,
+     "hi": 9.8,
+     "latest": {
+      "date": "2026-11-05",
+      "state": "FL",
+      "toi": "Homeowners",
+      "rate": 9.8,
+      "status": "Pending",
+      "approved": false
+     }
+    },
+    {
+     "state": "TX",
+     "toi": "Commercial property",
+     "n": 1,
+     "withRate": 1,
+     "lo": -3.5,
+     "hi": -3.5,
+     "latest": {
+      "date": "2025-03-01",
+      "state": "TX",
+      "toi": "Commercial property",
+      "rate": -3.5,
+      "status": "Approved",
+      "approved": true
+     }
+    },
+    {
+     "state": "TX",
+     "toi": "Homeowners",
+     "n": 1,
+     "withRate": 1,
+     "lo": 2,
+     "hi": 2,
+     "latest": {
+      "date": "2024-08-20",
+      "state": "TX",
+      "toi": "Homeowners",
+      "rate": 2,
+      "status": "Disapproved",
+      "approved": false
+     }
+    }
+   ],
+   "rowsTotal": 3
+  },
+  "states": {
+   "rows": [
+    {
+     "state": "FL",
+     "n": 3,
+     "rate": 2,
+     "latest": {
+      "date": "2026-11-05",
+      "state": "FL",
+      "toi": "Homeowners",
+      "rate": 9.8,
+      "status": "Pending",
+      "approved": false
+     }
+    },
+    {
+     "state": "TX",
+     "n": 2,
+     "rate": 2,
+     "latest": {
+      "date": "2025-03-01",
+      "state": "TX",
+      "toi": "Commercial property",
+      "rate": -3.5,
+      "status": "Approved",
+      "approved": true
+     }
+    },
+    {
+     "state": "GA",
+     "n": 1,
+     "rate": 0,
+     "latest": null
+    }
+   ],
+   "noState": 1
+  },
+  "years": {
+   "years": [
+    2023,
+    2024,
+    2025,
+    2026
+   ],
+   "types": [
+    "Rate",
+    "Rule",
+    "Form",
+    "Rate/Rule"
+   ],
+   "counts": [
+    [
+     0,
+     0,
+     0,
+     0
+    ],
+    [
+     1,
+     1,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     1,
+     1
+    ],
+    [
+     2,
+     0,
+     0,
+     0
+    ]
+   ],
+   "totals": [
+    0,
+    2,
+    2,
+    2
+   ],
+   "byType": [
+    3,
+    1,
+    1,
+    1
+   ]
+  },
+  "latest": {
+   "rows": [
+    {
+     "company": "Calloway Insurance Co",
+     "state": "FL",
+     "toi": "Homeowners",
+     "type": "Form",
+     "status": "Approved",
+     "published": "2025-06-15",
+     "filingNo": "S&P no. ABC1234567"
+    },
+    {
+     "company": "Calloway Insurance Co",
+     "state": "TX",
+     "toi": "Commercial property",
+     "type": "Rate/Rule",
+     "status": "Approved",
+     "published": "2025-03-01",
+     "filingNo": "S&P no. CAL0000003"
+    },
+    {
+     "company": "Calloway Insurance Co",
+     "state": "GA",
+     "toi": "Inland marine",
+     "type": "Rule",
+     "status": "Withdrawn",
+     "published": "2024-02-10",
+     "filingNo": "S&P no. CAL0000005"
+    },
+    {
+     "company": "Calloway Insurance Co",
+     "state": null,
+     "toi": null,
+     "type": "Form",
+     "status": "Approved",
+     "published": null,
+     "filingNo": null
+    }
+   ],
+   "total": 4
+  },
+  "regulator": {
+   "rows": [
+    {
+     "state": "FL",
+     "n": 3,
+     "median": 60,
+     "lo": 30,
+     "hi": 70
+    },
+    {
+     "state": "TX",
+     "n": 2,
+     "median": 90,
+     "lo": 90,
+     "hi": 90
+    }
+   ],
+   "all": {
+    "state": null,
+    "n": 5,
+    "median": 70,
+    "lo": 30,
+    "hi": 90
+   },
+   "left": 2
+  }
+ },
+ "text": {
+  "by": "plain",
+  "note": null,
+  "cover": {
+   "subtitle": "7 filings published 20 Nov 2023 to 18 Nov 2026"
+  },
+  "summary": {
+   "title": "7 filings in 3 states over the last 3 years",
+   "points": [
+    {
+     "lead": "Filings",
+     "text": "S&P returned 7 filings published 20 Nov 2023 to 18 Nov 2026: 4 rate, 2 rule and 2 form."
+    },
+    {
+     "lead": "States",
+     "text": "Filings in 3 states; the most in FL (3)."
+    },
+    {
+     "lead": "Largest rate change",
+     "text": "9.8% in FL (Homeowners), published 5 Nov, pending, not approved, so it may be the change asked for."
+    },
+    {
+     "lead": "Approvals",
+     "text": "2 of 4 rate filings (50.0%) show an approved status."
+    },
+    {
+     "lead": "Latest filing",
+     "text": "Published 5 Nov."
+    },
+    {
+     "lead": "With the regulator",
+     "text": "About 70 days from submitted to published, the median over 5 filings (approximate)."
+    }
+   ]
+  },
+  "rates": {
+   "title": "Overall rate changes from (3.5%) to 9.8%",
+   "points": [
+    {
+     "lead": "Range",
+     "text": "From (3.5%) to 9.8% across 4 filings; each is S&P's overall figure for the filing, not weighted by premium."
+    },
+    {
+     "lead": "Not approved",
+     "text": "2 filings with a rate impact aren't approved; their figures may be the change asked for."
+    },
+    {
+     "lead": "Latest",
+     "text": "9.8% in FL (Homeowners), published 5 Nov, pending."
+    }
+   ]
+  },
+  "states": {
+   "title": "Most filings in FL: 3 of 7",
+   "points": [
+    {
+     "lead": "Top states",
+     "text": "FL 3, TX 2, GA 1."
+    },
+    {
+     "lead": "Spread",
+     "text": "Filings in 3 states of the 51 searched."
+    },
+    {
+     "lead": "Rate filings",
+     "text": "2 of the 3 filings in FL are rate filings."
+    }
+   ]
+  },
+  "years": {
+   "title": "Most filings in 2026: 2 of 7",
+   "points": [
+    {
+     "lead": "Busiest year",
+     "text": "2026: 2 filings."
+    },
+    {
+     "lead": "By type",
+     "text": "Rate 3, Rule 1, Form 1, Rate/Rule 1."
+    },
+    {
+     "lead": "Part years",
+     "text": "2023 and 2026 are part years. 1 filing has no publish date."
+    }
+   ]
+  },
+  "forms": {
+   "title": "4 form and rule filings; latest 15 Jun 2025",
+   "points": [
+    {
+     "lead": "Latest",
+     "text": "Form filing in FL (Homeowners), published 15 Jun 2025, approved."
+    },
+    {
+     "lead": "In the period",
+     "text": "4 form and rule filings of 7 filings."
+    }
+   ]
+  },
+  "regulator": {
+   "title": "About 70 days with the regulator (median)",
+   "points": [
+    {
+     "lead": "Median",
+     "text": "About 70 days from submitted to published over 5 filings, from 30 to 90 days (approximate)."
+    },
+    {
+     "lead": "Slowest state",
+     "text": "TX: about 90 days, the median of 2 filings."
+    },
+    {
+     "lead": "Left out",
+     "text": "2 filings don't have both dates and are left out."
+    }
+   ]
+  },
+  "questions": {
+   "title": "Key diligence questions",
+   "items": [
+    {
+     "title": "Rate requests in progress",
+     "text": "2 filings with a rate impact aren't approved, the largest 9.8% in FL. What outcome and timing does management expect?"
+    },
+    {
+     "title": "Product changes",
+     "text": "4 form and rule filings in the period. Which programs are new or changing, and why?"
+    },
+    {
+     "title": "Regulatory timing",
+     "text": "Filings in TX took about 90 days from submitted to published (median, approximate). How does that delay affect rate adequacy?"
+    },
+    {
+     "title": "Rate plan",
+     "text": "What rate changes are planned for the coming year, by state and line, and what loss trend do they assume?"
+    }
+   ]
+  }
+ }
+}

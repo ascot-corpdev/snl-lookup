@@ -2839,7 +2839,8 @@ const TPL_BUCKET = "snl-template", TPL_PATH = "template.pptx", TPL_MAX = 50*1024
 function freshTemplate(){ return {checked:false, loading:false, info:null, err:"", errKind:"", bytes:null, uploading:"", upErr:"", upNote:""}; }
 function freshProfile(){
   return {status:null, statusErr:null, loading:false, kind:"company", code:"", name:"", formErr:"", find:{q:"", asked:"", matches:null, busy:false, err:""},
-    busy:"", asked:null, res:null, err:null, plan:null, libsErr:"", draft:null, drafted:null, draftErr:null, built:null, buildErr:"", tpl:freshTemplate()};
+    busy:"", asked:null, res:null, err:null, plan:null, libsErr:"", draft:null, drafted:null, draftErr:null, built:null, buildErr:"", tpl:freshTemplate(),
+    mode:null, fp:freshFp()};   // mode and fp: the filings profile (its block is after renderProfile)
 }
 S.pf=freshProfile();
 ASK_SUGGEST.profile=["What stands out in this company's results over these years?", "How has policyholder surplus moved against premiums written?", "Which lines of business and states drive this company's premiums?"];
@@ -3017,7 +3018,8 @@ async function pfPlan(pf){
   pf.plan=plan.filter(s=>s&&typeof s==="object"); pf.libsErr=""; render();
 }
 async function pfSample(){
-  const pf=S.pf; if(pf.busy) return;
+  const pf=S.pf; if(pf.busy || pf.fp.busy) return;
+  pf.mode="full";   // the full profile's sample shows in the full profile
   pfReset(pf); pf.busy="sample"; pf.asked=null; render();
   const r=await callFn("snl-profile",{action:"sample"});
   if(!S.session || S.pf!==pf) return;
@@ -3069,6 +3071,7 @@ function pfDownloadAgain(){ const b=S.pf.built; if(b) saveBlob(b.blob, b.name); 
 /* What Claude is told when asked from this view: the figures behind the profile, as the Statutory view describes its
    own (the questions function knows that shape). Nothing for the sample, whose figures are made up. */
 function pfScreen(){
+  if(pfMode()==="filings") return fpScreen();
   const pf=S.pf, f=pf.drafted ? pf.drafted.facts : pf.res&&pf.res.facts;
   if(!f || f.sample || !pfHasData(f) || !pfLive()) return null;
   const e=f.entity||{}, ys=f.years.filter(isNum).map(Number);
@@ -3171,12 +3174,15 @@ function pfTemplateHTML(){
   if(tp.upNote) h+=`<div class="info" id="pfTplDone" role="status"><span>${esc(tp.upNote)}</span></div>`;
   h+=`<div class="pfsample"><div><b>Check the template with a sample profile</b><p class="t2" id="pfSampleNote">The sample uses made-up figures for a made-up company. It works before statutory data is set up.</p></div>
     <button type="button" class="btn" data-act="pf-sample" ${pf.busy||!fnOk?"disabled":""}>${pf.busy==="sample"||(pf.busy==="build"&&pf.res&&pf.res.facts.sample)?"Building the sample…":"Build a sample profile"}</button></div>`;
+  h+=fpSampleHTML();
   return h+`</section>`;
 }
 function renderProfile(){
+  if(pfMode()==="filings") return fpRender();
   const pf=S.pf, s=pf.status, st=s&&s.statutory;
   let h=`<div><h2 class="action-title">Company profile as a PowerPoint file</h2>
     <p class="sub">Choose a company or group, check what the profile will hold, then download it built on your team's template, with charts and tables you can edit.</p></div>`;
+  h+=fpModeHTML();
   if(pf.statusErr) h+= pf.statusErr.err==="not_deployed" ? `<div class="info" id="pfOff" role="status"><span>${esc(errText(pf.statusErr))}</span></div>` : `<div id="pfOff">${problemHTML(pf.statusErr, "Couldn't check whether profiles are set up.", "pf-status-retry")}</div>`;
   else if(!s) h+=`<div class="info" id="pfOff" role="status"><span>Checking whether statutory data is set up…</span></div>`;
   else if(!st||!st.configured) h+=`<div class="info" id="pfOff" role="status"><span><b>Statutory data isn't set up yet,</b> so profiles of real companies can't be built. It needs a Snowflake reader account from S&amp;P. Until then, build a sample profile below to check how your template comes out.</span></div>`;
@@ -3194,6 +3200,253 @@ function renderProfile(){
   }
   h+=`<div id="pfOut" class="pfout" aria-live="polite">${pfOutHTML()}</div>`;
   return h+pfTemplateHTML();
+}
+
+/* ---------- Profile, filings: a profile deck from S&P filings alone ----------
+   The second kind of profile on this view. The reader chooses one company or a whole group from the company list (by
+   name: the list has S&P institution ids and group names, not NAIC codes) and a period; the profile function runs ONE
+   filing search (saved unlisted, inside a cap of S&P requests) and works out every figure; the deck is built here by
+   SNLProfile.filingsSpec on the same template. The page sends who and the period, never figures. */
+const FP_YEARS = [1,3,5];
+const FP_MAX_SP_REQUESTS = 60, FP_MAX_PLANNED = 50, FP_OVERHEAD = 3;   // the same in supabase/functions/_shared/profile.ts
+const FP_WINDOW_DAYS = 365;
+function freshFp(){ return {find:{q:"", asked:"", matches:null, groups:null, busy:false, err:""}, pick:null, years:3, formErr:"", busy:"", asked:null, res:null, err:null, plan:null, libsErr:"", draft:null, drafted:null, draftErr:null, built:null, buildErr:""}; }
+// which profile the view shows: the reader's choice, else the full one once statutory data is ready, else filings
+const pfMode = () => S.pf.mode || (pfLive() ? "full" : "filings");
+const fpFilingsOff = () => { const s=S.pf.status&&S.pf.status.filings; return !!s && s.configured===false; };
+const fpDraftWanted = () => pfClaude() && S.pf.fp.draft!==false && !chatAtLimit(S.chatUse) && !!S.pf.fp.res && !S.pf.fp.res.facts.sample;
+const fpYearsText = y => y===1 ? "the last year" : `the last ${y} years`;
+function fpModeHTML(){
+  const m=pfMode();
+  return `<div class="f fpmode"><span>Kind of profile</span><div class="seg" role="group" aria-label="Kind of profile"><button type="button" class="btn sm" data-act="pf-mode" data-m="filings" aria-pressed="${m==="filings"}">Filings profile</button><button type="button" class="btn sm" data-act="pf-mode" data-m="full" aria-pressed="${m==="full"}">Full profile (needs statutory data)</button></div></div>`;
+}
+
+/* ----- choosing: a company or a whole group from the company list ----- */
+async function fpLookup(){
+  const fp=S.pf.fp, fd=fp.find, q=fd.q.trim();
+  if(!q){ fd.matches=null; fd.groups=null; fd.err="Type part of a company or group name."; render(); return; }
+  fd.busy=true; fd.err=""; fd.matches=null; fd.groups=null; fd.asked=q; render();
+  const r=await callFn("snl-filings",{action:"resolve", q});
+  if(!S.session || S.pf.fp!==fp || fd.asked!==q) return;
+  fd.busy=false;
+  if(r.data){ fd.matches=Array.isArray(r.data.matches)?r.data.matches.filter(m=>m&&typeof m==="object"):[];
+    fd.groups=Array.isArray(r.data.groups)?r.data.groups.filter(g=>g&&typeof g==="object"&&!blank(g.name)&&Array.isArray(g.members)):[]; }
+  else if(r.err!=="signin") fd.err="Couldn't look that up. "+errText(r);
+  render();
+}
+function fpChooseCompany(i){
+  const fp=S.pf.fp, m=fp.find.matches&&fp.find.matches[i], id=m&&snapIdOf(m); if(!id || fp.busy) return;
+  fp.pick={kind:"company", name:id.name||`S&P ${id.kind==="companyId"?"company":"institution"} id ${id.id}`, group:blank(m.naicGroupName)?"":String(m.naicGroupName), ids:[id], noId:0, over:false};
+  fp.find.matches=null; fp.find.groups=null; fp.formErr=""; render(); document.getElementById("fp_get")?.focus();
+}
+function fpChooseGroup(i){
+  const fp=S.pf.fp, g=fp.find.groups&&fp.find.groups[i]; if(!g || fp.busy) return;
+  const seen=new Set(), ids=[];
+  for(const m of g.members){ const id=m&&typeof m==="object"?snapIdOf(m):null, k=id&&id.kind+":"+id.id; if(id && !seen.has(k)){ seen.add(k); ids.push(id); } }
+  const n=v=>isNum(v)?Math.max(0, Math.round(+v)):0;
+  fp.pick={kind:"group", name:String(g.name), group:String(g.name), ids, noId:Math.max(0, n(g.companies)-n(g.searchable)), over:!!g.tooBig || n(g.searchable)>ids.length};
+  fp.find.matches=null; fp.find.groups=null; fp.formErr=""; render(); document.getElementById("fp_get")?.focus();
+}
+// the period as the function works it out: the last N x 365 days up to today, exactly N windows of dates for S&P
+function fpRange(years){ const to=TODAY(); return {from:daysBefore(to, FP_WINDOW_DAYS*years-1), to}; }
+function fpPlanned(ids, years){ const r=fpRange(years); return snapCost(ids, r.from, r.to); }
+/* Why this profile can't be built, with what to choose instead; "" when it can. The function checks the same before
+   any S&P request (fpRefusal in profile.ts), so this is the reader's early warning. */
+function fpTooBig(pick, years){
+  if(!pick) return "";
+  if(!pick.ids.length) return pick.kind==="group" ? "No company in this group has an S&P id in the company list, so the group's filings can't be searched." : "This company has no S&P id in the company list, so its filings can't be searched.";
+  if(pick.over || pick.ids.length>MAX_COMPANIES) return `${pick.name} has more than ${MAX_COMPANIES} companies with S&P ids in the company list, and one filings profile covers at most ${MAX_COMPANIES}. Profile one of its companies instead.`;
+  const need=fpPlanned(pick.ids, years);
+  if(need<=FP_MAX_PLANNED) return "";
+  const fit=FP_YEARS.filter(y=>fpPlanned(pick.ids, y)<=FP_MAX_PLANNED);
+  return `A filings profile of ${pick.name} over ${fpYearsText(years)} needs at least ${need} S&P requests (one for each 10 companies and each year of dates), more than the ${FP_MAX_PLANNED} one filings profile may plan. ${fit.length?`Choose ${fpYearsText(Math.max(...fit))} instead.`:"Profile one of its companies instead."}`;
+}
+function fpBody(action, pick, years){
+  const b={action, kind:pick.kind, years};
+  if(pick.kind==="group") b.group=pick.name; else b[pick.ids[0].kind]=String(pick.ids[0].id);
+  return b;
+}
+
+/* ----- the figures, Claude's draft and the file ----- */
+function fpReset(fp){ fp.res=null; fp.err=null; fp.plan=null; fp.libsErr=""; fp.drafted=null; fp.draftErr=null; fp.built=null; fp.buildErr=""; }
+async function fpFacts(){
+  const fp=S.pf.fp; if(fp.busy) return;
+  if(!fp.pick){ fp.formErr="Choose a company or a group first: find it by name above."; render(); return; }
+  const big=fpTooBig(fp.pick, fp.years); if(big){ fp.formErr=big; render(); return; }
+  fp.formErr=""; fpReset(fp); fp.busy="facts"; fp.asked={pick:JSON.parse(JSON.stringify(fp.pick)), years:fp.years}; render();
+  const r=await callFn("snl-profile", fpBody("filings_facts", fp.asked.pick, fp.asked.years));
+  if(!S.session || S.pf.fp!==fp) return;
+  fp.busy="";
+  if(r.data && r.data.facts && typeof r.data.facts==="object" && r.data.text){ fpTake(fp, r.data); loadStatus(); }
+  else if(r.err!=="signin") fp.err = r.data ? {err:"bad_answer", msg:"The profile function sent back something the page can't read. Try again."} : r;
+  render();
+}
+function fpTake(fp, data){ fp.res={facts:data.facts, text:data.text, search:data.search&&typeof data.search==="object"?data.search:null, spRequests:isNum(data.spRequests)?+data.spRequests:null}; fp.plan=null; fp.libsErr=""; fpPlan(fp); }
+async function fpPlan(fp){
+  try{ await loadProfileLibs(); }catch{ if(S.pf.fp===fp){ fp.libsErr=PF_LIBS_ERR; render(); } return; }
+  if(S.pf.fp!==fp || !fp.res) return;
+  let plan=null; try{ plan=typeof window.SNLProfile.filingsPlan==="function" ? window.SNLProfile.filingsPlan(fp.res.facts) : null; }catch{}
+  if(!Array.isArray(plan)){ fp.libsErr="Couldn't work out which slides these filings fill. Reload the page and try again."; render(); return; }
+  fp.plan=plan.filter(s=>s&&typeof s==="object"); fp.libsErr=""; render();
+}
+async function fpSample(){
+  const pf=S.pf, fp=pf.fp; if(fp.busy || pf.busy) return;
+  pf.mode="filings"; fpReset(fp); fp.busy="sample"; fp.asked=null; render();
+  const r=await callFn("snl-profile",{action:"filings_sample"});
+  if(!S.session || S.pf.fp!==fp) return;
+  fp.busy="";
+  if(r.data && r.data.facts && typeof r.data.facts==="object" && r.data.text){ fpTake(fp, r.data); if(pfHasTemplate()){ await fpMake(fp); return; } }
+  else if(r.err!=="signin") fp.err = r.data ? {err:"bad_answer", msg:"The profile function sent back something the page can't read. Try again."} : r;
+  render();
+}
+async function fpBuild(plain){
+  const pf=S.pf, fp=pf.fp; if(fp.busy || !fp.res) return;
+  if(!pfHasTemplate()){ fp.buildErr=tplErrText("nofile"); render(); return; }
+  if(plain){ fp.draft=false; fp.draftErr=null; }
+  if(!plain && fpDraftWanted() && !fp.drafted && fp.asked){
+    fp.busy="draft"; fp.draftErr=null; fp.built=null; fp.buildErr=""; render();
+    const r=await callFn("snl-profile", fpBody("filings_draft", fp.asked.pick, fp.asked.years));
+    if(!S.session || S.pf.fp!==fp) return;
+    pfChatUse(); loadStatus();
+    if(r.data && r.data.facts && typeof r.data.facts==="object" && r.data.text){
+      fp.drafted={facts:r.data.facts, text:r.data.text, usage:r.data.usage||null};
+      markSeen(r.data.jobId);   // saved as a past answer; already in front of the reader
+    } else if(r.err!=="signin"){ fp.busy=""; fp.draftErr = r.data ? {err:"bad_answer", msg:"Claude's draft came back in a form the page can't read."} : r; render(); return; }
+    else return;
+  }
+  await fpMake(fp);
+}
+async function fpMake(fp){
+  const pf=S.pf;
+  fp.busy="build"; fp.buildErr=""; fp.built=null; render();
+  const use = fp.drafted && fpDraftWanted() ? fp.drafted : fp.res;
+  const fail=msg=>{ if(!S.session || S.pf.fp!==fp) return; fp.busy=""; fp.buildErr=msg; render(); };
+  let bytes; try{ bytes=await templateBytes(pf); }catch(e){ fail(e.message); return; }
+  if(!S.session || S.pf.fp!==fp) return;
+  try{ await loadProfileLibs(); }catch{ fail(PF_LIBS_ERR); return; }
+  if(!S.session || S.pf.fp!==fp) return;
+  let spec; try{ spec=window.SNLProfile.filingsSpec(use.facts, use.text); }catch(e){ fail("Couldn't lay out the slides from these filings. "+((e&&e.message)||"")); return; }
+  let out; try{ out=await window.SNLDeck.build(bytes.slice(0), spec); }catch(e){ fail("Couldn't build the PowerPoint file. "+((e&&e.message)||"Try again.")); return; }
+  if(!S.session || S.pf.fp!==fp) return;
+  fp.busy=""; fp.built={blob:new Blob([out],{type:PPTX_TYPE}), name:pfFileName(spec), by:use.text&&use.text.by==="claude"?"claude":"plain"};
+  render(); saveBlob(fp.built.blob, fp.built.name);
+}
+/* What Ask Claude is told from this view in filings mode: the search behind the profile, as the Filings view says it. */
+function fpScreen(){
+  const fp=S.pf.fp, r=fp.res, s=r&&r.search; if(!r || r.facts.sample || !s) return null;
+  const ints=a=>(Array.isArray(a)?a:[]).map(Number).filter(Number.isInteger);
+  return {view:"filings", search:{companyIds:ints(s.companyIds), institutionIds:ints(s.institutionIds), states:(Array.isArray(s.states)?s.states:[]).map(String), from:String(s.from||""), to:String(s.to||""), typeOfInsuranceIds:[], filingTypeIds:[], filingStatusIds:[]},
+    total:isNum(r.facts.totals&&r.facts.totals.filings)?+r.facts.totals.filings:0, companies:blank(r.facts.entity&&r.facts.entity.name)?[]:[String(r.facts.entity.name)]};
+}
+
+/* ----- drawing ----- */
+function fpFinderHTML(){
+  const fp=S.pf.fp, fd=fp.find;
+  let found="";
+  if(fd.busy) found=`<p class="t2" role="status">Looking for matches…</p>`;
+  else if(fd.matches!==null && !fd.matches.length && !(fd.groups||[]).length) found=`<div class="info" id="fp_noMatch" role="status"><span>No company or group in the app's company list matches "${esc(fd.asked)}". Try a shorter part of the name.</span></div>`;
+  else if(fd.matches!==null){
+    const groups=(fd.groups||[]).map((g,i)=>{ const n=isNum(g.searchable)?+g.searchable:0, all=isNum(g.companies)?+g.companies:n;
+      return `<li><div><div class="t1">${esc(g.name)}</div><div class="t2">Group · ${plural(n,"company","companies")} with S&amp;P ids${all>n?` (${count(all-n)} without)`:""}</div></div><button type="button" class="btn sm" data-act="fp-group" data-i="${i}">Choose group</button></li>`; }).join("");
+    const cos=fd.matches.map((m,i)=>{ const id=snapIdOf(m), meta=[id?`S&P ${id.kind==="companyId"?"company":"institution"} id ${id.id}`:"", blank(m.naicGroupName)?"":`group ${m.naicGroupName}`].filter(Boolean).join(" · ");
+      return `<li><div><div class="t1">${esc(m.companyName||"n/d")}</div>${meta?`<div class="t2">${esc(meta)}</div>`:""}</div>${id?`<button type="button" class="btn sm" data-act="fp-co" data-i="${i}">Choose</button>`:`<span class="t2 noadd">Can't be used: the company list has no S&amp;P id for it, so its filings can't be searched.</span>`}</li>`; }).join("");
+    found=`<ul class="matches" id="fp_matches" aria-label="Matching groups and companies">${groups}${cos}</ul>`;
+  }
+  return `<div class="f"><label for="fp_find">Company or group <em>part of a company or group name</em></label>
+    <div class="toolbar"><div class="grow"><input type="text" id="fp_find" data-bind="pf.fp.find.q" value="${esc(fd.q)}" autocomplete="off" spellcheck="false" placeholder="For example Calloway"></div>
+      <button type="button" class="btn" data-act="fp-find" ${fd.busy?"disabled":""}>Find</button></div>
+    ${fd.err?`<p class="err" id="fp_findErr" role="alert">${esc(fd.err)}</p>`:""}${found}</div>`;
+}
+function fpChosenHTML(){
+  const pk=S.pf.fp.pick;
+  if(!pk) return `<p class="t2" id="fp_chosen">Nothing chosen yet.</p>`;
+  const detail = pk.kind==="group" ? `group of ${plural(pk.ids.length,"company","companies")} with S&P ids in the company list${pk.noId?`; ${plural(pk.noId,"company has","companies have")} no S&P id and ${pk.noId===1?"is":"are"} left out`:""}`
+    : `S&P ${pk.ids[0].kind==="companyId"?"company":"institution"} id ${pk.ids[0].id}${pk.group?` · part of ${pk.group}`:""}`;
+  return `<p id="fp_chosen" style="margin:0">Chosen: <b>${esc(pk.name)}</b> <span class="t2">${esc(detail)}</span> <button type="button" class="lnk t2" data-act="fp-clear">Clear</button></p>`;
+}
+function fpCostHTML(){
+  const fp=S.pf.fp, pk=fp.pick, rg=fpRange(fp.years);
+  const dates=`<span class="t2" id="fp_dates">Filings published ${fmtDay(rg.from)} to ${fmtDay(rg.to)}, in every state in S&amp;P's list, every filing type and status.</span>`;
+  if(!pk) return dates;
+  const big=fpTooBig(pk, fp.years);
+  if(big) return `${dates}<div class="banner" id="fp_tooBig" role="alert"><span>${esc(big)}</span></div>`;
+  const need=fpPlanned(pk.ids, fp.years);
+  return `${dates}<p class="t2" id="fp_cost" style="margin:0"><b>About ${plural(need,"S&amp;P request")}</b> (one for each 10 companies and each year of dates), plus up to ${FP_OVERHEAD} for signing in and S&amp;P's lists, and more if S&amp;P has over 500 filings in a year. One filings profile may use at most ${FP_MAX_SP_REQUESTS}. None if the same search was run before, here or on the Snapshot view, and saved.</p>`;
+}
+function fpPlanHTML(fp){
+  if(fp.libsErr) return `<div class="banner" id="fpLibsErr" role="alert"><span>${esc(fp.libsErr)}</span><button type="button" class="btn sm" data-act="fp-libs-retry">Try again</button></div>`;
+  if(!fp.plan) return `<p class="t2" role="status">Working out which slides these filings fill…</p>`;
+  const n=fp.plan.filter(s=>s.included).length;
+  return `<div class="f"><span>The slides <em>${plural(n,"slide")} of ${count(fp.plan.length)} can be filled from these filings</em></span>
+    <ol class="pfplan" id="fpPlan">${fp.plan.map(s=>`<li class="${s.included?"in":"out"}"><span class="t1">${esc(s.label||s.id)}</span>${s.included?`<span class="pill in">Included</span>`:`<span class="pfwhy">Left out: ${esc(blank(s.reason)?"its figures aren't available":s.reason)}</span>`}</li>`).join("")}</ol></div>`;
+}
+function fpDraftHTML(fp){
+  const f=fp.res.facts;
+  if(f.sample) return `<p class="t2" id="fpDraftNote">The sample uses plain text written from its figures.</p>`;
+  if(!pfClaude()) return `<p class="t2" id="fpDraftNote">Claude isn't set up, so the slides use plain titles and points written from the filings.</p>`;
+  const c=S.chatUse;
+  if(chatAtLimit(c)) return `<div class="info" id="fpDraftNote" role="status"><span>You've reached today's limit of ${plural(c.dailyLimit,"question")}, so the slides use plain titles and points written from the filings. Questions come back at midnight UTC.</span></div>`;
+  const on=fp.draft!==false;
+  const today = c && isNum(c.askedToday) ? ` You've asked ${isNum(c.dailyLimit)?`${count(c.askedToday)} of ${plural(c.dailyLimit,"question")}`:plural(c.askedToday,"question")} today${isNum(c.costToday)?`, ${costText(c.costToday)} in all`:""}.` : "";
+  const done = fp.drafted ? (fp.drafted.text.by==="claude" ? `<p class="t2" id="fpDrafted">Claude has drafted the text for these filings${pfCostLine(fp.drafted.usage)}</p>` : "") : "";
+  return `<div class="pfdraft"><label class="pfcheck"><input type="checkbox" id="fp_draft" data-act="fp-draft" ${on?"checked":""} ${fp.busy?"disabled":""}>
+      <span><b>Ask Claude to draft the slide titles, takeaways and diligence questions</b> <span class="t2">from these filing figures only. Every figure Claude writes is checked; a section with one that doesn't match falls back to plain text.</span></span></label>
+    <p class="t2" id="fpDraftCost">Counts as one of today's questions to Claude.${today} The search is reused from the saved result, so it usually needs no S&amp;P requests.</p>${done}</div>`;
+}
+function fpOutHTML(){
+  const fp=S.pf.fp;
+  if(fp.busy==="facts") return `<div class="info" id="fpBusy" role="status"><span><b>Getting the filings of ${esc(fp.asked.pick.name)}…</b> A new search asks S&amp;P about one request a second, so this can take a minute or two.</span></div>`;
+  if(fp.busy==="sample") return `<div class="info" id="fpBusy" role="status"><span><b>Getting the sample filings…</b></span></div>`;
+  if(!fp.res){
+    if(!fp.err) return "";
+    if(["not_configured","not_found","too_big"].includes(fp.err.err)) return `<div class="info" id="fpErr" role="status"><span>${esc(errText(fp.err))}</span></div>`;
+    return `<div id="fpErr">${problemHTML(fp.err, "Couldn't get the filings.", fp.asked?"fp-facts":"fp-sample")}</div>`;
+  }
+  const f=fp.res.facts, e=f.entity||{}, T=f.totals||{}, P=f.period||{}, sh=f.search||{};
+  let h=`<section class="tcard" id="fpContents" aria-label="What the filings profile will contain">`;
+  if(f.sample) h+=`<div class="info" id="fpSample" role="status"><span><b>This is a sample filings profile.</b> The group, its companies and every filing in it are made up, so you can check how your template comes out.</span></div>`;
+  const who = e.kind==="group" ? `Group of ${plural(e.companies,"company","companies")}${e.noId?`, ${count(e.noId)} more without S&P ids left out`:""}` : "Company";
+  h+=`<div class="blk-h"><div><h3 id="fpName">${esc(blank(e.name)?"n/d":e.name)}</h3><p class="t2" id="fpMeta">${esc([who, `filings published ${fmtDay(P.from)} to ${fmtDay(P.to)}`].join(" · "))}</p></div></div>`;
+  if(!T.filings) h+=`<div class="info" id="fpNothing" role="status"><span><b>S&amp;P returned nothing for this search.</b> No filings came back for ${esc(e.name||"this choice")} in any state over ${fpYearsText(P.years||fp.years)}. That doesn't prove nothing was filed. Check the choice, or try a longer period.</span></div>`;
+  else h+=`<div class="pftiles" id="fpHead"><div class="pftile" data-k="filings"><span class="t2">Filings</span><b>${count(T.filings)}</b></div><div class="pftile" data-k="rate"><span class="t2">Rate filings</span><b>${count(T.rate)}</b></div><div class="pftile" data-k="states"><span class="t2">States with filings</span><b>${count(T.states)}</b></div></div>`;
+  if(sh.capped) h+=`<div class="banner" id="fpCapped" role="alert"><span><b>The search stopped early,</b> so these filings may be incomplete and the slides say so. Choose a shorter period or one company for a complete profile.</span></div>`;
+  h+=fpPlanHTML(fp);
+  const used=fp.res.spRequests;
+  h+=`<p class="source" id="fpSource">Source: S&amp;P Global Market Intelligence, SNL Insurance Product Filings. Rate impacts are S&amp;P's overall figure for each filing, not weighted by premium; for a filing that isn't approved it may be the change asked for.${sh.fromStore?` From the saved search${sh.fetchedAt?` of ${esc(whenAt(sh.fetchedAt))}`:""}: no new S&amp;P requests.`:isNum(used)?` ${plural(used,"S&amp;P request")} used.`:""}</p></section>`;
+  h+=`<section class="tcard" id="fpBuild" aria-label="Build the PowerPoint file">${fpDraftHTML(fp)}`;
+  if(fp.busy==="draft") h+=`<div class="info" id="fpDrafting" role="status"><span><b>Claude is drafting the slide text…</b> This can take up to two minutes. Keep this tab open.</span></div>`;
+  else if(fp.busy==="build") h+=`<div class="info" id="fpBuilding" role="status"><span><b>Building the PowerPoint file…</b> This takes a few seconds, a little longer the first time.</span></div>`;
+  if(fp.draftErr){ const r=fp.draftErr, calm=["limit","daily_limit","busy","not_configured"].includes(r.err);
+    h+=`<div class="${calm?"info":"banner"}" id="fpDraftErr" role="${calm?"status":"alert"}"><span>${esc(pfDraftErrText(r))}</span><span class="inline"><button type="button" class="btn sm primary" data-act="fp-build-plain" ${fp.busy?"disabled":""}>Build with plain text</button>${r.err==="busy"||!calm?`<button type="button" class="btn sm" data-act="fp-build">Try the draft again</button>`:""}</span></div>`; }
+  if(fp.drafted && fp.drafted.text.by!=="claude" && !blank(fp.drafted.text.note) && fpDraftWanted()) h+=`<div class="info" id="fpNote" role="status"><span><b>The slides use plain text.</b> ${esc(fp.drafted.text.note)}</span></div>`;
+  else if(fp.drafted && fp.drafted.text.by==="claude" && !blank(fp.drafted.text.note) && fpDraftWanted()) h+=`<div class="info" id="fpNote" role="status"><span><b>Some slides use plain text.</b> ${esc(fp.drafted.text.note)}</span></div>`;
+  if(fp.buildErr) h+=`<div class="banner" id="fpBuildErr" role="alert"><span>${esc(fp.buildErr)}</span>${pfHasTemplate()?`<button type="button" class="btn sm" data-act="fp-build">Try again</button>`:""}</div>`;
+  if(fp.built && !fp.busy) h+=`<div class="info" id="fpBuilt" role="status"><span><b>Your filings profile is ready.</b> ${esc(fp.built.name)} was saved to your downloads. It was made in this browser and isn't stored or sent anywhere.</span><button type="button" class="btn sm" data-act="fp-again">Download again</button></div>`;
+  const tpl=pfHasTemplate(), label=fpDraftWanted()&&!fp.drafted ? "Draft with Claude and build" : fp.built ? "Build again" : "Build the PowerPoint file";
+  if(!tpl) h+=`<p class="t2" id="fpNoTplNote">${isCorpDev()?"Upload your PowerPoint template below to build the file.":"The file can be built once Corp Dev uploads the template."}</p>`;
+  if(!fp.draftErr) h+=`<div class="toolbar"><button type="button" class="btn primary" id="fp_buildBtn" data-act="fp-build" ${fp.busy||!tpl||!fp.plan?"disabled":""}>${label}</button></div>`;
+  return h+`</section>`;
+}
+function fpRender(){
+  const pf=S.pf, fp=pf.fp;
+  let h=`<div><h2 class="action-title">Company profile as a PowerPoint file</h2>
+    <p class="sub">A filings profile needs S&amp;P's filings alone: choose a company or a whole group and a period, check which slides it fills and what it costs, then download it built on your team's template, with charts and tables you can edit.</p></div>`;
+  h+=fpModeHTML();
+  if(pf.statusErr) h+= pf.statusErr.err==="not_deployed" ? `<div class="info" id="pfOff" role="status"><span>${esc(errText(pf.statusErr))}</span></div>` : `<div id="pfOff">${problemHTML(pf.statusErr, "Couldn't check whether profiles are set up.", "pf-status-retry")}</div>`;
+  else if(fpFilingsOff()) h+=`<div class="info" id="fpOff" role="status"><span><b>S&amp;P filings aren't set up yet,</b> so a new filings profile can't be searched. A profile whose search was run before still opens from its saved result. You can build the sample below meanwhile.</span></div>`;
+  h+=`<form class="tcard" id="fpForm" novalidate aria-label="Choose a company or group and a period">${fpFinderHTML()}${fpChosenHTML()}
+    <div class="f"><span>Period</span><div class="snper"><div class="seg" role="group" aria-label="Period">${FP_YEARS.map(y=>`<button type="button" class="btn sm" data-act="fp-years" data-y="${y}" aria-pressed="${fp.years===y}">${y===1?"Last year":`Last ${y} years`}</button>`).join("")}</div></div></div>
+    <div id="fp_costBox" style="display:flex;flex-direction:column;gap:8px;min-width:0">${fpCostHTML()}</div>
+    ${fp.formErr?`<p class="err" id="fpFormErr" role="alert">${esc(fp.formErr)}</p>`:""}
+    <div class="toolbar"><button type="button" class="btn primary" id="fp_get" data-act="fp-facts" ${fp.busy||(pf.statusErr&&pf.statusErr.err==="not_deployed")?"disabled":""}>${fp.busy==="facts"?"Getting the filings…":"Get the filings"}</button><span class="t2 grow">Shows which slides the profile will hold before anything is built.</span></div>
+  </form>`;
+  h+=`<div id="fpOut" class="pfout" aria-live="polite">${fpOutHTML()}</div>`;
+  return h+pfTemplateHTML();
+}
+function fpSampleHTML(){
+  const pf=S.pf, fnOk=!(pf.statusErr&&pf.statusErr.err==="not_deployed"), fp=pf.fp;
+  return `<div class="pfsample" id="fpSampleBox"><div><b>Check the template with a sample filings profile</b><p class="t2" id="fpSampleNote">Made-up filings for a made-up group. It works before S&amp;P filings are set up.</p></div>
+    <button type="button" class="btn" data-act="fp-sample" ${fp.busy||pf.busy||!fnOk?"disabled":""}>${fp.busy==="sample"||(fp.busy==="build"&&fp.res&&fp.res.facts.sample)?"Building the sample…":"Build a sample filings profile"}</button></div>`;
 }
 
 /* ---------- Snapshot: one company or group over 1, 3 or 5 years, on one page ----------
@@ -5702,6 +5955,19 @@ document.addEventListener("click", e=>{
     case "pf-sample": pfSample(); break;
     case "pf-tpl-pick": document.getElementById("pf_tplFile")?.click(); break;
     case "pf-tpl-retry": S.pf.tpl.checked=false; checkTemplate(); break;
+    case "pf-mode": S.pf.mode=t.dataset.m==="full"?"full":"filings"; render(); break;
+    case "fp-find": fpLookup(); break;
+    case "fp-co": fpChooseCompany(+t.dataset.i); break;
+    case "fp-group": fpChooseGroup(+t.dataset.i); break;
+    case "fp-clear": S.pf.fp.pick=null; S.pf.fp.formErr=""; render(); document.getElementById("fp_find")?.focus(); break;
+    case "fp-years": S.pf.fp.years=FP_YEARS.includes(+t.dataset.y)?+t.dataset.y:3; S.pf.fp.formErr=""; render(); break;
+    case "fp-facts": fpFacts(); break;
+    case "fp-libs-retry": S.pf.fp.libsErr=""; render(); fpPlan(S.pf.fp); break;
+    case "fp-draft": S.pf.fp.draft=!!t.checked; render(); break;
+    case "fp-build": fpBuild(false); break;
+    case "fp-build-plain": fpBuild(true); break;
+    case "fp-again": { const b=S.pf.fp.built; if(b) saveBlob(b.blob, b.name); } break;
+    case "fp-sample": fpSample(); break;
 
     case "snap-find": snapLookup(); break;
     case "snap-co": snapChooseCompany(+t.dataset.i); break;
@@ -5807,6 +6073,7 @@ document.addEventListener("keydown", e=>{
   if(e.target.id==="st_find" && e.key==="Enter"){ e.preventDefault(); statLookup(); return; }
   if(e.target.id==="pf_find" && e.key==="Enter"){ e.preventDefault(); pfLookup(); return; }
   if(e.target.id==="pf_code" && e.key==="Enter"){ e.preventDefault(); pfFacts(); return; }
+  if(e.target.id==="fp_find" && e.key==="Enter"){ e.preventDefault(); fpLookup(); return; }
   if(e.target.id==="sn_find" && e.key==="Enter"){ e.preventDefault(); snapLookup(); return; }
   if(e.target.id==="fc_find" && e.key==="Enter"){ e.preventDefault(); fcLookup(); return; }
   if(e.target.id==="cm_find" && e.key==="Enter"){ e.preventDefault(); cmpLookup(); return; }
