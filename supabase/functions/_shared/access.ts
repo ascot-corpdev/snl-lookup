@@ -25,9 +25,13 @@ import { type Env, serviceKey } from "./http.ts";
 export type AccessSettings = { team: string; auds: string[] };
 export type Role = "corpdev" | "reader";
 
-/** The team domain as a bare host name, or null when it isn't one. Accepts https:// and a trailing slash. */
+/** The team domain as a bare host name, or null when it isn't one. */
 export function teamHost(v: string | undefined | null): string | null {
-  const s = String(v ?? "").trim().toLowerCase().replace(/^https:\/\//, "").replace(/\/+$/, "");
+  // Forgiving about how it was pasted, the same way as the Worker: quotes round it, https://, a whole sign-in
+  // address (the host is kept), or the team name alone (".cloudflareaccess.com" is added).
+  let s = String(v ?? "").trim().replace(/^["'`]+|["'`]+$/g, "").trim().toLowerCase();
+  s = s.replace(/^https:\/\//, "").replace(/[\/?#].*$/, "");
+  if (/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(s)) s += ".cloudflareaccess.com";
   return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(s) ? s : null;
 }
 

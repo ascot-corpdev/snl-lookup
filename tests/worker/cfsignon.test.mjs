@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { createWorker, configScript, TEXT } from "../../worker/index.js";
+import { createWorker, configScript, settingsProblem, teamHost, TEXT } from "../../worker/index.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 let pass = 0, fail = 0;
@@ -68,6 +68,15 @@ const good = await token();
 for (const [label, env] of [["no settings", { ASSETS }], ["no audience", { ...ENV, POLICY_AUD: "" }], ["no team domain", { ...ENV, TEAM_DOMAIN: "" }], ["a team domain that isn't a host name", { ...ENV, TEAM_DOMAIN: "team example" }], ["an audience of only commas", { ...ENV, POLICY_AUD: " , " }]]) {
   const r = await go("/", { tok: good, env });
   ok(`${label}: 403, a short plain page, nothing served and nothing fetched`, r.status === 403 && /Not set up yet/.test(r.text) && r.text.includes("TEAM_DOMAIN and POLICY_AUD") && assetCalls.length === 0 && calls.length === 0 && r.h("content-type").startsWith("text/html") && r.h("cache-control") === "no-store", { status: r.status, text: r.text });
+}
+// ---- the team domain however it was pasted, and a page that names the setting at fault
+ok("team domain: a pasted sign-in address, quotes or the team name alone all come to the bare host", teamHost("https://team.cloudflareaccess.com/cdn-cgi/access/login/x?y=1") === "team.cloudflareaccess.com" && teamHost('"team.cloudflareaccess.com"') === "team.cloudflareaccess.com" && teamHost("my-team") === "my-team.cloudflareaccess.com" && teamHost("team example") === null && teamHost("http://team.example") === null && teamHost("team.example:8443") === null);
+ok("which setting is at fault: missing, malformed, or the audience; never the value", settingsProblem({}) === "TEAM_DOMAIN is missing. POLICY_AUD is missing." && settingsProblem({ TEAM_DOMAIN: "team example", POLICY_AUD: "a" }) === "TEAM_DOMAIN is set, but it isn't a team domain. It should look like your-team.cloudflareaccess.com." && settingsProblem({ TEAM_DOMAIN: "team.example", POLICY_AUD: " , " }) === "POLICY_AUD is missing." && settingsProblem({ TEAM_DOMAIN: "team.example", POLICY_AUD: "a" }) === "");
+{
+  const r = await go("/", { tok: good, env: { ...ENV, TEAM_DOMAIN: "team example secret-looking" } });
+  ok("a malformed team domain: the page says so and how it should look, without showing the value", r.status === 403 && r.text.includes("TEAM_DOMAIN is set, but it isn&#39;t a team domain. It should look like your-team.cloudflareaccess.com.") && !r.text.includes("secret-looking"), r.text);
+  const j = await go("/auth/session", { tok: good, env: { ...ENV, POLICY_AUD: "" }, method: "POST" });
+  ok("a missing audience on /auth/session: JSON, 403, names POLICY_AUD", j.status === 403 && /POLICY_AUD is missing\./.test(j.text) && /not_configured/.test(j.text), j.text);
 }
 const before = calls.length;
 const refused = [
