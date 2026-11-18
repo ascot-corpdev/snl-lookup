@@ -10,7 +10,7 @@ const chatFn = await import(new URL("../../supabase/functions/snl-chat/index.ts"
 const profileFn = await import(new URL("../../supabase/functions/snl-profile/index.ts", import.meta.url).href);
 const watchFn = await import(new URL("../../supabase/functions/snl-watch/index.ts", import.meta.url).href);
 import {
-  boundNote, emptyStateNote, LOST_PLACE, MAX_SEARCH_REQUESTS, MOVED, RUN_SUFFIX, savedBoundNote, type SearchParams, searchFilings, searchKey, STEP_PAGES, STEP_ROWS,
+  boundNote, emptyStateNote, partNote, savedOrFreshSearch, LOST_PLACE, MAX_SEARCH_REQUESTS, MOVED, RUN_SUFFIX, savedBoundNote, type SearchParams, searchFilings, searchKey, STEP_PAGES, STEP_ROWS,
 } from "../../supabase/functions/_shared/filings.ts";
 import { forgetTokens, makeGate, PLAN_LIMITS, Spgmi } from "../../supabase/functions/_shared/spgmi.ts";
 import { runStep, startSweep } from "../../supabase/functions/_shared/marketindex.ts";
@@ -52,13 +52,21 @@ function world(search: Answer) {
   };
   /** The page's way: the first part, then each next part with the cursor, until there is none. */
   const parts = async (body: Record<string, unknown>) => {
-    const out = [await call({ ...body, steps: true })];
-    while (out.at(-1)!.status === 200 && out.at(-1)!.body.more) out.push(await call({ ...body, steps: true, cursor: out.at(-1)!.body.cursor }));
+    const out = [await call({ ...body })];
+    while (out.at(-1)!.status === 200 && out.at(-1)!.body.more) out.push(await call({ ...body, cursor: out.at(-1)!.body.cursor }));
     return out;
   };
   const searches = () => sp.calls("/api/v1/search").length;
+  /** The functions' own way (Claude, profiles): savedOrFreshSearch, one call, stopped at the bound. */
+  const own = async (b: Record<string, any>) => {
+    const before = rowsSent;
+    const api = new Spgmi({ username: "api-user", password: "api-pass" }, { fetch: counting, gate: makeGate(db, PLAN_LIMITS.trial, clock.sleep), sleep: clock.sleep });
+    const p: SearchParams = { companyIds: b.companyIds ?? [], institutionIds: b.institutionIds ?? [], states: b.states, filingStatusIds: b.filingStatusIds ?? [], typeOfInsuranceIds: [], filingTypeIds: [], spStatEntityIds: [], trackingNumbers: [], from: b.from, to: b.to };
+    const body = await savedOrFreshSearch(api, db, p, { now: clock.now, refresh: b.refresh === true });
+    return { status: 200, body: JSON.parse(JSON.stringify(body)), fromSp: rowsSent - before };
+  };
   const listed = () => [...db.store.values()].filter((r) => r.kind === "search" && (r.doc as any).unlisted === undefined);
-  return { clock, db, sp, deps, call, parts, searches, listed };
+  return { clock, db, sp, deps, call, parts, own, searches, listed };
 }
 
 /** Pages of made-up filings generated per request: `pages` full pages of `per` rows for every batch and window. */
@@ -108,6 +116,7 @@ const WIDE = { action: "search", companyIds: SIXTY, states: ["FL", "TX"], from: 
   ok("no answer to the page is over 3 MB", ps.every((p) => p.bytes < 3e6), ps.map((p) => p.bytes));
   ok("the 60 S&P requests are spread over the parts, 4 a part, and counted for the whole search", w.searches() === 60 && last.requests === 60 && ps.every((p, i) => p.body.requests === (i + 1) * STEP_PAGES), ps.map((p) => p.body.requests));
   ok("each part says which it is and roughly how many there are", ps.every((p, i) => p.body.part === i + 1) && ps[0].body.partsAbout === ps.length && ps[0].body.parts === null && last.parts === ps.length, ps.map((p) => [p.body.part, p.body.partsAbout]));
+  ok("a part before the last is marked incomplete with a note for pages from before parts; the last isn't", ps.slice(0, -1).every((p) => p.body.capped === true && same(p.body.notes, [partNote(p.body.part)])) && last.capped === false && !last.notes.some((n: string) => n.includes("comes in parts")), ps[0].body.notes);
   ok("each part counts the whole search so far", ps.every((p, i) => p.body.total === (i + 1) * STEP_ROWS));
   const saved = [...w.db.store.values()].filter((r) => r.kind === "search");
   ok("every saved document holds at most STEP_ROWS filings and is under the database's 4 MB", saved.every((r) => (!Array.isArray((r.doc as any).rows) || (r.doc as any).rows.length <= STEP_ROWS) && JSON.stringify(r.doc).length < 4_000_000 && rules.problem(r) === null), saved.map((r) => [r.id, JSON.stringify(r.doc).length]));
@@ -122,11 +131,11 @@ const WIDE = { action: "search", companyIds: SIXTY, states: ["FL", "TX"], from: 
   ok("opened again, each part still says the whole search's counts", again.every((p) => p.body.total === 30000 && p.body.parts === ps.length));
 
   // the same search from a caller that doesn't ask for parts stops at the bound and says so
-  const one = await w.call({ ...WIDE, refresh: true });
-  ok("without parts, a search stops at STEP_ROWS filings and says the result is incomplete, and why", one.status === 200 && one.body.capped === true && one.body.atBound === true && one.body.rows.length === STEP_ROWS && one.body.notes[0] === boundNote(STEP_PAGES) && one.fromSp <= STEP_ROWS, one.body.notes);
+  const one = await w.own({ ...WIDE, refresh: true });
+  ok("the functions' own search (one call) stops at STEP_ROWS filings and says the result is incomplete, and why", one.status === 200 && one.body.capped === true && one.body.atBound === true && one.body.rows.length === STEP_ROWS && one.body.notes[0] === boundNote(STEP_PAGES) && one.fromSp <= STEP_ROWS, one.body.notes);
   ok("…it isn't saved, so the parts saved before stay as they were", one.body.saved === false && w.listed().length === 1 && typeof (w.listed()[0].doc as any).parts === "number");
-  const held = await w.call(WIDE);
-  ok("a saved search in parts, opened without parts, gives its first part and says it holds more", held.body.fromStore === true && held.body.capped === true && held.body.rows.length === STEP_ROWS && held.body.notes[0] === savedBoundNote(30000, STEP_ROWS) && !("parts" in held.body), held.body.notes);
+  const held = await w.own(WIDE);
+  ok("a saved search in parts, opened by the functions' own search, gives its first part and says it holds more", held.body.fromStore === true && held.body.capped === true && held.body.rows.length === STEP_ROWS && held.body.notes[0] === savedBoundNote(30000, STEP_ROWS) && !("parts" in held.body), held.body.notes);
 }
 
 // ---------- parts put together equal the same search in one piece ----------
@@ -157,7 +166,7 @@ const WIDE = { action: "search", companyIds: SIXTY, states: ["FL", "TX"], from: 
   ok("a company's name is the one its newest filing gives, as in one piece", [3, 5, 21, 22, 23].every((k) => last.byCompany.find((c: any) => c.id === ids[k]).name === whole.byCompany.find((c) => c.id === ids[k])!.name) && whole.byCompany.find((c) => c.id === ids[5])!.name === "Calloway Test Co 5" && whole.byCompany.find((c) => c.id === ids[23])!.name === "Calloway Alias Co");
   ok("the notes are the same, the empty state and the empty company included", same(last.notes, whole.notes) && last.notes.includes(emptyStateNote("GA")) && last.notes.some((n: string) => n.includes("company id 9100024")), { parts: last.notes, whole: whole.notes });
   ok("the requests are the same as one piece", last.requests === whole.requests, [last.requests, whole.requests]);
-  ok("notes come only with the last part", ps.slice(0, -1).every((x) => same(x.body.notes, [])));
+  ok("the search's own notes come only with the last part", ps.slice(0, -1).every((x) => same(x.body.notes, [partNote(x.body.part)])));
   const twice = await world(over(rows, 500)).parts(body);
   ok("the same search run twice gives the same rows in the same order", same(together(twice.map((x) => x.body)), joined));
   // a search that fits in one part is answered and saved as searches always were
@@ -180,7 +189,7 @@ const WIDE = { action: "search", companyIds: SIXTY, states: ["FL", "TX"], from: 
   ok("…and the result is saved", ps.at(-1)!.body.saved === true && w.listed().length === 1);
 
   const wide = world(generated(1));
-  const r = await wide.call({ ...WIDE, companyIds: Array.from({ length: 70 }, (_, i) => 9100000 + i), from: "2016-11-15", to: "2026-11-13", steps: true });
+  const r = await wide.call({ ...WIDE, companyIds: Array.from({ length: 70 }, (_, i) => 9100000 + i), from: "2016-11-15", to: "2026-11-13" });
   ok("a search too wide for its 60 requests is refused before any request is spent, in parts as before", r.status === 400 && r.body.error === "spgmi_bad_request" && /needs at least 77 S&P requests/.test(r.body.message) && wide.searches() === 0, r.body);
 
   const endless = world((call) => J(spPage(Array.from({ length: 500 }, (_, i) => filing(call.body.properties.pageNumber * 1000 + i, { filingVersionId: FV(call.body.properties.pageNumber * 1000 + i), companyId: 9100001 })), { totalPages: 9999 })));
@@ -193,30 +202,30 @@ const WIDE = { action: "search", companyIds: SIXTY, states: ["FL", "TX"], from: 
 // ---------- a lost answer, a lost place, a saved search refreshed while it opens ----------
 {
   const w = world(generated(3));   // 6 batches x 3 pages: 18 pages, 5 parts
-  const one = await w.call({ ...WIDE, steps: true });
-  const two = await w.call({ ...WIDE, steps: true, cursor: one.body.cursor });
+  const one = await w.call({ ...WIDE });
+  const two = await w.call({ ...WIDE, cursor: one.body.cursor });
   const n = w.searches();
-  const again = await w.call({ ...WIDE, steps: true, cursor: one.body.cursor });
+  const again = await w.call({ ...WIDE, cursor: one.body.cursor });
   ok("asking for a part again (its answer was lost on the way) sends the same part, without asking S&P", again.status === 200 && w.searches() === n && same(again.body.rows, two.body.rows) && again.body.part === 2 && same(again.body.cursor, two.body.cursor), { s: again.status, n: w.searches() - n });
-  const bad = await w.call({ ...WIDE, steps: true, cursor: { run: one.body.cursor.run.replace(/^./, "0"), part: 3 } });
+  const bad = await w.call({ ...WIDE, cursor: { run: one.body.cursor.run.replace(/^./, "0"), part: 3 } });
   ok("a cursor from another run of the search can't carry on: 409 with what to do", bad.status === 409 && bad.body.error === "search_lost" && bad.body.message === LOST_PLACE, bad.body);
-  const skip = await w.call({ ...WIDE, steps: true, cursor: { ...two.body.cursor, part: 5 } });
+  const skip = await w.call({ ...WIDE, cursor: { ...two.body.cursor, part: 5 } });
   ok("nor can a cursor that skips a part", skip.status === 409 && skip.body.error === "search_lost");
-  const junk = await w.call({ ...WIDE, steps: true, cursor: { run: "<script>", part: 2 } });
+  const junk = await w.call({ ...WIDE, cursor: { run: "<script>", part: 2 } });
   ok("a cursor that isn't one is refused the same way", junk.status === 409 && junk.body.message === LOST_PLACE);
   let c = two.body.cursor, last = two;
-  while (last.body.more) { last = await w.call({ ...WIDE, steps: true, cursor: c }); c = last.body.cursor; }
+  while (last.body.more) { last = await w.call({ ...WIDE, cursor: c }); c = last.body.cursor; }
   ok("after those, the search still finishes and is saved", last.status === 200 && last.body.saved === true && last.body.total === 18 * 500, last.body);
-  const lostLast = await w.call({ ...WIDE, steps: true, cursor: { run: one.body.cursor.run, part: last.body.part } });
+  const lostLast = await w.call({ ...WIDE, cursor: { run: one.body.cursor.run, part: last.body.part } });
   ok("asking again for the last part, once the search is saved, sends it from the saved search", lostLast.status === 200 && lostLast.body.fromStore === true && same(lostLast.body.rows, last.body.rows));
 
   // opening it, then someone refreshes it before the next part is asked for
-  const open1 = await w.call({ ...WIDE, steps: true });
+  const open1 = await w.call({ ...WIDE });
   ok("a saved search opens from the store, part 1 of its parts", open1.body.fromStore === true && open1.body.part === 1 && open1.body.parts === last.body.part && open1.body.cursor.run.startsWith("s"), open1.body);
   const re = await w.parts({ ...WIDE, refresh: true });
   ok("Refresh asks S&P for all of it again", re.length === last.body.part && re.every((p) => p.body.fromStore === false) && w.searches() === 2 * 18 && re.at(-1)!.body.saved === true, w.searches());
   ok("…and Recent searches still lists it once", w.listed().length === 1);
-  const stale = await w.call({ ...WIDE, steps: true, cursor: open1.body.cursor });
+  const stale = await w.call({ ...WIDE, cursor: open1.body.cursor });
   ok("carrying on from before the refresh says plainly the saved search changed", stale.status === 409 && stale.body.error === "search_moved" && stale.body.message === MOVED, stale.body);
   const fresh = await w.parts(WIDE);
   ok("opening it again gives the refreshed result", fresh.every((p) => p.body.fromStore) && fresh.at(-1)!.body.total === 18 * 500);
@@ -240,12 +249,12 @@ const WIDE = { action: "search", companyIds: SIXTY, states: ["FL", "TX"], from: 
   const ps = await w.parts(body);
   ok("a large result saved whole before parts opens in parts, with no S&P request", ps.length === 3 && ps.map((x) => x.body.rows.length).join() === "2000,2000,500" && w.searches() === 0 && ps.every((x) => x.body.fromStore && x.body.total === 4500 && x.body.fetchedAt === "2026-11-01T10:00:00.000Z"), ps.map((x) => [x.status, x.body.rows?.length]));
   ok("…and put together it is the saved result", same(together(ps.map((x) => x.body)), rows));
-  const held = await w.call(body);
-  ok("opened without parts, it gives its newest STEP_ROWS filings and says the rest are left out", held.body.rows.length === STEP_ROWS && held.body.capped === true && held.body.notes[0] === savedBoundNote(4500, STEP_ROWS) && held.body.rows[0].publishDate === "2026-10-01", held.body.notes);
+  const held = await w.own(body);
+  ok("opened by the functions' own search, it gives its newest STEP_ROWS filings and says the rest are left out", held.body.rows.length === STEP_ROWS && held.body.capped === true && held.body.notes[0] === savedBoundNote(4500, STEP_ROWS) && held.body.rows[0].publishDate === "2026-10-01", held.body.notes);
   const smallId = await searchKey({ ...p, states: ["TX"] });
   const doc = { params: { ...p, states: ["TX"], allStatuses: false }, rows: rows.slice(0, 3), total: 3, requests: 1, capped: false, byState: [{ state: "TX", rows: 3 }], byCompany: [], notes: ["A note saved with it."], source: "S&P Global Market Intelligence, SNL Insurance Product Filings" };
   w.db.store.set(smallId, { id: smallId, kind: "search", label: "TX", doc, fetched_at: "2026-11-01T10:00:00.000Z" });
-  const a = await w.call({ ...body, states: ["TX"], steps: true }), b = await w.call({ ...body, states: ["TX"] });
+  const a = await w.call({ ...body, states: ["TX"] }), b = await w.own({ ...body, states: ["TX"] });
   ok("a small result saved before parts opens exactly as it was saved, either way", same(a.body.rows, doc.rows) && same(a.body.notes, doc.notes) && a.body.more === false && a.body.parts === 1 && same(b.body.rows, doc.rows) && b.body.capped === false && same(b.body.notes, doc.notes), { a: a.body.notes, b: b.body.capped });
 }
 

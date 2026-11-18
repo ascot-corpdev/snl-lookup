@@ -592,7 +592,8 @@ async function savedPart(db: Db, id: string, saved: StoreRow, k: number): Promis
     rows = all.length > STEP_ROWS ? all.slice((k - 1) * STEP_ROWS, k * STEP_ROWS) : all;
     meta = doc;
   }
-  return { ...(meta as unknown as SearchAnswer), rows, fetchedAt: saved.fetched_at, fromStore: true, saved: true, part: k, parts: n, partsAbout: n, more: k < n, cursor: k < n ? { run, part: k + 1 } : null };
+  const more = k < n, m = meta as unknown as SearchAnswer;
+  return { ...m, rows, ...(more ? { capped: true, notes: [partNote(k)] } : {}), fetchedAt: saved.fetched_at, fromStore: true, saved: true, part: k, parts: n, partsAbout: n, more, cursor: more ? { run, part: k + 1 } : null };
 }
 
 /** The next part of a fresh search: at most STEP_PAGES pages from S&P, saved as one part, with the running count. */
@@ -636,6 +637,8 @@ async function freshPart(api: Spgmi, db: Db, id: string, p: SearchParams, allSta
   }
   return stepAnswer(p, allStatuses, prog, rows, { allowed: o.allowed, finished: false, saved: false, now: o.now, unlisted: o.unlisted });
 }
+export const partNote = (part: number) =>
+  `This search has more filings than one answer can hold, so it comes in parts and this is part ${part}. Reload the page to get the newest version of the site, which puts the parts together.`;
 export const KEEP_PLACE_FAILED = "The search couldn't keep its place in the database, so it stopped after this part and these results are incomplete. Try again in a minute.";
 
 /** A part's answer: its rows, the whole search's counts so far, and where to carry on. */
@@ -643,8 +646,9 @@ function stepAnswer(p: SearchParams, allStatuses: boolean, prog: Progress, rows:
   const capped = o.capped === true;
   const sum = summarise(prog.tally, p, { requests: prog.requests, maxRequests: o.allowed, capped, knownStates: prog.knownStates });
   return {
-    params: { ...p, allStatuses }, rows, total: sum.total, requests: prog.requests, capped, byState: sum.byState, byCompany: sum.byCompany,
-    notes: o.finished ? sum.notes : [], source: SOURCE, ...(o.unlisted ? { unlisted: true } : {}),
+    params: { ...p, allStatuses }, rows, total: sum.total, requests: prog.requests, capped: capped || !o.finished, byState: sum.byState, byCompany: sum.byCompany,
+    // A page from before searches came in parts reads one answer as the whole search: marked incomplete, and told why.
+    notes: o.finished ? sum.notes : [partNote(prog.parts)], source: SOURCE, ...(o.unlisted ? { unlisted: true } : {}),
     fetchedAt: new Date(o.now).toISOString(), fromStore: false, saved: o.saved,
     part: prog.parts, parts: o.finished ? prog.parts : null, partsAbout: o.finished ? prog.parts : prog.parts + partsLeft(prog, planLength(p), o.allowed),
     more: !o.finished, cursor: o.finished ? null : { run: prog.run, part: prog.parts + 1 },

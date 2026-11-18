@@ -1312,7 +1312,7 @@ function bsResult(st){ return {...st.last, rows:st.acc.rows.slice().sort(bsNewes
    marked capped and incomplete (incomplete.text says why, also first in its notes), and resume carries on from there.
    o.ctl: from bsControl, to stop; o.onPart(progress) after each part; o.resume: a resume from an earlier answer. */
 async function searchParts(payload, o={}){
-  const ctl=o.ctl||{}, base={steps:true, ...payload}; delete base.cursor;   // steps: the function may answer in parts
+  const ctl=o.ctl||{}, base={...payload}; delete base.cursor;
   const st=o.resume ? {acc:o.resume.acc, last:o.resume.last, cursor:o.resume.cursor} : {acc:{by:new Map(), rows:[]}, last:null, cursor:null};
   let tries=0;
   for(;;){
@@ -1343,7 +1343,8 @@ function bsIncomplete(st, inc){
     ? `You stopped the search after ${count(p.done)}${of?` of ${of}`:""} parts, so these results are incomplete.`
     : `Part ${count(p.done+1)}${of?` of ${of}`:""} couldn't be fetched, so these results are incomplete. ${errText(inc.err)}`;
   const d=bsResult(st);
-  return {data:{...d, capped:true, saved:false, incomplete:{why:inc.why, text}, notes:[text, ...(Array.isArray(d.notes)?d.notes:[])]}, status:200,
+  // a part before the last carries only a note for pages older than this one: left out
+  return {data:{...d, capped:true, saved:false, incomplete:{why:inc.why, text}, notes:[text, ...(!st.last.more && Array.isArray(d.notes)?d.notes:[])]}, status:200,
     resume:{acc:st.acc, last:st.last, cursor:st.cursor}};
 }
 function stopSearch(){ const f=S.f; if(f.busy && f.ctl) f.ctl.stop(); }

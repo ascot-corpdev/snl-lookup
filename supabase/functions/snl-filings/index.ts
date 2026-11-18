@@ -13,11 +13,11 @@
 //   resolve   {q}                                 -> companies in the app's company list, by name, NAIC code or S&P id,
 //                                                    and whole groups whose name or group code matches {groups, groupNote}
 //   search    {companyIds, institutionIds, states, from, to, filingStatusIds?, typeOfInsuranceIds?, filingTypeIds?,
-//              spStatEntityIds?, trackingNumbers?, refresh?, unlisted?, steps?, cursor?}
+//              spStatEntityIds?, trackingNumbers?, refresh?, unlisted?, cursor?}
 //                                                 -> {rows, total, notes, byState, byCompany, requests, capped, fetchedAt, ...}
-//                                                    At most STEP_ROWS filings a call. With steps: true, a wider search
-//                                                    comes in parts: {..., part, parts, partsAbout, more, cursor}; send the
-//                                                    same search with that cursor for the next part (_shared/filings.ts).
+//                                                    At most STEP_ROWS filings a call: a wider search comes in parts,
+//                                                    {..., part, parts, partsAbout, more, cursor}; send the same search
+//                                                    with that cursor for the next part (searchStep, _shared/filings.ts).
 //   document  {documentId} or {filingVersionId}   -> the document itself, as S&P sends it (usually a PDF)
 //   check                                         -> the S&P connection check: sign-in, entitlement, the four lists
 //                                                    (at most five S&P requests), as a plain-English report
@@ -103,8 +103,9 @@ async function serve(req: Request, deps: Deps, json: Json, cors: Record<string, 
         if (!parsed.ok) return json(400, { error: "bad", message: parsed.message });
         // unlisted: kept out of the shared Recent searches list (still saved, so the same search costs nothing again).
         const o = { now, refresh: body.refresh === true, maxRequests: MAX_SEARCH_REQUESTS, deadline: now + SEARCH_TIME_MS, clock: deps.now ?? Date.now, unlisted: body.unlisted === true };
-        // steps: the page fetches a wide search in parts, one call each; without it a search stops at one part's worth
-        const answer = body.steps === true ? await searchStep(api, db, parsed.params, { ...o, cursor: body.cursor }) : await savedOrFreshSearch(api, db, parsed.params, o);
+        // A wide search comes in parts, one call each (the page asks for the next with the cursor): no call holds more
+        // than STEP_ROWS filings. The functions' own searches use savedOrFreshSearch, which stops at that bound.
+        const answer = await searchStep(api, db, parsed.params, { ...o, cursor: body.cursor });
         return json(200, { ...answer, ...(await usage()) });
       }
 
