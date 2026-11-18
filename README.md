@@ -2,7 +2,7 @@
 
 A small web app for a Strategy & Corporate Development team at an insurer. It answers insurance questions from S&P Global Market Intelligence data.
 
-- **Filings:** search S&P's SNL Insurance Product Filings (rate, rule and form filings) by company, state, type of insurance, filing type and date. See the rate impact and description, and open the filing's original document.
+- **Filings:** search S&P's SNL Insurance Product Filings (rate, rule and form filings) by company, state, type of insurance, filing type and date. See the rate impact and description, and open the filing's original document. States are chosen on a map of the United States or from the list beside it.
 - **Ask Claude:** a panel that opens over either view. Type a question in plain English. Claude is told what is on your screen (the filings search or the statutory figures), searches filings, reads the documents, and answers with page citations, its sources and a comparison table you can export to CSV or Excel. Under every finished answer, **Export answer** downloads the question, answer, table and numbered sources as one Word document, and **Copy answer** copies the same so it pastes into an email or a memo with the table intact. The panel also lists your own questions from the last 30 days under "Past answers".
 - **Statutory:** direct and net premiums written by line and state, policyholder surplus, and loss, expense and combined ratios by NAIC company or group code, with peers side by side. This view is built and waiting: it goes live when the Snowflake secrets are set (step 7).
 
