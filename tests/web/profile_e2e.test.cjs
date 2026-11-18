@@ -31,6 +31,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
         return J(400,{error:"bad",message:"Unknown action."}); }
       if(u===JSZIP_URL) return r.fulfill({contentType:"application/javascript",body:ZIPLIB});
       if(u===BASE+"deck.js" || u===BASE+"profile-slides.js") return r.fulfill({contentType:"application/javascript",body:fs.readFileSync(path.join(WEB,u.slice(BASE.length)),"utf8")});
+      if(u===BASE+"template-builtin.pptx") return r.fulfill({contentType:"application/vnd.openxmlformats-officedocument.presentationml.presentation",body:fs.readFileSync(path.join(WEB,"template-builtin.pptx"))});
       if(/supabase\.js/.test(u)) return r.fulfill({contentType:"application/javascript",body:MOCK});
       if(/config\.js/.test(u)) return r.fulfill({contentType:"application/javascript",body:CONFIG});
       if(u.startsWith(BASE)) return r.fulfill({contentType:"text/html",body:fs.readFileSync(WEB+"/index.html","utf8")}); return r.fulfill({status:404,body:""});});
@@ -74,9 +75,23 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   // ----- Corp Dev uploads a real template: the real check accepts it, and refuses a file that is not one -----
   t=await open({}); p=t.p;
   await p.setInputFiles("#pf_tplFile",{name:"team-template.pptx", mimeType:"application/vnd.openxmlformats-officedocument.presentationml.presentation", buffer:TEMPLATE}); await p.waitForTimeout(1200);
-  ok("a usable template is uploaded", (await p.evaluate(()=>__mock.storage.uploads.map(u=>[u.bucket,u.path,u.size]))).length===1 && (await t.txt("#pfTplState")).startsWith("The template is uploaded."), await t.txt("#pfTplState"));
+  ok("a usable template is uploaded", (await p.evaluate(()=>__mock.storage.uploads.map(u=>[u.bucket,u.path,u.size]))).length===1 && (await t.txt("#pfTplState"))==="The standard template, uploaded by Corp Dev on 14 Nov.", await t.txt("#pfTplState"));
   await p.setInputFiles("#pf_tplFile",{name:"notes.pptx", mimeType:"application/vnd.openxmlformats-officedocument.presentationml.presentation", buffer:Buffer.from("not a PowerPoint file")}); await p.waitForTimeout(800);
   ok("a file that isn't a PowerPoint file is refused before any upload, in plain words", (await p.evaluate(()=>__mock.storage.uploads.length))===1 && (await p.textContent("body")).includes("This file isn't a PowerPoint file."));
+  await t.ctx.close();
+
+  // ----- nobody has uploaded a template: the sample is built on the built-in plain template that ships with the site -----
+  t=await open({}); p=t.p;
+  ok("no template anywhere: the built-in plain template is used", (await t.txt("#pfTplState"))==="The built-in plain template: nobody has uploaded one yet.", await t.txt("#pfTplState"));
+  const [d2]=await Promise.all([p.waitForEvent("download",{timeout:20000}), p.click('[data-act="pf-sample"]')]);
+  await p.waitForTimeout(300);
+  ok("built on the built-in template, and the page says so", (await t.txt("#pfBuilt")).endsWith("Built on the built-in plain template.Download again") && !(await p.evaluate(()=>__mock.storage.calls.some(c=>c.op==="download"))), await t.txt("#pfBuilt"));
+  const z2=await JSZip.loadAsync(fs.readFileSync(await d2.path())), r2=n=>z2.file(n).async("string");
+  const s2=Object.keys(z2.files).filter(n=>/^ppt\/slides\/slide\d+\.xml$/.test(n)), all2=(await Promise.all(s2.map(r2))).join("\n");
+  ok("a real PowerPoint file with nine slides, the company's figures on them", s2.length===9 && all2.includes("Calloway Insurance Co: company profile (sample)") && all2.includes("$122.5M"), s2);
+  const lays=await Promise.all(Object.keys(z2.files).filter(n=>/^ppt\/slideLayouts\/slideLayout\d+\.xml$/.test(n)).map(r2));
+  ok("its layouts are the built-in template's two", lays.map(x=>x.match(/<p:cSld name="([^"]*)"/)[1]).sort().join("|")==="Spectrum Title Only White|Title White");
+  ok("its properties are the built-in template's: no author", /<dc:title>Plain template<\/dc:title>/.test(await r2("docProps/core.xml")) && !/<dc:creator>[^<]/.test(await r2("docProps/core.xml")));
   await t.ctx.close();
 
   ok("no page errors", errs.length===0, errs);
