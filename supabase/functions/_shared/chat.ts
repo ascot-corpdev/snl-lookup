@@ -13,6 +13,7 @@
 import Anthropic, { toFile } from "npm:@anthropic-ai/sdk@1.8.0";
 import type { Db, Step } from "./db.ts";
 import { downloadDocument, type Filing, filingNumber, filingNumberText, getReference, MATCHES_PER_NAME, MAX_IDS, MAX_LOOKUP_NAMES, MAX_MEMBERS, parseDocRef, parseSearch, resolveEntity, resolveMany, savedOrFreshSearch } from "./filings.ts";
+import { STEP_ROWS } from "./filings.ts";
 import type { Env } from "./http.ts";
 import { credsReady, Snowflake, snowflakeCreds, SnowflakeError } from "./snowflake.ts";
 import { type Gate, makeGate, NOT_CONFIGURED, planLimits, Spgmi, SpgmiError } from "./spgmi.ts";
@@ -1000,7 +1001,9 @@ function makeTools(ctx: ChatCtx, st: ChatState, api: Spgmi | null, client: Anthr
       notes.push(`Only the newest ${shown.length} of ${found.total} filings are shown here. Narrow the dates or add a type filter to see the rest.`);
       cap(`One search returned ${found.total.toLocaleString("en-US")} filings and Claude saw only the newest ${shown.length}. Narrow the dates or the type of filing to cover the rest.`);
     }
-    if (found.capped) cap(`One search stopped after ${plural(found.requests, "S&P request", "S&P requests")}, so its results are incomplete. Narrow the dates, states or companies.`);
+    // A search holds at most STEP_ROWS filings in one function call (filings.ts); one with more stops there, and says so.
+    if (found.atBound) cap(`One search found more filings than the site can hold at once (${STEP_ROWS.toLocaleString("en-US")}), so its results are incomplete. Narrow the dates, states or companies.`);
+    else if (found.capped) cap(`One search stopped after ${plural(found.requests, "S&P request", "S&P requests")}, so its results are incomplete. Narrow the dates, states or companies.`);
     return { result: { source: found.source, fetchedAt: found.fetchedAt, fromSavedResult: found.fromStore, total: found.total, shown: shown.length, byState: found.byState, byCompany: found.byCompany, notes, filings: shown.map(compactFiling) } };
   }
 

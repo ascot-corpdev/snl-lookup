@@ -25,6 +25,7 @@
 
 import type { Db, Entity, IndexGroup, IndexQueryParams, IndexQueryResult, IndexRow, IndexState, IndexSweep, MissedBatch, PlanCompany, SweepPlan } from "./db.ts";
 import { type Cell, dateWindows, type Filing, filingNumberText, getReference, MAX_IDS_PER_REQUEST, MAX_WINDOW_DAYS, PAGE_SIZE, searchFilings, type SearchParams, SOURCE } from "./filings.ts";
+import { dedupe, type Fetched, fetchPages, type PagePlace, planSearch, STEP_ROWS } from "./filings.ts";
 import type { Env } from "./http.ts";
 import { NOT_CONFIGURED, type Spgmi, SpgmiError } from "./spgmi.ts";
 
@@ -425,13 +426,23 @@ export async function runStep(ctx: IndexCtx): Promise<StepOutcome> {
         s.next_unit++; s.tries = 0;
       };
       try {
-        const r = await searchFilings(ctx.api, params, { maxRequests: MAX_PAGES, pageSize: PAGE_SIZE, deadline: deadline + STEP_SPARE_MS, now: ctx.now });
-        // Cut short by time, not by pages: nothing is kept and the batch is asked again in the next step.
-        if (r.capped && r.requests < MAX_PAGES) return await end("waiting", `S&P was slow, so this step stopped part-way through a batch. It carries on from that batch: ${n(s.next_unit)} of ${n(s.units_total)} done.`);
-        const at = iso(), rows = mergeRows(r.rows.map((f) => indexRow(f, s.state, s.id, at)).filter((x): x is IndexRow => !!x));
-        if (rows.length) await db.putIndexRows(rows);
-        s.rows_found += rows.length;
-        if (r.capped) skip(`S&P had more than ${n(MAX_PAGES * PAGE_SIZE)} filings for these companies in these dates; only the first ${n(MAX_PAGES * PAGE_SIZE)} were kept.`);
+        // A function call holds at most STEP_ROWS rows from S&P (filings.ts), so a batch with more pages is read and
+        // saved a piece at a time; the index merges a filing's companies when a later piece names it again.
+        const plan = planSearch(params), kept = new Set<string>();
+        let place: PagePlace | null = { unit: 0, page: 1 }, used = 0, stop: Fetched["stop"] = null;
+        while (place) {
+          const got = await fetchPages(ctx.api, plan, place, { maxRequests: MAX_PAGES - used, maxRows: STEP_ROWS, pageSize: PAGE_SIZE, deadline: deadline + STEP_SPARE_MS, now: ctx.now });
+          used += got.requests; place = got.next; stop = got.stop;
+          const at = iso(), rows = mergeRows(dedupe(got.raw).map((f) => indexRow(f, s.state, s.id, at)).filter((x): x is IndexRow => !!x));
+          got.raw.length = 0;
+          if (rows.length) await db.putIndexRows(rows);
+          for (const x of rows) kept.add(x.state + "|" + x.filing_key);
+          if (stop === "time" || stop === "requests") break;
+        }
+        // Cut short by time, not by pages: the batch is asked again in the next step (what came back is saved again then).
+        if (stop === "time") return await end("waiting", `S&P was slow, so this step stopped part-way through a batch. It carries on from that batch: ${n(s.next_unit)} of ${n(s.units_total)} done.`);
+        s.rows_found += kept.size;
+        if (stop === "requests") skip(`S&P had more than ${n(MAX_PAGES * PAGE_SIZE)} filings for these companies in these dates; only the first ${n(MAX_PAGES * PAGE_SIZE)} were kept.`);
         else { s.next_unit++; s.tries = 0; }
         s.stalls = 0;
         s.message = null;
