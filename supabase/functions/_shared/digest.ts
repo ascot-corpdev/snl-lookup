@@ -29,8 +29,11 @@ export const ACTIONS = ["new", "revised", "replaced", "withdrawn", "unchanged"] 
 export type Program = { name: string; segment: typeof SEGMENTS[number] | null; basis: string; page: number };
 /** program: the name of the program in the same digest the form belongs to, or null when the filing doesn't link them. */
 export type Form = { number: string; edition: string | null; title: string | null; action: typeof ACTIONS[number] | null; replaces: string | null; page: number; program: string | null };
-/** premium: written premium affected, a plain number of US dollars (not thousands); the page shows it in $M. */
-export type Rate = { overallPct: number | null; requestedPct: number | null; approvedPct: number | null; premium: number | null; policyholders: number | null; effectiveNew: string | null; effectiveRenewal: string | null; page: number | null };
+/** premium: written premium affected, a plain number of US dollars (not thousands); the page shows it in $M.
+    From version 2 (RATE_MORE) a rate may also carry the figures an analyst reads a rate filing for, each optional:
+    present only when the filing gives it and the check below keeps it, each with its own page in pages. */
+export type Rate = { overallPct: number | null; requestedPct: number | null; approvedPct: number | null; premium: number | null; policyholders: number | null; effectiveNew: string | null; effectiveRenewal: string | null; page: number | null }
+  & Partial<Record<RateMoreKey, number | null>> & { lossCostRef?: string | null; pages?: Partial<Record<RateMoreKey | "lossCostRef", number>> };
 export type Point = { text: string; page: number };
 export type Digest = {
   filingVersionId: string | null; documentId: number | null; filingNo: string | null;
@@ -38,12 +41,37 @@ export type Digest = {
   typeOfInsurance: string | null; filingType: string | null; status: string | null; published: string | null;
   pages: number | null; read: PageRange[]; madeAt: string; by: "claude";
   summary: string; programs: Program[]; forms: Form[]; rate: Rate; eligibility: Point[]; notable: Point[];
+  /** What the digest was made under: 1 (or none) for a summary made before RATE_MORE existed, DIGEST_VERSION now. */
+  v?: number;
 };
+
+/** The digest's version. 2 added RATE_MORE and the lossCostRef to the rate. A saved digest without v is version 1:
+    it reads as before and simply lacks the newer figures; a profile offers to make it again. */
+export const DIGEST_VERSION = 2;
+/** The rate figures added in version 2, all optional and nullable. kind: how a figure is matched in the quoted basis
+    ("pct": within rounding to 0.1; "ratio": to 0.001; "count": a whole number within half a percent); lo and hi: the
+    values that can be real (anything outside is a shape error). */
+export const RATE_MORE = {
+  indicatedPct: { kind: "pct", lo: -100, hi: 1000, words: "the indicated rate change the filing's own analysis supports (%)" },
+  maxPct: { kind: "pct", lo: -100, hi: 1000, words: "the largest change for any one policyholder (%)" },
+  minPct: { kind: "pct", lo: -100, hi: 1000, words: "the smallest change, or largest decrease, for any one policyholder (%)" },
+  lossCostChangePct: { kind: "pct", lo: -100, hi: 1000, words: "the change in the advisory loss costs the filing adopts (%)" },
+  lossCostMultiplier: { kind: "ratio", lo: 0.01, hi: 20, words: "the loss cost multiplier filed, for example 1.250" },
+  targetLossRatio: { kind: "pct", lo: 0, hi: 200, words: "the permissible or target loss (and LAE) ratio (%)" },
+  projectedLossRatio: { kind: "pct", lo: 0, hi: 1000, words: "the projected or experience loss (and LAE) ratio the indication rests on (%)" },
+  lossTrendPct: { kind: "pct", lo: -100, hi: 100, words: "the annual loss trend selected (%)" },
+  expensePct: { kind: "pct", lo: 0, hi: 100, words: "the total expense provision, fixed and variable (%)" },
+  profitPct: { kind: "pct", lo: -100, hi: 100, words: "the profit and contingencies provision (%)" },
+  exposures: { kind: "count", lo: 0, hi: 1e10, words: "exposures affected, such as house-years or car-years (a whole number)" },
+} as const;
+export type RateMoreKey = keyof typeof RATE_MORE;
+export const RATE_MORE_KEYS = Object.keys(RATE_MORE) as RateMoreKey[];
 
 /** The limits on a digest. Texts: the summary up to 600 characters, every other text up to 300 (Contract B). */
 export const DIGEST = {
   summary: 600, text: 300,
   number: 40, edition: 20,     // a form number and its edition date, as filings print them ("CHO 30 01", "06 25")
+  lossCostRef: 120,            // the advisory loss cost reference a rate filing adopts (version 2)
   programs: 20, forms: 80, points: 20,
   pages: 150,                  // pages one digest may rest on: one read (LIMITS.docPages in chat.ts)
   getMax: 50,                  // filings in one "get"
@@ -152,12 +180,44 @@ export function numbersIn(text: string): number[] {
 }
 /** Whether a figure appears among the numbers of a basis: within rounding for a percentage, within half a percent
     for an amount or a count. */
-function figureIn(v: number, basis: string, kind: "pct" | "amount"): boolean {
+function figureIn(v: number, basis: string, kind: "pct" | "amount" | "ratio"): boolean {
   const n = numbersIn(basis), a = Math.abs(v);
-  return n.some((x) => (kind === "pct" ? Math.abs(x - a) <= 0.051 : Math.abs(x - a) <= Math.max(0.5, a * 0.005)));
+  return n.some((x) => (kind === "pct" ? Math.abs(x - a) <= 0.051 : kind === "ratio" ? Math.abs(x - a) <= 0.00051 : Math.abs(x - a) <= Math.max(0.5, a * 0.005)));
 }
 /** The words of a name that must appear in its basis: those of four letters or more, without a final "s". */
 const keyWords = (s: string) => [...new Set(s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4).map((w) => w.replace(/s$/, "")))];
+
+/** The version 2 rate figures (RATE_MORE and lossCostRef) Claude gave, checked one by one: a number of the right kind
+    inside its range (else a shape error), its page (its own in r.pages, else the rate's page) inside the pages read
+    (else dropped as a page error), and the figure in the rate's quoted basis, as the older rate figures must be (else
+    unsupported). The loss cost reference's longer words must all be in the basis, as a program's name must. Only the
+    figures kept are returned, with their pages; nothing at all when none is. */
+function rateMore(r: Record<string, unknown>, basis: string, read: PageRange[], dropped: Dropped): Partial<Rate> {
+  const out: Partial<Rate> = {}, pages: NonNullable<Rate["pages"]> = {};
+  const given = r.pages && typeof r.pages === "object" && !Array.isArray(r.pages) ? r.pages as Record<string, unknown> : {};
+  const pageOf = (k: string) => (given[k] !== null && given[k] !== undefined ? given[k] : r.page);
+  for (const k of RATE_MORE_KEYS) {
+    const v = r[k], spec = RATE_MORE[k];
+    if (v === null || v === undefined) continue;
+    if (typeof v !== "number" || !Number.isFinite(v) || v < spec.lo || v > spec.hi || (spec.kind === "count" && !Number.isInteger(v))) { dropped.shape++; continue; }
+    const p = pageOf(k);
+    if (!inRead(p, read)) { dropped.pages++; continue; }
+    if (!figureIn(v, basis, spec.kind === "count" ? "amount" : spec.kind)) { dropped.unsupported++; continue; }
+    out[k] = v; pages[k] = p;
+  }
+  if (r.lossCostRef !== null && r.lossCostRef !== undefined) {
+    const ref = str(r.lossCostRef, DIGEST.lossCostRef), p = pageOf("lossCostRef");
+    if (!ref) dropped.shape++;
+    else if (!inRead(p, read)) dropped.pages++;
+    else {
+      const b = basis.toLowerCase(), words = keyWords(ref);
+      if (!words.length || !words.every((w) => b.includes(w))) dropped.unsupported++;
+      else { out.lossCostRef = ref; pages.lossCostRef = p; }
+    }
+  }
+  if (Object.keys(pages).length) out.pages = pages;
+  return out;
+}
 
 /** Checks one digest's fields as Claude gave them against the pages it read. read is exactly the pages Claude was
     given. Returns the fields to save (null when the summary itself is unusable) and what was dropped.
@@ -233,6 +293,7 @@ export function checkDigest(raw: unknown, read: PageRange[]): { fields: Pick<Dig
       Object.assign(rate, { overallPct: num("overallPct", "pct"), requestedPct: num("requestedPct", "pct"), approvedPct: num("approvedPct", "pct"), premium: num("premium", "amount"), policyholders: num("policyholders", "amount", true), effectiveNew: day("effectiveNew"), effectiveRenewal: day("effectiveRenewal") });
       if (Object.entries(rate).some(([k, v]) => k !== "page" && v !== null)) rate.page = r.page as number;
     }
+    Object.assign(rate, rateMore(r, basis, read, dropped));
   }
 
   const points = (v: unknown): Point[] => {
@@ -252,7 +313,7 @@ export function checkDigest(raw: unknown, read: PageRange[]): { fields: Pick<Dig
 
 /** A whole digest from what was known before reading, the checked fields and the pages read. */
 export function buildDigest(meta: FilingMeta, fields: NonNullable<ReturnType<typeof checkDigest>["fields"]>, read: PageRange[], madeAt: string): Digest {
-  return { ...meta, read: mergeRanges(read), madeAt, by: "claude", ...fields };
+  return { ...meta, read: mergeRanges(read), madeAt, by: "claude", ...fields, v: DIGEST_VERSION };
 }
 
 /** A digest read back from the database or sent by the page, checked again on the way out: only well-formed parts are
@@ -265,13 +326,15 @@ export function cleanDigest(raw: unknown): Digest | null {
   const { fields } = checkDigestStored(d, read);
   if (!fields) return null;
   const meta = metaFrom({ ...d, filingNo: d.filingNo });
-  return { ...meta, filingNo: str(d.filingNo, 60), company: str(d.company, 200) ?? meta.company, pages: meta.pages, read, madeAt: typeof d.madeAt === "string" && !Number.isNaN(Date.parse(d.madeAt)) ? d.madeAt : new Date(0).toISOString(), by: "claude", ...fields };
+  return { ...meta, filingNo: str(d.filingNo, 60), company: str(d.company, 200) ?? meta.company, pages: meta.pages, read, madeAt: typeof d.madeAt === "string" && !Number.isNaN(Date.parse(d.madeAt)) ? d.madeAt : new Date(0).toISOString(), by: "claude", ...fields, v: versionOf(d) };
 }
+/** A saved digest's version: a whole number up to DIGEST_VERSION, or 1 when it has none (made before versions). */
+export const versionOf = (d: { v?: unknown } | null | undefined): number => (d && Number.isInteger(d.v) && (d.v as number) >= 1 ? Math.min(d.v as number, DIGEST_VERSION) : 1);
 /** The saved fields again, without the basis checks (a saved digest has no quoted basis for its forms and rate). */
 function checkDigestStored(d: Record<string, unknown>, read: PageRange[]) {
   const forms = (Array.isArray(d.forms) ? d.forms : []).map((f) => ({ ...(f as object), basis: typeof (f as Form)?.number === "string" ? `${(f as Form).number} ${(f as Form).edition ?? ""} ${(f as Form).replaces ?? ""}` : "" }));
   const rate = d.rate && typeof d.rate === "object" ? d.rate as Record<string, unknown> : {};
-  const figures = ["overallPct", "requestedPct", "approvedPct", "premium", "policyholders", "effectiveNew", "effectiveRenewal"].map((k) => rate[k]).filter((v) => v !== null && v !== undefined).join(" ");
+  const figures = ["overallPct", "requestedPct", "approvedPct", "premium", "policyholders", "effectiveNew", "effectiveRenewal", ...RATE_MORE_KEYS, "lossCostRef"].map((k) => rate[k]).filter((v) => v !== null && v !== undefined).join(" ");
   return checkDigest({ ...d, forms, rate: { ...rate, basis: figures } }, read);
 }
 
@@ -285,6 +348,7 @@ export const DIGEST_RULES = `What a summary holds
 - programs: each product or program the filing names (for example a private client or high value homeowners program). segment is your judgement: one of ${SEG_WORDS}, or null when the filing doesn't show it. basis quotes, or closely paraphrases, the filing's words that show the program and its segment, and must contain the program's name.
 - forms: each form the filing lists, usually from its form schedule: number and edition as printed, title, action (one of ${ACT_WORDS}, or null), replaces (the number of the form it replaces, or null), program (the name, exactly as in programs, of the program the filing says the form belongs to, or null when the filing doesn't link them; don't guess), and basis: the line of the form schedule or text that lists it, copied as printed, containing the form number.
 - rate: the overall rate change (overallPct), the change requested and approved when the filing gives them, written premium affected (premium: a plain number of US dollars, not thousands), policyholders affected, and the effective dates for new and renewal business (yyyy-mm-dd). basis quotes the words or table cells the figures come from, with each figure as printed. Use null for anything the filing doesn't give.
+- rate, also when the filing gives them (percentages as numbers of percentage points, 4.5 for 4.5%): ${RATE_MORE_KEYS.map((k) => `${k}: ${RATE_MORE[k].words}`).join("; ")}; and lossCostRef: the advisory loss cost filing or circular the company adopts, named as printed (for example a bureau's loss cost reference number). Each must be quoted, as printed, in the rate's basis. pages gives the filing's page of each of these (null when it is the rate's page).
 - eligibility: who and what the filing's rules let in or keep out, briefly.
 - notable: anything else a corporate development reader should know, briefly.
 Rules
@@ -303,8 +367,10 @@ const FIELDS_PROPS = {
   forms: ITEMS({ number: { type: "string" }, edition: NULLABLE("string"), title: NULLABLE("string"), action: { anyOf: [{ type: "string", enum: [...ACTIONS] }, { type: "null" }] }, replaces: NULLABLE("string"), program: NULLABLE("string"), basis: { type: "string" }, page: { type: "integer" } }),
   rate: {
     type: "object",
-    properties: { overallPct: NULLABLE("number"), requestedPct: NULLABLE("number"), approvedPct: NULLABLE("number"), premium: NULLABLE("number"), policyholders: NULLABLE("integer"), effectiveNew: NULLABLE("string"), effectiveRenewal: NULLABLE("string"), basis: NULLABLE("string"), page: NULLABLE("integer") },
-    required: ["overallPct", "requestedPct", "approvedPct", "premium", "policyholders", "effectiveNew", "effectiveRenewal", "basis", "page"], additionalProperties: false,
+    properties: { overallPct: NULLABLE("number"), requestedPct: NULLABLE("number"), approvedPct: NULLABLE("number"), premium: NULLABLE("number"), policyholders: NULLABLE("integer"), effectiveNew: NULLABLE("string"), effectiveRenewal: NULLABLE("string"), basis: NULLABLE("string"), page: NULLABLE("integer"),
+      ...Object.fromEntries(RATE_MORE_KEYS.map((k) => [k, NULLABLE(RATE_MORE[k].kind === "count" ? "integer" : "number")])), lossCostRef: NULLABLE("string"),
+      pages: { type: "object", properties: Object.fromEntries([...RATE_MORE_KEYS, "lossCostRef"].map((k) => [k, NULLABLE("integer")])), required: [...RATE_MORE_KEYS, "lossCostRef"], additionalProperties: false } },
+    required: ["overallPct", "requestedPct", "approvedPct", "premium", "policyholders", "effectiveNew", "effectiveRenewal", "basis", "page", ...RATE_MORE_KEYS, "lossCostRef", "pages"], additionalProperties: false,
   },
   eligibility: ITEMS({ text: { type: "string" }, page: { type: "integer" } }),
   notable: ITEMS({ text: { type: "string" }, page: { type: "integer" } }),
@@ -390,10 +456,28 @@ export function summaryDocument(d: Digest): { title: string; blocks: string[]; p
     ...d.programs.map((p): [string, number] => [`Program: ${p.name}. Segment: ${p.segment ?? "not shown"}. Based on: "${p.basis}". Page ${p.page}.`, p.page]),
     ...d.forms.map((f): [string, number] => [`Form ${f.number}${f.edition ? ` (${f.edition})` : ""}${f.title ? `, ${f.title}` : ""}${f.action ? `, ${f.action}` : ""}${f.replaces ? `, replaces ${f.replaces}` : ""}${f.program ? `, program ${f.program}` : ""}. Page ${f.page}.`, f.page]),
     ...(d.rate.page !== null ? [[`Rate: overall ${d.rate.overallPct ?? "n/d"}%, requested ${d.rate.requestedPct ?? "n/d"}%, approved ${d.rate.approvedPct ?? "n/d"}%, written premium affected ${d.rate.premium ?? "n/d"} US dollars, policyholders affected ${d.rate.policyholders ?? "n/d"}, effective for new business ${d.rate.effectiveNew ?? "n/d"}, for renewals ${d.rate.effectiveRenewal ?? "n/d"}. Page ${d.rate.page}.`, d.rate.page] as [string, number]] : []),
+    ...rateMoreLines(d.rate),
     ...d.eligibility.map((e): [string, number] => [`Eligibility: ${e.text} Page ${e.page}.`, e.page]),
     ...d.notable.map((n): [string, number] => [`Notable: ${n.text} Page ${n.page}.`, n.page]),
   ];
   return { title: title.slice(0, 400), blocks: lines.map((l) => l[0]), pages: lines.map((l) => l[1]) };
+}
+
+/** The version 2 rate figures as lines Claude can cite, one for each figure the digest holds, with its page. */
+export const RATE_MORE_LABELS: Record<RateMoreKey | "lossCostRef", string> = {
+  indicatedPct: "Indicated rate change", maxPct: "Largest change for one policyholder", minPct: "Smallest change for one policyholder", lossCostChangePct: "Change in advisory loss costs adopted",
+  lossCostMultiplier: "Loss cost multiplier", targetLossRatio: "Permissible or target loss ratio", projectedLossRatio: "Projected loss ratio", lossTrendPct: "Annual loss trend",
+  expensePct: "Expense provision", profitPct: "Profit and contingencies provision", exposures: "Exposures affected", lossCostRef: "Advisory loss costs adopted",
+};
+function rateMoreLines(rate: Rate): [string, number][] {
+  const out: [string, number][] = [], pages = rate.pages ?? {};
+  for (const k of [...RATE_MORE_KEYS, "lossCostRef"] as (RateMoreKey | "lossCostRef")[]) {
+    const v = rate[k], p = pages[k] ?? rate.page;
+    if (v === null || v === undefined || typeof p !== "number") continue;
+    const shown = k === "lossCostRef" || k === "lossCostMultiplier" ? String(v) : k === "exposures" ? Number(v).toLocaleString("en-US") : `${v}%`;
+    out.push([`Rate detail: ${RATE_MORE_LABELS[k]} ${shown}. Page ${p}.`, p]);
+  }
+  return out;
 }
 
 // ---------- making a digest on request (snl-digest "make") ----------

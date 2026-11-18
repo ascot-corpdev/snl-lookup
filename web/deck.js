@@ -26,6 +26,12 @@
 //        color, pointColors:{i:color}, labelColor}], labels:{format, position, color, size} | false, legend:"top"|"none",
 //        valueAxis:{max, min, major, format} | null, gap, overlap, catSize, catLabels:"low"|"nextTo", name}
 //        (catLabels "low" puts the category labels at the bottom, clear of columns below zero)
+//   {type:"freeform", path, view:[vx,vy,vw,vh], x,y,w,h, fill, pattern:{prst,fg,bg}, line:{color,width,dash} | false, paras, name}
+//        one custom-geometry shape (PowerPoint's "freeform") drawn from SVG-style path data (M L H V Z, either case) in
+//        the units of view; the whole view is laid on the box x,y,w,h, and the shape sits on its own outline's bounds,
+//        so it can be moved, recoloured or edited point by point. pattern: a hatch (prst "ltUpDiag", "dkDnDiag", ...)
+//        instead of a solid fill.
+//   {type:"group", name, items:[ freeform | text | box | line ]}                  (one PowerPoint group of its items)
 (function () {
   "use strict";
   var NS = {
@@ -488,6 +494,89 @@
       '<c:chart xmlns:c="' + NS.c + '" r:id="' + rel + '"/></a:graphicData></a:graphic></p:graphicFrame>');
   }
 
+  // ---------- freeform shapes and groups ----------
+  // Path data as SVG writes it, limited to straight lines: M/m, L/l, H/h, V/v and Z/z, numbers separated by spaces or
+  // commas. Returns the subpaths as absolute points, or throws a plain sentence for anything else.
+  function parsePath(d, where) {
+    var src = String(d == null ? "" : d), toks = src.match(/[MmLlHhVvZz]|-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/g) || [];
+    if (src.replace(/[MmLlHhVvZz]|-?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?|[\s,]/g, "").length) fail("The slide plan has a problem: " + where + " has a shape outline the builder can't read.");
+    var subs = [], cur = null, x = 0, y = 0, sx = 0, sy = 0, cmd = null, i = 0;
+    var numAt = function () { if (i >= toks.length || !/^[-.\d]/.test(toks[i])) fail("The slide plan has a problem: " + where + " has a shape outline with a missing number."); return +toks[i++]; };
+    while (i < toks.length) {
+      if (/^[A-Za-z]$/.test(toks[i])) cmd = toks[i++];
+      else if (!cmd) fail("The slide plan has a problem: " + where + " has a shape outline that doesn't start with a move.");
+      switch (cmd) {
+        case "M": case "m": {
+          var nx = numAt(), ny = numAt();
+          x = cmd === "m" ? x + nx : nx; y = cmd === "m" ? y + ny : ny;
+          cur = { pts: [[x, y]], closed: false }; subs.push(cur); sx = x; sy = y;
+          cmd = cmd === "m" ? "l" : "L"; break;   // numbers after a move are lines
+        }
+        case "L": case "l": { var lx = numAt(), ly = numAt(); x = cmd === "l" ? x + lx : lx; y = cmd === "l" ? y + ly : ly; if (!cur) fail("The slide plan has a problem: " + where + " has a shape outline that doesn't start with a move."); cur.pts.push([x, y]); break; }
+        case "H": case "h": { var hx = numAt(); x = cmd === "h" ? x + hx : hx; if (!cur) fail("The slide plan has a problem: " + where + " has a shape outline that doesn't start with a move."); cur.pts.push([x, y]); break; }
+        case "V": case "v": { var vy = numAt(); y = cmd === "v" ? y + vy : vy; if (!cur) fail("The slide plan has a problem: " + where + " has a shape outline that doesn't start with a move."); cur.pts.push([x, y]); break; }
+        case "Z": case "z": if (cur) { cur.closed = true; } x = sx; y = sy; cur = null; cmd = null; break;
+      }
+    }
+    subs = subs.filter(function (p) { return p.pts.length > 1; });
+    if (!subs.length) fail("The slide plan has a problem: " + where + " has an empty shape outline.");
+    return subs;
+  }
+  // a freeform's outline on the slide: its points in inches, and their bounds
+  function freeformGeometry(it, where) {
+    needBox(it, where);
+    var v = Array.isArray(it.view) && it.view.length === 4 && it.view.every(num) && it.view[2] > 0 && it.view[3] > 0 ? it.view : null;
+    var subs = parsePath(it.path, where);
+    if (!v) { var all = [].concat.apply([], subs.map(function (p) { return p.pts; })); var mx = Math.min.apply(null, all.map(function (p) { return p[0]; })), my = Math.min.apply(null, all.map(function (p) { return p[1]; }));
+      v = [mx, my, Math.max.apply(null, all.map(function (p) { return p[0]; })) - mx || 1, Math.max.apply(null, all.map(function (p) { return p[1]; })) - my || 1]; }
+    var kx = it.w / v[2], ky = it.h / v[3];
+    var inch = subs.map(function (p) { return { closed: p.closed, pts: p.pts.map(function (q) { return [it.x + (q[0] - v[0]) * kx, it.y + (q[1] - v[1]) * ky]; }) }; });
+    var xs = [], ys = []; inch.forEach(function (p) { p.pts.forEach(function (q) { xs.push(q[0]); ys.push(q[1]); }); });
+    var x0 = Math.min.apply(null, xs), y0 = Math.min.apply(null, ys), x1 = Math.max.apply(null, xs), y1 = Math.max.apply(null, ys);
+    return { subs: inch, x: x0, y: y0, w: Math.max(x1 - x0, 1 / EMU), h: Math.max(y1 - y0, 1 / EMU) };
+  }
+  var PATTERNS = { ltUpDiag: 1, ltDnDiag: 1, dkUpDiag: 1, dkDnDiag: 1, wdUpDiag: 1, wdDnDiag: 1, smGrid: 1, dotGrid: 1, pct20: 1, pct30: 1, horz: 1, vert: 1, cross: 1 };
+  function freeformShape(s, it, where) {
+    var g = freeformGeometry(it, where), id = s.id(), W = emu(g.w), H = emu(g.h), ox = emu(g.x), oy = emu(g.y);
+    var pt = function (q) { return '<a:pt x="' + Math.max(0, Math.min(W, emu(q[0]) - ox)) + '" y="' + Math.max(0, Math.min(H, emu(q[1]) - oy)) + '"/>'; };
+    var path = g.subs.map(function (p) {
+      return "<a:moveTo>" + pt(p.pts[0]) + "</a:moveTo>" + p.pts.slice(1).map(function (q) { return "<a:lnTo>" + pt(q) + "</a:lnTo>"; }).join("") + (p.closed ? "<a:close/>" : "");
+    }).join("");
+    var fill = it.pattern ? '<a:pattFill prst="' + (PATTERNS[it.pattern.prst] ? it.pattern.prst : "ltUpDiag") + '"><a:fgClr><a:srgbClr val="' + color(it.pattern.fg, GREY) + '"/></a:fgClr><a:bgClr><a:srgbClr val="' + color(it.pattern.bg, WHITE) + '"/></a:bgClr></a:pattFill>'
+      : it.fill ? '<a:solidFill><a:srgbClr val="' + color(it.fill) + '"/></a:solidFill>' : "<a:noFill/>";
+    var line = it.line === false ? "<a:ln><a:noFill/></a:ln>" : '<a:ln w="' + Math.round((it.line && num(it.line.width) ? it.line.width : 0.75) * 12700) + '"><a:solidFill><a:srgbClr val="' + color(it.line && it.line.color, WHITE) + '"/></a:solidFill>' +
+      (it.line && it.line.dash ? '<a:prstDash val="dash"/>' : "") + "<a:round/></a:ln>";
+    var text = it.paras && it.paras.length ? "<p:txBody>" + bodyPr(Object.assign({ margin: 0, anchor: "ctr" }, it)) + "<a:lstStyle/>" + it.paras.map(function (p) { return para(p); }).join("") + "</p:txBody>" : "";
+    s.xml.push('<p:sp><p:nvSpPr><p:cNvPr id="' + id + '" name="' + esc(oneLine(it.name || "Freeform " + (id - 1))) + '"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>' +
+      '<p:spPr><a:xfrm><a:off x="' + ox + '" y="' + oy + '"/><a:ext cx="' + W + '" cy="' + H + '"/></a:xfrm>' +
+      '<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:rect l="0" t="0" r="r" b="b"/><a:pathLst><a:path w="' + W + '" h="' + H + '">' + path + "</a:path></a:pathLst></a:custGeom>" +
+      fill + line + "</p:spPr>" + text + "</p:sp>");
+    return g;
+  }
+  // a group of shapes, as PowerPoint groups them: its frame is the bounds of what it holds, in slide inches
+  function groupShape(s, it, where) {
+    var list = (it.items || []).filter(function (x) { return x && typeof x === "object"; });
+    if (!list.length) return;
+    var outer = s.xml; s.xml = [];
+    var id = s.id(), bx = [];
+    list.forEach(function (c, k) {
+      var w2 = where + ", part " + (k + 1);
+      switch (c.type) {
+        case "freeform": var g = freeformShape(s, c, w2); bx.push([g.x, g.y, g.x + g.w, g.y + g.h]); break;
+        case "text": needBox(c, w2); textShape(s, Object.assign({ margin: 0.02 }, c), true); bx.push([c.x, c.y, c.x + c.w, c.y + c.h]); break;
+        case "box": needBox(c, w2); textShape(s, c, false); bx.push([c.x, c.y, c.x + c.w, c.y + c.h]); break;
+        case "line": lineShape(s, c); bx.push([Math.min(c.x1, c.x2), Math.min(c.y1, c.y2), Math.max(c.x1, c.x2), Math.max(c.y1, c.y2)]); break;
+        default: fail("The slide plan has a problem: " + w2 + " is of a kind a group can't hold (" + oneLine(c.type).slice(0, 40) + ").");
+      }
+    });
+    var kids = s.xml.join(""); s.xml = outer;
+    var x0 = Math.min.apply(null, bx.map(function (b) { return b[0]; })), y0 = Math.min.apply(null, bx.map(function (b) { return b[1]; }));
+    var x1 = Math.max.apply(null, bx.map(function (b) { return b[2]; })), y1 = Math.max.apply(null, bx.map(function (b) { return b[3]; }));
+    var off = '<a:off x="' + emu(x0) + '" y="' + emu(y0) + '"/>', ext = '<a:ext cx="' + Math.max(1, emu(x1 - x0)) + '" cy="' + Math.max(1, emu(y1 - y0)) + '"/>';
+    s.xml.push('<p:grpSp><p:nvGrpSpPr><p:cNvPr id="' + id + '" name="' + esc(oneLine(it.name || "Group " + (id - 1))) + '"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>' +
+      "<p:grpSpPr><a:xfrm>" + off + ext + off.replace("a:off", "a:chOff") + ext.replace("a:ext", "a:chExt") + "</a:xfrm></p:grpSpPr>" + kids + "</p:grpSp>");
+  }
+
   // ---------- charts ----------
   function col(n) { var s = ""; n += 1; while (n > 0) { var m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
   function txPr(size, c, extra) {
@@ -622,6 +711,8 @@
         case "line": lineShape(s, it); break;
         case "table": tableShape(s, it); break;
         case "chart": chartShape(s, it, where); break;
+        case "freeform": freeformShape(s, it, where); break;
+        case "group": groupShape(s, it, where); break;
         default: fail("The slide plan has a problem: " + where + " is of a kind the builder doesn't draw (" + oneLine(it.type).slice(0, 40) + ").");
       }
     });

@@ -497,8 +497,9 @@
   // row are left out, and a filing's description is never used (real rows often have none).
   var TEAL = "00857C", PURPLE = "944599";
   var FP_SLIDES = [
-    ["cover", "Cover"], ["summary", "Summary"], ["rates", "Rate changes"], ["states", "Where it files"], ["years", "Filings by year and type"],
-    ["forms", "Latest form and rule filings"], ["regulator", "Time with the regulator"], ["questions", "Key diligence questions"]
+    ["cover", "Cover"], ["summary", "Executive summary"], ["states", "Where it files (map)"], ["rateMap", "Latest rate change by state (map)"], ["rates", "Rate changes"],
+    ["exposure", "Premium and policyholders the rate filings state"], ["adequacy", "Rate adequacy and loss costs"], ["programs", "Programs and forms"], ["market", "Against the market"],
+    ["years", "Filings by year and type"], ["forms", "Latest form and rule filings"], ["regulator", "Time with the regulator"], ["questions", "Key diligence questions"]
   ];
   var LX2 = 8.42, LW = 7.4, RW = R - LX2;                 // two columns: left x 0.52 w 7.4, right x 8.42 w 4.38
   var FP_CHART_COLS = 20;                                 // the most filings drawn as columns on the rate chart
@@ -507,11 +508,18 @@
   function arr(a) { return Array.isArray(a) ? a : []; }
   function cnt(n) { return num(n) ? commas(String(Math.round(n))) : "n/d"; }
   function fpRows(f, k) { return arr(f[k] && f[k].rows).filter(function (r) { return r && typeof r === "object"; }); }
-  function fpPlan(facts) {
+  function fpPlan(facts, opts) {
     var f = facts || {}, T = f.totals || {}, R = f.rates || {}, Y = f.years || {};
     var rows = FP_SLIDES.map(function (s) { return { id: s[0], label: s[1], included: true, reason: "" }; });
     var out = function (id, reason) { rows.forEach(function (r) { if (r.id === id) { r.included = false; r.reason = reason; } }); };
-    if (!num(T.filings) || T.filings <= 0) { ["rates", "states", "years", "forms", "regulator"].forEach(function (id) { out(id, NOTHING); }); return rows; }
+    if (!num(T.filings) || T.filings <= 0) { ["states", "rateMap", "rates", "exposure", "adequacy", "programs", "market", "years", "forms", "regulator"].forEach(function (id) { out(id, NOTHING); }); return rows; }
+    var X = rich(f), map = usMapOf(opts);
+    if (!map) out("rateMap", "The outlines of the states didn't load, so the rate map is left out (the filings by state are a bar chart instead). Reload the page and build again.");
+    else if (!fpRows(f, "states").some(function (s) { return s.latest && num(s.latest.rate); })) out("rateMap", "No filing in any state carried an overall rate impact in S&P's data, so there is nothing to shade.");
+    if (!arr(X.E.rows).length) out("exposure", needSummaries(f, "rate", "the premium or policyholders they affect"));
+    if (!arr(X.A.rows).length) out("adequacy", needSummaries(f, "rate", "an indicated, filed or approved change, loss costs or assumptions"));
+    if (!arr(X.G.programs).length && !arr(X.G.forms).length) out("programs", X.U.checked && X.G.summaries ? "The " + plural(X.G.summaries, "saved summary", "saved summaries") + " of this company's filings name no program or form." : needSummaries(f, "form", "a program or a form"));
+    if (!arr(X.M.rows).length) out("market", flat(X.M.reason) || "The market index wasn't looked up for this profile.");
     if (!R.filings) out("rates", "S&P returned no rate filings for this search, so there are no rate changes to show.");
     else if (!R.withImpact) out("rates", "No filing carried an overall rate impact in S&P's data, so there are no rate changes to chart.");
     else if (!arr(R.points).length) out("rates", "None of the filings with a rate impact has a publish date, so they can't be put in date order.");
@@ -537,7 +545,7 @@
     for (var i = 0; i < tries.length; i++) {
       var lv = tries[i][1], parts = ["Source: " + FILINGS_SOURCE + ", " + tries[i][0] + "."];
       if (capped) parts.push(lv > 2 ? "Incomplete." : lv ? "Search incomplete." : "The search stopped early, so figures may be incomplete.");
-      notes.forEach(function (n) { parts.push(typeof n === "string" ? n : n[Math.min(lv, n.length - 1)]); });
+      notes.forEach(function (n) { var v = typeof n === "string" ? n : n[Math.min(lv, n.length - 1)]; if (v) parts.push(v); });
       if (claude) parts.push(lv > 2 ? "Claude's text: check it." : lv ? "Text drafted by Claude: check it." : "Text drafted by Claude from these figures: check it before use.");
       if (f.sample) parts.push(lv > 2 ? "Made-up." : lv > 1 ? "Made-up figures." : "Sample: made-up figures.");
       var s = parts.join(" ");
@@ -584,6 +592,8 @@
           : ["n/d", "Largest overall rate change (no filing carried one)"],
         A.rateFilings ? [pct(A.share), "Rate filings approved, " + cnt(A.approved) + " of " + cnt(A.rateFilings) + " (derived)"] : ["n/d", "Rate filings approved (no rate filings)"]
       ];
+      // what the saved summaries and the market index add takes the place of the rule and form counts, then the latest date
+      richTiles(f).forEach(function (r, i) { tiles[[2, 3, 5][i]] = r; });
       var tw = (lw - 0.15) / 2, th = (BOTTOM - 0.1 - TOP - HDR - 3 * 0.12) / 4;
       tiles.forEach(function (c, i) {
         var tl = tile(L + (i % 2) * (tw + 0.15), TOP + HDR + Math.floor(i / 2) * (th + 0.12), tw, th, c[0], c[1], c[2]);
@@ -715,10 +725,333 @@
     return { kind: "content", id: "questions", title: trimTitle(flat(t.questions && t.questions.title) || "Key diligence questions"), items: items };
   }
 
-  function fpSpec(facts, text) {
-    var f = facts || {}, t = text || {};
-    var included = {}; fpPlan(f).forEach(function (r) { included[r.id] = r.included; });
-    var make = { summary: fpSummary, rates: fpRates, states: fpStates, years: fpYears, forms: fpForms, regulator: fpRegulator, questions: fpQuestions };
+  // =================================================================================================================
+  // ---------- the richer filings profile: maps, exposure, rate adequacy, programs and forms, the market ----------
+  // =================================================================================================================
+  // The facts come from profile.ts (fpRich, fpMarketFacts): what saved summaries of the company's own filings state, and
+  // the market index of the states it files in. Every figure from a summary is shown with its filing and page.
+  var FP_USD_150 = [2.30, 3.50];          // what Claude reading 150 pages costs (the README's estimate, FC_USD_150 on the page)
+  var FP_SUGGEST = 5;                      // the summaries the plan suggests making when none is saved
+  var MAP_VIEW = [0, 0, 975, 610];         // US_MAP's drawing (Albers USA)
+  var SMALL = ["NH", "VT", "MA", "RI", "CT", "NJ", "DE", "MD", "DC"];   // labelled beside the map, with a leader line
+  var COUNT_FILLS = ["DCDAF0", "B4AEDB", "847CC0", "51499A", NAVY];
+  var NOTHING_FILL = { prst: "ltUpDiag", fg: "A6A6BF", bg: "FFFFFF" }, NO_RATE_FILL = "EEEEF5", UNSEARCHED_FILL = "BFBFBF";
+  var RATE_BINS = [
+    { label: "Down 5.0% or more", fill: TEAL, dark: true, has: function (v) { return v <= -5; } },
+    { label: "Down under 5.0%", fill: "8FD0CA", has: function (v) { return v < 0 && v > -5; } },
+    { label: "No change", fill: "D9DCE6", has: function (v) { return v === 0; } },
+    { label: "Up to 5.0%", fill: "F7B6DA", has: function (v) { return v > 0 && v <= 5; } },
+    { label: "Up over 5.0% to 10.0%", fill: "F062B5", dark: true, has: function (v) { return v > 5 && v <= 10; } },
+    { label: "Up over 10.0%", fill: MAG, dark: true, has: function (v) { return v > 10; } }
+  ];
+  // where a label sits off US_MAP's own point, in its units, so neighbouring south-eastern labels don't collide
+  var NUDGE = { SC: [14, 6], GA: [-8, 8], LA: [-4, 4], MS: [0, -6], AL: [2, 8], NC: [14, 2], FL: [14, 8], WV: [-4, 2], KY: [4, 0], TN: [0, 2] };
+
+  function rich(f) {
+    var z = { filings: 0, withDocument: 0, summarised: 0, older: 0 }, o = f || {};
+    var U = o.summaries && typeof o.summaries === "object" ? o.summaries : { checked: false, note: "Saved summaries weren't looked up for this profile.", rate: z, form: z };
+    return {
+      searched: arr(o.map && o.map.searched),
+      U: { checked: !!U.checked, note: flat(U.note), rate: U.rate || z, form: U.form || z },
+      E: o.exposure || { rows: [], total: 0, latest: [], latestPremium: null, latestPolicyholders: null, summarised: 0 },
+      A: o.adequacy || { rows: [], total: 0, summarised: 0 },
+      G: o.programs || { programs: [], programsTotal: 0, forms: [], formsTotal: 0, summaries: 0 },
+      M: o.market || { checked: false, reason: "The market index wasn't looked up for this profile.", rows: [], coverage: [], indexed: [] }
+    };
+  }
+  function usd2(v) { return "$" + v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+  // what making n summaries costs, as the page estimates it: 1 S&P request each and up to 150 pages of Claude reading
+  function makeCost(n) { return plural(n, "S&P request") + " and about " + usd2(n * FP_USD_150[0]) + " to " + usd2(n * FP_USD_150[1]) + " of Claude reading"; }
+  function plural(n, one, more) { return cnt(n) + " " + (n === 1 ? one : (more || one + "s")); }
+  /* Why a slide that needs saved summaries is left out, and what including it would cost. kind: "rate" or "form". */
+  function needSummaries(f, kind, what) {
+    var R = rich(f), c = R.U[kind], noun = kind === "rate" ? "rate filing" : "form filing";
+    if (!R.U.checked) return (R.U.note || "Saved summaries weren't looked up for this profile.") + " This slide needs them.";
+    if (!c.filings) return "S&P returned no " + noun + "s for this search, so there is nothing to summarise for this slide.";
+    if (!c.summarised) {
+      var k = Math.min(FP_SUGGEST, c.withDocument);
+      if (!k) return "None of the " + plural(c.filings, noun) + " has a document to summarise, so this slide can't be filled.";
+      return "None of the " + plural(c.filings, noun) + " has a saved summary yet. Summarising the latest " + cnt(k) + " would take " + makeCost(k) + "; choose it below to include this slide.";
+    }
+    var older = c.older ? " " + plural(c.older, "of them was", "of them were") + " summarised before these figures were read; refreshing " + (c.older === 1 ? "it" : "them") + " would take " + makeCost(c.older) + "." : "";
+    return "The " + plural(c.summarised, "summarised " + noun) + " don't state " + what + "." + older;
+  }
+
+  // ----- the map -----
+  function pathBox(d) {
+    var toks = String(d || "").match(/[MmLlHhVvZz]|-?\d+(?:\.\d+)?/g) || [], x = 0, y = 0, sx = 0, sy = 0, cmd = "", i = 0, b = [Infinity, Infinity, -Infinity, -Infinity];
+    var see = function () { b[0] = Math.min(b[0], x); b[1] = Math.min(b[1], y); b[2] = Math.max(b[2], x); b[3] = Math.max(b[3], y); };
+    while (i < toks.length) {
+      if (/[A-Za-z]/.test(toks[i])) cmd = toks[i++];
+      if (cmd === "z" || cmd === "Z") { x = sx; y = sy; continue; }
+      var a = +toks[i++];
+      if (cmd === "M" || cmd === "m") { var b2 = +toks[i++]; x = cmd === "m" ? x + a : a; y = cmd === "m" ? y + b2 : b2; sx = x; sy = y; cmd = cmd === "m" ? "l" : "L"; }
+      else if (cmd === "L" || cmd === "l") { var c2 = +toks[i++]; x = cmd === "l" ? x + a : a; y = cmd === "l" ? y + c2 : c2; }
+      else if (cmd === "H" || cmd === "h") x = cmd === "h" ? x + a : a;
+      else if (cmd === "V" || cmd === "v") y = cmd === "v" ? y + a : a;
+      see();
+    }
+    return b;
+  }
+  function usMapOf(opts) {
+    var m = opts && opts.usMap;
+    if (!m && typeof US_MAP !== "undefined") m = US_MAP;   // the page's own outlines (web/index.html), when loaded there
+    if (!m || typeof m !== "object") return null;
+    var ok = Object.keys(m).filter(function (k) { return /^[A-Z]{2}$/.test(k) && Array.isArray(m[k]) && typeof m[k][0] === "string"; });
+    return ok.length >= 40 ? m : null;
+  }
+  // count bins: five even steps up to the most filings in a state (1 to 4, 5 to 8, ... for 19), fewer when that's small
+  function countBins(max) {
+    var step = Math.max(1, Math.ceil(max / 5)), out = [];
+    for (var lo = 1; lo <= max; lo += step) out.push({ lo: lo, hi: Math.min(lo + step - 1, max) });
+    return out.map(function (b, i) { return { lo: b.lo, hi: b.hi, fill: COUNT_FILLS[Math.round(i * (COUNT_FILLS.length - 1) / Math.max(1, out.length - 1))], dark: i * (COUNT_FILLS.length - 1) / Math.max(1, out.length - 1) >= 2.5,
+      label: b.lo === b.hi ? plural(b.lo, "filing") : cnt(b.lo) + " to " + cnt(b.hi) + " filings" }; });
+  }
+  /* The map as one group of native shapes: a freeform for each state (from US_MAP), its two-letter code and figure
+     where the state is big enough, and the small north-eastern states labelled beside the map with leader lines.
+     mode "count": shaded by filings; "rate": by the latest overall rate change. A state S&P returned nothing for is
+     hatched (never shaded as zero); a state with filings but no rate impact is pale grey on the rate map. */
+  function mapItems(f, mode, usMap, x, y, w, h) {
+    var rows = fpRows(f, "states"), by = {}, R = rich(f), searched = {};
+    rows.forEach(function (r) { if (r.state) by[r.state] = r; });
+    R.searched.forEach(function (s) { searched[s] = true; });
+    var anySearched = R.searched.length > 0;
+    var maxN = rows.reduce(function (m, r) { return Math.max(m, num(r.n) ? r.n : 0); }, 0), bins = countBins(maxN);
+    var callW = 0.62, k = Math.min((w - callW - 0.12) / MAP_VIEW[2], h / MAP_VIEW[3]), mw = MAP_VIEW[2] * k, mh = MAP_VIEW[3] * k;
+    var mx = x, my = y + (h - mh) / 2;
+    var look = function (code) {
+      var r = by[code];
+      if (anySearched && !searched[code] && !r) return { fill: UNSEARCHED_FILL, kind: "unsearched" };
+      if (!r || !num(r.n) || r.n <= 0) return { pattern: NOTHING_FILL, kind: "nothing" };
+      if (mode === "count") { var b = bins.filter(function (q) { return r.n >= q.lo && r.n <= q.hi; })[0] || bins[bins.length - 1]; return { fill: b.fill, dark: b.dark, value: cnt(r.n), kind: "data" }; }
+      var l = r.latest; if (!l || !num(l.rate)) return { fill: NO_RATE_FILL, value: "n/d", kind: "norate" };
+      var rb = RATE_BINS.filter(function (q) { return q.has(l.rate); })[0];
+      return { fill: rb.fill, dark: !!rb.dark, value: pctCell(l.rate) + (l.approved ? "" : "*"), kind: "data" };
+    };
+    var shapes = [], labels = [], callouts = [];
+    Object.keys(usMap).filter(function (c) { return /^[A-Z]{2}$/.test(c); }).sort().forEach(function (code) {
+      var e = usMap[code], st = look(code), name = flat(e[1]) || code;
+      shapes.push({ type: "freeform", path: e[0], view: MAP_VIEW, x: mx, y: my, w: mw, h: mh, fill: st.fill, pattern: st.pattern, line: { color: st.kind === "nothing" ? "A6A6BF" : "FFFFFF", width: 0.75 },
+        name: name + (st.kind === "nothing" ? ": S&P returned nothing" : st.kind === "unsearched" ? ": not searched" : st.kind === "norate" ? ": no rate impact" : ": " + st.value) });
+      var nd = NUDGE[code] || [0, 0], lx = num(e[2]) ? e[2] + nd[0] : null, ly = num(e[3]) ? e[3] + nd[1] : null;
+      if (lx === null && code === "HI") { var hb = pathBox(e[0]); lx = (hb[0] + hb[2]) / 2 + 30; ly = (hb[1] + hb[3]) / 2 - 18; }
+      var col = st.dark ? "FFFFFF" : NAVY;
+      if (lx !== null && ly !== null) {
+        var cx = mx + lx * k, cy = my + ly * k, two = st.kind === "data" || st.kind === "norate";
+        labels.push({ type: "text", x: cx - 0.3, y: cy - (two ? 0.17 : 0.1), w: 0.6, h: two ? 0.34 : 0.2, margin: 0, anchor: "ctr", autofit: false, name: "Label " + code,
+          paras: [{ align: "ctr", runs: [{ text: code, size: 10, bold: two, color: two ? col : "666666" }] }].concat(two ? [{ align: "ctr", runs: [{ text: st.value, size: 10, color: col }] }] : []) });
+      } else if (SMALL.indexOf(code) >= 0 && (st.kind === "data" || st.kind === "norate")) {
+        var bb = pathBox(e[0]);
+        callouts.push({ code: code, value: st.value, cx: mx + (bb[0] + bb[2]) / 2 * k, cy: my + (bb[1] + bb[3]) / 2 * k });
+      }
+    });
+    // the small states' labels in a column right of the map, in north to south order, never overlapping
+    callouts.sort(function (a, b) { return a.cy - b.cy; });
+    var colX = mx + mw + 0.12, lastY = -Infinity;
+    callouts.forEach(function (c) {
+      var ty = Math.max(c.cy - 0.1, lastY + 0.22); lastY = ty;
+      labels.push({ type: "line", x1: c.cx, y1: c.cy, x2: colX - 0.02, y2: ty + 0.1, color: "666666", width: 0.5, name: "Leader " + c.code });
+      labels.push({ type: "text", x: colX, y: ty, w: callW, h: 0.2, margin: 0, anchor: "ctr", autofit: false, name: "Label " + c.code,
+        paras: [{ runs: [{ text: c.code + " ", size: 10, bold: true, color: NAVY }, { text: c.value, size: 10, color: NAVY }] }] });
+    });
+    var legend = mode === "count" ? bins.map(function (b) { return { fill: b.fill, label: b.label }; })
+      : RATE_BINS.map(function (b) { return { fill: b.fill, label: b.label }; }).concat([{ fill: NO_RATE_FILL, label: "Filings, no rate impact" }]);
+    legend.push({ pattern: NOTHING_FILL, label: "S&P returned nothing" });
+    if (anySearched && Object.keys(usMap).some(function (c) { return /^[A-Z]{2}$/.test(c) && !searched[c] && !by[c]; })) legend.push({ fill: UNSEARCHED_FILL, label: "Not searched" });
+    return { group: { type: "group", name: mode === "count" ? "Map of filings by state" : "Map of latest rate change by state", items: shapes.concat(labels) }, legend: legend, bottom: my + mh, right: colX + (callouts.length ? callW : 0) };
+  }
+  // the legend: a swatch (a small freeform square, so a hatch can show) and its label, in rows across the width given
+  function legendItems(legend, x, y, w, name) {
+    var items = [], cw = Math.max(1.55, Math.min(2.3, w / Math.min(legend.length, 4))), per = Math.max(1, Math.floor(w / cw));
+    legend.forEach(function (l, i) {
+      var lx = x + (i % per) * cw, ly = y + Math.floor(i / per) * 0.24;
+      items.push({ type: "freeform", path: "M0 0H10V10H0Z", view: [0, 0, 10, 10], x: lx, y: ly + 0.04, w: 0.16, h: 0.16, fill: l.fill, pattern: l.pattern, line: { color: "A6A6BF", width: 0.5 }, name: "Key " + l.label });
+      items.push({ type: "text", x: lx + 0.22, y: ly, w: cw - 0.26, h: 0.24, margin: 0, anchor: "ctr", autofit: false, name: "Key label " + l.label, paras: [{ runs: [{ text: l.label, size: 10, color: NAVY }] }] });
+    });
+    return { group: { type: "group", name: name || "Key", items: items }, h: Math.ceil(legend.length / per) * 0.24 };
+  }
+  function mapSlide(f, t, mode, usMap) {
+    var items = [], lw = 7.75, rx = 8.62, rw = R - rx, rows = fpRows(f, "states"), star = false;
+    var legendRows = Math.ceil((mode === "count" ? countBins(rows.reduce(function (m, r) { return Math.max(m, r.n || 0); }, 0)).length + 2 : 9) / 3);
+    var mapH = BOTTOM - TOP - HDR - 0.12 - legendRows * 0.24;
+    items.push(header(mode === "count" ? "Filings by state, shaded by number of filings" : "Latest overall rate change by state (%)", L, TOP, lw));
+    var m = mapItems(f, mode, usMap, L, TOP + HDR, lw, mapH);
+    items.push(m.group);
+    items.push(legendItems(m.legend, L, m.bottom + 0.1, lw, mode === "count" ? "Key: filings" : "Key: rate change").group);
+    // the right column: the states with filings, then the takeaways
+    var tableRows = rows.slice(0, 12), head, tr;
+    if (mode === "count") {
+      head = ["State", "Filings", "Rate filings", "Latest rate (%)"];
+      tr = tableRows.map(function (r) { var l = r.latest; if (l && !l.approved) star = true; return [r.state, cnt(r.n), cnt(r.rate), l ? pctCell(l.rate) + (l.approved ? "" : "*") : "n/d"]; });
+    } else {
+      var withRate = rows.filter(function (r) { return r.latest && num(r.latest.rate); }).sort(function (a, b) { return b.latest.rate - a.latest.rate || a.state.localeCompare(b.state); });
+      tableRows = withRate.slice(0, 12);
+      head = ["State", "Latest (%)", "Published", "Status"];
+      tr = tableRows.map(function (r) { var l = r.latest; if (!l.approved) star = true; return [r.state, { text: pctCell(l.rate) + (l.approved ? "" : "*"), color: l.rate > 0 ? NAVY : l.rate < 0 ? TEAL : NAVY }, fpDate(f, l.date), cellText(l.status, 1.2)]; });
+    }
+    var all = mode === "count" ? rows.length : rows.filter(function (r) { return r.latest && num(r.latest.rate); }).length;
+    items.push(header((mode === "count" ? "By state" : "Highest first") + (all > tableRows.length ? " (" + tableRows.length + " of " + all + ")" : ""), rx, TOP, rw));
+    items.push({ type: "table", x: rx, y: TOP + HDR, colW: mode === "count" ? [0.7, 0.9, 1.1, 1.48] : [0.7, 1.1, 1.18, 1.2], rowH: 0.25, size: 11, name: mode === "count" ? "Table states" : "Table latest rate by state",
+      aligns: mode === "count" ? ["l", "r", "r", "r"] : ["l", "r", "r", "l"], rows: [head].concat(tr) });
+    var y2 = TOP + HDR + (tr.length + 1) * 0.25 + 0.25;
+    if (BOTTOM - y2 >= 1.2) items = items.concat(takeaways(pointsOf(t, mode === "count" ? "states" : "rateMap"), rx, y2, rw, BOTTOM - y2));
+    var notes = [star ? ["* Not approved: the figure may be the change asked for. Rate impacts are S&P's overall figure, not weighted by premium.", "* Not approved: may be the change asked for. Unweighted.", "* Not approved: may be as asked."]
+      : ["Rate impacts are S&P's overall figure for the newest filing with one, not weighted by premium.", "Rate impacts: overall, not premium-weighted."],
+      ["Hatched: S&P returned nothing for this search in that state, which doesn't prove nothing was filed.", "Hatched: S&P returned nothing (not proof of none).", "Hatched: nothing returned."]];
+    if (f.states && f.states.noState) notes.push(cnt(f.states.noState) + " with no state left out.");
+    items.push(fpSource(f, t, notes));
+    return content(t, mode === "count" ? "states" : "rateMap", mode === "count" ? "Where it files" : "Latest rate change by state", items);
+  }
+
+  // ----- exposure: what each summarised rate filing states about the book it covers -----
+  var EXPO_LINE = "What each rate filing states for the book it covers, from its own pages: not statutory premium, and not the company's whole book.";
+  function sumNote(f) { var R = rich(f); return cnt(R.E.summarised || R.U.rate.summarised) + " of " + plural(R.U.rate.filings, "rate filing") + " summarised"; }
+  function fpExposure(f, t) {
+    var R = rich(f), E = R.E, items = [], rows = arr(E.rows).slice();
+    items.push({ type: "text", x: L, y: TOP, w: W, h: 0.3, margin: 0, name: "What these figures are", paras: [{ runs: [{ text: EXPO_LINE, size: 12, color: NAVY }] }] });
+    var top = TOP + 0.35, ch = 1.85, y2 = top + HDR + ch + 0.15, cap = Math.max(1, Math.floor((BOTTOM - y2 - HDR) / 0.25) - 1);
+    var c1w = 3.9, c2x = L + c1w + 0.3, c2w = LX2 - 0.3 - c2x;
+    // the table: the latest filing for each state and type first (the first chart's figures), then the newest others;
+    // both charts draw only what the table shows, so every figure charted has its filing and page beside it
+    var latest = arr(E.latest), key = function (r) { return (r.filingNo || "") + "|" + (r.published || "") + "|" + (r.state || "") + "|" + (r.toi || ""); };
+    var pick = latest.slice(0, cap), have = {}; pick.forEach(function (r) { have[key(r)] = true; });
+    rows.slice().sort(function (a, b) { return String(b.published || "").localeCompare(String(a.published || "")); }).forEach(function (r) { if (pick.length < cap && !have[key(r)]) { pick.push(r); have[key(r)] = true; } });
+    var shown = pick.sort(function (a, b) { return String(b.published || "").localeCompare(String(a.published || "")); });
+    var label = function (r) { return (flat(r.state) || "n/d") + " " + (flat(r.toi) || "type n/d"); };
+    var usePrem = latest.some(function (r) { return num(r.premium) && have[key(r)]; });
+    var val = function (r) { return usePrem ? (num(r.premium) ? m1(r.premium) : null) : (num(r.policyholders) ? r.policyholders : null); };
+    // chart 1: by state and type of insurance (the latest filing of each), largest first
+    var bars = latest.filter(function (r) { return have[key(r)] && val(r) !== null; }).slice(0, 7);
+    items.push(header(usePrem ? "Latest per state and type ($M)" : "Latest per state and type", L, top, c1w));
+    items.push({ type: "chart", kind: "bar", x: L, y: top + HDR, w: c1w, h: ch, legend: "none", gap: 40, categories: bars.length ? bars.map(function (r) { return fitText(label(r), 10, 2.0, false); }) : ["n/d"],
+      series: [ser(usePrem ? "Premium affected ($M)" : "Policyholders", bars.length ? bars.map(val) : [null], NAVY, { pointColors: { 0: MAG } })], labels: { format: usePrem ? "#,##0.0" : "#,##0" }, catSize: 10, name: "Chart exposure by state" });
+    // chart 2: over time, each filing in the table in date order
+    var dated = shown.filter(function (r) { return val(r) !== null; }).slice().reverse();
+    items.push(header(usePrem ? "Each filing, in date order ($M)" : "Each filing, in date order", c2x, top, c2w));
+    items.push({ type: "chart", kind: "column", x: c2x, y: top + HDR, w: c2w, h: ch, legend: "none", gap: 50, catSize: 10, catLabels: "low",
+      categories: dated.length ? dated.map(function (r) { var d = ymd(r.published); return (flat(r.state) || "n/d") + " " + (d ? MONTHS[d.m - 1].slice(0, 3) + " " + d.y : "n/d"); }) : ["n/d"],
+      series: [ser(usePrem ? "Premium affected ($M)" : "Policyholders", dated.length ? dated.map(val) : [null], BLUE)], labels: { format: usePrem ? "#,##0.0" : "#,##0", size: 10 }, name: "Chart exposure over time" });
+    // the table, and the takeaways beside it
+    var tr = shown.map(function (r) {
+      var pg = num(r.page) ? String(r.page) : "n/d";
+      if (num(r.exposures) && num(r.exposuresPage) && r.exposuresPage !== r.page) pg = (num(r.page) ? r.page + ", " : "") + r.exposuresPage;
+      return [fpDate(f, r.published), flat(r.state) || "n/d", flat(r.toi) || "n/d", num(r.premium) ? millions(r.premium) : "n/d", num(r.policyholders) ? cnt(r.policyholders) : "n/d", num(r.exposures) ? cnt(r.exposures) : "n/d", num(r.rate) ? pctCell(r.rate) : "n/d", flat(r.filingNo) || "n/d", pg];
+    });
+    items.push(header("Each filing's own figures, newest first" + (num(E.total) && E.total > shown.length ? " (" + shown.length + " of " + cnt(E.total) + ")" : ""), L, y2, W));
+    items.push(fpTable("Table exposure", L, y2 + HDR, W, ["Published", "State", "Type of insurance", "Premium ($M)", "Policyholders", "Exposures", "Overall rate (%)", "Filing", "Page"], tr,
+      [1.1, 0.6, 2.4, 1.35, 1.25, 1.1, 1.35, 2.4, 0.73], ["r", "l", "l", "r", "r", "r", "r", "l", "r"], [0, 1, 7, 8], { fit: [2, 7] }));
+    items = items.concat(takeaways(pointsOf(t, "exposure"), LX2, top, RW, y2 - 0.12 - top));
+    items.push(fpSource(f, t, [["Premium (US dollars) and policyholders as each filing states them, from saved summaries made by Claude; totals add the latest filing per state and type (derived).",
+      "As each filing states them (summaries by Claude); totals (derived).", "Filings' own figures; totals (derived)."], [sumNote(f) + ".", ""]]));
+    return content(t, "exposure", "Premium and policyholders the rate filings state", items);
+  }
+
+  // ----- rate adequacy and loss costs -----
+  function fpAdequacy(f, t) {
+    var R = rich(f), rows = arr(R.A.rows), items = [];
+    items.push({ type: "text", x: L, y: TOP, w: W, h: 0.3, margin: 0, name: "What these figures are", paras: [{ runs: [{ text: "Indicated: the change the filing's own analysis supports. Filed: the change asked for. Approved: the change the regulator allowed, where the filing states it.", size: 12, color: NAVY }] }] });
+    var top = TOP + 0.35, lw = 7.4, ch = 2.2;
+    var withPct = rows.filter(function (r) { return [r.indicatedPct, r.requestedPct, r.overallPct, r.approvedPct].some(num); }).slice(0, 6).reverse();
+    var filedOf = function (r) { return num(r.requestedPct) ? r.requestedPct : num(r.overallPct) ? r.overallPct : null; };
+    if (withPct.length) {
+      var cats = withPct.map(function (r) { var d = ymd(r.published); return (flat(r.state) || "n/d") + " " + (d ? MONTHS[d.m - 1].slice(0, 3) + " " + d.y : "n/d"); });
+      var series = [ser("Indicated", withPct.map(function (r) { return num(r.indicatedPct) ? r.indicatedPct : null; }), NAVY), ser("Filed", withPct.map(filedOf), MAG), ser("Approved", withPct.map(function (r) { return num(r.approvedPct) ? r.approvedPct : null; }), TEAL)]
+        .filter(function (s) { return s.values.some(num); });
+      items.push(header("Indicated, filed and approved rate change, by filing (%)", L, top, lw));
+      items.push({ type: "chart", kind: "column", x: L, y: top + HDR, w: lw, h: ch, categories: cats, series: series, legend: "top", gap: 90, overlap: -10, labels: { format: "0.0;(0.0);0.0", size: 10 }, catSize: 10, catLabels: "low", name: "Chart indicated and filed" });
+    } else {
+      items.push(header("Rate change by filing (%)", L, top, lw));
+      items.push({ type: "box", x: L, y: top + HDR, w: lw, h: 1.2, fill: "EEEEF5", margins: [0.2, 0.2, 0.15, 0.15], anchor: "ctr", name: "No indicated change", paras: [{ runs: [{ text: "None of the summarised rate filings states an indicated, filed or approved change.", size: 12, color: NAVY }] }] });
+      ch = 1.2;
+    }
+    var y2 = top + HDR + ch + 0.2;
+    var SHOWN = ["indicatedPct", "requestedPct", "approvedPct", "overallPct", "lossCostMultiplier", "lossCostChangePct", "lossTrendPct", "targetLossRatio", "projectedLossRatio", "expensePct", "profitPct"];
+    var pageList = function (r) { var p = {}; SHOWN.forEach(function (k) { if (num(r[k]) && r.pages && num(r.pages[k])) p[r.pages[k]] = true; }); if (num(r.page) && [r.requestedPct, r.approvedPct, r.overallPct].some(num)) p[r.page] = true; var a = Object.keys(p).map(Number).sort(function (a, b) { return a - b; }); return a.length ? a.join(", ") : "n/d"; };
+    var shown = rows.slice(0, Math.max(1, Math.floor((BOTTOM - y2 - HDR) / 0.25) - 1));
+    var tr = shown.map(function (r) {
+      var c = function (v) { return num(v) ? pctCell(v) : "n/d"; }, ind = r.indicatedPct, fi = filedOf(r);
+      return [flat(r.state) || "n/d", fpDate(f, r.published), num(ind) && num(fi) && ind > fi + 0.05 ? { text: c(ind), color: MAG } : c(ind), c(fi), c(r.approvedPct),
+        num(r.lossCostMultiplier) ? r.lossCostMultiplier.toFixed(3) : "n/d", c(r.lossCostChangePct), c(r.lossTrendPct), c(r.targetLossRatio), c(r.projectedLossRatio), c(r.expensePct), c(r.profitPct), flat(r.filingNo) || "n/d", pageList(r)];
+    });
+    items.push(header("Loss costs and assumptions each filing states (%; LCM a multiplier)" + (num(R.A.total) && R.A.total > shown.length ? " (" + shown.length + " of " + cnt(R.A.total) + ")" : ""), L, y2, W));
+    items.push(fpTable("Table adequacy", L, y2 + HDR, W, ["State", "Published", "Indicated", "Filed", "Approved", "LCM", "Loss costs", "Trend", "Target LR", "Projected LR", "Expenses", "Profit", "Filing number", "Pages"], tr,
+      [0.55, 1.0, 0.9, 0.62, 0.92, 0.62, 0.95, 0.66, 0.95, 1.12, 0.9, 0.66, 1.8, 1.25], ["l", "r", "r", "r", "r", "r", "r", "r", "r", "r", "r", "r", "l", "r"], [0, 1, 12, 13], { fit: [12, 13] }));
+    items = items.concat(takeaways(pointsOf(t, "adequacy"), LX2, top, RW, y2 - 0.15 - top));
+    var refs = rows.filter(function (r) { return r.lossCostRef; }).length;
+    items.push(fpSource(f, t, [["As each filing states them (saved summaries made by Claude, with the filing's pages). Magenta: indicated above filed. LCM: loss cost multiplier; LR: loss ratio.",
+      "As each filing states them (summaries by Claude). Magenta: indicated above filed. LR: loss ratio.", "Filings' own figures. Magenta: indicated above filed."], refs ? [plural(refs, "filing adopts", "filings adopt") + " advisory loss costs.", ""] : "", [sumNote(f) + ".", ""]]));
+    return content(t, "adequacy", "Rate adequacy and loss costs", items);
+  }
+
+  // ----- programs and forms -----
+  function fpPrograms(f, t) {
+    var R = rich(f), G = R.G, items = [], progs = arr(G.programs), forms = arr(G.forms);
+    var pRows = progs.slice(0, 6), lw = LW;
+    items.push(header("Programs by segment" + (num(G.programsTotal) && G.programsTotal > pRows.length ? " (" + pRows.length + " of " + cnt(G.programsTotal) + ")" : ""), L, TOP, lw));
+    if (pRows.length) items.push(fpTable("Table programs", L, TOP + HDR, lw, ["Program", "Segment", "State", "Published", "Filing", "Page"],
+      pRows.map(function (p) { return [flat(p.name) || "n/d", p.segment ? flat(p.segment) : "n/d", flat(p.state) || "n/d", fpDate(f, p.published), flat(p.filingNo) || "n/d", num(p.page) ? String(p.page) : "n/d"]; }),
+      [2.1, 1.3, 0.55, 1.0, 1.95, 0.55], ["l", "l", "l", "r", "l", "r"], [0, 1, 4, 5], { fit: [0, 1, 4] }));
+    else items.push({ type: "box", x: L, y: TOP + HDR, w: lw, h: 0.8, fill: "EEEEF5", margins: [0.2, 0.2, 0.1, 0.1], anchor: "ctr", name: "No programs", paras: [{ runs: [{ text: "The saved summaries name no program.", size: 12, color: NAVY }] }] });
+    var ph = pRows.length ? (pRows.length + 1) * 0.25 : 0.8, y2 = Math.max(TOP + HDR + ph + 0.3, 3.4);
+    items = items.concat(takeaways(pointsOf(t, "programs"), LX2, TOP, RW, y2 - 0.15 - TOP));
+    var fRows = forms.slice(0, Math.max(1, Math.floor((BOTTOM - y2 - HDR) / 0.25) - 1));
+    items.push(header("Latest form schedule, newest filing first" + (num(G.formsTotal) && G.formsTotal > fRows.length ? " (" + fRows.length + " of " + cnt(G.formsTotal) + ")" : ""), L, y2, W));
+    if (fRows.length) items.push(fpTable("Table forms", L, y2 + HDR, W, ["Form", "Edition", "Title", "Action", "State", "Published", "Filing", "Page"],
+      fRows.map(function (x) { return [flat(x.number) || "n/d", flat(x.edition) || "n/d", flat(x.title) || "n/d", x.action ? cap(flat(x.action)) : "n/d", flat(x.state) || "n/d", fpDate(f, x.published), flat(x.filingNo) || "n/d", num(x.page) ? String(x.page) : "n/d"]; }),
+      [1.4, 0.85, 3.6, 1.0, 0.6, 1.2, 2.3, 0.6], ["l", "l", "l", "l", "l", "r", "l", "r"], [0, 2, 6, 7], { fit: [0, 1, 2, 6] }));
+    else items.push({ type: "box", x: L, y: y2 + HDR, w: W, h: 0.8, fill: "EEEEF5", margins: [0.2, 0.2, 0.1, 0.1], anchor: "ctr", name: "No forms", paras: [{ runs: [{ text: "The saved summaries list no form.", size: 12, color: NAVY }] }] });
+    items.push(fpSource(f, t, [["From saved summaries made by Claude, with the filing and page of each item; a segment is Claude's judgement from the filing's words.", "From summaries by Claude; segment is a judgement.", "Summaries by Claude."],
+      [plural(G.summaries || 0, "summary", "summaries") + " used.", ""]]));
+    return content(t, "programs", "Programs and forms", items);
+  }
+
+  // ----- against the market -----
+  function fpMarket(f, t) {
+    var R = rich(f), M = R.M, rows = arr(M.rows).slice(0, 4), items = [];
+    var cov = arr(M.coverage).map(function (c) { return c.state + ": filings published " + longDate(c.from) + " to " + longDate(c.to) + ", " + cnt(c.covered) + " companies in the app's list covered, " + cnt(c.missed) + " not"; }).join("; ");
+    items.push({ type: "text", x: L, y: TOP, w: W, h: 0.42, margin: 0, name: "Index coverage", paras: [{ runs: [{ text: "Market index coverage: ", size: 11, bold: true, color: NAVY }, { text: (cov || "n/d") + ". Companies outside the app's list aren't in it, so it isn't the whole market.", size: 11, color: NAVY }] }] });
+    var top = TOP + 0.5, ch = 2.15, c1w = 3.6, c2x = L + c1w + 0.3, c2w = LX2 - 0.3 - c2x;
+    var cats = rows.map(function (r) { return (flat(r.state) || "n/d") + " " + fitText(flat(r.toi) || "type n/d", 10, 1.4, false); });
+    items.push(header("Its share of indexed filings (%)", L, top, c1w));
+    items.push({ type: "chart", kind: "bar", x: L, y: top + HDR, w: c1w, h: ch, legend: "none", gap: 50, categories: cats, series: [ser("Share of filings (%)", rows.map(function (r) { return num(r.share) ? Math.round(r.share * 10) / 10 : null; }), NAVY, { pointColors: { 0: MAG } })],
+      labels: { format: "0.0" }, catSize: 10, name: "Chart share of filings" });
+    items.push(header("Rate change against the index (%)", c2x, top, c2w));
+    items.push({ type: "chart", kind: "column", x: c2x, y: top + HDR, w: c2w, h: ch, categories: cats, legend: "top", gap: 60, overlap: -5, catLabels: "low", labels: { format: "0.0;(0.0);0.0", size: 10 }, catSize: 10, name: "Chart rate against index",
+      series: [ser("Lower quartile", rows.map(function (r) { return r.market.q1; }), "A6A6BF"), ser("Median", rows.map(function (r) { return r.market.median; }), NAVY),
+        ser("Upper quartile", rows.map(function (r) { return r.market.q3; }), BLUE), ser("Its latest", rows.map(function (r) { return r.carrier.latest ? r.carrier.latest.rate : null; }), MAG)].filter(function (s) { return s.values.some(num); }) });
+    items = items.concat(takeaways(pointsOf(t, "market"), LX2, top, RW, ch + HDR));
+    var y2 = top + HDR + ch + 0.2, star = false;
+    var tr = rows.map(function (r) {
+      var l = r.carrier.latest; if (l && !l.approved) star = true;
+      var rng = num(r.market.lo) ? (r.market.lo === r.market.hi ? pctCell(r.market.lo) : pctCell(r.market.lo) + " to " + pctCell(r.market.hi)) : "n/d";
+      return [(flat(r.state) || "n/d") + " " + (flat(r.toi) || ""), monthYear(r.from).replace(/^(\w{3})\w*/, "$1") + " to " + monthYear(r.to).replace(/^(\w{3})\w*/, "$1"), cnt(r.market.filings), cnt(r.market.companies), cnt(r.carrier.filings), num(r.share) ? pctCell(r.share) : "n/d", num(r.rank) ? cnt(r.rank) + " of " + cnt(r.market.companies) : "n/d", rng,
+        num(r.market.q1) ? pctCell(r.market.q1) + " to " + pctCell(r.market.q3) : "n/d", num(r.market.median) ? pctCell(r.market.median) : "n/d", l ? pctCell(l.rate) + (l.approved ? "" : "*") : "n/d"];
+    });
+    items.push(header("Against the index: same state, type of insurance and dates", L, y2, W));
+    items.push(fpTable("Table market", L, y2 + HDR, W, ["State and type", "Published", "Filings", "Companies", "Its filings", "Share (%)", "Its rank", "Index range (%)", "Middle half (%)", "Median (%)", "Its latest (%)"], tr,
+      [1.45, 2.05, 0.75, 1.0, 0.95, 0.85, 0.8, 1.25, 1.2, 0.9, 1.05], ["l", "l", "r", "r", "r", "r", "r", "r", "r", "r", "r"], [0, 1, 2, 4], { fit: [0, 1] }));
+    var cut = rows.some(function (r) { return r.truncated; });
+    items.push(fpSource(f, t, [["Index: S&P filings swept into the app's market index; quartiles and median of S&P's overall rate impacts (derived), not weighted by premium.", "Index: the app's market index; quartiles and median (derived).", "Index; median (derived)."],
+      star ? ["* Not approved: may be the change asked for.", "* May be as asked."] : "", cut ? "Index rows capped." : ""]));
+    return content(t, "market", "Against the market", items);
+  }
+
+  // the summary's tiles, with what the saved summaries and the index add in place of the rule and form counts
+  function richTiles(f) {
+    var R = rich(f), out = [];
+    if (num(R.E.latestPremium)) out.push([money(R.E.latestPremium), "Premium the latest rate filings state, summed (derived; not statutory)"]);
+    var ind = arr(R.A.rows).filter(function (r) { return num(r.indicatedPct) && (num(r.requestedPct) || num(r.overallPct)); });
+    if (ind.length) { var gap = ind.filter(function (r) { return r.indicatedPct > (num(r.requestedPct) ? r.requestedPct : r.overallPct) + 0.05; }).length; out.push([cnt(gap) + " of " + cnt(ind.length), "Rate filings filed below their own indicated change", gap ? MAG : NAVY]); }
+    var m0 = arr(R.M.rows)[0];
+    if (m0 && num(m0.share)) out.push([pct(m0.share), "Share of indexed " + flat(m0.state) + " " + lower(flat(m0.toi)) + " filings (derived)"]);
+    return out;
+  }
+
+  function fpSpec(facts, text, opts) {
+    var f = facts || {}, t = text || {}, usMap = usMapOf(opts);
+    var included = {}; fpPlan(f, opts).forEach(function (r) { included[r.id] = r.included; });
+    var make = { summary: fpSummary, rates: fpRates, states: usMap ? function (f, t) { return mapSlide(f, t, "count", usMap); } : fpStates, rateMap: function (f, t) { return mapSlide(f, t, "rate", usMap); },
+      exposure: fpExposure, adequacy: fpAdequacy, programs: fpPrograms, market: fpMarket, years: fpYears, forms: fpForms, regulator: fpRegulator, questions: fpQuestions };
     var slides = [fpCover(f, t)];
     FP_SLIDES.slice(1).forEach(function (s) { if (included[s[0]]) slides.push(make[s[0]](f, t)); });
     var day = ymd(f.asOf) ? String(f.asOf).slice(0, 10) : "";
@@ -737,6 +1070,6 @@
     return { fileName: name + "-profile" + (f.sample ? "-sample" : "") + (day ? "-" + day : "") + ".pptx", slides: slides };
   }
 
-  window.SNLProfile = { plan: plan, spec: spec, filingsPlan: fpPlan, filingsSpec: fpSpec,
+  window.SNLProfile = { plan: plan, spec: spec, filingsPlan: fpPlan, filingsSpec: fpSpec, filingsCost: makeCost,
     format: { money: money, millions: millions, pct: pct, pctCell: pctCell, mult: mult, shortDate: shortDate, monthYear: monthYear, trimTitle: trimTitle } };
 })();
