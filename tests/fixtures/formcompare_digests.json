@@ -1,0 +1,110 @@
+{
+  "_about": "Made-up filing summaries (digests) for the Programs and forms page tests, in the shape Contract B gives for the snl-digest function. Every name, form number and text is invented. saved: the digests saved before the test starts, by document id; Calloway has two programs with different segments (C1 and C2), Tarrow one (T1); C3 is a digest with empty lists. made: digests the make action answers with. hostile: a digest with hostile text in every field, wrong types and pages that aren't numbers.",
+  "saved": {
+    "9100001": {
+      "filingVersionId": "fcver-c1", "documentId": 9100001, "filingNo": "S&P no. FCS-C-0001",
+      "company": "Calloway Home Co", "companies": ["Calloway Home Co"], "state": "FL",
+      "typeOfInsurance": "Homeowners", "filingType": "Form", "status": "Approved", "published": "2026-10-10",
+      "pages": 624, "read": [{"from": 1, "to": 150}],
+      "madeAt": "2026-11-12T05:00:00Z", "by": "claude",
+      "summary": "Introduces a private client homeowners program and revises the standard homeowners forms.",
+      "programs": [
+        {"name": "Calloway Signature Home", "segment": "private client", "basis": "for dwellings with a replacement cost of $1,000,000 or more", "page": 4},
+        {"name": "Calloway Homeowners Advantage", "segment": "middle market", "basis": "owner-occupied homes with Coverage A from $250,000 to $999,999", "page": 5}
+      ],
+      "forms": [
+        {"number": "CHO 30 01", "edition": "06 25", "title": "Signature homeowners policy", "action": "new", "replaces": null, "page": 12},
+        {"number": "CHO 30 02", "edition": "06 25", "title": "Advantage homeowners policy", "action": "revised", "replaces": null, "page": 14},
+        {"number": "CHO 04 10", "edition": "06 25", "title": "Water backup endorsement", "action": "replaced", "replaces": "CHO 04 10 01 22", "page": 20, "program": "Calloway Homeowners Advantage"}
+      ],
+      "rate": {"overallPct": null, "requestedPct": null, "approvedPct": null, "premium": null, "policyholders": null, "effectiveNew": "2027-01-01", "effectiveRenewal": null, "page": 3},
+      "eligibility": [{"text": "Signature Home requires a monitored central station alarm.", "page": 21}],
+      "notable": [{"text": "Water backup cover moves to an endorsement.", "page": 31}]
+    },
+    "9100002": {
+      "filingVersionId": "fcver-c2", "documentId": 9100002, "filingNo": "CALL-FORM-0002",
+      "company": "Calloway Insurance Co", "companies": ["Calloway Insurance Co", "Calloway Home Co"], "state": "FL",
+      "typeOfInsurance": "Homeowners", "filingType": "Form", "status": "Approved", "published": "2026-06-15",
+      "pages": 210, "read": [{"from": 1, "to": 150}],
+      "madeAt": "2026-11-10T05:00:00Z", "by": "claude",
+      "summary": "Revises the high-value homes policy and adds a water backup endorsement.",
+      "programs": [
+        {"name": "Calloway Signature Home", "segment": "private client", "basis": "the high-value homes program", "page": 2}
+      ],
+      "forms": [
+        {"number": "CHO 30 01", "edition": "01 22", "title": "Signature homeowners policy", "action": "revised", "replaces": null, "page": 9},
+        {"number": "CHO 04 10", "edition": "01 22", "title": "Water backup endorsement", "action": "new", "replaces": null, "page": 11}
+      ],
+      "rate": {"overallPct": 4.5, "requestedPct": null, "approvedPct": null, "premium": null, "policyholders": null, "effectiveNew": "2026-08-01", "effectiveRenewal": null, "page": 3},
+      "eligibility": [],
+      "notable": []
+    },
+    "9100003": {
+      "filingVersionId": "fcver-c3", "documentId": 9100003, "filingNo": "S&P no. FCS-C-0003",
+      "company": "Calloway Coastal Co", "companies": ["Calloway Coastal Co"], "state": "FL",
+      "typeOfInsurance": "Homeowners", "filingType": "Form", "status": "Approved", "published": "2025-11-20",
+      "pages": 88, "read": [{"from": 1, "to": 88}],
+      "madeAt": "2026-11-09T05:00:00Z", "by": "claude",
+      "summary": "Updates a policyholder notice.",
+      "programs": [], "forms": [],
+      "rate": {"overallPct": null, "requestedPct": null, "approvedPct": null, "premium": null, "policyholders": null, "effectiveNew": null, "effectiveRenewal": null, "page": null},
+      "eligibility": [], "notable": []
+    },
+    "9200001": {
+      "filingVersionId": "fcver-t1", "documentId": 9200001, "filingNo": "TARR-FORM-0001",
+      "company": "Tarrow Mutual Insurance Co", "companies": ["Tarrow Mutual Insurance Co"], "state": "FL",
+      "typeOfInsurance": "Homeowners", "filingType": "Form", "status": "Approved", "published": "2026-09-01",
+      "pages": 300, "read": [{"from": 1, "to": 150}],
+      "madeAt": "2026-11-11T05:00:00Z", "by": "claude",
+      "summary": "Replaces the homeowners special form with a new edition.",
+      "programs": [
+        {"name": "Tarrow Homeowners", "segment": "standard", "basis": "the company's homeowners program for owner-occupied dwellings", "page": 6}
+      ],
+      "forms": [
+        {"number": "TM HO 3", "edition": "09 24", "title": "Homeowners 3 special form", "action": "new", "replaces": null, "page": 10},
+        {"number": "TM HO 3", "edition": "03/2020", "title": "Homeowners 3 special form", "action": "withdrawn", "replaces": null, "page": 11},
+        {"number": "TM HO 04 90", "edition": "Ed. 2024", "title": "Personal property replacement cost", "action": null, "replaces": null, "page": 15}
+      ],
+      "rate": null,
+      "eligibility": [{"text": "Homes must be owner-occupied.", "page": 22}],
+      "notable": []
+    }
+  },
+  "made": {
+    "9200002": {
+      "filingVersionId": "fcver-t2", "documentId": 9200002, "filingNo": "TARR-FORM-0002",
+      "company": "Tarrow Mutual Insurance Co", "companies": ["Tarrow Mutual Insurance Co"], "state": "FL",
+      "typeOfInsurance": "Homeowners", "filingType": "Form", "status": "Approved", "published": "2025-05-05",
+      "pages": 150, "read": [{"from": 1, "to": 150}],
+      "madeAt": "2026-11-13T12:00:00Z", "by": "claude",
+      "summary": "Adds a high-value homes endorsement package.",
+      "programs": [
+        {"name": "Tarrow Estate Plus", "segment": "private client", "basis": "an endorsement package for homes valued over $1,500,000", "page": 3}
+      ],
+      "forms": [
+        {"number": "TM HO 3", "edition": "03/2020", "title": "Homeowners 3 special form", "action": "unchanged", "replaces": null, "page": 8}
+      ],
+      "rate": {"overallPct": null, "requestedPct": null, "approvedPct": null, "premium": null, "policyholders": null, "effectiveNew": null, "effectiveRenewal": null, "page": null},
+      "eligibility": [], "notable": []
+    }
+  },
+  "hostile": {
+    "filingVersionId": "fcver-t1", "documentId": 9200001, "filingNo": "<b>TARR</b>",
+    "company": "<script>window.__xss=1</script>", "companies": ["<b>x</b>"], "state": "FL",
+    "pages": "624<img src=x onerror=\"window.__xss=2\">", "read": [{"from": "1", "to": "<b>9</b>"}, {"from": {"a": 1}, "to": 5}],
+    "summary": "<img src=x onerror=\"window.__xss=3\"> Summary & more",
+    "programs": [
+      {"name": "<img src=x onerror=\"window.__xss=4\">Estate", "segment": "<b>private client</b>", "basis": "<script>window.__xss=5</script>\"quoted\"", "page": "4; alert(1)"},
+      {"name": {"nested": true}, "segment": "middle market", "basis": ["not", "text"], "page": -3},
+      "not an object",
+      null
+    ],
+    "forms": [
+      {"number": "<b>X 1</b>", "edition": "<i>06 25</i>", "title": "\"><svg onload=\"window.__xss=6\">", "action": "deleted", "replaces": {"x": 1}, "page": 0, "program": "<u>p</u>"},
+      {"number": 42, "edition": null, "title": null, "action": "NEW", "page": 7}
+    ],
+    "rate": {"overallPct": "<b>9</b>", "requestedPct": null, "approvedPct": null, "premium": null, "policyholders": null, "effectiveNew": "<script>x</script>", "effectiveRenewal": null, "page": "x"},
+    "eligibility": [{"text": "<a href=\"javascript:window.__xss=7\">click</a>", "page": 2.5}],
+    "notable": "not a list"
+  }
+}
