@@ -178,6 +178,8 @@ label.f em,.f em{font-weight:normal;font-style:normal;color:var(--muted)}
 .matches li{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;justify-content:space-between;padding:8px 10px;min-width:0}
 .matches li+li{border-top:1px solid var(--grid)}
 .matches li>div{min-width:0;flex:1 1 220px;overflow-wrap:anywhere}
+/* Searches in parts (big-searches): where a search has got to, under the "Searching" line */
+.bsprog{display:block;margin-top:4px;font-weight:bold}
 /* Recent searches: a compact bar above the form, opening to a list of saved searches that reopen in a click */
 .recent{border:1px solid var(--grid);background:var(--alt);padding:8px 12px;display:flex;flex-direction:column;gap:8px;min-width:0}
 .recent-h{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;min-width:0}
@@ -813,6 +815,7 @@ async function callFn(fn, payload, opts){
   if(res.ok && opts && opts.raw) return {res, status:res.status};
   let body=null; try{ body=await res.json(); }catch{}
   if(res.status===401){ const msg=(body&&body.message)||"Sign in again."; sessionEnded(msg); return {err:"signin", msg, status:401}; }
+  if(bsStopped(res, body)) return bsStoppedAnswer(res, body);   // Supabase stopped the function (memory or CPU): searches in parts, below
   if(res.status===404 && !(body&&body.message)) return {err:"not_deployed", status:404,
     msg: isCorpDev() ? `${FN[fn][0].toUpperCase()+FN[fn].slice(1)} isn't deployed yet. Run: supabase functions deploy ${fn} --no-verify-jwt (see the README).` : "This part of the site isn't set up yet. Ask Corp Dev."};
   if(!res.ok) return {err:(body&&body.error)||("http_"+res.status), msg:(body&&body.message)||`${FN[fn][0].toUpperCase()+FN[fn].slice(1)} answered ${res.status}. Try again in a minute.`, status:res.status, requestId:body&&body.requestId};
@@ -1230,10 +1233,11 @@ function filingsFormHTML(){
       <button type="button" class="btn sm ghost" data-act="refs-refresh" ${S.refsLoading?"disabled":""} title="Fetches S&amp;P's lists of states, types of insurance, filing types and statuses again (four S&amp;P requests)">${S.refsLoading?"Refreshing lists…":"Refresh lists"}</button></div>
   </form>`;
 }
-async function runSearch(refresh, given){
+async function runSearch(refresh, given, resumeIt){
   const f=S.f; if(f.busy) return;
   let payload;
-  if(refresh){ if(!f.last) return; payload={...f.last, refresh:true}; }
+  if(resumeIt){ if(!f.last || !f.resume) return; payload={...f.last}; delete payload.refresh; }   // carry on a search that stopped part-way
+  else if(refresh){ if(!f.last) return; payload={...f.last, refresh:true}; }
   else if(given){ payload=given; f.last=payload; f.res=null; }   // a recent search, sent exactly as it was saved
   else{
     const problem=searchProblem();
@@ -1242,19 +1246,117 @@ async function runSearch(refresh, given){
   }
   if(unlistedOn()) payload.unlisted=true; else delete payload.unlisted;   // kept out of Recent searches, or not, as the tick says now
   f.formErr=""; f.busy=true; f.err=null; render();
-  const r=await callFn("snl-filings", payload);
-  f.busy=false;
+  // a wide search comes in parts (searchParts): progress shows as they arrive, and Stop keeps what has arrived
+  const ctl=bsControl(), resume=resumeIt?f.resume:null; f.ctl=ctl; f.prog=resume?bsProgress(resume):null; f.resume=null; f.carrying=!!resume;
+  const r=await searchParts(payload, {ctl, resume, onPart:p=>{ if(f.ctl===ctl){ f.prog=p; render(); } }});
+  if(f.ctl!==ctl) return;   // a newer search took over
+  f.busy=false; f.ctl=null; f.prog=null; f.carrying=false;
   if(!S.session) return;
+  if(r.err==="stopped"){ toast("Search stopped. Nothing had come back yet."); render(); return; }
   if(r.data){
-    f.res=r.data; f.shown=PAGE; f.filter=""; f.openDesc={}; f.openCo={}; takeUsage(r.data);
+    f.res=r.data; f.resume=r.resume||null; f.shown=PAGE; f.filter=""; f.openDesc={}; f.openCo={}; takeUsage(r.data);
     for(const c of (r.data.byCompany||[])){ const chip=f.chips.find(x=>x.kind===c.kind && x.id===String(c.id)); if(chip && !chip.name && c.name) chip.name=c.name; }
     loadStatus(); recentAfterSearch(r.data);
   } else if(r.err!=="signin") f.err=r;
   render();
 }
 
+/* ---------- Searches in parts (big-searches) ----------
+   One call to the filings function holds at most 2,000 filings (STEP_ROWS in _shared/filings.ts), so a wider search
+   comes in parts: the first answer says there is more and gives a cursor, and the page asks for each next part with
+   the same search and that cursor, one at a time. The parts are put together here: each filing version once (a filing
+   named again in a later part adds its companies), then newest first, as the function sorts a search done in one
+   piece. Each part's answer carries the whole search's counts so far and the last one its notes, so the result reads
+   as one search. A part that fails is asked for once more; Stop keeps what has arrived. A part that comes back empty
+   is just a part. Every view that searches filings goes through searchParts. */
+const BS_TOO_BIG = "This search was too big for the site to run in one go. Narrow the dates, states or companies, or try again.";
+const BS_RETRY_MS = 1500;
+/* Supabase's own answer when it stops a function for using too much memory or CPU: status 546, code WORKER_LIMIT or
+   WORKER_RESOURCE_LIMIT (Supabase's documentation, "Status codes" and "Error codes", Nov 2026). */
+function bsStopped(res, body){
+  const code=String((body&&body.code)||res.headers.get("sb-error-code")||"");
+  return res.status===546 || /^WORKER(_RESOURCE)?_LIMIT$/.test(code);
+}
+/* UNCONFIRMED: which request id the platform's answer carries that a browser may read. The sb-request-id header is read
+   when it is there (and exposed), then a request id in the body; with none, the message goes without one. */
+function bsStoppedAnswer(res, body){
+  const id=String(res.headers.get("sb-request-id")||res.headers.get("x-request-id")||(body&&(body.request_id||body.requestId||body.id))||"").replace(/[^\w.:-]/g,"").slice(0,80);
+  return {err:"too_big", status:res.status, msg:BS_TOO_BIG+(id?` Supabase reference: ${id}.`:"")};
+}
+const bsKey = r => r.filingVersionId!==null&&r.filingVersionId!==undefined ? "v:"+r.filingVersionId : r.serffFilingEntityEventId!==null&&r.serffFilingEntityEventId!==undefined ? "e:"+r.serffFilingEntityEventId : "j:"+JSON.stringify(r);
+function bsMerge(acc, rows){
+  for(const r of (Array.isArray(rows)?rows:[])){
+    if(!r || typeof r!=="object") continue;
+    const k=bsKey(r), kept=acc.by.get(k), cos=Array.isArray(r.companies)?r.companies:[];
+    if(!kept){ const c={...r, companies:[...cos]}; acc.by.set(k,c); acc.rows.push(c); continue; }
+    for(const c of cos) if(c && !kept.companies.some(x=>x && String(x.companyId)===String(c.companyId) && x.companyName===c.companyName)) kept.companies.push(c);
+  }
+}
+const bsNewest = (a,b) => String(b.publishDate??"").localeCompare(String(a.publishDate??""));
+// a failed part is asked for once more when it may go through the second time: no answer, or a fault on the far side
+const bsRetryable = e => e.status===0 || (e.status>=500 && e.err!=="not_configured");
+function bsControl(){ const c={stopped:false}; c.wait=new Promise(res=>{ c.stop=()=>{ c.stopped=true; res({err:"stopped"}); }; }); return c; }
+/* Where a search in parts has got to: parts in, how many there are (exact once known), filings so far. */
+function bsProgress(st){
+  const d=st.last||{}, exact=isNum(d.parts), of=exact?+d.parts:isNum(d.partsAbout)?+d.partsAbout:null;
+  return {done:isNum(d.part)?+d.part:0, of, exact, filings:st.acc.rows.length, fromStore:d.fromStore===true};
+}
+function bsProgText(p){
+  if(!p || !p.done || !p.of || p.of<2) return "";
+  return `${count(p.done)} of ${p.exact?"":"about "}${count(p.of)} parts, ${plural(p.filings,"filing")} so far.`;
+}
+function bsProgHTML(p){ const t=bsProgText(p); return t?` <span class="bsprog" id="bsProg">${esc(t)}</span>`:""; }
+function bsResult(st){ return {...st.last, rows:st.acc.rows.slice().sort(bsNewest), more:false, cursor:null}; }
+/* Runs a search, in as many parts as it comes in. Returns what callFn returns for one search ({data} or {err, msg,
+   ...}), with data holding every part. When it can't finish (stopped, or a part failed twice) data is what arrived,
+   marked capped and incomplete (incomplete.text says why, also first in its notes), and resume carries on from there.
+   o.ctl: from bsControl, to stop; o.onPart(progress) after each part; o.resume: a resume from an earlier answer. */
+async function searchParts(payload, o={}){
+  const ctl=o.ctl||{}, base={steps:true, ...payload}; delete base.cursor;   // steps: the function may answer in parts
+  const st=o.resume ? {acc:o.resume.acc, last:o.resume.last, cursor:o.resume.cursor} : {acc:{by:new Map(), rows:[]}, last:null, cursor:null};
+  let tries=0;
+  for(;;){
+    if(ctl.stopped) return bsIncomplete(st, {why:"stopped"});
+    const body=st.cursor ? {...base, cursor:st.cursor} : base;
+    if(st.cursor) delete body.refresh;   // only the first call asks S&P afresh; the rest carry on from the cursor
+    const r=await Promise.race([callFn("snl-filings", body), ctl.wait||new Promise(()=>{})]);
+    if(ctl.stopped) return bsIncomplete(st, {why:"stopped"});
+    if(r.data && Array.isArray(r.data.rows)){
+      tries=0; takeUsage(r.data);
+      bsMerge(st.acc, r.data.rows); st.last=r.data; st.cursor=r.data.more && r.data.cursor ? r.data.cursor : null;
+      if(st.cursor && !r.data.more) st.cursor=null;
+      if(o.onPart) o.onPart(bsProgress(st));
+      if(!st.cursor) return {data:bsResult(st), status:200};
+      continue;
+    }
+    const e=r.data ? {err:"bad_answer", msg:"The filings function sent back something the page can't read. Try again."} : r;
+    if(e.err==="signin") return e;
+    if(tries<1 && bsRetryable(e)){ tries++; await new Promise(res=>setTimeout(res, BS_RETRY_MS)); continue; }
+    if(!st.last) return e;   // nothing came back: the search failed as a whole, as one call would
+    return bsIncomplete(st, {why:"failed", err:e});
+  }
+}
+function bsIncomplete(st, inc){
+  if(!st.last) return {err:"stopped", msg:"You stopped the search before anything came back.", status:0};
+  const p=bsProgress(st), of=p.of&&p.of>p.done ? `${p.exact?"":"about "}${count(p.of)}` : "";
+  const text = inc.why==="stopped"
+    ? `You stopped the search after ${count(p.done)}${of?` of ${of}`:""} parts, so these results are incomplete.`
+    : `Part ${count(p.done+1)}${of?` of ${of}`:""} couldn't be fetched, so these results are incomplete. ${errText(inc.err)}`;
+  const d=bsResult(st);
+  return {data:{...d, capped:true, saved:false, incomplete:{why:inc.why, text}, notes:[text, ...(Array.isArray(d.notes)?d.notes:[])]}, status:200,
+    resume:{acc:st.acc, last:st.last, cursor:st.cursor}};
+}
+function stopSearch(){ const f=S.f; if(f.busy && f.ctl) f.ctl.stop(); }
+function bsStopHTML(){ const f=S.f; return f.ctl ? `<button type="button" class="btn sm" id="searchStop" data-act="search-stop" title="Stops asking for more parts. What has arrived is shown, marked incomplete.">Stop</button>` : ""; }
+/* A search that stopped part-way: why, and a button to carry on from where it stopped (the parts already in are kept). */
+function bsIncompleteHTML(r){
+  const f=S.f, failed=r.incomplete.why==="failed";
+  const lead=failed ? "These results are incomplete." : "You stopped the search.";
+  return `<div class="banner" id="incomplete" role="alert"><span><b>${lead}</b> ${esc(r.incomplete.text)} ${plural(Array.isArray(r.rows)?r.rows.length:0,"filing")} arrived and ${Array.isArray(r.rows)&&r.rows.length===1?"is":"are"} shown below; the counts and exports cover only these.</span>${f.resume?`<button type="button" class="btn sm" id="searchResume" data-act="search-resume">${failed?"Try again":"Carry on"}</button>`:""}</div>`;
+}
+
 /* ---------- Filings: results ---------- */
-const rowKey = (r,i) => String(!blank(r.filingVersionId) ? "v"+r.filingVersionId : !blank(r.serffFilingEntityEventId) ? "e"+r.serffFilingEntityEventId : "i"+i);
+const rowKey =(r,i) => String(!blank(r.filingVersionId) ? "v"+r.filingVersionId : !blank(r.serffFilingEntityEventId) ? "e"+r.serffFilingEntityEventId : "i"+i);
 const companiesOf = r => Array.isArray(r.companies)&&r.companies.length ? r.companies : [{companyId:r.companyId, companyName:r.companyName, naicCompanyCode:r.naicCompanyCode}];
 /* S&P's own wording first, then the number as a percentage, then "n/d". overallRateImpact is in percentage points:
    the Live check on 18 Nov 2026 saw it on 6 of 10 rows, from -11 to -0.8, with no display value on any row. */
@@ -1315,17 +1417,18 @@ function filingRowHTML({r,key}){
 }
 function filingsResultsHTML(){
   const f=S.f, r=f.res;
-  if(f.busy && !r) return `<div class="banner" role="status" id="searching"><span>Searching S&amp;P's filings… A long date range can take a minute. After that the results are saved for everyone until someone clicks Refresh.</span></div>`;
+  if(f.busy && !r) return `<div class="banner" role="status" id="searching"><span>Searching S&amp;P's filings… A long date range can take a minute. After that the results are saved for everyone until someone clicks Refresh.${bsProgHTML(f.prog)}</span>${bsStopHTML()}</div>`;
   if(!r) return f.err ? problemHTML(f.err, "Couldn't run the search.", "search-retry")
     : `<div class="empty" id="noSearch"><p>Choose companies, states and dates, then search. Results are saved, so the same search opens at once next time.</p></div>`;
-  const all=Array.isArray(r.rows)?r.rows:[], notes=Array.isArray(r.notes)?r.notes.filter(n=>!blank(n)):[], p=r.params||f.last||{};
+  const all=Array.isArray(r.rows)?r.rows:[], notes=Array.isArray(r.notes)?r.notes.filter(n=>!blank(n)).slice(r.incomplete?1:0):[], p=r.params||f.last||{};
   const total=isNum(r.total)?+r.total:all.length, rows=visibleRows(), shown=rows.slice(0,f.shown);
   let h=`<h2 class="sec">Results</h2>`;
   h+=`<p class="sub" id="resSummary" style="margin:0">${total?`<b>${plural(total,"filing")}</b>`:`<b>S&amp;P returned nothing</b> for filings`}${p.from&&p.to?` published from ${fmtDay(p.from)} to ${fmtDay(p.to)}`:""}${Array.isArray(p.states)&&p.states.length?` in ${esc(p.states.join(", "))}`:""}.</p>`;
-  if(f.busy) h+=`<div class="banner" role="status" id="refreshing"><span>Asking S&amp;P again… The results below are from ${fmtAt(r.fetchedAt)} until the new ones arrive.</span></div>`;
+  if(f.busy) h+=`<div class="banner" role="status" id="refreshing"><span>${f.carrying?"Carrying on with the search… The filings below are those that had arrived; the rest are added when the search finishes.":`Asking S&amp;P again… The results below are from ${fmtAt(r.fetchedAt)} until the new ones arrive.`}${bsProgHTML(f.prog)}</span>${bsStopHTML()}</div>`;
   else if(f.err) h+=problemHTML(f.err, "Couldn't refresh the search.", "search-refresh");
   else if(r.fromStore) h+=`<div class="info" id="fromStore" role="status"><span>From the last fetch on ${fmtAt(r.fetchedAt)}.</span><button class="btn sm" data-act="search-refresh">Refresh</button></div>`;
-  if(r.capped) h+=`<div class="banner" id="capped" role="alert"><span><b>These results are incomplete.</b> The search stopped before S&amp;P had returned everything. Narrow the dates, states or companies and search again.</span></div>`;
+  if(r.incomplete && !f.busy) h+=bsIncompleteHTML(r);
+  if(r.capped && !r.incomplete) h+=`<div class="banner" id="capped" role="alert"><span><b>These results are incomplete.</b> The search stopped before S&amp;P had returned everything. Narrow the dates, states or companies and search again.</span></div>`;
   h+=unlistedNoteHTML(r);
   if(r.saved===false && !r.capped && !f.busy) h+=`<p class="t2" id="notSaved">These results couldn't be saved, so the next search will ask S&amp;P again.</p>`;
   if(notes.length || !all.length) h+=`<div class="notes" id="notes" role="status"><b>${all.length?"Read this before you rely on the results":"Nothing came back, and that isn't proof that nothing was filed"}</b><ul>${(notes.length?notes:[EMPTY_RESULT]).map(n=>`<li>${esc(n)}</li>`).join("")}</ul></div>`;
@@ -3920,8 +4023,10 @@ async function snapRun(refresh, given){
     run={pick:JSON.parse(JSON.stringify(sn.pick)), years:sn.years, payload:{action:"search", companyIds:nums("companyId"), institutionIds:nums("institutionId"), states:stateOptions().map(s=>s.id).sort(), from, to}};
   }
   sn.formErr=""; sn.busy=true; sn.err=null; if(!refresh) sn.res=null; sn.ran=run; render();
-  const r=await callFn("snl-filings", refresh ? {...run.payload, refresh:true} : run.payload);
+  sn.prog=null;
+  const r=await searchParts(refresh ? {...run.payload, refresh:true} : run.payload, {onPart:p=>{ if(S.snap===sn){ sn.prog=p; render(); } }});   // a wide search comes in parts (big-searches)
   if(!S.session || S.snap!==sn) return;   // signed out, or the session ended, while it ran
+  sn.prog=null;
   sn.busy=false;
   if(r.data && Array.isArray(r.data.rows)){ sn.res=r.data; sn.err=null; takeUsage(r.data); loadStatus(); snapRemember(run, r.data); }
   else if(r.err!=="signin") sn.err = r.data ? {err:"bad_answer", msg:"The filings function sent back something the page can't read. Try again."} : r;
@@ -4140,7 +4245,7 @@ function snapByCompanyHTML(res, run){
 }
 function snapOutHTML(){
   const sn=S.snap, run=sn.ran, r=sn.res, who=run?run.pick.name:"";
-  if(sn.busy && !r) return `<div class="info" id="snBusy" role="status"><span><b>Getting ${esc(who)}'s filings…</b> A long period can take a minute. After that the result is saved, so it opens at once next time.</span></div>`;
+  if(sn.busy && !r) return `<div class="info" id="snBusy" role="status"><span><b>Getting ${esc(who)}'s filings…</b> A long period can take a minute. After that the result is saved, so it opens at once next time.${bsProgHTML(sn.prog)}</span></div>`;
   if(!r){
     if(!sn.err) return "";
     if(sn.err.err==="not_configured" || sn.err.err==="not_deployed") return `<div class="info" id="snErr" role="status"><span>${esc(errText(sn.err))}</span></div>`;
@@ -4150,7 +4255,7 @@ function snapOutHTML(){
   const c=snapCompute(r, run), p=c.p, pk=run&&run.pick;
   let h=`<div class="snhead" id="snHead"><div><h3 id="snName">${esc(who||"Snapshot")}</h3><p class="t2" id="snMeta">${esc([pk&&pk.kind==="group"?`Group of ${plural(pk.ids.length,"company","companies")} with S&P ids${pk.noId?`; ${plural(pk.noId,"company","companies")} without one left out`:""}`:pk&&pk.group?`Part of ${pk.group}`:"", `filings published ${fmtDay(p.from)} to ${fmtDay(p.to)}`, `${plural(c.searched.length,"state")} searched`, "every filing type and status"].filter(Boolean).join(" · "))}</p></div>
     <div class="toolbar"><button type="button" class="btn" id="sn_ask" data-act="snap-ask" data-q="all">Ask Claude about this</button><button type="button" class="btn" id="sn_toFilings" data-act="snap-filings" ${sn.busy?"disabled":""}>See every filing on the Filings view</button><span class="inline"><span class="t2">All filings:</span>${snapExpHTML("filings")}</span></div></div>`;
-  if(sn.busy) h+=`<div class="banner" role="status" id="snRefreshing"><span>Asking S&amp;P again… What is below is from ${fmtAt(r.fetchedAt)} until the new result arrives.</span></div>`;
+  if(sn.busy) h+=`<div class="banner" role="status" id="snRefreshing"><span>Asking S&amp;P again… What is below is from ${fmtAt(r.fetchedAt)} until the new result arrives.${bsProgHTML(sn.prog)}</span></div>`;
   else if(sn.err) h+=problemHTML(sn.err, "Couldn't refresh the snapshot.", "snap-refresh");
   else if(r.fromStore) h+=`<div class="info" id="snFromStore" role="status"><span>From the saved result fetched ${fmtAt(r.fetchedAt)}, so opening it used no S&amp;P requests.</span><button type="button" class="btn sm" data-act="snap-refresh">Refresh from S&amp;P</button></div>`;
   if(r.capped) h+=`<div class="banner" id="snPartial" role="alert"><span><b>This snapshot is partial.</b> The search stopped at its limit before S&amp;P had returned everything, so every count below is lower than it should be. Choose a shorter period${pk&&pk.kind==="group"?" or one of the group's companies":""} and run it again.</span></div>`;
@@ -4489,8 +4594,10 @@ async function fcSearches(fc){
   fc.busy=true; render();
   for(let k=0;k<todo.length;k++){
     const run=todo[k]; run.err=null; fc.step={i:k+1, n:todo.length}; render();
-    const r=await callFn("snl-filings", run.payload);
+    fc.prog=null;
+    const r=await searchParts(run.payload, {onPart:p=>{ if(S.fc===fc){ fc.prog=p; render(); } }});   // a wide search comes in parts (big-searches)
     if(!S.session || S.fc!==fc) return;   // signed out, or the session ended, while it ran
+    fc.prog=null;
     if(r.data && Array.isArray(r.data.rows)){ run.res=r.data; takeUsage(r.data); }
     else run.err = r.data ? {err:"bad_answer", msg:"The filings function sent back something the page can't read. Try again."} : r;
   }
@@ -4823,7 +4930,7 @@ function fcOutHTML(){
   const cs=fcCarriers(fc), names=ran.picks.map(p=>p.name);
   let h=`<div class="snhead" id="fcHead"><div><h3 id="fcName">${esc(names.join(", "))}</h3><p class="t2" id="fcMeta">${esc([`${ran.wide?"Form, rule and rate filings":"Form filings"} in ${fcStateName(ran.state)}`, ran.toiName||"type of insurance n/d", `published ${fmtDay(ran.from)} to ${fmtDay(ran.to)}`, "every status"].join(" · "))}</p></div>
     <div class="toolbar"><button type="button" class="btn" id="fc_ask" data-act="fc-ask" ${fc.runs.some(x=>x.res)?"":"disabled"}>Ask Claude about this</button></div></div>`;
-  if(fc.busy) h+=`<div class="info" id="fcBusy" role="status"><span><b>Finding the filings${fc.step&&fc.step.n>1?`: search ${count(fc.step.i)} of ${count(fc.step.n)}`:""}…</b> A long period can take a minute. Each search is saved, so the same one opens at once next time.</span></div>`;
+  if(fc.busy) h+=`<div class="info" id="fcBusy" role="status"><span><b>Finding the filings${fc.step&&fc.step.n>1?`: search ${count(fc.step.i)} of ${count(fc.step.n)}`:""}…</b> A long period can take a minute. Each search is saved, so the same one opens at once next time.${bsProgHTML(fc.prog)}</span></div>`;
   const failed=fc.runs.filter(x=>x.err);
   if(!fc.busy && failed.length){
     const calm=failed.every(x=>["not_configured","not_deployed"].includes(x.err.err)), who=failed.flatMap(x=>x.carriers.map(i=>ran.picks[i].name));
@@ -5070,8 +5177,10 @@ async function cmpGo(cm, which, refresh){
   for(let k=0; k<which.length; k++){
     const part=cm.parts[which[k]]; cm.step={at:k+1, of:which.length}; part.state="running"; render();
     const body={...part.payload, ...(refresh?{refresh:true}:{}), ...(unlisted?{unlisted:true}:{})};
-    const r=await callFn("snl-filings", body);
+    cm.prog=null;
+    const r=await searchParts(body, {onPart:p=>{ if(S.cmp===cm){ cm.prog=p; render(); } }});   // a wide search comes in parts (big-searches)
     if(!S.session || S.cmp!==cm) return;   // signed out, or the session ended, while it ran
+    cm.prog=null;
     if(r.data && Array.isArray(r.data.rows)){ part.state="ok"; part.res=r.data; part.err=null; takeUsage(r.data); }
     else { part.state="err"; part.res=null; part.err = r.data ? {err:"bad_answer", msg:"The filings function sent back something the page can't read. Try again."} : r; }
   }
@@ -5260,7 +5369,7 @@ function cmpLatestBlockHTML(c){
 function cmpProgressHTML(cm){
   const st=cm.step, n=cm.parts.length;
   const items=cm.parts.map((p,i)=>`<li class="${p.state==="ok"?"ok":p.state==="err"?"err":""}">Search ${i+1}: ${plural(cmpPartIds(p.payload).length,"company","companies")} <span>${p.state==="ok"?"done":p.state==="err"?"didn't run":p.state==="running"?"running…":"waiting"}</span></li>`).join("");
-  return `<div class="info cmprog" id="cmBusy" role="status"><span><b>${n>1?`Searching ${st?st.at:1} of ${st?st.of:n}…`:"Searching…"}</b> Each search can take a minute or so. Each is saved as it finishes, so the comparison opens at once next time.</span>${n>1?`<ol>${items}</ol>`:""}</div>`;
+  return `<div class="info cmprog" id="cmBusy" role="status"><span><b>${n>1?`Searching ${st?st.at:1} of ${st?st.of:n}…`:"Searching…"}</b> Each search can take a minute or so. Each is saved as it finishes, so the comparison opens at once next time.${bsProgHTML(cm.prog)}</span>${n>1?`<ol>${items}</ol>`:""}</div>`;
 }
 // what didn't come back: which searches, and so which carriers, with one Try again for the failed searches only
 function cmpFailedHTML(c, cm){
@@ -6225,6 +6334,8 @@ document.addEventListener("click", e=>{
     case "refs-refresh": loadRefs(true); break;
     case "search": runSearch(false); break;
     case "search-refresh": runSearch(true); break;
+    case "search-stop": stopSearch(); break;
+    case "search-resume": runSearch(false, null, true); break;
     case "search-retry": if(f.last){ f.busy=false; runSearch(false); } break;
     case "fsort": { const k=t.dataset.k; f.sort = f.sort.k===k ? {k, dir:-f.sort.dir} : {k, dir:k==="publishDate"||k==="rate"?-1:1}; f.shown=PAGE; render(); break; }
     case "more-rows": f.shown+=PAGE; render(); break;

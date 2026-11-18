@@ -155,7 +155,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   ok("while searching: says so, and the button waits", (await t.txt("#searching")).startsWith("Searching S&P's filings") && await p.isDisabled('button[data-act="search"]') && (await t.txt('button[data-act="search"]'))==="Searching…");
   await p.waitForTimeout(500);
   const sent=t.of("search")[0];
-  ok("what the page sends: ids as numbers, states sorted, only the ticked filters", same(sent.body,{action:"search",companyIds:[4000001,4000107],institutionIds:[5000001],states:["FL","GA"],from:"2021-01-01",to:"2026-11-13",typeOfInsuranceIds:[101],filingTypeIds:[11,12],trackingNumbers:["CALL-134000001","TARR-134000777"]}), sent.body);
+  ok("what the page sends: ids as numbers, states sorted, only the ticked filters", same(sent.body,{steps:true,action:"search",companyIds:[4000001,4000107],institutionIds:[5000001],states:["FL","GA"],from:"2021-01-01",to:"2026-11-13",typeOfInsuranceIds:[101],filingTypeIds:[11,12],trackingNumbers:["CALL-134000001","TARR-134000777"]}), sent.body);
   ok("sent with the login's token and the publishable key", sent.auth==="Bearer t" && sent.apikey==="sb_publishable_k");
   ok("strip takes the request counts from the search answer", (await t.txt("#s_usage"))==="S&P requests: 24 of 500 this hour, 52 of 12,000 today (trial account)", await t.txt("#s_usage"));
   await p.waitForTimeout(700); t.statusDelay=0;
@@ -324,9 +324,9 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   t.search=()=>({status:404, empty:true});
   await p.click('button[data-act="search"]'); await p.waitForTimeout(450);
   ok("function not deployed: Corp Dev gets the command", (await t.txt("#results .banner")).includes("The filings function isn't deployed yet. Run: supabase functions deploy snl-filings --no-verify-jwt (see the README)."));
-  t.abortSearch=true;
-  await p.click('button[data-act="search"]'); await p.waitForTimeout(450);
-  ok("no connection: says so plainly", (await t.txt("#results .banner")).startsWith("Couldn't run the search. Couldn't reach the filings function. Check your connection and try again."));
+  t.abortSearch=true; const tried=t.of("search").length;
+  await p.click('button[data-act="search"]'); await p.waitForTimeout(2200);   // (big-searches) a search that gets no answer is tried once more first
+  ok("no connection: tried once more, then says so plainly", (await t.txt("#results .banner")).startsWith("Couldn't run the search. Couldn't reach the filings function. Check your connection and try again.") && t.of("search").length===tried+2);
   t.abortSearch=false;
   await p.press("#f_tracking","Enter"); await p.waitForTimeout(450);
   ok("Enter in the form runs the search", (await t.txt("#results .banner")).includes("isn't deployed yet"));
@@ -347,7 +347,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   await p.screenshot({path:OUTDIR+"/filings-nolists-390.png",fullPage:true});
   await p.setViewportSize({width:1440,height:900});
   await t.quick(["FL","DC"]);
-  ok("no lists: the search leaves the three filters out", same(t.of("search")[0].body,{action:"search",companyIds:[4000001],institutionIds:[],states:["DC","FL"],from:"2025-11-14",to:"2026-11-13"}), t.of("search")[0].body);
+  ok("no lists: the search leaves the three filters out", same(t.of("search")[0].body,{steps:true,action:"search",companyIds:[4000001],institutionIds:[],states:["DC","FL"],from:"2025-11-14",to:"2026-11-13"}), t.of("search")[0].body);
   t.refs=copy(REFS);
   await p.click('button[data-act="refs-refresh"]'); await p.waitForTimeout(350);
   ok("Refresh lists asks S&P again and fills the filters", same(t.of("reference").pop().body,{action:"reference",refresh:true}) && (await p.$$("#chk_toi input")).length===14 && !(await p.$(".nolist")) && (await t.txt("#toastRoot"))==="Lists refreshed from S&P." && (await p.$$("#states button")).length===6);
