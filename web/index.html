@@ -183,6 +183,12 @@ label.f em,.f em{font-weight:normal;font-style:normal;color:var(--muted)}
 .recent-i .t1{color:var(--blue)}
 #st_named:empty{display:none}
 .noadd{max-width:44ch}
+/* Whole groups in the company finder, and the tick that keeps a search out of Recent searches */
+.matches.groups{border-color:var(--blue)}
+.matches.groups li{background:var(--alt)}
+.unl{display:flex;gap:8px;align-items:flex-start;font-weight:normal;cursor:pointer;min-width:0;overflow-wrap:anywhere}
+.unl input{margin:3px 0 0;flex:none}
+.bigwarn{color:var(--magenta)}
 
 /* Tables */
 .tbl-wrap{overflow-x:auto;border:1px solid var(--grid);max-width:100%}
@@ -455,7 +461,8 @@ WI:["M579 113h4l-2 2zM560 121h3l5 -1l8 -5l4 1l-2 3l-1 4l3 -3l5 3l3 1l2 4l17 3l5 
 WV:["M733 295l5 -2v-3h2l-1 -5l2 -5l3 3l2 -2l-1 -3l1 -5h2l2 -4l2 2l2 -2l4 -6l2 -7l-1 -4l2 -5l-1 -4l-1 -2l2 -2l4 21l17 -3l2 12l3 -3l3 -5l2 1l2 -5l3 2l3 -1l2 -3l3 -2l3 2l3 -1v2l3 4l-1 5l-10 -6v7l-6 11l-3 -2l-2 8l-2 3l-3 -1l-3 -2v4l-4 7v3l-3 5l-1 3l2 1l-1 3l-3 3l-1 -2l-4 4l-2 -1v2l-6 3l-3 -2l-3 4h-2l-3 -1l-3 -4v-2h-3l-3 -2l-1 -2l-4 -3l-2 -4v-4z","West Virginia",763,291],
 WY:["M369 156l-4 45l-4 46l-28 -3l-32 -4l-24 -3l-24 -3l-9 -2l3 -22l9 -56l2 -12l5 1l35 5l41 5z","Wyoming",308,195]
 };
-const PAGE = 100, MAX_COMPANIES = 50, MAX_YEARS = 10, MAX_QUESTION = 4000, MAX_HISTORY = 6, MAX_HISTORY_ANSWER = 20000, MAX_CODES = 8, MAX_STAT_YEARS = 15;
+const PAGE = 100, MAX_COMPANIES = 100, MAX_YEARS = 10, MAX_QUESTION = 4000, MAX_HISTORY = 6, MAX_HISTORY_ANSWER = 20000, MAX_CODES = 8, MAX_STAT_YEARS = 15;
+const MAX_SEARCH_REQUESTS = 60;   // the most S&P requests one search may use (snl-filings refuses a wider search before asking S&P)
 const XLSX_SRC = "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.mini.min.js";
 const DOCX_SRC = "https://cdn.jsdelivr.net/npm/docx@9.5.1/dist/index.iife.min.js";   // the Word export, loaded on the first click
 const JOB_COLS = "id,status,question,progress,partial,result,error,segments,created_at,updated_at,heartbeat_at";
@@ -731,6 +738,7 @@ function estimateText(){
   if(!f.chips.length || !a || !b || a>b) return "";
   const windows=Math.ceil((Math.round((b-a)/DAY)+1)/365), n=k=>Math.ceil(f.chips.filter(c=>c.kind===k).length/10);
   const req=windows*(n("companyId")+n("institutionId"));
+  if(req>MAX_SEARCH_REQUESTS) return tooWideText(req, windows, n("companyId")+n("institutionId"), f.chips.length);
   return `About ${plural(req,"S&P request")}, more if there are many results. A search someone has already run costs none.`;
 }
 async function resolveCompany(){
@@ -742,6 +750,7 @@ async function resolveCompany(){
   if(!S.session) return;
   if(r.data){ f.matches=Array.isArray(r.data.matches)?r.data.matches:[]; f.resolveNote=r.data.note||""; }
   else if(r.err!=="signin"){ f.matches=[]; f.resolveErr=errText(r); }
+  f.groups=r.data&&Array.isArray(r.data.groups)?r.data.groups.filter(g=>g&&typeof g==="object"&&Array.isArray(g.members)):[]; f.groupNote=r.data&&typeof r.data.groupNote==="string"?r.data.groupNote:"";
   render();
 }
 function addChip(kind, id, name){
@@ -766,6 +775,75 @@ function addAllMatches(){
   toast(full ? `Added ${added}. A search takes at most ${MAX_COMPANIES} companies, so the rest were left out.` : added ? `Added ${plural(added,"company","companies")}.` : "Those companies are already chosen.");
   document.getElementById("f_q")?.focus();
 }
+/* ---------- Filings: whole groups in the company finder ----------
+   The function offers each group whose name (or NAIC group code) matches what was typed, with every member company
+   that has an S&P id, so a whole group goes into one search in one click. */
+const idsPerYear = list => Math.ceil(list.filter(m=>!blank(m.companyId)).length/10) + Math.ceil(list.filter(m=>blank(m.companyId)&&!blank(m.institutionId)).length/10);
+const groupName = g => !blank(g.name) ? String(g.name) : !blank(g.code) ? `NAIC group ${g.code}` : "Group";
+function groupChoicesHTML(){
+  const f=S.f, gs=f.groups||[];
+  if(!gs.length) return f.groupNote ? `<p class="t2" id="groupNote">${esc(f.groupNote)}</p>` : "";
+  const rows=gs.map((g,i)=>{
+    const members=g.members.filter(m=>m&&(!blank(m.companyId)||!blank(m.institutionId))), n=isNum(g.searchable)?+g.searchable:members.length;
+    const without=isNum(g.companies)&&+g.companies>n ? +g.companies-n : 0, req=idsPerYear(members);
+    const meta=[!blank(g.code)?`NAIC group ${g.code}`:"", g.tooBig ? `about ${plural(req,"S&P request")} for each year of dates for the first ${count(members.length)}` : `about ${plural(req,"S&P request")} for each year of dates`,
+      without?`${plural(without,"company has","companies have")} no S&P id and can't be searched`:""].filter(Boolean).join(" · ");
+    const big = g.tooBig ? `<div class="t2 bigwarn" data-big>Too big for one search: a search takes at most ${count(MAX_COMPANIES)} companies. Add the first ${count(members.length)} and search, then remove them, find the others by name and search again.</div>` : "";
+    return `<li><div><div class="t1">${esc(groupName(g))}, ${esc(plural(n,"company","companies"))}${g.tooBig?"":": add all"}</div><div class="t2">${esc(meta)}</div>${big}</div>
+      <span class="inline"><button type="button" class="btn sm" data-act="co-add-group" data-i="${i}">${g.tooBig?`Add the first ${count(members.length)}`:`Add all ${count(n)}`}</button></span></li>`; }).join("");
+  return `<ul class="matches groups" id="groupChoices" aria-label="Whole groups">${rows}</ul>${f.groupNote?`<p class="t2" id="groupNote">${esc(f.groupNote)}</p>`:""}`;
+}
+/** Adds every company of a group not already chosen, up to the most one search takes, and says what happened. */
+function addGroup(i){
+  const f=S.f, g=(f.groups||[])[i]; if(!g) return;
+  let added=0, left=0;
+  for(const m of g.members){
+    const kind=!blank(m.companyId)?"companyId":!blank(m.institutionId)?"institutionId":null; if(!kind) continue;
+    const id=String(m[kind]).trim();
+    if(!/^\d{1,12}$/.test(id) || f.chips.some(c=>c.kind===kind && c.id===id)) continue;
+    if(f.chips.length>=MAX_COMPANIES){ left++; continue; }
+    f.chips.push({kind, id, name:m.companyName||""}); added++;
+  }
+  f.q=""; f.matches=null; f.groups=[]; f.groupNote=""; f.resolveNote=""; f.resolveErr=""; f.formErr=""; render();
+  const name=groupName(g);
+  toast(left&&!added ? `A search takes at most ${MAX_COMPANIES} companies and ${MAX_COMPANIES} are chosen, so none of ${name} was added. Remove some companies to make room.`
+    : left ? `Added ${plural(added,"company","companies")} from ${name}. A search takes at most ${MAX_COMPANIES} companies, so ${count(left)} ${left===1?"was":"were"} left out. Remove some companies to make room.`
+    : added ? `Added ${plural(added,"company","companies")} from ${name}.` : `Every company in ${name} is already chosen.`);
+  document.getElementById("f_q")?.focus();
+}
+/* What the estimate says when a search is too wide for one search, with what would fit. */
+function tooWideText(req, windows, perYear, n){
+  const years=Math.floor(MAX_SEARCH_REQUESTS/Math.max(1,perYear)), fit=Math.min(MAX_COMPANIES, Math.floor(MAX_SEARCH_REQUESTS/windows)*10);
+  const dates = years>=1 ? `with these ${plural(n,"company","companies")}, a search can cover up to ${count(years*365)} days of dates (a little under ${plural(years,"year")})` : "";
+  const cos = fit>=10 ? `over these dates, a search can take up to ${plural(fit,"company","companies")}` : "these dates are too long for even 10 companies";
+  return `About ${plural(req,"S&P request")}: more than the ${MAX_SEARCH_REQUESTS} one search may use, so S&P won't be asked. Choose fewer years or fewer companies: ${[dates, cos].filter(Boolean).join("; ")}.`;
+}
+
+/* ---------- Filings: keeping a search out of Recent searches ----------
+   The tick is remembered for this login's session in this tab. Such a search is still saved, so the same search
+   costs nothing next time, but the Recent searches list leaves it out (the function marks the saved result). */
+const UNLISTED_KEY = "snl.f.unlisted";
+function unlistedOn(){
+  if(S.f.unlisted===undefined){ let v=false; try{ v=sessionStorage.getItem(UNLISTED_KEY)==="1"; }catch{} S.f.unlisted=v; }
+  return S.f.unlisted;
+}
+function setUnlisted(on){
+  S.f.unlisted=!!on;
+  try{ if(on) sessionStorage.setItem(UNLISTED_KEY,"1"); else sessionStorage.removeItem(UNLISTED_KEY); }catch{}
+  render();
+}
+function unlistedTickHTML(){
+  return `<label class="unl" for="f_unlisted"><input type="checkbox" id="f_unlisted" data-act="unlisted-tick" ${unlistedOn()?"checked":""}><span>Keep this search out of Recent searches <em class="t2" style="font-style:normal">The result is still saved, so running the same search again costs no S&amp;P requests, but it isn't listed for anyone. Remembered until you sign out.</em></span></label>`;
+}
+function unlistedNoteHTML(r){
+  const f=S.f; if(f.busy || !f.last || !f.last.unlisted) return "";
+  if(r.unlisted) return `<p class="t2" id="unlistedNote">Kept out of Recent searches. The result is saved, so the same search costs no S&amp;P requests next time.</p>`;
+  if(r.fromStore) return `<p class="t2" id="unlistedNote">This search had been run before and is already in Recent searches. Opening it again doesn't add anything to the list.</p>`;
+  // a filings function from before this tick existed saves every search as listed
+  if(r.saved!==false) return `<p class="t2 bigwarn" id="unlistedNote">This search may show in Recent searches: the filings function hasn't been updated to keep searches out of the list yet. Tell Corp Dev.</p>`;
+  return "";
+}
+
 /* A match from the company list with no S&P id: shown, but it can't be added to a filing search. */
 function noFilingsHTML(m){
   return `<span class="t2 noadd">Can't be added: the company list has no S&amp;P id for it, so its filings can't be searched.${!blank(m.naicCompanyCode)?" Its NAIC code works on the Statutory view.":""}</span>`;
@@ -784,16 +862,17 @@ function companyPickerHTML(){
         : hasIn ? `<button type="button" class="btn sm" data-act="co-add" data-kind="institutionId" data-id="${esc(m.institutionId)}" data-name="${esc(m.companyName)}">Add</button>` : noFilingsHTML(m);
       return `<li><div><div class="t1">${esc(m.companyName)}</div><div class="t2">${esc(meta)}</div></div><span class="inline">${add}</span></li>`; }).join("");
     const addable=f.matches.filter(m=>!blank(m.companyId)||!blank(m.institutionId)).length;
-    const all = addable>1 ? `<p class="t2" id="addAll"><button type="button" class="btn sm" data-act="co-add-all">Add all ${addable}</button> to search a whole group at once.</p>` : "";
+    const gh=groupChoicesHTML();
+    const all = addable>1 ? `<p class="t2" id="addAll"><button type="button" class="btn sm" data-act="co-add-all">Add all ${addable}</button> ${gh?"to add every company listed.":"to search a whole group at once."}</p>` : "";
     const byId = numeric ? `<li id="byId"><div><div class="t1">Use ${esc(f.asked.trim())} as an S&amp;P id</div><div class="t2">For a company the app hasn't seen yet. The name fills in after the first search.</div></div><span class="inline">
         <button type="button" class="btn sm" data-act="co-add" data-kind="companyId" data-id="${esc(f.asked.trim())}">Add as company id</button>
         <button type="button" class="btn sm" data-act="co-add" data-kind="institutionId" data-id="${esc(f.asked.trim())}">Add as institution id</button></span></li>` : "";
-    found = (f.resolveNote ? `<div class="info" id="resolveNote" role="status"><span>${esc(f.resolveNote)}${numeric?"":" Type the id (a whole number) in the box above to add it."}</span></div>` : "")
+    found = gh + (f.resolveNote && !gh ? `<div class="info" id="resolveNote" role="status"><span>${esc(f.resolveNote)}${numeric?"":" Type the id (a whole number) in the box above to add it."}</span></div>` : "")
       + (rows||byId ? `<ul class="matches" id="matches" aria-label="Matching companies">${rows}${byId}</ul>${all}` : "");
   }
   const chips = f.chips.length ? `<div class="chips" id="chips" aria-label="Chosen companies">${f.chips.map((c,i)=>`<span class="cchip"><span><b>${esc(c.name||(c.kind==="companyId"?"Company":"Institution")+" "+c.id)}</b>${c.name?` <span class="t2">${esc(chipLabel(c))}</span>`:` <span class="t2">S&amp;P ${c.kind==="companyId"?"company":"institution"} id</span>`}</span><button type="button" data-act="co-remove" data-i="${i}" aria-label="Remove ${esc(c.name||chipLabel(c))}">×</button></span>`).join("")}</div>`
     : `<p class="t2" id="noChips">No companies chosen yet.</p>`;
-  return `<div class="f"><label for="f_q">Companies <em>name, NAIC code or S&amp;P id; up to ${MAX_COMPANIES}</em></label>
+  return `<div class="f"><label for="f_q">Companies <em>name, group name, NAIC code or S&amp;P id; up to ${MAX_COMPANIES}</em></label>
     <div class="toolbar"><div class="grow"><input type="text" id="f_q" data-bind="f.q" value="${esc(f.q)}" autocomplete="off" spellcheck="false" placeholder="For example Calloway, 90001 or 4000001"></div>
       <button type="button" class="btn" data-act="co-find" ${f.resolving?"disabled":""}>Find company</button></div>
     ${f.resolveErr?`<p class="err" role="alert">${esc(f.resolveErr)}</p>`:""}${found}${chips}</div>`;
@@ -831,6 +910,7 @@ function filingsFormHTML(){
     </div>
     ${listsOff||S.refsMsg||S.refsErr?`<p class="t2" id="refsMsg">${esc(S.refsErr||S.refsMsg||"Some of S&P's lists aren't loaded yet.")}</p>`:""}
     <label class="f"><span>Tracking numbers <em>optional; separate with commas</em></span><input type="text" id="f_tracking" data-bind="f.tracking" value="${esc(f.tracking)}" autocomplete="off" spellcheck="false"></label>
+    ${unlistedTickHTML()}
     ${f.formErr?`<p class="err" id="formErr" role="alert">${esc(f.formErr)}</p>`:""}
     <div class="toolbar"><button class="btn primary" data-act="search" ${f.busy?"disabled":""}>${f.busy?"Searching…":"Search filings"}</button>
       <span class="t2 grow" id="f_est">${esc(est)}</span>
@@ -847,6 +927,7 @@ async function runSearch(refresh, given){
     if(problem){ f.formErr=problem; render(); document.getElementById("formErr")?.scrollIntoView({block:"nearest"}); return; }
     payload=searchPayload(); f.last=payload; f.res=null;
   }
+  if(unlistedOn()) payload.unlisted=true; else delete payload.unlisted;   // kept out of Recent searches, or not, as the tick says now
   f.formErr=""; f.busy=true; f.err=null; render();
   const r=await callFn("snl-filings", payload);
   f.busy=false;
@@ -917,6 +998,7 @@ function filingsResultsHTML(){
   else if(f.err) h+=problemHTML(f.err, "Couldn't refresh the search.", "search-refresh");
   else if(r.fromStore) h+=`<div class="info" id="fromStore" role="status"><span>From the last fetch on ${fmtAt(r.fetchedAt)}.</span><button class="btn sm" data-act="search-refresh">Refresh</button></div>`;
   if(r.capped) h+=`<div class="banner" id="capped" role="alert"><span><b>These results are incomplete.</b> The search stopped before S&amp;P had returned everything. Narrow the dates, states or companies and search again.</span></div>`;
+  h+=unlistedNoteHTML(r);
   if(r.saved===false && !r.capped && !f.busy) h+=`<p class="t2" id="notSaved">These results couldn't be saved, so the next search will ask S&amp;P again.</p>`;
   if(notes.length || !all.length) h+=`<div class="notes" id="notes" role="status"><b>${all.length?"Read this before you rely on the results":"Nothing came back, and that isn't proof that nothing was filed"}</b><ul>${(notes.length?notes:[EMPTY_RESULT]).map(n=>`<li>${esc(n)}</li>`).join("")}</ul></div>`;
   const bs=Array.isArray(r.byState)?r.byState:[], bc=Array.isArray(r.byCompany)?r.byCompany:[];
@@ -966,7 +1048,7 @@ async function loadRecent(){
   if(R.loading){ R.again=true; return; }
   R.loading=true; R.again=false; R.err=""; render();
   let data=null, error=null;
-  try{ ({data, error}=await S.sb.from("snl_store").select(RECENT_COLS).eq("kind","search").order("fetched_at",{ascending:false}).limit(R.limit+1)); }catch(e){ error=e||{}; }
+  try{ ({data, error}=await S.sb.from("snl_store").select(RECENT_COLS).eq("kind","search").is("doc->>unlisted",null).order("fetched_at",{ascending:false}).limit(R.limit+1)); }catch(e){ error=e||{}; }
   if(!S.session || S.f!==f) return;   // signed out while it loaded
   R.loading=false;
   if(error || !Array.isArray(data)){
@@ -2494,6 +2576,8 @@ document.addEventListener("click", e=>{
     case "co-find": resolveCompany(); break;
     case "co-add": addChip(t.dataset.kind, t.dataset.id, t.dataset.name); break;
     case "co-add-all": addAllMatches(); break;
+    case "co-add-group": addGroup(+t.dataset.i); break;
+    case "unlisted-tick": setUnlisted(t.checked); break;
     case "co-remove": f.chips.splice(+t.dataset.i,1); render(); break;
     case "state-toggle": { const s=t.dataset.s; f.states=f.states.includes(s)?f.states.filter(x=>x!==s):f.states.concat(s); f.formErr=""; render(); document.querySelector(`#states [data-s="${CSS.escape(s)}"]`)?.focus({preventScroll:true}); if(t.dataset.map) showStateRow(s); break; }   // neither the page nor the list jumps; a click on the map brings its row into view in the list
     case "state-all": f.states=stateOptions().map(s=>s.id); f.formErr=""; render(); break;
@@ -2602,6 +2686,7 @@ document.addEventListener("keydown", e=>{
 /* ---------- auth: Supabase email and password; usernames map to <username>@<usernameDomain> ---------- */
 function toEmail(u){ u=u.trim().toLowerCase(); return u.includes("@") ? u : u+"@"+(CFG.usernameDomain||"snl-lookup.local"); }
 function resetState(){
+  try{ sessionStorage.removeItem(UNLISTED_KEY); }catch{}
   clearTimeout(S.ask.timer);
   for(const d of Object.values(S.docs)) if(d.url){ try{ URL.revokeObjectURL(d.url); }catch{} }
   S.session=null; S.drawer=null; S.status=null; S.statusErr=""; S.refs=null; S.refsLoading=false; S.refsMsg=""; S.refsErr=""; S.docs={};

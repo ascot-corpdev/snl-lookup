@@ -47,8 +47,8 @@ const norm = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const LIKELY = {
   naicGroupName: ["naicgroupname", "groupname", "group"],
   naicGroupCode: ["naicgroupcode", "naicgroupnumber", "naicgroup", "groupcode", "groupnumber"],
-  spStatEntityId: ["spstatentityid", "statentityid", "statutoryentityid"],
-  institutionId: ["snlinstitutionkey", "institutionkey", "spinstitutionid", "institutionid", "keyinstn", "mikey", "snlkey"],
+  spStatEntityId: ["spstatentityid", "statentityid", "statutoryentityid", "spstatutoryentitykey", "statutoryentitykey", "snlstatentitykey", "statentitykey"],
+  institutionId: ["snlinstitutionkey", "spinstitutionkey", "institutionkey", "spinstitutionid", "institutionid", "keyinstn", "mikey", "snlkey"],
   companyId: ["spcapitaliqid", "capitaliqcompanyid", "capitaliqid", "ciqcompanyid", "spcompanyid", "companyid", "ciqid", "iqid"],
   naicCompanyCode: ["naiccompanycode", "naiccompanynumber", "naiccocode", "naiccode", "naicnumber", "cocode", "naic"],
   companyName: ["companyname", "entityname", "institutionname", "legalname", "company", "entity", "name"],
