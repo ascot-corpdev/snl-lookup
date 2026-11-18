@@ -368,6 +368,60 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 .pfsample>div{flex:1 1 260px;min-width:0}
 .pfsample p{margin:2px 0 0}
 @media (max-width:560px){.pftiles{grid-template-columns:1fr}.pftile{flex-direction:row;justify-content:space-between;align-items:baseline;gap:8px}.pftile b{font-size:17px}.pfplan .pfwhy{text-align:left;flex-basis:100%}}
+/* Snapshot: one company or group at a glance. Tiles, then the map, rate changes, filings by year, the latest form and
+   rule filings and time with the regulator, each a block with its numbers as a table beside or under its chart. */
+.snout{display:flex;flex-direction:column;gap:26px;min-width:0}
+.snout:empty{display:none}
+.snhead{display:flex;flex-wrap:wrap;gap:10px 20px;align-items:flex-end;justify-content:space-between;min-width:0}
+.snhead>div{min-width:0;flex:1 1 320px;overflow-wrap:anywhere}
+.snhead h3{font-size:20px;color:var(--ink)}
+.snper{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;min-width:0}
+.sntiles{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
+.sntile{background:var(--tile);padding:10px 12px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.sntile b{font-size:24px;font-variant-numeric:tabular-nums;line-height:1.2}
+.sntile .t2{overflow-wrap:anywhere}
+.snblk{display:flex;flex-direction:column;gap:12px;min-width:0;border-top:2px solid var(--ink);padding-top:12px}
+.snblk>.blk-h h3{font-size:16px}
+.snexp{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
+.sngrid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:16px 28px;align-items:start}
+.sngrid.half{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.sngrid>div{min-width:0;display:flex;flex-direction:column;gap:10px}
+.snnote{max-width:96ch}
+.snchart{display:block;width:100%;height:auto;max-width:100%}
+.snchart text{font-family:var(--font);font-size:12px;fill:var(--muted)}
+.snchart text.tot{fill:var(--ink);font-weight:bold;text-anchor:middle}
+.snchart .ax{stroke:var(--grid);stroke-width:1}
+.snchart .ax0{stroke:var(--ink);stroke-width:1}
+.snchart .mk{stroke-width:1.5}
+.snchart .mk.up{fill:var(--magenta);stroke:var(--magenta)}
+.snchart .mk.dn{fill:var(--teal);stroke:var(--teal)}
+.snchart .mk.z{fill:var(--muted);stroke:var(--muted)}
+.snchart .mk.open{fill:var(--surface);stroke-width:2}
+.snlegend{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;min-width:0}
+.snlegend li{display:inline-flex;align-items:center;gap:6px;min-width:0}
+.snlegend .sw{flex:none;width:14px;height:14px;display:inline-block;border:1px solid transparent}
+.snlegend .sw.none{background:var(--surface);border:1px dashed var(--muted)}
+.snlegend .mkk{flex:none;font-size:13px;line-height:1}
+.snmap path{stroke:var(--surface);stroke-width:1;stroke-linejoin:round}
+.snmap path.none{fill:var(--surface);stroke:var(--muted);stroke-dasharray:4 3}
+.snmap path.nrate{fill:var(--alt);stroke:var(--muted)}
+.snmap path.ns{fill:var(--tile)}
+.snmap text{font:bold 15px var(--font);fill:var(--ink);text-anchor:middle;pointer-events:none}
+.snmap text.lt{fill:#fff}
+.snmap text.ns,.snmap text.none{fill:var(--muted);font-weight:normal}
+.sntbl td.num,.sntbl th.num{white-space:nowrap}
+.sntbl td{overflow-wrap:normal}
+.sntbl td.num .t2{white-space:normal}
+.snsum{margin:0;font-size:12px}
+.snsum summary{cursor:pointer;font-weight:bold;color:var(--blue)}
+.snsum[open] summary{margin-bottom:8px}
+.snrecent{display:flex;flex-direction:column;gap:6px;min-width:0;border-top:1px solid var(--grid);padding-top:12px}
+.snrecent ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.snrecent li{min-width:0;max-width:100%}
+.snrecent .chip{display:block}
+@media (max-width:1100px){.sntiles{grid-template-columns:repeat(3,minmax(0,1fr))}.sngrid,.sngrid.half{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:820px){.snmap text{display:none}}
+@media (max-width:560px){.sntiles{grid-template-columns:repeat(2,minmax(0,1fr))}.sntile b{font-size:20px}}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
@@ -389,6 +443,7 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
     </div>
     <nav class="tabs" aria-label="Views" id="tabs" hidden>
       <a href="#filings" data-view="filings">Filings</a>
+      <a href="#snapshot" data-view="snapshot">Snapshot</a>
       <a href="#statutory" data-view="statutory">Statutory</a>
       <a href="#profile" data-view="profile">Profile</a>
     </nav>
@@ -1499,6 +1554,7 @@ function askScreen(){
     return {view:"statutory", query:{kind:r.kind==="group"?"group":"company", codes:(Array.isArray(r.codes)?r.codes:[]).map(String), fromYear:+r.fromYear, toYear:+r.toYear}, companies:names(r.entities)};
   }
   if(S.view==="profile") return pfScreen();
+  if(S.view==="snapshot") return snapScreen();
   return null;
 }
 /* The same thing in one plain line, so what Claude is told is never a surprise. */
@@ -2572,6 +2628,452 @@ function renderProfile(){
   return h+pfTemplateHTML();
 }
 
+/* ---------- Snapshot: one company or group over 1, 3 or 5 years, on one page ----------
+   Page only. It looks companies up with the snl-filings "resolve" action, runs ONE "search" (every state in S&P's
+   list, every filing type and status, by publish date: the same search the Filings view runs from that form, saved
+   the same way) and works out every figure here from the rows that come back. */
+VIEWS.push("snapshot");
+const SNAP_YEARS = [1,3,5];
+const SNAP_MAX_REQUESTS = 60;      // S&P requests one search may use: MAX_SEARCH_REQUESTS in supabase/functions/_shared/filings.ts
+const SNAP_IDS_PER_REQUEST = 10;   // S&P takes 10 company ids a request (MAX_IDS_PER_REQUEST there)
+const SNAP_WINDOW_DAYS = 365;      // and 365 days of dates a request, so a period of N years is exactly N windows
+const SNAP_LOOKUP_MAX = 50;        // the most companies one look-up returns (resolveEntity there)
+const SNAP_RECENT = 6, SNAP_LATEST = 10;
+// The companies one snapshot can cover is MAX_COMPANIES, the same limit as one search on the Filings view.
+function freshSnap(){ return {find:{q:"", asked:"", matches:null, busy:false, err:""}, pick:null, picking:"", pickErr:"", years:3, formErr:"", busy:false, res:null, err:null, ran:null, mapBy:"count"}; }
+S.snap=freshSnap();
+const snapNarrow = () => { try{ return window.matchMedia("(max-width:700px)").matches; }catch{ return false; } };
+try{ window.matchMedia("(max-width:700px)").addEventListener("change", ()=>{ if(S.session && S.view==="snapshot" && S.snap.res) render(); }); }catch{}   // the charts are drawn for the width
+function enterSnapshot(){ if(!S.refs && !S.refsLoading) loadRefs(false); }
+
+/* ----- choosing: a company, or a group (every member company in the company list) ----- */
+// the S&P id a search takes for a directory row: the company id when there is one, otherwise the institution id
+function snapIdOf(m){
+  const ok=v=>!blank(v) && /^\d{1,12}$/.test(String(v).trim()), name=blank(m.companyName)?"":String(m.companyName);
+  return ok(m.companyId) ? {kind:"companyId", id:String(m.companyId).trim(), name} : ok(m.institutionId) ? {kind:"institutionId", id:String(m.institutionId).trim(), name} : null;
+}
+// groups among the matches, by group name (the company list has group names, not group codes)
+function snapGroups(matches){
+  const out=[];
+  for(const m of matches){ const name=blank(m.naicGroupName)?"":String(m.naicGroupName).trim(); if(!name) continue;
+    const key=name.toLowerCase(); let g=out.find(x=>x.key===key); if(!g){ g={key, name, n:0}; out.push(g); } g.n++; }
+  return out;
+}
+/* The look-up keeps only letters, digits, spaces and . & ' - of what it is given, so a group name like
+   "Calloway Group (SNL P&C Group)" is looked up by its first plain part, and members are then matched on the full name. */
+const snapGroupQuery = name => String(name).split(/[^\p{L}\p{N} .&'-]/u)[0].replace(/\s+/g," ").trim().slice(0,100);
+async function snapLookup(){
+  const sn=S.snap, fd=sn.find, q=fd.q.trim();
+  if(!q){ fd.matches=null; fd.err="Type part of a company or group name."; render(); return; }
+  fd.busy=true; fd.err=""; fd.matches=null; fd.asked=q; sn.pickErr=""; render();
+  const r=await callFn("snl-filings",{action:"resolve", q});
+  if(!S.session || S.snap!==sn || fd.asked!==q) return;
+  fd.busy=false;
+  if(r.data) fd.matches=Array.isArray(r.data.matches)?r.data.matches.filter(m=>m&&typeof m==="object"):[];
+  else if(r.err!=="signin") fd.err="Couldn't look that up. "+errText(r);
+  render();
+}
+function snapChooseCompany(i){
+  const sn=S.snap, m=sn.find.matches&&sn.find.matches[i], id=m&&snapIdOf(m); if(!id || sn.busy) return;
+  sn.pick={kind:"company", name:id.name||`S&P ${id.kind==="companyId"?"company":"institution"} id ${id.id}`, group:blank(m.naicGroupName)?"":String(m.naicGroupName), ids:[id], noId:0, cut:false};
+  sn.find.matches=null; sn.formErr=""; sn.pickErr=""; render(); document.getElementById("sn_run")?.focus();
+}
+async function snapChooseGroup(i){
+  const sn=S.snap, all=sn.find.matches||[], g=snapGroups(all)[i]; if(!g || sn.picking || sn.busy) return;
+  sn.picking=g.name; sn.pickErr=""; sn.pick=null; sn.formErr=""; render();
+  let found=all.slice(), cut=false;
+  const q=snapGroupQuery(g.name);
+  if(q.length>=2){
+    const r=await callFn("snl-filings",{action:"resolve", q});
+    if(!S.session || S.snap!==sn || sn.picking!==g.name) return;
+    if(!r.data){ sn.picking=""; sn.pickErr="Couldn't list the group's companies. "+errText(r); render(); return; }
+    const ms=Array.isArray(r.data.matches)?r.data.matches.filter(m=>m&&typeof m==="object"):[];
+    cut=ms.length>=SNAP_LOOKUP_MAX; found=found.concat(ms);
+  }
+  const seen=new Set(), ids=[]; let noId=0;
+  for(const m of found){
+    if(blank(m.naicGroupName) || String(m.naicGroupName).trim().toLowerCase()!==g.key) continue;
+    const id=snapIdOf(m), k=id ? id.kind+":"+id.id : "n:"+String(m.companyName??"").toLowerCase()+"|"+String(m.naicCompanyCode??"");
+    if(seen.has(k)) continue; seen.add(k);
+    if(id) ids.push(id); else noId++;
+  }
+  sn.picking=""; sn.pick={kind:"group", name:g.name, group:g.name, ids, noId, cut}; sn.find.matches=null; render();
+  document.getElementById("sn_run")?.focus();
+}
+
+/* ----- the period and what it costs ----- */
+function snapRange(years){ const to=TODAY(); return {from:daysBefore(to, SNAP_WINDOW_DAYS*years-1), to}; }
+// one S&P request for each 10 companies of a kind for each 365 days of dates, before any extra pages
+function snapCost(ids, from, to){
+  const a=parseDay(from), b=parseDay(to); if(!a || !b || a>b) return 0;
+  const windows=Math.ceil((Math.round((b-a)/DAY)+1)/SNAP_WINDOW_DAYS), n=k=>Math.ceil(ids.filter(c=>c.kind===k).length/SNAP_IDS_PER_REQUEST);
+  return windows*(n("companyId")+n("institutionId"));
+}
+const snapYearsText = y => y===1 ? "last year" : `last ${y} years`;
+/* Why one search can't take this snapshot, in plain words with what to choose instead; "" when it can. */
+function snapTooBig(pick, years, maxIds=MAX_COMPANIES, maxReq=SNAP_MAX_REQUESTS){
+  if(!pick) return "";
+  if(!pick.ids.length) return pick.kind==="group" ? `None of the companies in ${pick.name} has an S&P id in the company list, so the group's filings can't be searched. Its companies can be added on the Filings view by S&P id.` : "This company has no S&P id in the company list, so its filings can't be searched.";
+  if(pick.ids.length>maxIds) return `${pick.name} has ${pick.cut?"at least ":""}${plural(pick.ids.length,"company","companies")} with S&P ids in the company list, and one snapshot covers at most ${maxIds}. Choose one of its companies instead, or search the group in parts on the Filings view.`;
+  if(pick.cut) return `${pick.name} has more companies in the company list than one look-up returns (${SNAP_LOOKUP_MAX}), so a snapshot can't be sure to cover all of it. Choose one of its companies instead, or search the group in parts on the Filings view.`;
+  const r=snapRange(years), need=snapCost(pick.ids, r.from, r.to);
+  if(need>maxReq){
+    const fit=SNAP_YEARS.filter(y=>{ const x=snapRange(y); return snapCost(pick.ids, x.from, x.to)<=maxReq; });
+    return `This snapshot needs at least ${need} S&P requests, more than the ${maxReq} one search may use. ${fit.length?`Choose the ${snapYearsText(Math.max(...fit))} instead.`:"Choose one of its companies instead."}`;
+  }
+  return "";
+}
+
+/* ----- running it, and snapshots run before in this browser ----- */
+const snapRecentKey = () => "snl.snapshots."+(S.session&&S.session.uid||"");
+function snapRecentList(){
+  try{ const a=JSON.parse(localStorage.getItem(snapRecentKey())||"[]"); return Array.isArray(a) ? a.filter(x=>x&&x.pick&&Array.isArray(x.pick.ids)&&x.payload&&x.payload.action==="search").slice(0,SNAP_RECENT) : []; }catch{ return []; }
+}
+// only a complete, saved result is listed: reopening it sends the same search, which opens from the saved result
+function snapRemember(run, res){
+  if(res.capped || res.saved===false) return;
+  const key=JSON.stringify(run.payload), list=[{pick:run.pick, years:run.years, payload:run.payload, at:new Date().toISOString()}].concat(snapRecentList().filter(x=>JSON.stringify(x.payload)!==key)).slice(0,SNAP_RECENT);
+  try{ localStorage.setItem(snapRecentKey(), JSON.stringify(list)); }catch{}
+}
+async function snapRun(refresh, given){
+  const sn=S.snap; if(sn.busy) return;
+  let run;
+  if(given) run=given;
+  else if(refresh){ if(!sn.ran) return; run=sn.ran; }
+  else{
+    if(!sn.pick){ sn.formErr="Choose a company or a group first: find it by name above."; render(); return; }
+    const big=snapTooBig(sn.pick, sn.years); if(big){ sn.formErr=big; render(); return; }
+    const {from, to}=snapRange(sn.years), nums=k=>sn.pick.ids.filter(c=>c.kind===k).map(c=>Number(c.id));
+    run={pick:JSON.parse(JSON.stringify(sn.pick)), years:sn.years, payload:{action:"search", companyIds:nums("companyId"), institutionIds:nums("institutionId"), states:stateOptions().map(s=>s.id).sort(), from, to}};
+  }
+  sn.formErr=""; sn.busy=true; sn.err=null; if(!refresh) sn.res=null; sn.ran=run; render();
+  const r=await callFn("snl-filings", refresh ? {...run.payload, refresh:true} : run.payload);
+  if(!S.session || S.snap!==sn) return;   // signed out, or the session ended, while it ran
+  sn.busy=false;
+  if(r.data && Array.isArray(r.data.rows)){ sn.res=r.data; sn.err=null; takeUsage(r.data); loadStatus(); snapRemember(run, r.data); }
+  else if(r.err!=="signin") sn.err = r.data ? {err:"bad_answer", msg:"The filings function sent back something the page can't read. Try again."} : r;
+  render();
+}
+function snapReopen(i){
+  const sn=S.snap, run=snapRecentList()[i]; if(!run || sn.busy) return;
+  sn.pick=run.pick; sn.years=SNAP_YEARS.includes(+run.years)?+run.years:3; sn.find.matches=null;
+  snapRun(false, run);
+}
+/* The same search on the Filings view, form filled in, so every row can be read there. A complete result opens from
+   the saved one; a partial one isn't saved, so the form is filled and the reader decides whether to ask S&P again. */
+function snapToFilings(){
+  const sn=S.snap, run=sn.ran, r=sn.res, f=S.f; if(!run || !r) return;
+  if(f.busy){ toast("The Filings view is still running a search. Try again when it has finished."); return; }
+  const p=run.payload;
+  f.chips=run.pick.ids.slice(0, MAX_COMPANIES).map(c=>({kind:c.kind, id:String(c.id), name:c.name||""}));
+  f.states=[...p.states]; f.from=p.from; f.to=p.to; f.toi=[]; f.ftype=[]; f.fstatus=[]; f.toiFilter=""; f.tracking="";
+  f.q=""; f.matches=null; f.resolveNote=""; f.resolveErr=""; f.formErr="";
+  location.hash="#filings";
+  if(r.capped){ f.res=null; f.err=null; toast("The form is filled in. Press Search filings to run it: a partial result isn't saved, so it asks S&P again."); }
+  else runSearch(false, {...p});
+}
+
+/* ----- working it out: every figure comes from the rows of the one search ----- */
+/* UNCONFIRMED: S&P's filing types are SERFF's names, like "Rate", "Rule" and "Form", and combinations such as
+   "Rate/Rule" or "Rate and rule". A filing counts as a rate, rule or form filing when its type names that word, so a
+   combined filing counts in each kind it names. Change this one function if S&P names them some other way. */
+function snapKinds(type){ const t=String(type??"").toLowerCase(); return {rate:/\brates?\b/.test(t), rule:/\brules?\b/.test(t), form:/\bforms?\b/.test(t)}; }
+/* UNCONFIRMED: which of S&P's statuses mean the filing is approved. Only a status that says "approved" is drawn as
+   approved; every other status (pending, withdrawn, disapproved, or one this page doesn't know) is drawn as not approved. */
+const snapApproved = s => /approv/i.test(String(s??"")) && !/disapprov|not approv/i.test(String(s??""));
+const snapState = r => { const s=String(r.serffFilingStateId??"").trim().toUpperCase(); return /^[A-Z]{2}$/.test(s) ? s : ""; };
+const snapStateName = s => { const o=stateOptions().find(x=>x.id===s); return o&&o.name!==s ? o.name : US_MAP[s] ? US_MAP[s][1] : s; };
+/* One entry per filing version, as the Filings view keys its rows (rowKey): rows S&P sent more than once for the
+   same version, one for each company on it, become one filing that lists every company. */
+function snapFilings(rows){
+  const by=new Map(), out=[];
+  (Array.isArray(rows)?rows:[]).forEach((r,i)=>{ if(!r || typeof r!=="object") return;
+    const k=rowKey(r,i), cos=companiesOf(r), kept=by.get(k);
+    if(!kept){ const f={...r, companies:cos.slice()}; by.set(k,f); out.push(f); return; }
+    for(const c of cos) if(!kept.companies.some(x=>String(x.companyId??"")===String(c.companyId??"") && String(x.institutionId??"")===String(c.institutionId??"") && x.companyName===c.companyName)) kept.companies.push(c); });
+  return out;
+}
+const snapMedian = a => { const s=[...a].sort((x,y)=>x-y), n=s.length; return !n ? null : n%2 ? s[(n-1)/2] : (s[n/2-1]+s[n/2])/2; };
+// newest publish date first; a filing with no publish date after every dated one
+const snapByDate = (a,b) => (b.pub?b.pub.getTime():-Infinity)-(a.pub?a.pub.getTime():-Infinity);
+/* UNCONFIRMED: publishDate is when S&P published the filing (the date the Filings view searches by), which is close
+   to, but not always the same as, the date the regulator decided it. The days from dateSubmitted to publishDate are
+   shown as an approximate time with the regulator. */
+const snapDays = f => f.sub && f.pub ? Math.round((f.pub-f.sub)/DAY) : null;
+function snapCompute(res, run){
+  const p=res.params||run&&run.payload||{};
+  const fs=snapFilings(res.rows).map(r=>({r, k:snapKinds(r.serffFilingType), st:snapState(r), toi:blank(r.typeOfInsurance)?"":String(r.typeOfInsurance), type:blank(r.serffFilingType)?"":String(r.serffFilingType),
+    pub:parseDay(r.publishDate), sub:parseDay(r.dateSubmitted), rate:isNum(r.overallRateImpact)?+r.overallRateImpact:null, ok:snapApproved(r.filingStatus)}));
+  const searched=[...new Set((Array.isArray(p.states)?p.states:[]).map(s=>String(s).toUpperCase()))];
+  const states=new Map(searched.map(s=>[s,[]])); for(const f of fs) if(f.st){ if(!states.has(f.st)) states.set(f.st,[]); states.get(f.st).push(f); }
+  const latestRate=list=>list.filter(f=>f.rate!==null).sort(snapByDate)[0]||null;
+  const byState=[...states.entries()].map(([st, list])=>({st, name:snapStateName(st), n:list.length, rates:list.filter(f=>f.k.rate||f.rate!==null).length, latest:latestRate(list)}));
+  const dated=fs.filter(f=>f.pub);
+  // rate filings: those S&P types as rate filings, and any other filing that carries an overall rate impact
+  const rateFs=fs.filter(f=>f.k.rate||f.rate!==null), rateGroups=new Map();
+  for(const f of rateFs){ const k=`${f.st}|${f.toi}`; if(!rateGroups.has(k)) rateGroups.set(k,{st:f.st, toi:f.toi, list:[]}); rateGroups.get(k).list.push(f); }
+  const rateRows=[...rateGroups.values()].map(g=>{ const v=g.list.filter(f=>f.rate!==null).map(f=>f.rate);
+    return {st:g.st, toi:g.toi, n:g.list.length, withRate:v.length, lo:v.length?Math.min(...v):null, hi:v.length?Math.max(...v):null, latest:latestRate(g.list)}; })
+    .sort((a,b)=>(a.st||"~").localeCompare(b.st||"~") || (a.toi||"~").localeCompare(b.toi||"~"));
+  // filings by year published and filing type: S&P's own type names, rate, rule and form first
+  const y0=parseDay(p.from), y1=parseDay(p.to), years=[];
+  const yLo=Math.min(y0?y0.getFullYear():Infinity, ...dated.map(f=>f.pub.getFullYear())), yHi=Math.max(y1?y1.getFullYear():-Infinity, ...dated.map(f=>f.pub.getFullYear()));
+  if(isFinite(yLo) && isFinite(yHi)) for(let y=yLo; y<=yHi && years.length<20; y++) years.push(y);
+  const order=t=>{ const i=["rate","rule","form"].indexOf(t.toLowerCase()); return i<0 ? (t ? 3 : 4) : i; };
+  const types=[...new Set(fs.map(f=>f.type))].sort((a,b)=>order(a)-order(b) || a.localeCompare(b));
+  const yearRows=years.map(y=>{ const list=dated.filter(f=>f.pub.getFullYear()===y); return {year:y, total:list.length, by:types.map(t=>list.filter(f=>f.type===t).length)}; });
+  // time with the regulator, by state
+  const withDays=fs.map(f=>({f, d:snapDays(f)})).filter(x=>x.d!==null && x.d>=0), dayGroups=new Map();
+  for(const x of withDays){ if(!dayGroups.has(x.f.st)) dayGroups.set(x.f.st,[]); dayGroups.get(x.f.st).push(x.d); }
+  const dayRow=(st, a)=>({st, n:a.length, median:snapMedian(a), lo:a.length?Math.min(...a):null, hi:a.length?Math.max(...a):null});
+  const dayRows=[...dayGroups.entries()].sort((a,b)=>(a[0]||"~").localeCompare(b[0]||"~")).map(([st,a])=>dayRow(st,a));
+  return {p, fs, searched, byState, from:p.from, to:p.to,
+    tiles:{n:fs.length, rate:fs.filter(f=>f.k.rate).length, rule:fs.filter(f=>f.k.rule).length, form:fs.filter(f=>f.k.form).length, other:fs.filter(f=>!f.k.rate&&!f.k.rule&&!f.k.form).length,
+      states:byState.filter(s=>s.n).length, latest:dated.length?dated.slice().sort(snapByDate)[0].pub:null},
+    rateFs, rateRows, ratePts:rateFs.filter(f=>f.rate!==null&&f.pub).sort((a,b)=>a.pub-b.pub), rateNoDate:rateFs.filter(f=>f.rate!==null&&!f.pub).length,
+    years:yearRows, types, undated:fs.length-dated.length,
+    latestFR:fs.filter(f=>f.k.form||f.k.rule).sort(snapByDate), dayRows, dayAll:dayRow("", withDays.map(x=>x.d)), dayLeft:fs.length-withDays.length};
+}
+
+/* ----- drawing: charts by hand as inline SVG, every one with its numbers as text beside or under it ----- */
+const snapPct = v => v===null||v===undefined ? "n/d" : pct(v);
+const snapRange2 = (lo, hi, fmt) => lo===null ? "n/d" : lo===hi ? fmt(lo) : `${fmt(lo)} to ${fmt(hi)}`;
+const snapStatus = f => blank(f.r.filingStatus) ? "n/d" : String(f.r.filingStatus);
+const snapStLabel = st => st ? `${snapStateName(st)} (${st})` : "State n/d";
+function snapMark(f, cx, cy, s){
+  const cls=`mk ${f.rate>0?"up":f.rate<0?"dn":"z"}${f.ok?"":" open"}`;
+  const title=`<title>${esc(`${fmtD(f.pub)}, ${f.st||"state n/d"}${f.toi?` ${f.toi}`:""}: ${pct(f.rate)}, ${snapStatus(f)}`)}</title>`;
+  if(f.rate>0) return `<path class="${cls}" d="M${cx} ${cy-s}L${cx+s} ${cy+s*.75}L${cx-s} ${cy+s*.75}Z">${title}</path>`;
+  if(f.rate<0) return `<path class="${cls}" d="M${cx} ${cy+s}L${cx+s} ${cy-s*.75}L${cx-s} ${cy-s*.75}Z">${title}</path>`;
+  return `<circle class="${cls}" cx="${cx}" cy="${cy}" r="${s*.7}">${title}</circle>`;
+}
+function snapRateChart(c){
+  const pts=c.ratePts; if(!pts.length) return "";
+  const nar=snapNarrow(), W=nar?360:1240, H=nar?230:300, L=nar?50:64, R=12, T=12, B=26;
+  const t0=(parseDay(c.from)||pts[0].pub).getTime(), t1=Math.max((parseDay(c.to)||pts[pts.length-1].pub).getTime(), t0+DAY);
+  const m=Math.max(5, Math.ceil(Math.max(...pts.map(f=>Math.abs(f.rate)))/5)*5);
+  const x=t=>+(L+(t-t0)/(t1-t0)*(W-L-R)).toFixed(1), y=v=>+(T+(m-v)/(2*m)*(H-T-B)).toFixed(1);
+  let g="";
+  for(const v of [m, m/2, 0, -m/2, -m]) g+=`<line class="${v===0?"ax0":"ax"}" x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L-6}" y="${y(v)+4}" text-anchor="end">${esc(pct(v))}</text>`;
+  for(let yr=new Date(t0).getFullYear()+1; yr<=new Date(t1).getFullYear(); yr++){ const t=new Date(yr,0,1).getTime(); if(t<=t0||t>t1) continue;
+    g+=`<line class="ax" x1="${x(t)}" x2="${x(t)}" y1="${T}" y2="${H-B}"/><text x="${x(t)}" y="${H-8}" text-anchor="middle">${yr}</text>`; }
+  const marks=pts.map(f=>snapMark(f, x(f.pub.getTime()), y(f.rate), nar?6:7)).join("");
+  return `<svg class="snchart" id="snRateChart" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="snRateH snRateDesc" focusable="false">
+    <desc id="snRateDesc">${esc(`${plural(pts.length,"filing")} with an overall rate impact, from ${fmtDay(c.from)} to ${fmtDay(c.to)}. The figures are in the table under the chart.`)}</desc>${g}${marks}</svg>`;
+}
+function snapRateBlockHTML(c){
+  const exp=snapExpHTML("rates");
+  let h=`<section class="snblk" id="snRates" aria-labelledby="snRateH"><div class="blk-h"><h3 id="snRateH">Rate changes over time</h3>${exp}</div>`;
+  h+=`<p class="t2 snnote" id="snRateNote">Each mark is one filing's overall rate impact as S&amp;P gives it. It isn't weighted by premium, and for a filing that isn't approved it may be what the company asked for rather than what was approved. Each filing's status is shown, and nothing here is averaged.</p>`;
+  if(!c.rateFs.length) return h+`<div class="info" id="snNoRates" role="status"><span>S&amp;P returned no rate filings for this search, so there are no rate changes to show.</span></div></section>`;
+  if(!c.ratePts.length && !c.rateNoDate) h+=`<div class="info" id="snNoRates" role="status"><span>None of the ${plural(c.rateFs.length,"rate filing")} carries an overall rate impact in S&amp;P's data, so there is nothing to chart. The table below still lists them.</span></div>`;
+  else{
+    h+=snapRateChart(c);
+    h+=`<ul class="snlegend" id="snRateKey"><li><span class="mkk" style="color:var(--magenta)" aria-hidden="true">▲</span>Increase</li><li><span class="mkk" style="color:var(--teal)" aria-hidden="true">▼</span>Decrease</li><li><span class="mkk" style="color:var(--muted)" aria-hidden="true">●</span>No change</li><li><span class="mkk" aria-hidden="true">■</span>Filled: approved</li><li><span class="mkk" aria-hidden="true">□</span>Hollow: any other status, such as pending or withdrawn</li></ul>`;
+    if(c.rateNoDate) h+=`<p class="t2" id="snRateNoDate">${plural(c.rateNoDate,"filing with a rate impact has","filings with a rate impact have")} no publish date in S&amp;P's data, so ${c.rateNoDate===1?"it isn't":"they aren't"} on the chart. ${c.rateNoDate===1?"It is":"They are"} in the tables.</p>`;
+    const list=c.rateFs.filter(f=>f.rate!==null).sort(snapByDate);
+    h+=`<details class="snsum" id="snRatePts"><summary>The figures behind the chart (${plural(list.length,"filing")})</summary><div class="tbl-wrap"><table class="sntbl"><thead><tr><th>Published</th><th>State</th><th>Type of insurance</th><th>Filing type</th><th class="num">Rate impact</th><th>Status</th></tr></thead><tbody>${list.map(f=>`<tr><td>${f.pub?fmtD(f.pub):"n/d"}</td><td>${esc(f.st||"n/d")}</td><td>${esc(f.toi||"n/d")}</td><td>${esc(f.type||"n/d")}</td><td class="num">${esc(pct(f.rate))}</td><td>${esc(snapStatus(f))}</td></tr>`).join("")}</tbody></table></div></details>`;
+  }
+  h+=`<div class="tbl-wrap cardwrap"><table class="sntbl cards" id="snRateTable"><caption class="sr">Rate filings by state and type of insurance</caption><thead><tr><th>State</th><th>Type of insurance</th><th class="num">Rate filings</th><th class="num">With a rate impact</th><th class="num">Range of rate impacts</th><th class="num">Latest rate impact</th><th>Published</th><th>Status</th></tr></thead><tbody>${c.rateRows.map(g=>`<tr><td class="c-half" data-label="State">${esc(g.st||"n/d")}</td><td class="c-half" data-label="Type of insurance">${esc(g.toi||"n/d")}</td><td class="num c-half" data-label="Rate filings">${count(g.n)}</td><td class="num c-half" data-label="With a rate impact">${count(g.withRate)}</td><td class="num c-half" data-label="Range of rate impacts">${esc(snapRange2(g.lo, g.hi, pct))}</td><td class="num c-half" data-label="Latest rate impact">${esc(g.latest?pct(g.latest.rate):"n/d")}</td><td class="c-half" data-label="Published">${g.latest&&g.latest.pub?fmtD(g.latest.pub):"n/d"}</td><td class="c-half" data-label="Status">${esc(g.latest?snapStatus(g.latest):"n/d")}</td></tr>`).join("")}</tbody></table></div>`;
+  return h+`</section>`;
+}
+// the map's colours: filings per state in up to four steps, darkest for the most; or the latest rate impact
+const SNAP_COUNT_FILL = ["#D6E6F3","#9CC3E3","#4F95CC","#00539E"], SNAP_DARK = new Set(["#4F95CC","#00539E","#00857C","#EB008C"]);
+function snapCountBins(max){
+  if(!(max>0)) return [];
+  const bins = max<=4 ? Array.from({length:max},(_,i)=>({lo:i+1, hi:i+1})) : (s=>[0,1,2,3].map(i=>({lo:i*s+1, hi:Math.min(max,(i+1)*s)})).filter(b=>b.lo<=b.hi))(Math.ceil(max/4));
+  return bins.map((b,i)=>({...b, fill:SNAP_COUNT_FILL[SNAP_COUNT_FILL.length-bins.length+i], label:b.lo===b.hi?plural(b.lo,"filing"):`${count(b.lo)} to ${count(b.hi)} filings`}));
+}
+const SNAP_RATE_BINS = [
+  {fill:"#00857C", label:"Down 5.0% or more", has:v=>v<=-5}, {fill:"#8CCBC6", label:"Down by less than 5.0%", has:v=>v<0},
+  {fill:"#C9CBD6", label:"No change", has:v=>v===0}, {fill:"#F5A3D0", label:"Up by less than 5.0%", has:v=>v<5}, {fill:"#EB008C", label:"Up 5.0% or more", has:()=>true}];
+function snapMapHTML(c, by){
+  const stats=new Map(c.byState.map(s=>[s.st,s])), searched=new Set(c.searched), max=Math.max(0,...c.byState.map(s=>s.n)), bins=snapCountBins(max);
+  let shapes="", last="", labels="";
+  for(const code of Object.keys(US_MAP)){
+    const [d, name, lx, ly]=US_MAP[code], s=stats.get(code);
+    let cls="", fill="", what="";
+    if(!searched.has(code) && !s){ cls="ns"; what=`${name} (${code}): not searched, as it isn't in S&P's list of states`; }
+    else if(!s || !s.n){ cls="none"; what=`${name} (${code}): S&P returned nothing for this search`; }
+    else if(by==="rate"){
+      if(!s.latest){ cls="nrate"; what=`${name} (${code}): ${plural(s.n,"filing")}, none with a rate impact`; }
+      else { fill=SNAP_RATE_BINS.find(b=>b.has(s.latest.rate)).fill; what=`${name} (${code}): latest rate impact ${pct(s.latest.rate)}${s.latest.pub?`, ${fmtD(s.latest.pub)}`:""}, ${snapStatus(s.latest)}`; }
+    } else { fill=(bins.find(b=>s.n>=b.lo&&s.n<=b.hi)||bins[bins.length-1]).fill; what=`${name} (${code}): ${plural(s.n,"filing")}`; }
+    const path=`<path d="${d}" data-s="${code}"${cls?` class="${cls}"`:""}${fill?` style="fill:${fill}"`:""}><title>${esc(what)}</title></path>`;
+    if(cls==="none") last+=path; else shapes+=path;   // dashed outlines last, so no neighbour hides them
+    if(isNum(lx)) labels+=`<text x="${lx}" y="${ly+6}" class="${cls==="ns"||cls==="none"?cls:SNAP_DARK.has(fill)?"lt":""}">${code}</text>`;
+  }
+  const key = by==="rate" ? SNAP_RATE_BINS.map(b=>`<li><span class="sw" style="background:${b.fill}" aria-hidden="true"></span>${esc(b.label)}</li>`).join("")+`<li><span class="sw" style="background:var(--alt);border-color:var(--muted)" aria-hidden="true"></span>Filings, but none with a rate impact</li>`
+    : bins.map(b=>`<li><span class="sw" style="background:${b.fill}" aria-hidden="true"></span>${esc(b.label)}</li>`).join("");
+  const ns=Object.keys(US_MAP).some(k=>!searched.has(k)&&!stats.has(k));
+  return `<svg class="snchart snmap" id="snMapSvg" viewBox="0 0 975 610" role="img" aria-label="${by==="rate"?"Map of the latest overall rate impact in each state":"Map of the number of filings in each state"}. The same figures are in the table beside it." focusable="false">${shapes}${last}${labels}</svg>
+    <ul class="snlegend" id="snMapKey">${key}<li><span class="sw none" aria-hidden="true"></span>Dashed outline: S&amp;P returned nothing for this search</li>${ns?`<li><span class="sw" style="background:var(--tile)" aria-hidden="true"></span>Not searched: not in S&amp;P's list of states</li>`:""}</ul>`;
+}
+function snapMapBlockHTML(c){
+  const sn=S.snap, by=sn.mapBy, rows=c.byState.filter(s=>s.n).sort((a,b)=>b.n-a.n || a.st.localeCompare(b.st)), none=c.byState.filter(s=>!s.n).map(s=>s.st).sort();
+  const table=`<div class="tbl-wrap"><table class="sntbl" id="snStateTable"><caption class="sr">Filings by state</caption><thead><tr><th>State</th><th class="num">Filings</th><th class="num">Rate filings</th><th class="num">Latest rate impact</th></tr></thead><tbody>${rows.map(s=>`<tr><td>${esc(snapStLabel(s.st))}</td><td class="num">${count(s.n)}</td><td class="num">${count(s.rates)}</td><td class="num">${s.latest?`${esc(pct(s.latest.rate))}<div class="t2">${s.latest.pub?fmtD(s.latest.pub):"date n/d"}, ${esc(snapStatus(s.latest))}</div>`:"n/d"}</td></tr>`).join("")}</tbody></table></div>`;
+  return `<section class="snblk" id="snMap" aria-labelledby="snMapH"><div class="blk-h"><h3 id="snMapH">Where it files</h3><span class="inline"><span class="seg" role="group" aria-label="Colour the map by"><button type="button" class="btn sm" data-act="snap-map" data-by="count" aria-pressed="${by!=="rate"}">Number of filings</button><button type="button" class="btn sm" data-act="snap-map" data-by="rate" aria-pressed="${by==="rate"}">Latest rate impact</button></span>${snapExpHTML("states")}</span></div>
+    <div class="sngrid"><div>${snapMapHTML(c, by)}</div><div>${table}${none.length?`<p class="t2" id="snStateNone">S&amp;P returned nothing for this search in ${esc(andList(none, 12))}. That isn't proof that nothing was filed there.</p>`:""}</div></div></section>`;
+}
+const SNAP_TYPE_FILL = ["#00539E","#EB008C","#00857C","#944599","#C46A1B","#0081C3","#262166"];
+const snapTypeFill = (t, i) => t ? SNAP_TYPE_FILL[i%SNAP_TYPE_FILL.length] : "#B8BCCB";
+const snapTypeName = t => t || "Type n/d";
+function snapYearChart(c){
+  if(!c.years.length || !c.years.some(y=>y.total)) return "";
+  const nar=snapNarrow(), W=nar?360:560, H=nar?220:250, L=34, R=8, T=18, B=26, max=Math.max(...c.years.map(y=>y.total));
+  const top=[2,4,6,8,10,20,30,40,50,100,200,300,400,500,1000].find(v=>v>=max)||Math.ceil(max/1000)*1000;   // halves are whole numbers
+  const y=v=>+(T+(1-v/top)*(H-T-B)).toFixed(1), band=(W-L-R)/c.years.length, bw=Math.min(56, band*.6);
+  let g="";
+  for(const v of [...new Set([0, top/2, top].filter(v=>Number.isInteger(v)))]) g+=`<line class="${v?"ax":"ax0"}" x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L-6}" y="${y(v)+4}" text-anchor="end">${count(v)}</text>`;
+  c.years.forEach((yr,i)=>{ const x0=+(L+band*i+(band-bw)/2).toFixed(1); let acc=0;
+    yr.by.forEach((n,ti)=>{ if(!n) return; const t=c.types[ti]; g+=`<rect x="${x0}" y="${y(acc+n)}" width="${bw.toFixed(1)}" height="${(y(acc)-y(acc+n)).toFixed(1)}" style="fill:${snapTypeFill(t,ti)}"><title>${esc(`${yr.year}, ${snapTypeName(t)}: ${plural(n,"filing")}`)}</title></rect>`; acc+=n; });
+    g+=`<text class="tot" x="${(x0+bw/2).toFixed(1)}" y="${y(yr.total)-5}">${count(yr.total)}</text><text x="${(x0+bw/2).toFixed(1)}" y="${H-8}" text-anchor="middle">${yr.year}</text>`; });
+  return `<svg class="snchart" id="snYearChart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Filings by year published and filing type. The figures are in the table beside it." focusable="false">${g}</svg>`;
+}
+function snapYearBlockHTML(c){
+  const key=`<ul class="snlegend" id="snYearKey">${c.types.map((t,i)=>`<li><span class="sw" style="background:${snapTypeFill(t,i)}" aria-hidden="true"></span>${esc(snapTypeName(t))}</li>`).join("")}</ul>`;
+  const table=`<div class="tbl-wrap"><table class="sntbl" id="snYearTable"><caption class="sr">Filings by year published and filing type</caption><thead><tr><th>Year</th>${c.types.map(t=>`<th class="num">${esc(snapTypeName(t))}</th>`).join("")}<th class="num">All</th></tr></thead><tbody>${c.years.map(y=>`<tr><td>${y.year}</td>${y.by.map(n=>`<td class="num">${count(n)}</td>`).join("")}<td class="num"><b>${count(y.total)}</b></td></tr>`).join("")}</tbody></table></div>`;
+  return `<section class="snblk" id="snYears" aria-labelledby="snYearH"><div class="blk-h"><h3 id="snYearH">Filings by year and type</h3>${snapExpHTML("years")}</div>
+    <div class="sngrid half"><div>${snapYearChart(c)}${key}</div><div>${table}<p class="t2">By the year S&amp;P published each filing; the first and last years are part years.${c.undated?` ${plural(c.undated,"filing has","filings have")} no publish date and ${c.undated===1?"isn't":"aren't"} counted here.`:""}</p></div></div></section>`;
+}
+function snapLatestBlockHTML(c){
+  const list=c.latestFR.slice(0, SNAP_LATEST);
+  let h=`<section class="snblk" id="snLatest" aria-labelledby="snLatestH"><div class="blk-h"><h3 id="snLatestH">Latest form and rule filings</h3>${snapExpHTML("forms")}</div>`;
+  if(!list.length) return h+`<div class="info" id="snNoForms" role="status"><span>S&amp;P returned no form or rule filings for this search.</span></div></section>`;
+  h+=`<p class="t2">The ${list.length<c.latestFR.length?`${count(list.length)} most recent of ${count(c.latestFR.length)}`:plural(list.length,"filing")}, newest first by the date S&amp;P published ${list.length===1?"it":"them"}.</p>`;
+  h+=`<div class="tbl-wrap cardwrap" id="snLatestWrap" data-keep><table class="cards filings" id="snLatestTable"><thead><tr><th>Company</th><th>State</th><th>Filing type</th><th>Type of insurance</th><th>Status</th><th>Dates</th><th class="num">Rate impact</th><th>Description</th><th>Tracking number</th><th>Document</th></tr></thead>
+    <tbody>${list.map((f,i)=>filingRowHTML({r:f.r, key:rowKey(f.r,"sn"+i)})).join("")}</tbody></table></div>`;
+  return h+`</section>`;
+}
+function snapDaysBlockHTML(c){
+  let h=`<section class="snblk" id="snDays" aria-labelledby="snDaysH"><div class="blk-h"><h3 id="snDaysH">Time with the regulator, approximately</h3>${snapExpHTML("days")}</div>`;
+  h+=`<p class="t2 snnote" id="snDaysNote">Days from the date a filing was submitted to the date S&amp;P published it, which is close to, but not always the same as, the date the regulator decided it. Read these as approximate.${c.dayLeft?` ${plural(c.dayLeft,"filing doesn't","filings don't")} have both dates and ${c.dayLeft===1?"is":"are"} left out.`:""}</p>`;
+  if(!c.dayRows.length) return h+`<div class="info" id="snNoDays" role="status"><span>None of these filings has both a submitted date and a publish date in S&amp;P's data.</span></div></section>`;
+  const row=(label, g, cls)=>`<tr${cls?` class="${cls}"`:""}><td>${label}</td><td class="num">${count(g.n)}</td><td class="num">${count(g.median)}</td><td class="num">${esc(snapRange2(g.lo, g.hi, count))}</td></tr>`;
+  return h+`<div class="tbl-wrap"><table class="sntbl" id="snDaysTable"><caption class="sr">Days from submitted to published, by state</caption><thead><tr><th>State</th><th class="num">Filings with both dates</th><th class="num">Median days</th><th class="num">Range of days</th></tr></thead><tbody>${c.dayRows.map(g=>row(esc(snapStLabel(g.st)), g)).join("")}${c.dayRows.length>1?row("<b>All states</b>", c.dayAll):""}</tbody></table></div></section>`;
+}
+const snapExpHTML = tbl => `<span class="snexp"><button type="button" class="btn sm ghost" data-act="export" data-what="snap" data-tbl="${tbl}" data-fmt="csv">CSV</button><button type="button" class="btn sm ghost" data-act="export" data-what="snap" data-tbl="${tbl}" data-fmt="xlsx">Excel</button></span>`;
+function snapTilesHTML(c){
+  const t=c.tiles, tile=(k, label, v, sub)=>`<div class="sntile" data-k="${k}"><span class="t2">${label}</span><b>${v}</b>${sub?`<span class="t2">${sub}</span>`:""}</div>`;
+  return `<div class="sntiles" id="snTiles">${tile("n","Filings",count(t.n),"in the period")}${tile("rate","Rate filings",count(t.rate))}${tile("rule","Rule filings",count(t.rule))}${tile("form","Form filings",count(t.form))}
+    ${tile("states","States with filings",count(t.states),`of ${plural(c.searched.length,"state")} searched`)}${tile("latest","Latest filing",t.latest?fmtD(t.latest):"n/d",t.latest?"published":"")}</div>
+    <p class="t2" id="snTileNote">Each filing version counts once, however many of the companies are on it. A filing of more than one type, such as rate and rule, counts in each.${t.other?` ${plural(t.other,"filing is","filings are")} of another type or ${t.other===1?"has":"have"} none given.`:""}</p>`;
+}
+function snapByCompanyHTML(res, run){
+  const bc=(Array.isArray(res.byCompany)?res.byCompany:[]).filter(x=>x&&typeof x==="object");
+  if(!run || run.pick.kind!=="group" || !bc.length) return "";
+  const nameOf=c=>{ const p=run.pick.ids.find(x=>x.kind===c.kind&&String(x.id)===String(c.id)); return !blank(c.name)?String(c.name):p&&p.name?p.name:`${c.kind==="institutionId"?"Institution":"Company"} id ${c.id}`; };
+  return `<div class="counts" id="snByCompany"><b>Filings naming each company:</b>${bc.map(c=>`<span>${esc(nameOf(c))} ${count(c.rows)}</span>`).join("")}</div>`;
+}
+function snapOutHTML(){
+  const sn=S.snap, run=sn.ran, r=sn.res, who=run?run.pick.name:"";
+  if(sn.busy && !r) return `<div class="info" id="snBusy" role="status"><span><b>Getting ${esc(who)}'s filings…</b> A long period can take a minute. After that the result is saved, so it opens at once next time.</span></div>`;
+  if(!r){
+    if(!sn.err) return "";
+    if(sn.err.err==="not_configured" || sn.err.err==="not_deployed") return `<div class="info" id="snErr" role="status"><span>${esc(errText(sn.err))}</span></div>`;
+    const wide=/needs at least \d+ S&P requests/.test(String(sn.err.msg||""));
+    return `<div id="snErr">${problemHTML(sn.err, wide?"This snapshot is too big for one search.":"Couldn't get the snapshot.", wide?"":"snap-retry")}</div>`;
+  }
+  const c=snapCompute(r, run), p=c.p, pk=run&&run.pick;
+  let h=`<div class="snhead" id="snHead"><div><h3 id="snName">${esc(who||"Snapshot")}</h3><p class="t2" id="snMeta">${esc([pk&&pk.kind==="group"?`Group of ${plural(pk.ids.length,"company","companies")} with S&P ids${pk.noId?`; ${plural(pk.noId,"company","companies")} without one left out`:""}`:pk&&pk.group?`Part of ${pk.group}`:"", `filings published ${fmtDay(p.from)} to ${fmtDay(p.to)}`, `${plural(c.searched.length,"state")} searched`, "every filing type and status"].filter(Boolean).join(" · "))}</p></div>
+    <div class="toolbar"><button type="button" class="btn" id="sn_toFilings" data-act="snap-filings" ${sn.busy?"disabled":""}>See every filing on the Filings view</button><span class="inline"><span class="t2">All filings:</span>${snapExpHTML("filings")}</span></div></div>`;
+  if(sn.busy) h+=`<div class="banner" role="status" id="snRefreshing"><span>Asking S&amp;P again… What is below is from ${fmtAt(r.fetchedAt)} until the new result arrives.</span></div>`;
+  else if(sn.err) h+=problemHTML(sn.err, "Couldn't refresh the snapshot.", "snap-refresh");
+  else if(r.fromStore) h+=`<div class="info" id="snFromStore" role="status"><span>From the saved result fetched ${fmtAt(r.fetchedAt)}, so opening it used no S&amp;P requests.</span><button type="button" class="btn sm" data-act="snap-refresh">Refresh from S&amp;P</button></div>`;
+  if(r.capped) h+=`<div class="banner" id="snPartial" role="alert"><span><b>This snapshot is partial.</b> The search stopped at its limit before S&amp;P had returned everything, so every count below is lower than it should be. Choose a shorter period${pk&&pk.kind==="group"?" or one of the group's companies":""} and run it again.</span></div>`;
+  if(!c.fs.length){
+    const notes=(Array.isArray(r.notes)?r.notes:[]).filter(n=>!blank(n)&&!/^S&P returned no filings for [A-Z]{2} in this search/.test(String(n)));
+    return h+`<div class="notes" id="snEmpty" role="status"><b>S&amp;P returned nothing for this search, and that isn't proof that nothing was filed</b><ul>${[EMPTY_RESULT, ...notes].map(n=>`<li>${esc(n)}</li>`).join("")}</ul><p class="t2" style="margin:6px 0 0">Check that this is the company you meant, or try a longer period.</p></div>`;
+  }
+  const notes=(Array.isArray(r.notes)?r.notes:[]).filter(n=>!blank(n)&&!/^S&P returned no filings for [A-Z]{2} in this search/.test(String(n)));   // empty states are on the map
+  h+=snapTilesHTML(c)+snapByCompanyHTML(r, run);
+  if(notes.length) h+=`<div class="notes" id="snNotes" role="status"><b>Read this before you rely on the snapshot</b><ul>${notes.map(n=>`<li>${esc(n)}</li>`).join("")}</ul></div>`;
+  h+=snapMapBlockHTML(c)+snapRateBlockHTML(c)+snapYearBlockHTML(c)+snapLatestBlockHTML(c)+snapDaysBlockHTML(c);
+  return h+`<p class="source" id="snSource">Source: ${esc(r.source||"S&P Global Market Intelligence, SNL Insurance Product Filings")}, fetched ${fmtAt(r.fetchedAt)}. Worked out in this browser from the filings S&amp;P returned. Opening a document uses one S&amp;P request the first time.</p>`;
+}
+function snapFinderHTML(){
+  const sn=S.snap, fd=sn.find;
+  let found="";
+  if(fd.busy) found=`<p class="t2" role="status">Looking for matches…</p>`;
+  else if(fd.matches!==null && !fd.matches.length) found=`<div class="info" id="sn_noMatch" role="status"><span>No company in the app's company list matches "${esc(fd.asked)}". Try a shorter part of the name.</span></div>`;
+  else if(fd.matches!==null){
+    const gs=snapGroups(fd.matches);
+    const groups=gs.map((g,i)=>`<li><div><div class="t1">${esc(g.name)}</div><div class="t2">Group · ${plural(g.n,"matching company","matching companies")}; choosing it takes every member in the company list</div></div><button type="button" class="btn sm" data-act="snap-group" data-i="${i}" ${sn.picking?"disabled":""}>Choose group</button></li>`).join("");
+    const cos=fd.matches.map((m,i)=>{ const id=snapIdOf(m), meta=[id?`S&P ${id.kind==="companyId"?"company":"institution"} id ${id.id}`:"", blank(m.naicGroupName)?"":`group ${m.naicGroupName}`].filter(Boolean).join(" · ");
+      return `<li><div><div class="t1">${esc(m.companyName||"n/d")}</div>${meta?`<div class="t2">${esc(meta)}</div>`:""}</div>${id?`<button type="button" class="btn sm" data-act="snap-co" data-i="${i}">Choose</button>`:`<span class="t2 noadd">Can't be used: the company list has no S&amp;P id for it, so its filings can't be searched.</span>`}</li>`; }).join("");
+    found=`<ul class="matches" id="sn_matches" aria-label="Matching groups and companies">${groups}${cos}</ul>`;
+  }
+  return `<div class="f"><label for="sn_find">Company or group <em>part of a company or group name</em></label>
+    <div class="toolbar"><div class="grow"><input type="text" id="sn_find" data-bind="snap.find.q" value="${esc(fd.q)}" autocomplete="off" spellcheck="false" placeholder="For example Calloway"></div>
+      <button type="button" class="btn" data-act="snap-find" ${fd.busy?"disabled":""}>Find</button></div>
+    ${fd.err?`<p class="err" id="sn_findErr" role="alert">${esc(fd.err)}</p>`:""}${found}</div>`;
+}
+function snapChosenHTML(){
+  const sn=S.snap, pk=sn.pick;
+  if(sn.picking) return `<p class="t2" id="sn_chosen" role="status">Listing the companies in ${esc(sn.picking)}…</p>`;
+  if(sn.pickErr) return `<p class="err" id="sn_chosen" role="alert">${esc(sn.pickErr)}</p>`;
+  if(!pk) return `<p class="t2" id="sn_chosen">Nothing chosen yet.</p>`;
+  const detail = pk.kind==="group" ? `group of ${plural(pk.ids.length,"company","companies")} with S&P ids in the company list${pk.noId?`; ${plural(pk.noId,"company has","companies have")} no S&P id and ${pk.noId===1?"is":"are"} left out`:""}`
+    : `S&P ${pk.ids[0].kind==="companyId"?"company":"institution"} id ${pk.ids[0].id}${pk.group?` · part of ${pk.group}`:""}`;
+  return `<p id="sn_chosen" style="margin:0">Chosen: <b>${esc(pk.name)}</b> <span class="t2">${esc(detail)}</span> <button type="button" class="lnk t2" data-act="snap-clear">Clear</button></p>`;
+}
+function snapCostHTML(){
+  const sn=S.snap, pk=sn.pick, rg=snapRange(sn.years), states=stateOptions().length;
+  const dates=`<span class="t2" id="sn_dates">Filings published ${fmtDay(rg.from)} to ${fmtDay(rg.to)}, in all ${plural(states,"state")} in ${S.refs&&refOptions("serffFilingState").length?"S&amp;P's list":"the app's list"}, every filing type and status.</span>`;
+  if(!pk) return dates;
+  const big=snapTooBig(pk, sn.years);
+  if(big) return `${dates}<div class="banner" id="sn_tooBig" role="alert"><span>${esc(big)}</span></div>`;
+  const need=snapCost(pk.ids, rg.from, rg.to);
+  return `${dates}<p class="t2" id="sn_cost" style="margin:0"><b>About ${plural(need,"S&amp;P request")}</b> (one for each 10 companies for each year of dates), more if S&amp;P has many filings. Once it has run, the result is saved: reopening it below costs no S&amp;P requests.</p>`;
+}
+function snapRecentHTML(){
+  const list=snapRecentList(); if(!list.length) return "";
+  return `<div class="snrecent" id="sn_recent"><span class="t2"><b>Snapshots run in this browser.</b> Reopening one uses no S&amp;P requests.</span><ul>${list.map((x,i)=>`<li><button type="button" class="chip" data-act="snap-recent" data-i="${i}" ${S.snap.busy?"disabled":""}><b>${esc(x.pick.name)}</b> <span class="t2">${esc(`${fmtDay(x.payload.from)} to ${fmtDay(x.payload.to)}`)}</span></button></li>`).join("")}</ul></div>`;
+}
+function renderSnapshot(){
+  const sn=S.snap, fst=S.status&&S.status.filings, waitStates=S.refsLoading&&!S.refs;
+  let h=`<div><h2 class="action-title">Filings snapshot for a company or group</h2>
+    <p class="sub">What a carrier has been filing in its markets, on one page: rate, rule and form filings by state, rate changes over time, filings by year and how long filings took. Worked out from S&amp;P's filings alone.</p></div>`;
+  if(fst && fst.configured===false) h+=`<div class="info" id="snOff" role="status"><span><b>S&amp;P filings aren't set up yet,</b> so a new snapshot can't be run. Snapshots run before still open from their saved results.</span></div>`;
+  h+=`<form class="tcard" id="snForm" novalidate aria-label="Choose a company or group and a period">${snapFinderHTML()}${snapChosenHTML()}
+    <div class="f"><span>Period</span><div class="snper"><div class="seg" role="group" aria-label="Period">${SNAP_YEARS.map(y=>`<button type="button" class="btn sm" data-act="snap-years" data-y="${y}" aria-pressed="${sn.years===y}">${y===1?"Last year":`Last ${y} years`}</button>`).join("")}</div></div></div>
+    <div id="sn_costBox" style="display:flex;flex-direction:column;gap:8px;min-width:0">${snapCostHTML()}</div>
+    ${sn.formErr?`<p class="err" id="sn_formErr" role="alert">${esc(sn.formErr)}</p>`:""}
+    <div class="toolbar"><button type="button" class="btn primary" id="sn_run" data-act="snap-run" ${sn.busy||sn.picking||waitStates?"disabled":""}>${sn.busy?"Getting the snapshot…":waitStates?"Loading S&amp;P's list of states…":"Show snapshot"}</button></div>
+    ${snapRecentHTML()}</form>`;
+  return h+`<div id="snOut" class="snout" aria-live="polite">${snapOutHTML()}</div>`;
+}
+
+/* ----- exports, and what Ask Claude is told ----- */
+function snapExport(tbl){
+  const sn=S.snap, r=sn.res; if(!r) return null;
+  const c=snapCompute(r, sn.ran), slug=String(sn.ran&&sn.ran.pick.name||"snapshot").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,40)||"snapshot";
+  const out=(name, sheet, cols, rows)=>({name:`snl-snapshot-${slug}-${name}-${TODAY()}`, sheet, cols, rows});
+  const day=d=>d?iso(d):"", n=v=>v===null||v===undefined?null:+v;
+  if(tbl==="filings") return out("filings","Filings",["Company","S&P company id","S&P institution id","All companies on the filing","State","Filing type","Type of insurance","Sub-type of insurance","Status","Date submitted","Date published","Effective date, new business","Effective date, renewals","Rate impact","Rate impact (number)","Description","Tracking number","Document id","Filing version id"],
+    c.fs.slice().sort(snapByDate).map(f=>{ const r0=f.r, c0=r0.companies[0]||{}; return [c0.companyName, c0.companyId, c0.institutionId??r0.institutionId, r0.companies.map(x=>x.companyName).filter(x=>!blank(x)).join("; "), f.st||r0.serffFilingState, r0.serffFilingType, r0.typeOfInsurance, r0.subTypeOfInsurance, r0.filingStatus,
+      dayOut(r0.dateSubmitted), dayOut(r0.publishDate), dayOut(r0.newBusReqEffDate), dayOut(r0.renewBusReqEffDate), rateImpact(r0), f.rate, r0.filingDescription, r0.trackingNumber, r0.documentId, r0.filingVersionId]; }));
+  if(tbl==="states") return out("states","By state",["State","State name","Filings","Rate filings","Latest rate impact (%)","Latest rate impact, date published","Latest rate impact, status","Note"],
+    c.byState.slice().sort((a,b)=>a.st.localeCompare(b.st)).map(s=>[s.st, s.name, s.n, s.rates, s.latest?s.latest.rate:null, s.latest?day(s.latest.pub):"", s.latest?snapStatus(s.latest):"", s.n?"":"S&P returned nothing for this search"]));
+  if(tbl==="rates") return out("rate-changes","Rate changes",["State","Type of insurance","Rate filings","With a rate impact","Lowest rate impact (%)","Highest rate impact (%)","Latest rate impact (%)","Latest, date published","Latest, status"],
+    c.rateRows.map(g=>[g.st, g.toi, g.n, g.withRate, n(g.lo), n(g.hi), g.latest?g.latest.rate:null, g.latest?day(g.latest.pub):"", g.latest?snapStatus(g.latest):""]));
+  if(tbl==="years") return out("by-year","By year and type",["Year", ...c.types.map(snapTypeName), "All"], c.years.map(y=>[y.year, ...y.by, y.total]));
+  if(tbl==="forms") return out("latest-forms-rules","Latest forms and rules",["Company","State","Type of insurance","Filing type","Description","Status","Date submitted","Date published","Tracking number","Document id","Filing version id"],
+    c.latestFR.slice(0, SNAP_LATEST).map(f=>[f.r.companies.map(x=>x.companyName).filter(x=>!blank(x)).join("; "), f.st, f.toi, f.type, f.r.filingDescription, f.r.filingStatus, dayOut(f.r.dateSubmitted), dayOut(f.r.publishDate), f.r.trackingNumber, f.r.documentId, f.r.filingVersionId]));
+  if(tbl==="days") return out("time-with-regulator","Time with regulator",["State","Filings with both dates","Median days, submitted to published (approximate)","Fewest days","Most days"],
+    c.dayRows.concat(c.dayRows.length>1?[{...c.dayAll, st:"All states"}]:[]).map(g=>[g.st, g.n, g.median, g.lo, g.hi]));
+  return null;
+}
+/* Told to Claude as the search behind the snapshot, in the shape the Filings view uses, so a question starts from
+   the same companies, states and period. */
+function snapScreen(){
+  const sn=S.snap, r=sn.res, run=sn.ran; if(!r || !run) return null;
+  const p=r.params||run.payload, ints=a=>(Array.isArray(a)?a:[]).map(Number).filter(Number.isInteger);
+  const names=[...new Set([run.pick.name, ...run.pick.ids.map(c=>c.name)].filter(x=>!blank(x)).map(String))].slice(0,20);
+  return {view:"filings", search:{companyIds:ints(p.companyIds), institutionIds:ints(p.institutionIds), states:(Array.isArray(p.states)?p.states:[]).map(String), from:String(p.from||""), to:String(p.to||""), typeOfInsuranceIds:[], filingTypeIds:[], filingStatusIds:[]},
+    total:snapFilings(r.rows).length, companies:names};
+}
+
 /* ---------- render ---------- */
 /* The view (or the Ask Claude panel) is rebuilt from state each time: keep the cursor, the scroll position of boxes
    marked data-keep, and anything half-typed in boxes that aren't bound to state (the sign-in form). */
@@ -2602,7 +3104,7 @@ function render(){
   if(!on){ v.innerHTML=loginHTML(); keep(); renderDrawer(); renderAsk(); renderConn(); renderLive(); return; }
   document.querySelectorAll("nav.tabs a").forEach(a=>a.setAttribute("aria-current", a.dataset.view===S.view ? "page" : "false"));
   document.getElementById("stripIn").innerHTML=stripHTML();
-  v.innerHTML = S.view==="statutory" ? renderStatutory() : S.view==="profile" ? renderProfile() : renderFilings();
+  v.innerHTML = S.view==="statutory" ? renderStatutory() : S.view==="profile" ? renderProfile() : S.view==="snapshot" ? renderSnapshot() : renderFilings();
   keep(); renderDrawer(); renderAsk();
   renderConn();
   renderLive();
@@ -2642,6 +3144,7 @@ function enterView(){
   if(S.view==="filings" && !S.w.loaded && !S.w.loading) loadWatch();
   if(S.view==="statutory" && !S.st.status && !S.st.loading) loadStatStatus();
   if(S.view==="profile") enterProfile();
+  if(S.view==="snapshot") enterSnapshot();
 }
 function route(){
   const h=location.hash.replace(/^#/,""); let v=VIEWS.includes(h)?h:null;
@@ -2663,6 +3166,7 @@ function exportOf(t){
   if(t.dataset.what==="filings") return filingsExport();
   if(t.dataset.what==="answer"){ const turn=S.ask.turns[+t.dataset.turn]; return turn?answerExport(turn):null; }
   if(t.dataset.what==="stat") return statExport(t.dataset.field);
+  if(t.dataset.what==="snap") return snapExport(t.dataset.tbl);
   return null;
 }
 document.addEventListener("click", e=>{
@@ -2762,6 +3266,18 @@ document.addEventListener("click", e=>{
     case "pf-sample": pfSample(); break;
     case "pf-tpl-pick": document.getElementById("pf_tplFile")?.click(); break;
     case "pf-tpl-retry": S.pf.tpl.checked=false; checkTemplate(); break;
+
+    case "snap-find": snapLookup(); break;
+    case "snap-co": snapChooseCompany(+t.dataset.i); break;
+    case "snap-group": snapChooseGroup(+t.dataset.i); break;
+    case "snap-clear": S.snap.pick=null; S.snap.formErr=""; render(); document.getElementById("sn_find")?.focus(); break;
+    case "snap-years": S.snap.years=SNAP_YEARS.includes(+t.dataset.y)?+t.dataset.y:3; S.snap.formErr=""; render(); break;
+    case "snap-run": snapRun(false); break;
+    case "snap-refresh": snapRun(true); break;
+    case "snap-retry": if(S.snap.ran) snapRun(false, S.snap.ran); break;
+    case "snap-recent": snapReopen(+t.dataset.i); break;
+    case "snap-map": S.snap.mapBy=t.dataset.by==="rate"?"rate":"count"; render(); break;
+    case "snap-filings": snapToFilings(); break;
   }
 });
 function onInput(e){
@@ -2786,6 +3302,7 @@ document.addEventListener("keydown", e=>{
   if(e.target.id==="st_find" && e.key==="Enter"){ e.preventDefault(); statLookup(); return; }
   if(e.target.id==="pf_find" && e.key==="Enter"){ e.preventDefault(); pfLookup(); return; }
   if(e.target.id==="pf_code" && e.key==="Enter"){ e.preventDefault(); pfFacts(); return; }
+  if(e.target.id==="sn_find" && e.key==="Enter"){ e.preventDefault(); snapLookup(); return; }
   if(e.target.id==="su_like" && e.key==="Enter"){ e.preventDefault(); discover(null, false); return; }
   if(e.target.id==="ask_input" && e.key==="Enter" && !e.shiftKey && !e.isComposing){ e.preventDefault(); askQuestion(); return; }
   if(e.key==="Enter" && e.target.closest && e.target.closest("#pwForm")){ e.preventDefault(); savePassword(); return; }
@@ -2809,6 +3326,7 @@ function resetState(){
   S.past=freshPast();
   S.w=freshWatch();
   S.pf=freshProfile();   // the template's bytes and any built file go with it
+  S.snap=freshSnap();
 }
 async function onSignedIn(session){
   const {data, error}=await S.sb.from("profiles").select("username,display_name,role").eq("id", session.user.id).maybeSingle();
