@@ -195,14 +195,18 @@ export function indexTables(clock: Clock, entities: () => Entity[]) {
   const names = (c: IndexCompany[]) => [...new Set(c.map((e) => e.n).filter((x): x is string => !!x))].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0)).join("; ").slice(0, 2000);
   const has = (hay: string | null, needle: string | null) => !needle || (hay ?? "").toLowerCase().includes(needle.toLowerCase());
   const isRate = (r: IndexRow) => (r.filing_type ?? "").toLowerCase().includes("rate");
-  const match = (p: IndexQueryParams) => [...filings.values()].filter((f) => f.state === p.state
-    && (!p.from || (f.publish_date !== null && f.publish_date >= p.from)) && (!p.to || (f.publish_date !== null && f.publish_date <= p.to))
-    && has(`${f.type_of_insurance ?? ""} / ${f.sub_type_of_insurance ?? ""}`, p.typeOfInsurance) && has(f.filing_type, p.filingType) && has(f.filing_status, p.status)
+  // migration 0009: scope (several states, each over its own dates) and types (any of several types of insurance)
+  type Many = IndexQueryParams & { scope?: { state: string; from: string | null; to: string | null }[]; types?: string[] };
+  const inDates = (f: IndexRow, from: string | null | undefined, to: string | null | undefined) => (!from || (f.publish_date !== null && f.publish_date >= from)) && (!to || (f.publish_date !== null && f.publish_date <= to));
+  const inScope = (p: Many, f: IndexRow) => (p.scope?.length ? p.scope.some((x) => f.state === x.state && inDates(f, x.from, x.to)) : f.state === p.state && inDates(f, p.from, p.to));
+  const typeOk = (p: Many, f: IndexRow) => { const t = `${f.type_of_insurance ?? ""} / ${f.sub_type_of_insurance ?? ""}`; return p.types?.length ? p.types.some((x) => has(t, x)) : has(t, p.typeOfInsurance); };
+  const match = (p: Many) => [...filings.values()].filter((f) => inScope(p, f)
+    && typeOk(p, f) && has(f.filing_type, p.filingType) && has(f.filing_status, p.status)
     && (p.rateAbove === null || (f.rate_impact !== null && f.rate_impact > p.rateAbove)) && (p.rateBelow === null || (f.rate_impact !== null && f.rate_impact < p.rateBelow))
     && p.words.every((w) => `${f.description ?? ""} ${f.company_names}`.toLowerCase().includes(w.toLowerCase())));
   const t: Required<Pick<Db, "allEntities" | "openSweep" | "getSweep" | "createSweep" | "claimSweep" | "updateSweep" | "sweeps" | "putIndexRows" | "pruneIndex" | "indexCount" | "indexStates" | "putIndexState" | "queryIndex">>
-    & { sweepRows: IndexSweep[]; filingRows: typeof filings; stateRows: typeof states; queries: IndexQueryParams[]; failPut: number; puts: number } = {
-    sweepRows: sweeps, filingRows: filings, stateRows: states, queries, failPut: 0, puts: 0,
+    & { sweepRows: IndexSweep[]; filingRows: typeof filings; stateRows: typeof states; queries: IndexQueryParams[]; failPut: number; puts: number; filtersVersion: number } = {
+    sweepRows: sweeps, filingRows: filings, stateRows: states, queries, failPut: 0, puts: 0, filtersVersion: 2,
     async allEntities(limit) { return structuredClone(entities().slice(0, limit)); },
     async openSweep() { const s = open(); return s ? structuredClone(s) : null; },
     async getSweep(id) { const s = sweeps.find((x) => x.id === id); return s ? structuredClone(s) : null; },
@@ -239,8 +243,11 @@ export function indexTables(clock: Clock, entities: () => Entity[]) {
     async queryIndex(p) {
       queries.push(structuredClone(p));
       const m = match(p), limit = Math.min(Math.max(p.limit || 50, 1), 500), offset = Math.max(p.offset || 0, 0);
-      const inState = [...filings.values()].filter((f) => f.state === p.state);
-      const out: IndexQueryResult = { total: m.length, withRate: m.filter((f) => f.rate_impact !== null).length, rateFilings: m.filter(isRate).length, stateRows: inState.length, stateDescribed: inState.filter((f) => f.description !== null).length };
+      const scoped = (p as Many).scope?.length ? (p as Many).scope!.map((x) => x.state) : [p.state];
+      const inState = [...filings.values()].filter((f) => scoped.includes(f.state));
+      const out: IndexQueryResult & { filters?: number } = { total: m.length, withRate: m.filter((f) => f.rate_impact !== null).length, rateFilings: m.filter(isRate).length, stateRows: inState.length, stateDescribed: inState.filter((f) => f.description !== null).length };
+      const fv = (this as unknown as { filtersVersion?: number } | undefined)?.filtersVersion ?? t.filtersVersion;
+      if (fv) out.filters = fv;   // what the 0009 functions add; 0 stands for a database without 0009 (set filtersVersion on the db)
       const sum = (list: IndexRow[]) => {
         const rates = list.map((f) => f.rate_impact).filter((x): x is number => x !== null), days = list.map((f) => f.publish_date).filter((x): x is string => !!x).sort();
         return { filings: list.length, rateFilings: list.filter(isRate).length, rateMin: rates.length ? Math.min(...rates) : null, rateMax: rates.length ? Math.max(...rates) : null, latest: days.at(-1) ?? null };

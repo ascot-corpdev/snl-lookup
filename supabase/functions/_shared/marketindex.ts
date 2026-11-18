@@ -584,10 +584,31 @@ const GROUPS = ["rows", "company", "type", "month"] as const;
 const isDay = (s: unknown): s is string => typeof s === "string" && dateOf(s) === s;
 const textFilter = (v: unknown) => { const s = clean(v, 60); return s && s.replace(/[^\p{L}\p{N}]/gu, "").length ? s : null; };
 
+/** "Narrow it down" on the Market view: a question may name several states (states) and several types of insurance
+    (typesOfInsurance) at once. Each state is answered over the part of the period its own sweep covers (scope), and a
+    filing matches when its type or sub-type contains any of the types, as the one type always has. Answered by the
+    database functions of migration 0009, which say so (filters: 2); before that migration only one state and one
+    type can be asked. */
+export const MAX_QUERY_STATES = 10, MAX_QUERY_TYPES = 20, FILTERS_VERSION = 2;
+export type IndexScope = { state: string; from: string; to: string };
+export type IndexQueryMany = IndexQueryParams & { states?: string[]; types?: string[]; scope?: IndexScope[] };
+export const NEEDS_0009 = "Searching several states or types of insurance at once needs the database update in supabase/migrations/0009_market_filters.sql: run it in the Supabase SQL editor (README, Market index). Until then, choose one state and one type of insurance.";
+
 /** Checks a question to the index. Every filter but the state may be left out. */
-export function parseIndexQuery(b: Record<string, unknown>): { ok: true; q: IndexQueryParams } | { ok: false; message: string } {
+export function parseIndexQuery(b: Record<string, unknown>): { ok: true; q: IndexQueryMany } | { ok: false; message: string } {
   const bad = (message: string) => ({ ok: false as const, message });
-  const state = typeof b.state === "string" ? b.state.trim().toUpperCase() : "";
+  let states: string[] | null = null, types: string[] | null = null;
+  if (b.states !== undefined && b.states !== null) {
+    const v = b.states;
+    if (!Array.isArray(v) || !v.length || v.length > MAX_QUERY_STATES || !v.every((x) => typeof x === "string" && STATE.test(x.trim().toUpperCase()))) return bad(`Choose states as two-letter codes like FL, at most ${MAX_QUERY_STATES}.`);
+    states = [...new Set(v.map((x) => String(x).trim().toUpperCase()))].sort();
+  }
+  if (b.typesOfInsurance !== undefined && b.typesOfInsurance !== null) {
+    const v = b.typesOfInsurance, list = Array.isArray(v) ? v.map((x) => (typeof x === "string" ? textFilter(x) : null)) : null;
+    if (!list || list.length > MAX_QUERY_TYPES || list.some((x) => !x)) return bad(`Types of insurance must be names from the index's list, at most ${MAX_QUERY_TYPES}.`);
+    types = [...new Map((list as string[]).map((x) => [x.toLowerCase(), x])).values()];
+  }
+  const state = states ? states[0] : typeof b.state === "string" ? b.state.trim().toUpperCase() : "";
   if (!STATE.test(state)) return bad("Choose a state, as a two-letter code like FL. The index answers one state at a time.");
   const group = b.group === undefined || b.group === null || b.group === "" ? "rows" : b.group;
   if (!GROUPS.includes(group as typeof GROUPS[number])) return bad("Group by company, type or month, or ask for the rows.");
@@ -603,7 +624,9 @@ export function parseIndexQuery(b: Record<string, unknown>): { ok: true; q: Inde
   const max = group === "rows" ? MAX_QUERY_ROWS : MAX_GROUPS;
   const limit = Number.isInteger(b.limit) && (b.limit as number) >= 1 ? Math.min(b.limit as number, max) : group === "rows" ? QUERY_PAGE : MAX_GROUPS;
   const offset = Number.isInteger(b.offset) && (b.offset as number) >= 0 ? Math.min(b.offset as number, 100_000) : 0;
-  return { ok: true, q: { state, from, to, typeOfInsurance: textFilter(b.typeOfInsurance), filingType: textFilter(b.filingType), status: textFilter(b.status), words, rateAbove, rateBelow, group: group as IndexQueryParams["group"], limit, offset } };
+  const one = textFilter(b.typeOfInsurance);
+  return { ok: true, q: { state, from, to, typeOfInsurance: types ? (types.length === 1 ? types[0] : null) : one, filingType: textFilter(b.filingType), status: textFilter(b.status), words, rateAbove, rateBelow, group: group as IndexQueryParams["group"], limit, offset,
+    ...(states ? { states } : {}), ...(types ? { types } : {}) } };
 }
 
 /** An indexed filing in the shape of a search row, so the page and Claude read it the way they read S&P's results. */
@@ -620,7 +643,9 @@ export function searchShaped(r: NonNullable<IndexQueryResult["rows"]>[number]): 
 }
 
 export type QueryAnswer = {
-  coverage: Coverage; query: IndexQueryParams; total: number; withRate: number; rateFilings: number; describedInState: number; filingsInState: number;
+  coverage: Coverage; query: IndexQueryMany; total: number;
+  /** With several states: the coverage of each state answered, and the states asked for that weren't. */
+  coverages?: Coverage[]; notIndexed?: string[]; outOfRange?: string[]; withRate: number; rateFilings: number; describedInState: number; filingsInState: number;
   group: IndexQueryParams["group"]; groups?: IndexGroup[]; groupTotal?: number; rows?: Filing[]; more: boolean; notes: string[]; source: string;
 };
 
@@ -630,7 +655,9 @@ export type QueryAnswer = {
 export async function answerQuery(db0: Db, raw: Record<string, unknown>): Promise<{ ok: true; answer: QueryAnswer } | { ok: false; status: number; error: string; message: string; indexed?: string[] }> {
   const parsed = parseIndexQuery(raw);
   if (!parsed.ok) return { ok: false, status: 400, error: "bad", message: parsed.message };
+  if ((parsed.q.states?.length ?? 0) > 1 || (parsed.q.types?.length ?? 0) > 1) return await answerMany(db0, parsed.q);
   const db = need(db0), q = { ...parsed.q };
+  delete q.states; delete q.types;
   const states = await db.indexStates(), s = states.find((x) => x.state === q.state), indexed = states.map((x) => x.state);
   if (!s) {
     const open = await db.openSweep();
@@ -658,6 +685,58 @@ export async function answerQuery(db0: Db, raw: Record<string, unknown>): Promis
   return {
     ok: true, answer: {
       coverage: cov, query: q, total, withRate: Number(r.withRate) || 0, rateFilings: Number(r.rateFilings) || 0, describedInState: Number(r.stateDescribed) || 0, filingsInState: Number(r.stateRows) || 0,
+      group: q.group, ...(q.group === "rows" ? { rows } : { groups: (r.groups ?? []).map((g) => ({ ...g, rateMin: g.rateMin === null ? null : Number(g.rateMin), rateMax: g.rateMax === null ? null : Number(g.rateMax), filings: Number(g.filings), rateFilings: Number(g.rateFilings) })), groupTotal: of }),
+      more: q.offset + shown < of, notes, source: `${SOURCE}, swept into the app's market index`,
+    },
+  };
+}
+
+/** A question naming several states or several types of insurance (the Market view's "Narrow it down"). Each state is
+    answered only over what its own sweep covers: a state the index doesn't hold, or whose sweep is wholly outside the
+    dates, is named and left out, never answered as empty; the coverage of every state answered comes back. Refused
+    when none of the states can be answered, and when the database functions predate migration 0009. */
+async function answerMany(db0: Db, q0: IndexQueryMany): Promise<{ ok: true; answer: QueryAnswer } | { ok: false; status: number; error: string; message: string; indexed?: string[] }> {
+  const db = need(db0), asked = q0.states ?? [q0.state], types = q0.types ?? (q0.typeOfInsurance ? [q0.typeOfInsurance] : []);
+  const states = await db.indexStates(), indexed = states.map((x) => x.state);
+  const held = asked.map((st) => states.find((x) => x.state === st)).filter((x): x is IndexState => !!x);
+  const notIndexed = asked.filter((st) => !indexed.includes(st));
+  const covers = (s: IndexState) => !((q0.from && q0.from > s.to_date) || (q0.to && q0.to < s.from_date));
+  const inRange = held.filter(covers), outOfRange = held.filter((s) => !covers(s)).map((s) => s.state);
+  const list = (a: string[]) => (a.length < 2 ? a.join("") : `${a.slice(0, -1).join(", ")} and ${a[a.length - 1]}`);
+  if (!held.length) {
+    const open = await db.openSweep();
+    const going = open && asked.includes(open.state) ? ` A ${open.kind === "top_up" ? "top-up" : "sweep"} of ${open.state} is under way (${publicSweep(open)!.percent}% done); ask again when it finishes.` : "";
+    return { ok: false, status: 404, error: "not_indexed", indexed, message: `${list(asked)} ${asked.length === 1 ? "isn't" : "aren't"} in the market index, so this can't be answered from it.${going} ${indexed.length ? `The index covers ${indexed.join(", ")}.` : "No state is indexed yet."} Nothing is answered from part of a sweep.` };
+  }
+  if (!inRange.length) return { ok: false, status: 400, error: "out_of_range", indexed, message: `These dates are outside what the index holds for ${list(held.map((s) => s.state))} (${held.map((s) => `${s.state}: ${shortDay(s.from_date)} to ${shortDay(s.to_date)}`).join("; ")}). Choose dates inside those periods.` };
+  const notes: string[] = [];
+  const scope: IndexScope[] = inRange.map((s) => {
+    let from = q0.from ?? s.from_date, to = q0.to ?? s.to_date;
+    if (q0.from && q0.from < s.from_date) { notes.push(`The index of ${s.state} starts ${shortDay(s.from_date)}, so filings published there before that aren't in this answer.`); from = s.from_date; }
+    if (q0.to && q0.to > s.to_date) { notes.push(`The index of ${s.state} runs to ${shortDay(s.to_date)}, so filings published there after that aren't in this answer. A top-up brings it up to date.`); to = s.to_date; }
+    return { state: s.state, from, to };
+  });
+  if (notIndexed.length) notes.unshift(`${list(notIndexed)} ${notIndexed.length === 1 ? "isn't" : "aren't"} in the market index, so ${notIndexed.length === 1 ? "it isn't" : "they aren't"} in this answer (not answered as empty). The index covers ${indexed.join(", ")}.`);
+  if (outOfRange.length) notes.unshift(`The index of ${list(outOfRange)} doesn't cover these dates, so ${outOfRange.length === 1 ? "it isn't" : "they aren't"} in this answer.`);
+  if (new Set(scope.map((x) => `${x.from}|${x.to}`)).size > 1) notes.push(`The states' sweeps cover different periods, so each state is answered over its own: ${scope.map((x) => `${x.state} ${shortDay(x.from)} to ${shortDay(x.to)}`).join("; ")}.`);
+  const from = scope.map((x) => x.from).sort()[0], to = scope.map((x) => x.to).sort().at(-1)!;
+  const q: IndexQueryMany = { ...q0, state: scope[0].state, from, to, typeOfInsurance: null, states: scope.map((x) => x.state), types, scope };
+  const r = await db.queryIndex(q) as IndexQueryResult & { filters?: number };
+  if (r.filters !== FILTERS_VERSION) return { ok: false, status: 400, error: "needs_update", message: NEEDS_0009 };
+  const total = Number(r.total) || 0, where = list(scope.map((x) => x.state));
+  if (q.words.length) {
+    if (!r.stateDescribed) notes.push(`No filing in the index of ${where} has a description (S&P left them empty), so the words were matched against company names only.`);
+    else if (r.stateDescribed < r.stateRows) notes.push(`Only ${n(r.stateDescribed)} of ${n(r.stateRows)} filings in the index of ${where} have a description, so the words were matched against those descriptions and company names.`);
+  }
+  if (q.rateAbove !== null || q.rateBelow !== null) notes.push("Filings with no overall rate impact are left out by a rate filter.");
+  if (!total) notes.push(`No filing in the index matches${types.length ? ` ${list(types.map((t) => `"${t}"`))}` : ""} in ${where}. That isn't proof that none were filed: the index holds the companies in the app's list only, and says nothing about states it doesn't cover.`);
+  for (const s of inRange) if (s.companies_missed) notes.push(`In ${s.state}, ${plural(s.companies_missed, "company", "companies")} in the list ${s.companies_missed === 1 ? "wasn't" : "weren't"} covered because ${s.companies_missed === 1 ? "its batch" : "their batches"} failed${coverageOf(s).missed.length ? `: ${coverageOf(s).missed.slice(0, 10).join("; ")}${s.companies_missed > 10 ? " and others" : ""}` : ""}.`);
+  const rows = q.group === "rows" ? (r.rows ?? []).map(searchShaped) : undefined;
+  const shown = q.group === "rows" ? rows!.length : (r.groups ?? []).length, of = q.group === "rows" ? total : Number(r.groupTotal) || 0;
+  const coverages = inRange.map(coverageOf);
+  return {
+    ok: true, answer: {
+      coverage: coverages[0], coverages, notIndexed, outOfRange, query: q, total, withRate: Number(r.withRate) || 0, rateFilings: Number(r.rateFilings) || 0, describedInState: Number(r.stateDescribed) || 0, filingsInState: Number(r.stateRows) || 0,
       group: q.group, ...(q.group === "rows" ? { rows } : { groups: (r.groups ?? []).map((g) => ({ ...g, rateMin: g.rateMin === null ? null : Number(g.rateMin), rateMax: g.rateMax === null ? null : Number(g.rateMax), filings: Number(g.filings), rateFilings: Number(g.rateFilings) })), groupTotal: of }),
       more: q.offset + shown < of, notes, source: `${SOURCE}, swept into the app's market index`,
     },
