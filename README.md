@@ -85,7 +85,15 @@ It prints which column it took for each field and the first three companies. If 
 SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co SUPABASE_SECRET_KEY=sb_secret_... npm run companies -- load PATH/TO/LIST.csv
 ```
 
-Loading again updates companies and never duplicates or removes any. On the Filings view, type a group name and click **Add all** to search the whole group at once (up to 50 companies a search).
+Loading again updates companies in place. A company the app has already seen in search results is merged into one row with everything both know (S&P ids, NAIC code, group), and any second row of the same company is merged in and removed. On the Filings view, type a group name and click **Add all** to search the whole group at once (up to 100 companies a search).
+
+To check the list, and to merge any company saved twice before this was so (this shows what it would do and changes nothing):
+
+```bash
+SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co SUPABASE_SECRET_KEY=sb_secret_... npm run companies -- tidy
+```
+
+If it lists any, run it again with `-- tidy --apply`.
 
 ### 3. Deploy the three functions
 
@@ -313,6 +321,8 @@ After step 5:
 
 **If something fails,** the message on screen says what S&P answered and gives S&P's reference number. Quote that reference to S&P support.
 
+**What live filings look like so far** (first Live check, 18 Nov 2026: ten rows, one company, Florida). Every assumption the app could test held. The filings had no tracking number and no description, so the app names a filing by S&P's own filing number, marked "S&P no.", on every page, export, email and answer; search by tracking number only for real tracking numbers. Half the filings were over 600 pages, which is why Claude reads long filings in parts. Run a broader search and the Live check again to see whether other states carry tracking numbers and descriptions.
+
 ## What each action costs
 
 **S&P requests** (the limit is 1 a second; trial 500 an hour and 12,000 a day, production 2,000 and 48,000). The status strip shows today's and this hour's count.
@@ -349,7 +359,7 @@ From Supabase's documentation in November 2026.
 | --- | --- | --- | --- |
 | How long one function call may run, background work included | 150 seconds | 400 seconds | A Claude answer runs in slices. Each reply from Claude must fit inside one call; a lookup asked for when the time is nearly up is put off to the next call. |
 | CPU time per call | 2 seconds | 2 seconds | Fine: the functions mostly wait on S&P and Claude. Cutting a page range out of a long PDF takes 0.1 to 0.3 seconds; one call spends at most 1 second cutting and puts further reads off to its next call. |
-| Memory | 256 MB | 256 MB | A filing document of up to 40 MB passes through; cutting a page range out of it needs about twice its size. |
+| Memory | 256 MB | 256 MB | A filing document of up to 60 MB passes through. Cutting 150 pages out of a made-up 57 MB, 900-page filing peaked at about 177 MB. |
 | Time to first response | 150 seconds | 150 seconds | A search is capped at 60 S&P requests to stay inside this. |
 | Function calls a month | 500,000 | 2 million | Far above this app's use. |
 | Database size | 500 MB | 8 GB | A saved search can be up to 4 MB (500 filings is about 0.4 MB). A result too big to save, about 5,000 filings or more, asks S&P again each time. |
@@ -376,24 +386,24 @@ Nothing in this list is guessed in the code: each item is either handled both wa
 | **How long S&P's refresh token stays usable.** The sign-in address, its form-encoded `username` and `password`, the token's `expires_in_seconds` and the refresh call (`POST .../api/v1/tokenRefresh`, form field `refreshToken`) are confirmed by S&P's public Authenticate specification. The app gets a new token a minute before the old one expires. The refresh token lasts up to 7 days and expires after 24 hours without activity; whether ordinary API calls count as activity is not stated, so the app counts only refresh use, the cautious reading. | `signIn` and `refresh` in `_shared/spgmi.ts` | First live call |
 | **How long S&P locks an account, and whether the refresh can answer 423.** 423 "Account Locked" at sign-in is confirmed. The app stops signing in for 30 minutes after a 423 from any call. The 30 minutes, and the 5-minute wait after a refused password, are this app's choices, not S&P's. | `_shared/spgmi.ts` | S&P |
 | **Whether sign-in errors carry an S&P reference.** The Authenticate specification's error body is `{error, message}` with no request id, so a failed sign-in may show no reference number. | `_shared/connection.ts` | First live call |
-| **Florida coverage.** | The state list in step 1 of the first live search | Live check (step 5) |
-| **The columns of S&P's reference lists.** The specification does not give them. The app takes the first column ending in "Id" as the id and the next as the name, and keeps the raw rows. | `referenceOptions` in `_shared/filings.ts` | Live check (step 5) |
-| **Paging fields in search results** (`totalPages` and so on). They are in S&P's user guide but not the public specification. The app works with or without them. | `searchFilings` in `_shared/filings.ts` | Live check (step 5) |
+| **Florida coverage.** Seen 18 Nov 2026: Florida and all 50 states and DC are in S&P's list, and Florida filings come back, without tracking numbers or descriptions. How complete Florida's coverage is remains a question for S&P. | The state list in step 1 of the first live search | Live check (step 5) |
+| **The columns of S&P's reference lists.** The specification does not give them. The app takes the first column ending in "Id" as the id and the next as the name, and keeps the raw rows. Seen 18 Nov 2026 (one fetch of each list): the first column ending in Id is the id and the next the name. | `referenceOptions` in `_shared/filings.ts` | Live check (step 5) |
+| **Paging fields in search results** (`totalPages` and so on). They are in S&P's user guide but not the public specification. The app works with or without them. Seen 18 Nov 2026 on one live search: `totalPages` comes back; the app still copes without it. | `searchFilings` in `_shared/filings.ts` | Live check (step 5) |
 | **How to find a company's S&P company id or institution id**, and which identifiers these are in Capital IQ Pro. The filings API has no company search and cannot search by NAIC code, so names are looked up in a list you load (step 2a) and in companies seen in earlier results. | `resolveEntity` in `_shared/filings.ts` | S&P |
 | **Which carriers Claude checks for a question about a market.** S&P's filings search has no "every company in a state" option, so for a market or segment question Claude chooses likely carriers itself, looks them up in the company list (several names and whole groups in one step) and says in its answer that the choice is its own and may miss carriers. | `resolveMany` in `_shared/filings.ts`; the system prompt in `_shared/chat.ts` | Read the answer: it names the carriers checked and those not in the list |
 | **How filings are sorted in a snapshot.** A filing counts as a rate, rule or form filing when S&P's filing type contains that word, only a status containing "approved" is drawn as approved, and the publish date is taken as close to, not the same as, the regulator's decision. | `snapKinds`, `snapApproved` and `snapDays` in `web/index.html` | Live check, then a look at a real snapshot |
 | **Tokens per page of a real filing.** The page limits, the guard on how much Claude is sent at once and the costs above rest on 3,100 to 4,600 tokens a page, and on the front pages of a filing holding its summary, rate information and form schedule. | `LIMITS` and `read` in `_shared/chat.ts` | The cost line under the first live answers that read long filings |
 | **The wording that marks a watchlist filing** as a new program, new form, new to a state or a withdrawal, and that S&P's rate impact is in percentage points. The rules were written before any real filing had been seen. | `flagFiling` and `rateChange` in `_shared/watch.ts` | The first live watchlist results |
 | **The column headings of a Capital IQ Pro export.** The import matches likely headings and shows what it matched before loading; any column can be named outright. | `matchColumns` in `scripts/companies-lib.mjs` | Your first export |
-| **Date and rate-impact formats** in results. The app shows what S&P sends and "n/d" when it is missing. | The Filings view | Live check (step 5) |
+| **Date and rate-impact formats** in results. The app shows what S&P sends and "n/d" when it is missing. Seen 18 Nov 2026: dates like 2026-01-31. | The Filings view | Live check (step 5) |
 | **How S&P counts requests**: whether sign-ins count, and when its day starts. The app counts every call and uses UTC days, so it can only over-count. S&P's public API specification also limits document downloads to 500 an hour on a trial account (1,000 in production); the app does not count those separately. | `makeGate` in `_shared/spgmi.ts` | S&P |
-| **Ids are whole numbers and filters are lists.** S&P's specification gives no types; the app follows its examples (company, institution, status, type and filing type ids as numbers; states as two-letter codes). If a live reference list shows text ids, searches by that filter will be refused until this is changed. | `parseSearch` in `_shared/filings.ts` | Live check (step 5) |
-| **Pages of results are numbered from 1**, as in S&P's example. | `searchFilings` in `_shared/filings.ts` | Live check (step 5) |
+| **Ids are whole numbers and filters are lists.** S&P's specification gives no types; the app follows its examples (company, institution, status, type and filing type ids as numbers; states as two-letter codes). If a live reference list shows text ids, searches by that filter will be refused until this is changed. Seen 18 Nov 2026: reference ids are whole numbers and states two-letter codes. In result rows the filing type id came as digits in text; the app treats "1" and 1 as the same id. | `parseSearch` in `_shared/filings.ts` | Live check (step 5) |
+| **Pages of results are numbered from 1**, as in S&P's example. Seen 18 Nov 2026 on one live search. | `searchFilings` in `_shared/filings.ts` | Live check (step 5) |
 | **One filing version has one document, state and set of dates.** When several rows share a `filingVersionId`, the app keeps the first row and lists every company on it. | `dedupe` in `_shared/filings.ts` | Live check (step 5) |
 | **What `pages` means.** Taken as the document's page count. The app also counts the pages in the file and uses the larger number for Claude's limits. | `read` in `_shared/chat.ts` | First live answer |
-| **What a `filingVersionId` looks like.** S&P's example is a 36-character id; the app passes on any id of 8 to 64 letters, digits, dots, underscores and dashes. | `parseDocRef` in `_shared/filings.ts` | Live check (step 5) |
+| **What a `filingVersionId` looks like.** S&P's example is a 36-character id; the app passes on any id of 8 to 64 letters, digits, dots, underscores and dashes. Seen 18 Nov 2026 (10 rows): both ids fit the shapes the app accepts. | `parseDocRef` in `_shared/filings.ts` | Live check (step 5) |
 | **How S&P answers a wrong username or password.** 401 "User unauthorized" is confirmed by the Authenticate specification. A 400 at sign-in is not in the specification; the app reads it as a refused sign-in too. | `signIn` in `_shared/spgmi.ts` | First live call |
-| **The unit of `overallRateImpact`.** Shown as a percentage when S&P's display value is missing. | The Filings view (`web/index.html`) | Live check (step 5) |
+| **The unit of `overallRateImpact`.** Shown as a percentage when S&P's display value is missing. Seen 18 Nov 2026 (6 of 10 rows, -11 to -0.8): percentage points; S&P's display value was empty on every row. | The Filings view (`web/index.html`) | Live check (step 5) |
 | **How an account name with an underscore is written in the Snowflake sign-in token.** Snowflake's documentation does not say; the app keeps the underscore. | `jwtAccount` in `_shared/snowflake.ts` | First Snowflake call |
 | **Whether S&P limits API access to fixed IP addresses.** Supabase functions do not have fixed addresses. | n/a | S&P |
 | **The Snowflake reader account**: the account identifier, the service user with key-pair sign-in, and the warehouse name. | Step 7 | S&P |
