@@ -10,6 +10,8 @@
   const ME = "u1";
   const store = { profiles:{ [ME]:{id:ME, username:"corpdev1", display_name:"Corp Dev 1", role:O.role||"corpdev"} }, snl_jobs:{}, snl_settings:{}, snl_store:{} };
   if(O.noProfile) delete store.profiles[ME];
+  // The team library (migration 0007). noLibrary: true starts without the table, as before the migration is run.
+  if(!O.noLibrary) store.snl_library = {};
   (O.seed||[]).forEach(([t,id,row]) => { store[t][id] = {id, ...clone(row)}; });
   // More logins, for tests that sign one out and another in: users: {corpdev2:{id:"u2", display_name:"Corp Dev 2", role:"reader"}}
   Object.values(O.users||{}).forEach(u => { store.profiles[u.id] = {username:"", ...clone(u)}; });
@@ -39,6 +41,9 @@
     // see exactly what the page asked for. failStore: a message, and reading snl_store fails with it.
     // storeDelay: milliseconds a read of snl_store waits before answering.
     storeReads:[], failStore:"", storeDelay:0,
+    // snl_library (the team library): every read is recorded in libReads as {cols, eqs, ilikes, ord, range, single};
+    // failLibrary: true and reading it fails, as with no connection.
+    libReads:[], failLibrary:false,
     // An auth event from elsewhere, for example the session ending in another tab: fire("SIGNED_OUT")
     fire(event){ authCbs.forEach(cb => cb(event, event==="SIGNED_OUT" ? null : session())); }
   };
@@ -89,6 +94,8 @@
       // is(c, null): "doc->>key" reads a key inside a jsonb column, as PostgREST does; a missing key is null
       is(c, v){ (st.iss=st.iss||[]).push([c, v]); return b; },
       in(c, v){ st.ins.push([c, v]); return b; },
+      // ilike(c, "%word%"): the text anywhere in the column, any letter case (only % wildcards, as the page sends)
+      ilike(c, v){ (st.ilikes=st.ilikes||[]).push([c, v]); return b; },
       order(c, o){ st.ord=[c, !(o&&o.ascending===false)]; return b; },
       limit(n){ st.lim=n; return b; },
       maybeSingle(){ st.single=true; return b; },
@@ -98,6 +105,7 @@
     const match = r => st.eqs.every(([c,v]) => String(r[c]) === String(v)) && st.ins.every(([c,v]) => v.map(String).includes(String(r[c])))
       && st.gtes.every(([c,v]) => String(r[c]) >= String(v)) && st.lts.every(([c,v]) => String(r[c]) < String(v))
       && (table !== "snl_jobs" || (r.owner ?? ME) === M.uid)
+      && (st.ilikes||[]).every(([c,v]) => new RegExp("^"+String(v).split("%").map(w=>w.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join(".*")+"$","is").test(String(r[c]??"")))
       && (st.iss||[]).every(([c,v]) => { const [col, ...ks]=c.split(/->>?/); let x=r[col]; for(const k of ks) x = x!==null && typeof x==="object" && k in x ? x[k] : null; return (x===undefined?null:x)===v || (x!==null && String(x)===String(v)); });
     function run(){
       const T = store[table];
@@ -118,7 +126,8 @@
       if(st.lim) rows = rows.slice(0, st.lim);
       if(st.range) rows = rows.slice(st.range[0], st.range[1]+1);
       // only the columns asked for, as PostgREST answers
-      if(table === "snl_jobs" && st.cols && st.cols !== "*"){ const cs = st.cols.split(",").map(s=>s.trim()); rows = rows.map(r => Object.fromEntries(cs.filter(c=>c in r).map(c=>[c, r[c]]))); }
+      if(table === "snl_library"){ M.libReads.push(clone({cols:st.cols, eqs:st.eqs, ilikes:st.ilikes||[], ord:st.ord, range:st.range, single:st.single})); if(M.failLibrary) return {data:null, error:{message:"TypeError: Failed to fetch"}}; }
+      if((table === "snl_jobs" || table === "snl_library") && st.cols && st.cols !== "*"){ const cs = st.cols.split(",").map(s=>s.trim()); rows = rows.map(r => Object.fromEntries(cs.filter(c=>c in r).map(c=>[c, r[c]]))); }
       return st.single ? {data:rows[0]||null, error:null} : {data:rows, error:null};
     }
     // snl_store answers the way PostgREST would: only the columns asked for, where "alias:doc->a->b" is a JSON

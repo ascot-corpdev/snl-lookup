@@ -106,7 +106,35 @@ export interface Db {
   countJobsSince(owner: string, since: string): Promise<number>;
   /** The usage part of the result of each of the login's finished answers started since the given time. */
   usageSince(owner: string, since: string): Promise<Record<string, unknown>[]>;
+  // ---------- the team library (migration 0007); optional, so a stand-in without them still works ----------
+  /** A login's display name (profiles.display_name, or the username when that is empty). null for no profile. */
+  profileName?(uid: string): Promise<string | null>;
+  /** How many entries the library holds. */
+  libraryCount?(): Promise<number>;
+  libraryGet?(id: string): Promise<LibraryRow | null>;
+  /** The entry copied from this answer, if it has been saved. */
+  libraryByJob?(jobId: string): Promise<LibraryRow | null>;
+  /** Adds an entry. Returns it, or null when an entry for the same answer already exists. */
+  libraryAdd?(row: Omit<LibraryRow, "id" | "saved_at" | "updated_at">): Promise<LibraryRow | null>;
+  /** Changes an entry's title and tags (and the search text built from them). Returns it, or null when it is gone. */
+  libraryUpdate?(id: string, patch: Pick<LibraryRow, "title" | "tags" | "search_text">): Promise<LibraryRow | null>;
+  /** Removes an entry. Returns whether there was one to remove. */
+  libraryRemove?(id: string): Promise<boolean>;
 }
+
+/** One entry of the team library (migration 0007): a copy of a finished answer, taken when it was saved. */
+export type LibraryRow = {
+  id: string; job_id: string; title: string; question: string;
+  answer: { answer: unknown[]; sources: unknown[]; table: unknown; caps: unknown[]; lookups: unknown[] };
+  model: string | null; asked_at: string; answered_at: string;
+  saved_by: string | null; saved_by_name: string; saved_at: string; updated_at: string;
+  tags: string[]; companies: string[]; search_text: string;
+};
+/** The library table is missing (migration 0007 not run): PostgREST's "not in the schema cache", or Postgres's
+    "undefined table". */
+export const LIBRARY_MISSING = "library_missing";
+const libraryMissing = (e: { code?: string; message?: string } | null) => !!e && (e.code === "PGRST205" || e.code === "42P01" || /snl_library/.test(e.message ?? "") && /does not exist|schema cache/.test(e.message ?? ""));
+const libraryFail = (e: { code?: string; message?: string }, what: string): never => { throw new Error(libraryMissing(e) ? LIBRARY_MISSING : `${what}: ${e.message}`); };
 
 // A saved place is kept as text inside its row. Postgres re-orders the keys of JSON it stores, and Claude must
 // be sent back exactly the conversation it produced, byte for byte, when an answer is picked up again.
@@ -494,6 +522,43 @@ export function supabaseDb(sb: SupabaseClient, now: () => number = Date.now): Db
       const { data, error } = await sb.from("snl_jobs").select("usage:result->usage").eq("owner", owner).eq("status", "done").gte("created_at", since);
       if (error) throw new Error(`Couldn't add up today's costs: ${error.message}`);
       return (data ?? []).map((r) => (r as { usage?: unknown }).usage).filter((u): u is Record<string, unknown> => !!u && typeof u === "object" && !Array.isArray(u));
+    },
+    // ---------- the team library (migration 0007) ----------
+    async profileName(uid) {
+      const { data } = await sb.from("profiles").select("username,display_name").eq("id", uid).maybeSingle();
+      const name = String(data?.display_name || data?.username || "").trim();
+      return name || null;
+    },
+    async libraryCount() {
+      const { count, error } = await sb.from("snl_library").select("id", { count: "exact", head: true });
+      if (error) libraryFail(error, "Couldn't count the library");
+      return count ?? 0;
+    },
+    async libraryGet(id) {
+      const { data, error } = await sb.from("snl_library").select("*").eq("id", id).maybeSingle();
+      if (error) libraryFail(error, "Couldn't read the library");
+      return (data as LibraryRow | null) ?? null;
+    },
+    async libraryByJob(jobId) {
+      const { data, error } = await sb.from("snl_library").select("*").eq("job_id", jobId).maybeSingle();
+      if (error) libraryFail(error, "Couldn't read the library");
+      return (data as LibraryRow | null) ?? null;
+    },
+    async libraryAdd(row) {
+      const { data, error } = await sb.from("snl_library").insert({ ...row, saved_at: nowIso(), updated_at: nowIso() }).select("*").single();
+      if (error?.code === "23505") return null;   // one entry per answer: someone saved it a moment ago
+      if (error) libraryFail(error, "Couldn't save to the library");
+      return data as LibraryRow;
+    },
+    async libraryUpdate(id, patch) {
+      const { data, error } = await sb.from("snl_library").update({ ...patch, updated_at: nowIso() }).eq("id", id).select("*");
+      if (error) libraryFail(error, "Couldn't change the library entry");
+      return ((data ?? [])[0] as LibraryRow | undefined) ?? null;
+    },
+    async libraryRemove(id) {
+      const { data, error } = await sb.from("snl_library").delete().eq("id", id).select("id");
+      if (error) libraryFail(error, "Couldn't remove the library entry");
+      return (data?.length ?? 0) > 0;
     },
   };
 }

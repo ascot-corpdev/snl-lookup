@@ -4,6 +4,7 @@
 import type { Db, Entity, Job, JobPatch, JobStatus, StoreKind, StoreRow } from "../../../supabase/functions/_shared/db.ts";
 import type { FoundFiling, WatchRun, WatchRunPatch } from "../../../supabase/functions/_shared/db.ts";
 import { entityLabel, groupNamePattern, oneEach, planEntityWrites, withSameCompanies } from "../../../supabase/functions/_shared/db.ts";
+import { LIBRARY_MISSING, type LibraryRow } from "../../../supabase/functions/_shared/db.ts";
 
 export const read = (name: string) => JSON.parse(Deno.readTextFileSync(new URL(`../../fixtures/${name}`, import.meta.url)));
 export const J = (o: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", ...headers } });
@@ -76,6 +77,7 @@ export function memoryDb(clock: Clock) {
       });
     },
     ...watchTables(clock),
+    ...libraryTables(clock),
     async createJob(owner, question) {
       const id = `00000000-0000-4000-8000-${String(++jobSeq).padStart(12, "0")}`;
       jobs.set(id, { id, owner, status: "queued", question, progress: [], partial: "", result: null, error: null, segments: 0, created_at: iso(), updated_at: iso(), heartbeat_at: iso() });
@@ -134,6 +136,34 @@ export function watchTables(clock: Clock) {
       for (const [k, r] of found) if (r.first_seen_at < before) found.delete(k);
       for (let i = runs.length - 1; i >= 0; i--) if (runs[i].status !== "running" && runs[i].started_at < before) runs.splice(i, 1);
     },
+  };
+  return t;
+}
+
+/** The team library (migration 0007) in memory, with the same one-entry-per-answer rule, plus the logins' display
+    names. library and profiles are the rows, for tests to look at; libraryFlags.missing = true acts as if the
+    migration hadn't been run (every library call fails as the real one does). */
+export function libraryTables(clock: Clock) {
+  const library = new Map<string, LibraryRow>(), profiles = new Map<string, string>();
+  let seq = 0;
+  const iso = () => new Date(clock.now).toISOString();
+  const libraryFlags = { missing: false };
+  const gate = () => { if (libraryFlags.missing) throw new Error(LIBRARY_MISSING); };
+  const t: Required<Pick<Db, "profileName" | "libraryCount" | "libraryGet" | "libraryByJob" | "libraryAdd" | "libraryUpdate" | "libraryRemove">> & { library: typeof library; profiles: typeof profiles; libraryFlags: typeof libraryFlags } = {
+    library, profiles, libraryFlags,
+    async profileName(uid) { return profiles.get(uid) ?? null; },
+    async libraryCount() { gate(); return library.size; },
+    async libraryGet(id) { gate(); const r = library.get(id); return r ? structuredClone(r) : null; },
+    async libraryByJob(jobId) { gate(); const r = [...library.values()].find((x) => x.job_id === jobId); return r ? structuredClone(r) : null; },
+    async libraryAdd(row) {
+      gate();
+      if ([...library.values()].some((x) => x.job_id === row.job_id)) return null;
+      const id = `00000000-0000-4000-a000-${String(++seq).padStart(12, "0")}`;
+      library.set(id, { ...structuredClone(row), id, saved_at: iso(), updated_at: iso() });
+      return structuredClone(library.get(id)!);
+    },
+    async libraryUpdate(id, patch) { gate(); const r = library.get(id); if (!r) return null; Object.assign(r, structuredClone(patch), { updated_at: iso() }); return structuredClone(r); },
+    async libraryRemove(id) { gate(); return library.delete(id); },
   };
   return t;
 }

@@ -21,11 +21,14 @@
 //   {"action": "status"}  -> 200 {configured, askedToday, dailyLimit, costToday, resetsAt}: the caller's questions
 //     since midnight UTC, the daily limit (null for none) and what today's finished answers cost in US dollars
 //   "ask" at the daily limit answers 429 {error: "daily_limit", message, askedToday, dailyLimit, resetsAt}.
+//   {"action": "library_save" | "library_update" | "library_remove", ...}: the team library (../_shared/library.ts).
+//     These copy answers already made and cost nothing, so they work whether or not Claude is connected.
 
 import { adminClient, type Env, type Json, readBody, sleep, type WhoIs, whoIs, withCors } from "../_shared/http.ts";
 import { type Db, supabaseDb } from "../_shared/db.ts";
 import { type ChatCtx, clearOld, deleteFiles, fileIdsOf, LIMITS, makeClient, newState, runJob, screenNote, type Turn } from "../_shared/chat.ts";
 import type { Gate } from "../_shared/spgmi.ts";
+import { libraryAction } from "../_shared/library.ts";
 
 export type Deps = {
   env: Env; fetch: typeof fetch; anthropicFetch?: typeof fetch; now?: () => number; whoIs?: WhoIs; db?: Db; gate?: Gate;
@@ -89,6 +92,12 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
   if (!who) return json(401, { error: "signin", message: "Sign in again." });
   const body = await readBody(req);
   if (!body) return json(400, { error: "bad", message: "Send a JSON body with an action." });
+  if (typeof body.action === "string" && body.action.startsWith("library_")) {
+    const libDb = deps.db ?? (() => { const a = adminClient(deps.env); return a ? supabaseDb(a, deps.now ?? Date.now) : null; })();
+    if (!libDb) return json(500, { error: "server", message: "The function can't reach its database. It must run inside Supabase." });
+    const out = await libraryAction(body, who, libDb, json);
+    if (out) return out;
+  }
   // Before Claude is connected nobody can ask, so there is nothing to count.
   if (body.action === "status" && !deps.env("ANTHROPIC_API_KEY")) return json(200, { configured: false, askedToday: null, dailyLimit: dailyLimit(deps.env), costToday: null, resetsAt: null });
   if (!deps.env("ANTHROPIC_API_KEY")) return json(503, { error: "not_configured", message: CLAUDE_NOT_CONFIGURED });
