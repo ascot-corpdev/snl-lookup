@@ -18,6 +18,8 @@
 //   document  {documentId} or {filingVersionId}   -> the document itself, as S&P sends it (usually a PDF)
 //   check                                         -> the S&P connection check: sign-in, entitlement, the four lists
 //                                                    (at most five S&P requests), as a plain-English report
+//   diagnose                                      -> the Live check (Corp Dev only): shapes and counts of real S&P answers,
+//                                                    never S&P's data (at most six S&P requests), _shared/diagnose.ts
 
 import { adminClient, type Env, type Json, readBody, sleep, type WhoIs, whoIs, withCors } from "../_shared/http.ts";
 import { type Db, supabaseDb } from "../_shared/db.ts";
@@ -27,6 +29,7 @@ import { clearOld } from "../_shared/chat.ts";
 import { type Gate, makeGate, NOT_CONFIGURED, planLimits, Spgmi, SpgmiError } from "../_shared/spgmi.ts";
 import { snowflakeConfigured } from "../_shared/snowflake.ts";
 import { checkConnection } from "../_shared/connection.ts";
+import { diagnose } from "../_shared/diagnose.ts";
 
 export type Deps = { env: Env; fetch: typeof fetch; anthropicFetch?: typeof fetch; now?: () => number; whoIs?: WhoIs; db?: Db; gate?: Gate; sleep?: (ms: number) => Promise<void> };
 
@@ -116,6 +119,10 @@ async function serve(req: Request, deps: Deps, json: Json, cors: Record<string, 
 
       case "check":
         return json(200, await checkConnection({ creds, db, gate: deps.gate ?? makeGate(db, limits, wait), fetch: deps.fetch, sleep: wait, now: deps.now ?? Date.now, plan: limits.plan, limits }));
+
+      case "diagnose":
+        if (who.role !== "corpdev") return json(403, { error: "forbidden", message: "Only Corp Dev logins can run the Live check." });
+        return json(200, await diagnose({ creds, db, gate: deps.gate ?? makeGate(db, limits, wait), fetch: deps.fetch, sleep: wait, now: deps.now ?? Date.now, plan: limits.plan, limits }));
 
       default:
         return json(400, { error: "bad", message: "Unknown action. Use status, reference, resolve, search, document or check." });
