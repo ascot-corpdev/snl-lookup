@@ -7,15 +7,16 @@
 //
 // NOT confirmed (each kept in one marked function below, and listed in the README):
 //   referenceOptions  which column of a reference list is the id and which is the name
-//   resolveEntity     S&P's filings API has no company search, so names resolve only against companies the app
-//                     has already seen in results
+//   resolveEntity     S&P's filings API has no company search, so names resolve only against the company list
+//                     loaded into the app and companies it has already seen in results
+//   resolveMany       the same, for several names and groups at once (Claude's market questions)
 //   parseSearch       ids are whole numbers and filters are lists (taken from the examples in S&P's public
 //                     specification, which gives no types)
 //   searchFilings     pages are numbered from 1 (S&P's example sends pageNumber 1)
 //   dedupe            one filing version has one document, state and set of dates
 //   parseDocRef       what a filingVersionId looks like (S&P's example is a 36-character id)
 
-import { type Db, type Entity, type StoreRow } from "./db.ts";
+import { type Db, type Entity, isNaicCode, oneEach, type StoreRow } from "./db.ts";
 import { shortHash } from "./http.ts";
 import { NOT_CONFIGURED, Spgmi, SpgmiError } from "./spgmi.ts";
 
@@ -335,6 +336,101 @@ export async function resolveEntity(db: Db, q: string, limit = 50): Promise<{ qu
   const matches = query.length >= 2 || /^\d+$/.test(query) ? await db.findEntities(query, limit) : [];
   return { query, matches, note: matches.length ? null : NO_MATCH(query) };
 }
+
+// ---------- resolve several names and groups at once (Claude's market questions) ----------
+
+export const MAX_LOOKUP_NAMES = 20;   // names and groups together in one look-up
+export const MATCHES_PER_NAME = 10;   // companies listed for one name; more means the name is too loose
+export const MAX_MEMBERS = 2 * MAX_IDS;   // group members listed in one look-up: two searches' worth
+
+/** A company as a look-up shows it to Claude: its name, the ids a search takes, and its group. */
+export type FoundCompany = { companyName: string; companyId: number | null; institutionId: number | null; naicCompanyCode: string | null; group: string | null; searchable: boolean };
+export type SearchBatch = { company_ids: number[]; institution_ids: number[]; requestsPerYear: number };
+export type ResolveMany = {
+  names: { name: string; matches: FoundCompany[]; more: boolean }[];
+  groups: { group: string; groupNames: string[]; members: FoundCompany[]; cut: boolean }[];
+  notFound: string[]; notLookedUp: string[]; searchBatches: SearchBatch[]; notes: string[];
+};
+
+const idOf = (v: unknown): number | null => (v !== null && v !== undefined && /^\d{1,12}$/.test(String(v)) ? Number(v) : null);
+/** A name as it is looked up: control characters out, spaces tidied, at most 100 characters. Always data. */
+const cleanName = (v: unknown) => String(v ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 100);
+
+function found(e: Entity): FoundCompany {
+  const companyId = idOf(e.companyId), institutionId = idOf(e.institutionId);
+  return { companyName: e.companyName, companyId, institutionId, naicCompanyCode: e.naicCompanyCode ?? null, group: e.naicGroupName ?? null, searchable: companyId !== null || institutionId !== null };
+}
+
+/** Every searchable company found, once, split into searches S&P can take: at most MAX_IDS ids each, by company
+    id when there is one, otherwise by institution id. requestsPerYear is the S&P requests that search needs for
+    each 364 days of dates (one for each 10 ids of a kind), before any extra pages. */
+export function searchBatches(companies: FoundCompany[]): SearchBatch[] {
+  const seen = new Set<string>(), ids: { kind: "c" | "i"; id: number }[] = [];
+  for (const c of companies) {
+    const k = c.companyId !== null ? { kind: "c" as const, id: c.companyId } : c.institutionId !== null ? { kind: "i" as const, id: c.institutionId } : null;
+    if (!k || seen.has(k.kind + k.id)) continue;
+    seen.add(k.kind + k.id);
+    ids.push(k);
+  }
+  return batches(ids, MAX_IDS).map((b) => {
+    const company_ids = b.filter((x) => x.kind === "c").map((x) => x.id), institution_ids = b.filter((x) => x.kind === "i").map((x) => x.id);
+    return { company_ids, institution_ids, requestsPerYear: Math.ceil(company_ids.length / MAX_IDS_PER_REQUEST) + Math.ceil(institution_ids.length / MAX_IDS_PER_REQUEST) };
+  });
+}
+
+/** UNCONFIRMED, for the same reason as resolveEntity: S&P's filings API has no company search, so this looks only
+    in the app's directory (the company list loaded with scripts/companies.mjs, and companies seen in earlier
+    results). It never calls S&P. Looks up several company names and groups in one go, so Claude can check a
+    market with one look-up: each group name (or NAIC group code) brings every member company in the directory.
+    Says which names matched nothing, and stops listing at MAX_LOOKUP_NAMES names, MATCHES_PER_NAME companies a
+    name and MAX_MEMBERS group members, saying so each time. */
+export async function resolveMany(db: Db, rawNames: unknown[], rawGroups: unknown[]): Promise<ResolveMany> {
+  const out: ResolveMany = { names: [], groups: [], notFound: [], notLookedUp: [], searchBatches: [], notes: [] };
+  const asked = new Set<string>();
+  const take = (list: unknown[], kind: "name" | "group") => {
+    const kept: string[] = [];
+    for (const raw of list) {
+      const n = cleanName(raw);
+      if (!n || asked.has(kind + n.toLowerCase())) continue;
+      asked.add(kind + n.toLowerCase());
+      if (asked.size > MAX_LOOKUP_NAMES) out.notLookedUp.push(n); else kept.push(n);
+    }
+    return kept;
+  };
+  const names = take(rawNames, "name"), groups = take(rawGroups, "group");
+  const all: FoundCompany[] = [];
+
+  for (const name of names) {
+    const matches = name.length >= 2 || /^\d+$/.test(name) ? await db.findEntities(name, MATCHES_PER_NAME + 1) : [];
+    const shown = matches.slice(0, MATCHES_PER_NAME).map(found);
+    out.names.push({ name, matches: shown, more: matches.length > MATCHES_PER_NAME });
+    if (!shown.length) out.notFound.push(name);
+    all.push(...shown);
+  }
+
+  let listed = 0;
+  for (const group of groups) {
+    const room = MAX_MEMBERS - listed;
+    if (room <= 0) { out.notLookedUp.push(group); continue; }
+    const members = oneEach(isNaicCode(group) ? await db.entitiesInGroup(group, room + 1) : await db.entitiesInGroupName(group, room + 1));
+    const shown = members.slice(0, room).map(found);
+    listed += shown.length;
+    out.groups.push({ group, groupNames: [...new Set(shown.map((m) => m.group).filter((g): g is string => !!g))], members: shown, cut: members.length > room });
+    if (!shown.length) out.notFound.push(group);
+    all.push(...shown);
+  }
+
+  out.searchBatches = searchBatches(all);
+  if (out.notFound.length) out.notes.push(`Not in the company list: ${out.notFound.join("; ")}. The app's company list is the list the owner loaded plus companies seen in earlier results. Tell the user they can add a company on the Filings view by its S&P company id or institution id. Don't guess ids.`);
+  for (const n of out.names) if (n.more) out.notes.push(`More than ${MATCHES_PER_NAME} companies match "${n.name}"; only the first ${MATCHES_PER_NAME} are listed. Use a fuller name, or the group name, to find the one you mean.`);
+  for (const g of out.groups) if (g.cut) out.notes.push(`"${g.group}" has more member companies in the list than one look-up returns (at most ${MAX_MEMBERS} members in all); only ${plain(g.members.length, "is", "are")} listed, by name. Search these, and look up any other member you need by name.`);
+  if (out.notLookedUp.length) out.notes.push(`One look-up takes at most ${MAX_LOOKUP_NAMES} names and groups, and lists at most ${MAX_MEMBERS} group members. These weren't looked up: ${out.notLookedUp.join("; ")}. Look them up in another call if they matter.`);
+  const unsearchable = all.filter((c) => !c.searchable).length;
+  if (unsearchable) out.notes.push(`${unsearchable === 1 ? "One company found has" : `${unsearchable} companies found have`} only a NAIC code, so search_filings can't search ${unsearchable === 1 ? "it" : "them"}; query_statutory can.`);
+  if (out.searchBatches.length) out.notes.push(`searchBatches holds every searchable company found, once, in lists search_filings takes (at most ${MAX_IDS} ids a search). Drop any match that isn't a carrier you meant before you search.`);
+  return out;
+}
+const plain = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 // ---------- documents ----------
 
