@@ -10,7 +10,7 @@
 // POST /functions/v1/snl-filings  {"action": ...}
 //   status                                        -> what is set up, S&P requests used, when data was last fetched
 //   reference {field?, refresh?}                  -> S&P's id lists (types of insurance, statuses, states, filing types)
-//   resolve   {q}                                 -> companies the app has seen before, by name, NAIC code or S&P id
+//   resolve   {q}                                 -> companies in the app's company list, by name, NAIC code or S&P id
 //   search    {companyIds, institutionIds, states, from, to, filingStatusIds?, typeOfInsuranceIds?, filingTypeIds?,
 //              spStatEntityIds?, trackingNumbers?, refresh?}
 //                                                 -> {rows, total, notes, byState, byCompany, requests, capped, fetchedAt, ...}
