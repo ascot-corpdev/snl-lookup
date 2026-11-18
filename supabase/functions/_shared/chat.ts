@@ -761,7 +761,9 @@ function makeTools(ctx: ChatCtx, st: ChatState, api: Spgmi | null, client: Anthr
     const p = parsed.params, n = p.companyIds.length + p.institutionIds.length;
     const range = p.from.slice(0, 4) === p.to.slice(0, 4) ? p.from.slice(0, 4) : `${p.from.slice(0, 4)} to ${p.to.slice(0, 4)}`;
     await step(`Searching S&P filings: ${plural(n, "company", "companies")}, ${p.states.join(", ")}, ${range}`);
-    const found = await savedOrFreshSearch(api, db, p, { now, maxRequests: LIMITS.searchRequests, deadline: sliceEnd + SPARE_MS, clock: ctx.now });
+    // unlisted: a search Claude runs inside an answer is saved (so it is free to repeat) but kept out of the shared
+    // Recent searches list, which would otherwise show every login which companies a question was about.
+    const found = await savedOrFreshSearch(api, db, p, { now, maxRequests: LIMITS.searchRequests, deadline: sliceEnd + SPARE_MS, clock: ctx.now, unlisted: true });
     for (const r of found.rows) {
       if (Object.keys(st.seen).length >= 600) break;
       st.seen[docKey(r.documentId, r.filingVersionId)] = compactFiling(r);

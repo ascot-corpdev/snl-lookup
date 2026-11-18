@@ -195,8 +195,8 @@ const P = (over: Record<string, unknown> = {}) => ({ companyIds: [], institution
   ok("and only that filing comes back to Claude", seen.r.s1.isError === false && seen.r.s1.value.total === 1 && seen.r.s1.value.filings[0].trackingNumber === "CALL-134000003", seen.r.s1.value);
   ok("a tracking number with odd characters is a plain tool error, and S&P isn't asked", seen.r.s2.isError === true && /tracking numbers must be short text values/.test(seen.r.s2.value.error) && searches.length === 1, seen.r.s2);
   const saved = [...db.store.values()].filter((r) => r.kind === "search");
+  ok("a search Claude runs inside an answer is saved, but kept out of the shared Recent searches list", saved.length === 1 && (saved[0].doc as any).unlisted === true);
   ok("the search Claude ran is saved under the same id the Filings view would use for it", saved.length === 1 && saved[0].id === await F.searchKey(P({ companyIds: [9100001], institutionIds: [], filingStatusIds: [], trackingNumbers: ["CALL-134000003"], from: "2025-01-01", to: "2025-12-31" }) as any), saved.map((r) => r.id));
-  ok("Claude's searches are listed in Recent searches, as before (see the report)", saved.every((r) => !(r.doc as any).unlisted));
 }
 
 done();

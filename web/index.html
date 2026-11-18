@@ -2687,6 +2687,16 @@ async function snapChooseGroup(i){
     const r=await callFn("snl-filings",{action:"resolve", q});
     if(!S.session || S.snap!==sn || sn.picking!==g.name) return;
     if(!r.data){ sn.picking=""; sn.pickErr="Couldn't list the group's companies. "+errText(r); render(); return; }
+    // The function names whole groups with every member (up to the most one search takes): use that when it is there.
+    const whole=(Array.isArray(r.data.groups)?r.data.groups:[]).find(x=>x&&typeof x==="object"&&Array.isArray(x.members)&&String(x.name??"").trim().toLowerCase()===g.key);
+    if(whole){
+      const seen=new Set(), ids=[];
+      for(const m of whole.members){ const id=m&&typeof m==="object"?snapIdOf(m):null, k=id&&id.kind+":"+id.id; if(id && !seen.has(k)){ seen.add(k); ids.push(id); } }
+      const n=v=>isNum(v)?Math.max(0, Math.round(+v)):0;
+      sn.picking=""; sn.pick={kind:"group", name:g.name, group:g.name, ids, noId:Math.max(0, n(whole.companies)-n(whole.searchable)), cut:false, over:!!whole.tooBig || n(whole.searchable)>ids.length};
+      sn.find.matches=null; render(); document.getElementById("sn_run")?.focus(); return;
+    }
+    // An older filings function gives only the matching companies, at most SNAP_LOOKUP_MAX of them.
     const ms=Array.isArray(r.data.matches)?r.data.matches.filter(m=>m&&typeof m==="object"):[];
     cut=ms.length>=SNAP_LOOKUP_MAX; found=found.concat(ms);
   }
@@ -2715,6 +2725,7 @@ function snapTooBig(pick, years, maxIds=MAX_COMPANIES, maxReq=SNAP_MAX_REQUESTS)
   if(!pick) return "";
   if(!pick.ids.length) return pick.kind==="group" ? `None of the companies in ${pick.name} has an S&P id in the company list, so the group's filings can't be searched. Its companies can be added on the Filings view by S&P id.` : "This company has no S&P id in the company list, so its filings can't be searched.";
   if(pick.ids.length>maxIds) return `${pick.name} has ${pick.cut?"at least ":""}${plural(pick.ids.length,"company","companies")} with S&P ids in the company list, and one snapshot covers at most ${maxIds}. Choose one of its companies instead, or search the group in parts on the Filings view.`;
+  if(pick.over) return `${pick.name} has more than ${maxIds} companies with S&P ids in the company list, and one snapshot covers at most ${maxIds}. Choose one of its companies instead, or search the group in parts on the Filings view.`;
   if(pick.cut) return `${pick.name} has more companies in the company list than one look-up returns (${SNAP_LOOKUP_MAX}), so a snapshot can't be sure to cover all of it. Choose one of its companies instead, or search the group in parts on the Filings view.`;
   const r=snapRange(years), need=snapCost(pick.ids, r.from, r.to);
   if(need>maxReq){

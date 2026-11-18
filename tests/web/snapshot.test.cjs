@@ -299,6 +299,25 @@ const member=(i, group)=>({companyId:null, companyName:`Nonesuch Member ${i} Co`
   ok("Try again sends the same search, and the snapshot shows", same(t.of("search").map(c=>c.body),[GROUP_SEARCH, GROUP_SEARCH]) && (await t.txt('#snTiles [data-k="n"] b'))==="18");
   await ctx_close(t);
 
+  // ----- a whole large group, from the filings function's own list of the group's members -----
+  {
+    const many=n=>Array.from({length:n},(_,i)=>member(i+1,"Nonesuch Group"));
+    const whole=(n, extra={})=>({name:"Nonesuch Group", code:null, companies:n+2, searchable:n, tooBig:false, requestsPerYear:Math.ceil(n/10), members:many(n).map(m=>({companyName:m.companyName, companyId:null, institutionId:String(m.institutionId)})), ...extra});
+    t=await open({}, {resolve:q=>/nonesuch group/i.test(q) ? {query:q, matches:many(50), groups:[whole(69)], groupNote:null} : {query:q, matches:many(3)}}); p=t.p;
+    await t.find("Nonesuch"); await p.click('[data-act="snap-group"]'); await p.waitForTimeout(250);
+    ok("a 69-company group is taken whole, and the members without an S&P id are counted", !(await p.$("#sn_tooBig")) && (await t.txt("#sn_chosen")).includes("69 companies") && (await t.txt("#sn_chosen")).includes("2 companies have no S&P id"), await t.txt("#sn_chosen"));
+    ok("its cost over 3 years: 7 batches of ten for each year", (await t.txt("#sn_cost")).startsWith("About 21 S&P requests ("), await t.txt("#sn_cost"));
+    await t.run();
+    ok("the search carries all 69 companies once each", t.of("search").length===1 && t.of("search")[0].body.institutionIds.length===69 && new Set(t.of("search")[0].body.institutionIds).size===69);
+    await ctx_close(t);
+    t=await open({}, {resolve:q=>/nonesuch group/i.test(q) ? {query:q, matches:many(50), groups:[whole(100,{companies:140, searchable:140, tooBig:true})], groupNote:null} : {query:q, matches:many(3)}}); p=t.p;
+    await t.find("Nonesuch"); await p.click('[data-act="snap-group"]'); await p.waitForTimeout(250);
+    ok("a group too big for one search: says so and what to choose instead", (await t.txt("#sn_tooBig"))==="Nonesuch Group has more than 100 companies with S&P ids in the company list, and one snapshot covers at most 100. Choose one of its companies instead, or search the group in parts on the Filings view.", await t.txt("#sn_tooBig"));
+    await p.click("#sn_run"); await p.waitForTimeout(100);
+    ok("too big for one search: nothing is sent", t.of("search").length===0);
+    await ctx_close(t);
+  }
+
   // ----- groups and companies that can't be snapshotted -----
   const big=Array.from({length:55},(_,i)=>member(i+1,"Nonesuch Group"));
   t=await open({}, {resolve:q=>/nonesuch group/i.test(q) ? {query:q, matches:big.slice(0,50)} : /tarrow group/i.test(q) ? {query:q, matches:[member(1,"Tarrow Group"),member(2,"Tarrow Group")]} : /tarrow/i.test(q) ? {query:q, matches:[{...member(1,"Tarrow Group"), institutionId:null}, {...member(2,"Tarrow Group"), institutionId:null}]} : {query:q, matches:big.slice(0,3)}}); p=t.p;
