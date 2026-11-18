@@ -48,38 +48,59 @@
     fire(event){ authCbs.forEach(cb => cb(event, event==="SIGNED_OUT" ? null : session())); }
   };
 
-  // Storage (the PowerPoint template): storage.from(bucket).list/download/upload against in-memory buckets, answering
-  // with errors shaped like supabase-js's StorageApiError. Options: template: {text, updated_at} starts the
-  // "snl-template" bucket with template.pptx; noBucket: true starts with no such bucket (the migration not run).
-  // Switches on __mock.storage: noBucket, refuse (true: reads and writes refused, as a policy would), netFail (true:
-  // every call fails as with no connection), delay (milliseconds before each answer). Records: calls [{op, bucket,
-  // path, opts}], uploads [{bucket, path, size, type, opts, text}].
+  // Storage (the PowerPoint templates): storage.from(bucket).list/download/upload/remove against in-memory buckets,
+  // answering with errors shaped like supabase-js's StorageApiError. Objects are kept by their whole path; list(prefix)
+  // answers with what is directly inside that folder (sub-folders as {name, id:null}), as Supabase does. Options:
+  // template: {text, updated_at} starts the "snl-template" bucket with the team's template.pptx; mine: {text, updated_at}
+  // starts it with the signed-in login's own users/<uid>/template.pptx; noBucket: true starts with no such bucket (the
+  // migration not run). The rules of migrations 0004 and 0008: anything under users/<another login>/ is hidden and
+  // refused, and the team object can only be written by Corp Dev. Switches on __mock.storage: noBucket, refuse (true:
+  // reads and writes refused, as a policy would), refuseMine (true: writes to the login's own folder refused, as before
+  // migration 0008 is run), netFail (true: every call fails as with no connection), delay (milliseconds before each
+  // answer). Records: calls [{op, bucket, path, opts}], uploads [{bucket, path, size, type, opts, text}], removed [path].
   const enc = s => Array.from(new TextEncoder().encode(String(s)));
-  M.storage = {buckets:{"snl-template":{}}, noBucket:!!O.noBucket, refuse:false, netFail:false, delay:0, calls:[], uploads:[]};
+  M.storage = {buckets:{"snl-template":{}}, noBucket:!!O.noBucket, refuse:false, refuseMine:false, netFail:false, delay:0, calls:[], uploads:[], removed:[]};
   if(O.template) M.storage.buckets["snl-template"]["template.pptx"] = {bytes:enc(O.template.text||"PK made-up template"), updated_at:O.template.updated_at||"2026-11-05T09:30:00Z"};
+  if(O.mine) M.storage.buckets["snl-template"]["users/"+ME+"/template.pptx"] = {bytes:enc(O.mine.text||"PK my own template"), updated_at:O.mine.updated_at||"2026-11-10T14:00:00Z"};
   const sErr = (message, statusCode, status) => ({name:"StorageApiError", message, statusCode, status});
+  const RLS = () => sErr("new row violates row-level security policy", "403", 400);
+  const mine = path => String(path).startsWith("users/"+M.uid+"/");
+  const others = path => /^users\//.test(String(path)) && !mine(path);
+  const role = () => (store.profiles[M.uid]||{}).role || null;
   function bucket(name){
     const gate = async (op, path, opts) => {
       M.storage.calls.push({op, bucket:name, path, opts:opts?clone(opts):null});
       if(M.storage.delay) await new Promise(r=>setTimeout(r, M.storage.delay));
       if(M.storage.netFail) return {name:"StorageUnknownError", message:"Failed to fetch"};
       if(M.storage.noBucket || !M.storage.buckets[name]) return sErr("Bucket not found", "404", 400);
-      if(M.storage.refuse) return op==="upload" ? sErr("new row violates row-level security policy", "403", 400) : op==="download" ? sErr("Object not found", "404", 400) : null;
+      if(M.storage.refuse) return op==="upload" ? RLS() : op==="download" ? sErr("Object not found", "404", 400) : null;
       return null;
     };
+    const writable = path => !others(path) && (mine(path) ? !M.storage.refuseMine && !!role() : path==="template.pptx" && role()==="corpdev");
     return {
       async list(prefix, opts){ const e=await gate("list", prefix, opts); if(e) return {data:null, error:e};
         if(M.storage.refuse) return {data:[], error:null};   // a policy hides what it doesn't allow
-        const s=opts&&opts.search||""; const B=M.storage.buckets[name];
-        return {data:Object.keys(B).filter(k=>k.includes(s)).map(k=>({name:k, id:"obj-"+k, updated_at:B[k].updated_at, created_at:B[k].updated_at, last_accessed_at:null, metadata:{size:B[k].bytes.length, mimetype:"application/vnd.openxmlformats-officedocument.presentationml.presentation"}})), error:null}; },
+        const s=opts&&opts.search||"", B=M.storage.buckets[name], pre=prefix?String(prefix).replace(/\/+$/,"")+"/":"", seen={}, out=[];
+        Object.keys(B).filter(k=>k.startsWith(pre) && !others(k)).forEach(k=>{
+          const rest=k.slice(pre.length), i=rest.indexOf("/");
+          if(i>=0){ const f=rest.slice(0,i); if(!seen[f] && f.includes(s)){ seen[f]=1; out.push({name:f, id:null, updated_at:null, created_at:null, last_accessed_at:null, metadata:null}); } return; }
+          if(rest.includes(s)) out.push({name:rest, id:"obj-"+k, updated_at:B[k].updated_at, created_at:B[k].updated_at, last_accessed_at:null, metadata:{size:B[k].bytes.length, mimetype:"application/vnd.openxmlformats-officedocument.presentationml.presentation"}});
+        });
+        return {data:out, error:null}; },
       async download(path){ const e=await gate("download", path); if(e) return {data:null, error:e};
-        const o=M.storage.buckets[name][path]; if(!o) return {data:null, error:sErr("Object not found", "404", 400)};
+        const o=others(path) ? null : M.storage.buckets[name][path]; if(!o) return {data:null, error:sErr("Object not found", "404", 400)};
         return {data:new Blob([new Uint8Array(o.bytes)]), error:null}; },
       async upload(path, body, opts){ const e=await gate("upload", path, opts); if(e) return {data:null, error:e};
+        if(!writable(path)) return {data:null, error:RLS()};
         const B=M.storage.buckets[name]; if(B[path] && !(opts&&opts.upsert)) return {data:null, error:sErr("The resource already exists", "409", 400)};
         const bytes=Array.from(new Uint8Array(await body.arrayBuffer()));
         M.storage.uploads.push({bucket:name, path, size:bytes.length, type:body.type||"", opts:opts?clone(opts):null, text:new TextDecoder().decode(new Uint8Array(bytes.slice(0,64)))});
-        B[path]={bytes, updated_at:new Date().toISOString()}; return {data:{path, id:"obj-"+path, fullPath:name+"/"+path}, error:null}; }
+        B[path]={bytes, updated_at:new Date().toISOString()}; return {data:{path, id:"obj-"+path, fullPath:name+"/"+path}, error:null}; },
+      // as Supabase: objects the rules don't let this login delete are left alone and not listed as removed
+      async remove(paths){ const e=await gate("remove", paths); if(e) return {data:null, error:e};
+        const B=M.storage.buckets[name], gone=[];
+        (paths||[]).forEach(path=>{ if(B[path] && writable(path)){ delete B[path]; M.storage.removed.push(path); gone.push({name:path, bucket_id:name}); } });
+        return {data:gone, error:null}; }
     };
   }
 

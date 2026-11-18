@@ -24,12 +24,14 @@ House rules for anyone changing the code are in [.github/copilot-instructions.md
 | `snl-digest` | Supabase Edge Function | Optional. Filing summaries: made once, saved, and searched. |
 | `snl-index` | Supabase Edge Function | Optional. The market index: sweeps a state for every listed company and answers from what it kept. |
 | `web/deck.js`, `web/profile-slides.js` | The browser | Build the profile as a PowerPoint file on your template. The file is made in the browser and never stored on the server. |
+| `web/standard-template.pptx` | GitHub Pages | The standard PowerPoint template: plain and unbranded, so a profile can be built before anyone uploads one. Made by `scripts/make-standard-template.py`. |
 | `supabase/migrations/0001_snl.sql` | Supabase Postgres | Logins and roles, saved S&P results, the S&P request counter, Claude answers in progress. |
 | `supabase/migrations/0003_watchlist.sql` | Supabase Postgres | Optional. The filings the watchlist found and the record of its checks. |
 | `supabase/migrations/0004_profile_template.sql` | Supabase Storage | Optional. A private place for the PowerPoint template. |
 | `supabase/migrations/0005_filing_digests.sql` | Supabase Postgres | Optional. Saved filing summaries. |
 | `supabase/migrations/0006_market_index.sql` | Supabase Postgres | Optional. The market index and the record of its sweeps. |
 | `supabase/migrations/0007_answer_library.sql` | Supabase Postgres | Optional. The team library of saved answers. |
+| `supabase/migrations/0008_personal_templates.sql` | Supabase Storage | Optional. Lets each login keep a PowerPoint template of its own, which only it can read or change. |
 | `scripts/logins.mjs` | Your computer | Creates logins. There is no self sign-up. |
 | `scripts/companies.mjs` | Your computer | Loads a company list so companies can be found by name or NAIC code. |
 
@@ -293,9 +295,19 @@ On the site, a Corp Dev login chooses companies and states in the search form an
 
 ### 10. Company profiles (optional)
 
-The **Profile** view builds a company profile as a PowerPoint file on your team's own template, with charts and tables you can edit: cover, executive summary, premium, underwriting, capital, reserves, reinsurance, recent rate and form filings, and key diligence questions. The template is kept in private storage, never in this repository. A built profile is made in the browser and is never stored on the server.
+The **Profile** view builds a company profile as a PowerPoint file, with charts and tables you can edit: cover, executive summary, premium, underwriting, capital, reserves, reinsurance, recent rate and form filings, and key diligence questions. A built profile is made in the browser and is never stored on the server.
 
-1. **SQL editor:** run `supabase/migrations/0004_profile_template.sql`. It adds a private storage bucket for the template. Any login can read it; only Corp Dev logins can change it.
+**Which template a profile is built on.** There are three levels, and the first one that exists is used:
+
+1. **Mine:** a login's own template. Any login can upload one with **Upload my template**. It is used only for that login's profiles; nobody else, Corp Dev included, can read, replace or delete it. **Remove my template** deletes it.
+2. **Team:** the team's template, uploaded by a Corp Dev login with **Upload team template**. Every login can use it.
+3. **Standard:** `web/standard-template.pptx`, which comes with the site. It is plain on purpose: white widescreen slides, dark grey Arial text, a thin rule and a slide number, with no company name, logo, picture or house colours, because this repository is public. Profiles work with it straight after set-up, before anything is uploaded. To change it, edit `scripts/make-standard-template.py` and run `python3 -I scripts/make-standard-template.py web/standard-template.pptx` (needs python-pptx 1.0.2).
+
+The **PowerPoint template** card on the Profile view shows which one will be used and lets a login switch between **Standard**, **Team** (when there is one) and **Mine** (when it has one). The choice is remembered in that browser for that login. If the chosen template has gone (removed, or deleted by Corp Dev), the page says so and uses the next one down the list from it: Mine, then Team, then Standard. Templates are downloaded once a session and kept in memory only. The team and personal templates are kept in private storage, never in this repository.
+
+**What a template needs.** A widescreen (13.33 x 7.5 in) PowerPoint file (.pptx, up to 50 MB). The profile uses a layout named "Title White" for the cover and one named "Spectrum Title Only White" for the other slides. If a template doesn't have those names, the closest layouts are used: for the cover, one with a title and a subtitle box (like PowerPoint's "Title Slide"); for the rest, one with a title box and as little else as possible (like "Title Only"). The page checks a file before it uploads it and says which layouts it picked. A template is refused only if it isn't a widescreen .pptx or has no layout with a title box.
+
+1. **SQL editor:** run `supabase/migrations/0004_profile_template.sql`, then `supabase/migrations/0008_personal_templates.sql`. The first adds a private storage bucket for the templates. The second lets each login keep its own template in its own folder (`users/<login id>/template.pptx`) and limits the team rules to the team template (`template.pptx`): any login can read it; only Corp Dev logins can change it. Both are safe to run again. Without them, profiles are built on the standard template only.
 2. Deploy the function:
 
    ```bash
@@ -304,8 +316,8 @@ The **Profile** view builds a company profile as a PowerPoint file on your team'
 
    The profile adds statutory fields the other functions also list, so deploy `snl-statutory` and `snl-chat` again too (step 3).
 
-3. Sign in with a Corp Dev login, open **Profile** and choose **Upload template**. Pick your team's PowerPoint template (.pptx, up to 50 MB). The page checks the file before it uploads it: the template needs a cover layout named "Title White" and a content layout named "Spectrum Title Only White".
-4. Choose **Build a sample profile** to see how your template comes out. The sample uses made-up figures, so it works before statutory data is set up. Open the file in PowerPoint and check the slides before relying on the builder.
+3. Optional: sign in with a Corp Dev login, open **Profile** and choose **Upload team template**. Pick your team's PowerPoint template (see "What a template needs" above).
+4. Choose **Build a sample profile** to see how the template in use comes out. The sample uses made-up figures, so it works before statutory data is set up. Open the file in PowerPoint and check the slides before relying on the builder.
 5. When Snowflake is set up, map the extra statutory fields on **Statutory > Field set-up**, as in step 7: gross premiums written, net premiums earned, net income, paid-in capital, total assets, risk-based capital ratio, net loss and LAE reserves, prior-year reserve development, reinsurance recoverables, and ceded premiums by reinsurer. The last of these also names an `item` column, the reinsurer's name. A slide whose figures aren't mapped is left out, and the page says why.
 6. Find a company or group, choose **Get figures** to see which slides it fills, then build the file.
 
@@ -313,7 +325,7 @@ The **Profile** view builds a company profile as a PowerPoint file on your team'
 
 **What a profile leaves out on purpose.** No comparisons with past deals, no teaser claims, no ownership or management pages: the app holds no deal information and only S&P's data. Add those in PowerPoint.
 
-**A filings profile, from S&P's filings alone.** While statutory data isn't set up, the Profile view opens on **Filings profile**. Find a company or a whole group by name, choose the last year, 3 years or 5 years, and choose **Get the filings**. The page shows what it will cost and which slides it fills, then builds the deck on your template: summary, rate changes, where it files, filings by year and type, latest form and rule filings, time with the regulator, and diligence questions. Rate impacts are S&P's overall figure for each filing, not weighted by premium; for a filing that isn't approved, the figure may be the change asked for. Use **Build a sample filings profile** to check your template with made-up filings. It needs steps 1 to 3 above and nothing else.
+**A filings profile, from S&P's filings alone.** While statutory data isn't set up, the Profile view opens on **Filings profile**. Find a company or a whole group by name, choose the last year, 3 years or 5 years, and choose **Get the filings**. The page shows what it will cost and which slides it fills, then builds the deck on your template: summary, rate changes, where it files, filings by year and type, latest form and rule filings, time with the regulator, and diligence questions. Rate impacts are S&P's overall figure for each filing, not weighted by premium; for a filing that isn't approved, the figure may be the change asked for. Use **Build a sample filings profile** to check your template with made-up filings. It needs step 2 above and nothing else; without steps 1 and 3 it is built on the standard template.
 
 ### 11. Filing summaries (optional)
 
@@ -486,6 +498,8 @@ Nothing in this list is guessed in the code: each item is either handled both wa
 | **Every SNL Insurance Regulatory view and column name.** | The mapping (step 7); `buildSql` in `_shared/statutory.ts` | Discover, then Corp Dev |
 | **The extra statutory figures a profile uses** (net premiums earned, net income, reserves, reserve development, RBC ratio, ceded premiums by reinsurer and the rest in step 10). They are the app's own names; whether S&P's views hold each one, and in which column, is not known until Discover. | The mapping (step 7) | Discover, then Corp Dev |
 | **The storage rules for the template.** The migration uses the statements Supabase documents for storage policies, but has not been run against a real project. | `0004_profile_template.sql` | First upload of the template |
+| **The storage rules for personal templates.** The migration uses `storage.foldername(name)` and `auth.uid()` as Supabase's storage examples do, but has not been run against a real project. Check that one login can't see another's template after the first two logins upload one. | `0008_personal_templates.sql` | First personal upload |
+| **How a profile comes out on other corporate templates.** Layouts with other names are matched by their boxes; a layout whose title sits low or wide may need the profile checked in PowerPoint. | `web/deck.js` | The sample profile, built on the template |
 | **How the profile comes out on the real template.** It is tested on a made-up stand-in with the same layout names. | `web/deck.js` | The sample profile, opened in PowerPoint |
 | **Who pays for Snowflake credits** and whether use is capped. | n/a | S&P |
 | **Claude reading real filings.** Tested against a stand-in for Anthropic's API only. Watch the first live answer: the page citations, the cost and how long each step takes. | `_shared/chat.ts` | First live answer |

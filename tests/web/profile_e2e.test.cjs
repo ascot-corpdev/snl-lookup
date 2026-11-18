@@ -74,9 +74,15 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   // ----- Corp Dev uploads a real template: the real check accepts it, and refuses a file that is not one -----
   t=await open({}); p=t.p;
   await p.setInputFiles("#pf_tplFile",{name:"team-template.pptx", mimeType:"application/vnd.openxmlformats-officedocument.presentationml.presentation", buffer:TEMPLATE}); await p.waitForTimeout(1200);
-  ok("a usable template is uploaded", (await p.evaluate(()=>__mock.storage.uploads.map(u=>[u.bucket,u.path,u.size]))).length===1 && (await t.txt("#pfTplState")).startsWith("The template is uploaded."), await t.txt("#pfTplState"));
+  ok("a usable template is uploaded", (await p.evaluate(()=>__mock.storage.uploads.map(u=>[u.bucket,u.path,u.size]))).length===1 && (await t.txt("#pfTplState")).startsWith("Your team's template.") && (await t.txt("#pfTplDone")).startsWith("Team template uploaded: 3 slides, 13.33 x 7.5 in. Your profiles"), await t.txt("#pfTplDone"));
   await p.setInputFiles("#pf_tplFile",{name:"notes.pptx", mimeType:"application/vnd.openxmlformats-officedocument.presentationml.presentation", buffer:Buffer.from("not a PowerPoint file")}); await p.waitForTimeout(800);
   ok("a file that isn't a PowerPoint file is refused before any upload, in plain words", (await p.evaluate(()=>__mock.storage.uploads.length))===1 && (await p.textContent("body")).includes("This file isn't a PowerPoint file."));
+  // a corporate template with its own layout names, as a login's own: the real check matches its layouts and says which
+  const corp=await JSZip.loadAsync(TEMPLATE);
+  for(const n of Object.keys(corp.files).filter(n=>/slideLayouts\/slideLayout\d+\.xml$/.test(n))){ const x=await corp.file(n).async("string"); corp.file(n, x.replace('name="Title White"','name="Cover"').replace('name="Spectrum Title Only White"','name="Title Only"'), {createFolders:false}); }
+  await p.setInputFiles("#pf_tplFileMine",{name:"corporate.pptx", mimeType:"application/vnd.openxmlformats-officedocument.presentationml.presentation", buffer:await corp.generateAsync({type:"nodebuffer"})}); await p.waitForTimeout(1200);
+  ok("a corporate template is accepted as the login's own, saying which layouts it uses", (await p.evaluate(()=>__mock.storage.uploads.map(u=>u.path)))+""===["template.pptx","users/u1/template.pptx"]+"" &&
+    (await t.txt("#pfTplDone"))==='Your template uploaded: 3 slides, 13.33 x 7.5 in. It has no layout named "Title White", so the cover uses "Cover". It has no layout named "Spectrum Title Only White", so the other slides use "Title Only". Your profiles are built on it now. Nobody else can see it.', await t.txt("#pfTplDone"));
   await t.ctx.close();
 
   ok("no page errors", errs.length===0, errs);

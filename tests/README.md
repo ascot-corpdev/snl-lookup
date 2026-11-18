@@ -21,6 +21,7 @@ npm test
 | `functions/e2e_test.ts`, `web/e2e.test.cjs` | One whole question, end to end on fixtures: the form filings of two made-up insurers in one state, and whether one of them files separate forms for two customer segments. The search, the documents with page citations, the comparison table and the export. |
 | `functions/resilience_test.ts`, `functions/pages_test.ts` | What keeps an answer safe when things go wrong: limits, time running out, a failed save, oversized documents, clearing up. |
 | `functions/migration_test.ts` | The migration keeps row-level security on and gives anonymous visitors nothing. It reads the SQL as text; to see it run, apply the migrations to a scratch Postgres database. |
+| `functions/personal_template_migration_test.ts`, `web/templates.test.cjs` | The PowerPoint template levels: the storage rules for each login's own template (read as text, then evaluated for a grid of logins and files), and on the page which template a profile is built on, choosing another, falling back when one has gone, and uploading or removing one's own. |
 | `scripts/*.test.mjs` | The login script and the company-list import against a local stand-in for Supabase, and the shell steps of the Pages and keep-awake workflows. |
 | `fixtures/` | Test data. **Every company, NAIC code, id, tracking number and filing text in it is made up.** |
 | `out/` | Screenshots from the last run. Not committed. |

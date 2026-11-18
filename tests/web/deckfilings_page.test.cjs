@@ -60,6 +60,7 @@ const PSTATUS = (over = {}) => ({ statutory: { configured: false, mapped: false,
         return J(400, { error: "bad", message: "Unknown action." }); }
       if (u === JSZIP_URL) return r.fulfill({ contentType: "application/javascript", body: ZIPLIB });
       if (u === BASE + "deck.js" || u === BASE + "profile-slides.js") return r.fulfill({ contentType: "application/javascript", body: fs.readFileSync(path.join(WEB, u.slice(BASE.length)), "utf8") });
+      if (u === BASE + "standard-template.pptx") return r.fulfill({ contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", body: fs.readFileSync(path.join(WEB, "standard-template.pptx")) });
       if (/supabase\.js/.test(u)) return r.fulfill({ contentType: "application/javascript", body: MOCK });
       if (/config\.js/.test(u)) return r.fulfill({ contentType: "application/javascript", body: CONFIG });
       if (u.startsWith(BASE)) return r.fulfill({ contentType: "text/html", body: fs.readFileSync(WEB + "/index.html", "utf8") }); return r.fulfill({ status: 404, body: "" }); });
@@ -213,7 +214,10 @@ const PSTATUS = (over = {}) => ({ statutory: { configured: false, mapped: false,
   ok("S&P filings not set up: said calmly; saved searches still open", (await t.txt("#fpOff")) === "S&P filings aren't set up yet, so a new filings profile can't be searched. A profile whose search was run before still opens from its saved result. You can build the sample below meanwhile.");
   await t.find("Calloway"); await p.click('[data-act="fp-co"][data-i="0"]'); await p.waitForTimeout(100); await p.click("#fp_get"); await p.waitForTimeout(800);
   ok("Claude not set up: plain titles, no draft choice", (await t.txt("#fpDraftNote")) === "Claude isn't set up, so the slides use plain titles and points written from the filings." && !(await p.$("#fp_draft")) && (await t.txt("#fp_buildBtn")) === "Build the PowerPoint file");
-  ok("no template, a reader: the button waits for Corp Dev", await p.isDisabled("#fp_buildBtn") && (await t.txt("#fpNoTplNote")) === "The file can be built once Corp Dev uploads the template.");
+  ok("nothing uploaded, a reader: the button says the standard template is used", !(await p.isDisabled("#fp_buildBtn")) && (await t.txt("#fpOnTpl")) === "Uses the standard template." && !(await p.$("#fpNoTplNote")));
+  dl = await t.download(() => p.click("#fp_buildBtn")); await p.waitForTimeout(200);
+  const stdSlides = await slidesOf(dl.zip), stdLayouts = await Promise.all(Object.keys(dl.zip.files).filter(n => /^ppt\/slideLayouts\/slideLayout\d+\.xml$/.test(n)).map(n => dl.zip.file(n).async("string")));
+  ok("nothing uploaded, a reader: built on the real standard template, with no slide of its own left over", stdSlides.length > 1 && stdLayouts.some(x => x.includes('<p:cSld name="Spectrum Title Only White"')) && !!dl.zip.file("ppt/theme/theme1.xml") && /name="Standard"/.test(await dl.zip.file("ppt/theme/theme1.xml").async("string")) && !(await p.$("#fpBuildErr")), stdSlides.length);
   await t.ctx.close();
 
   // ----- hostile text, and the session ending -----

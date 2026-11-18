@@ -2830,17 +2830,21 @@ function renderStatutory(){
     <div id="statResults" style="display:flex;flex-direction:column;gap:18px;min-width:0" aria-live="polite">${statResultsHTML()}</div>${isCorpDev()&&st.setup.open?setupHTML():""}`;
 }
 
-/* ---------- Profile: a company profile as a PowerPoint file on the team's own template ----------
+/* ---------- Profile: a company profile as a PowerPoint file on the login's, the team's or the standard template ----------
    The profile function gives the figures (facts) and plain slide text, or Claude's draft of the text. The slides are
-   built in this browser by deck.js and profile-slides.js, loaded on first use after the zip library. The template
-   lives in private storage: it is downloaded once per session and kept in memory only (never in browser storage),
-   and the built file is only handed to the browser to save. Both are dropped on sign-out. */
+   built in this browser by deck.js and profile-slides.js, loaded on first use after the zip library. The template is
+   the login's own, the team's or the standard one (see "the template" below): it is downloaded once per session and
+   kept in memory only (never in browser storage), and the built file is only handed to the browser to save. Both are
+   dropped on sign-out. */
 FN["snl-profile"]="the profile function";
 const JSZIP_SRC = "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js";   // the zip library the slide builder needs
 const DECK_SRC = "deck.js", SLIDES_SRC = "profile-slides.js";                        // beside this page
 const PPTX_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 const TPL_BUCKET = "snl-template", TPL_PATH = "template.pptx", TPL_MAX = 50*1024*1024;
-function freshTemplate(){ return {checked:false, loading:false, info:null, err:"", errKind:"", bytes:null, uploading:"", upErr:"", upNote:""}; }
+const TPL_STD_SRC = "standard-template.pptx";   // the unbranded template that ships beside this page
+// team, mine: what storage holds ({at, size}) or null; bytes: {standard, team, mine} once downloaded; note: a template
+// that went missing; uploading: "checking", "uploading" or "removing", for upWho ("team" or "mine")
+function freshTemplate(){ return {checked:false, loading:null, team:null, mine:null, err:"", errKind:"", bytes:null, uploading:"", upWho:"", upErr:"", upNote:"", note:"", removing:false}; }
 function freshProfile(){
   return {status:null, statusErr:null, loading:false, kind:"company", code:"", name:"", formErr:"", find:{q:"", asked:"", matches:null, busy:false, err:""},
     busy:"", asked:null, res:null, err:null, plan:null, libsErr:"", draft:null, drafted:null, draftErr:null, built:null, buildErr:"", tpl:freshTemplate(),
@@ -2852,7 +2856,6 @@ const askSuggestKey = sc => S.view==="snapshot" ? "snapshot" : S.view==="profile
 const pfLive = () => { const s=S.pf.status&&S.pf.status.statutory; return !!(s&&s.configured&&s.mapped); };
 const pfClaude = () => !!(S.pf.status&&S.pf.status.claude&&S.pf.status.claude.configured);
 const pfHasData = f => !!f && Array.isArray(f.years) && f.years.length>0;
-const pfHasTemplate = () => !!(S.pf.tpl.bytes || S.pf.tpl.info);
 // Claude drafts when it is set up, the reader hasn't switched it off, today's limit isn't reached, and it isn't the sample
 const pfDraftWanted = () => pfClaude() && S.pf.draft!==false && !chatAtLimit(S.chatUse) && !!S.pf.res && !S.pf.res.facts.sample;
 const pfEntLabel = (kind, code) => `NAIC ${kind==="group"?"group":"company"} ${code}`;
@@ -2889,67 +2892,144 @@ function loadProfileLibs(){
 }
 const PF_LIBS_ERR = "Couldn't load the slide builder. Check your connection and try again.";
 
-/* ----- the template in storage ----- */
+/* ----- the template: personal, then team, then standard -----
+   Three levels. Standard: web/standard-template.pptx, unbranded, beside this page, so a profile can always be built.
+   Team: "template.pptx" in the private bucket, uploaded by Corp Dev. Mine: "users/<login id>/template.pptx" in the same
+   bucket, uploaded by any login for its own decks (migration 0008 keeps each login to its own folder). The page uses
+   the one the reader chose in this browser (kept per login, in browser storage) when it is there; with no choice, or
+   when the chosen one has gone, it goes down the order Mine, Team, Standard from the chosen level. The bytes are kept
+   in memory only, never in browser storage. */
 function tplErrKind(e){
   const m=`${e&&e.statusCode||""} ${e&&e.status||""} ${e&&e.error||""} ${e&&e.message||""}`;
   return /bucket not found/i.test(m) ? "nobucket" : /row-level security|unauthori[sz]ed|forbidden|permission|denied|\b403\b|policy/i.test(m) ? "refused"
     : /not found|\b404\b/i.test(m) ? "nofile" : /fetch|network|load failed|timed? ?out/i.test(m) ? "network" : "other";
 }
-function tplErrText(kind, e, upload){
-  const what=upload?"upload":"get";
-  if(kind==="nobucket") return isCorpDev() ? "The place the template is kept isn't set up yet. Run migration 0004_profile_template.sql in Supabase (see the README), then try again." : "The place the template is kept isn't set up yet. Ask Corp Dev to finish the set-up.";
-  if(kind==="refused") return upload ? "Only Corp Dev logins can upload the template. If this is a Corp Dev login, check that migration 0004_profile_template.sql has been run (see the README)." : "This login isn't allowed to read the template. Ask Corp Dev.";
-  if(kind==="network") return `Couldn't reach storage to ${what} the template. Check your connection and try again.`;
-  if(kind==="nofile") return isCorpDev() ? "There is no template yet. Upload your PowerPoint template first." : "There is no template yet. Ask Corp Dev to upload the template.";
-  return `Couldn't ${what} the template: ${(e&&e.message)||"unknown error"}. Try again.`;
+// who: "team" (default) or "mine"; upload: the words are for an upload, not a read
+function tplErrText(kind, e, upload, who){
+  const what=upload?"upload":"get", mine=who==="mine", thing=mine?"your template":"the team template";
+  if(kind==="nobucket") return isCorpDev() ? "The place templates are kept isn't set up yet, so only the standard template can be used. Run migrations 0004_profile_template.sql and 0008_personal_templates.sql in Supabase (see the README), then check again." : "The place templates are kept isn't set up yet, so only the standard template can be used. Ask Corp Dev to finish the set-up.";
+  if(kind==="refused" && mine) return isCorpDev() ? `Storage refused ${thing}. Check that migration 0008_personal_templates.sql has been run in Supabase (see the README).` : `Storage refused ${thing}. Ask Corp Dev to check that migration 0008_personal_templates.sql has been run.`;
+  if(kind==="refused") return upload ? "Only Corp Dev logins can upload the team template. If this is a Corp Dev login, check that migrations 0004_profile_template.sql and 0008_personal_templates.sql have been run (see the README)." : "This login isn't allowed to read the team template. Ask Corp Dev.";
+  if(kind==="network") return `Couldn't reach storage to ${what} ${thing}. Check your connection and try again.`;
+  if(kind==="nofile") return `${mine?"Your template":"The team template"} isn't in storage any more.`;
+  return `Couldn't ${what} ${thing}: ${(e&&e.message)||"unknown error"}. Try again.`;
 }
-async function checkTemplate(){
-  const pf=S.pf, tp=pf.tpl; if(tp.loading) return;
-  tp.loading=true; tp.err=""; tp.errKind=""; render();
-  let data=null, error=null;
-  try{ ({data, error}=await S.sb.storage.from(TPL_BUCKET).list("", {limit:100, search:TPL_PATH})); }catch(e){ error=e; }
-  if(!S.session || S.pf!==pf) return;
-  tp.loading=false; tp.checked=true;
-  if(error){ tp.errKind=tplErrKind(error); if(tp.errKind==="nofile") tp.info=null; else tp.err=tplErrText(tp.errKind, error, false); }
-  else { const o=(Array.isArray(data)?data:[]).find(x=>x && x.name===TPL_PATH), m=o&&o.metadata||{};
-    tp.info = o ? {at:o.updated_at||o.created_at||m.lastModified||null, size:isNum(m.size)?+m.size:null} : null; }
+const TPL_ORDER = ["mine","team","standard"], TPL_NAME = {mine:"your own", team:"the team", standard:"the standard"}, TPL_BTN = {standard:"Standard", team:"Team", mine:"Mine"};
+const tplKey = () => "snl.pfTemplate."+(S.session&&S.session.uid||"");
+const tplMinePath = () => `users/${S.session&&S.session.uid||""}/${TPL_PATH}`;
+// the choice, kept in browser storage; where that can't be used (blocked, private window) it lasts this page only
+const tplMem = {};
+function tplChoice(){ const k=tplKey(); let v; try{ v=localStorage.getItem(k); }catch{ v=tplMem[k]; } return TPL_ORDER.includes(v) ? v : ""; }
+function setTplChoice(v){ const k=tplKey(); tplMem[k]=v||""; try{ if(v) localStorage.setItem(k, v); else localStorage.removeItem(k); }catch{} }
+function tplHave(k){ const tp=S.pf.tpl; return k==="standard" || (k==="team" && !!tp.team) || (k==="mine" && !!tp.mine); }
+/* The template a build uses now: the chosen one if it is there, else the next one down the order from it. */
+function tplUse(){ const c=tplChoice(); if(c && tplHave(c)) return c; return TPL_ORDER.slice(c?TPL_ORDER.indexOf(c):0).find(tplHave) || "standard"; }
+const tplWhat = k => `${TPL_NAME[k]} template`;
+function tplObj(o){ const m=o&&o.metadata||{}; return o ? {at:o.updated_at||o.created_at||m.lastModified||null, size:isNum(m.size)?+m.size:null} : null; }
+/* What is in storage: the team template and this login's own, looked for together. Returns a promise; the page can
+   build on the standard template whatever this finds. */
+function checkTemplate(){
+  const pf=S.pf, tp=pf.tpl; if(tp.loading) return tp.loading;
+  tp.err=""; tp.errKind="";
+  const look=async(prefix)=>{ try{ return await S.sb.storage.from(TPL_BUCKET).list(prefix, {limit:100, search:TPL_PATH}); }catch(e){ return {data:null, error:e}; } };
+  tp.loading=(async()=>{
+    const [team, mine]=await Promise.all([look(""), look(tplMinePath().replace(/\/[^/]+$/,""))]);
+    if(!S.session || S.pf!==pf) return;
+    tp.loading=null; tp.checked=true;
+    if(team.error){ tp.errKind=tplErrKind(team.error); if(tp.errKind==="nofile") tp.team=null; else tp.err=tplErrText(tp.errKind, team.error, false); }
+    else tp.team=tplObj((Array.isArray(team.data)?team.data:[]).find(x=>x && x.name===TPL_PATH));
+    // this login's folder: nothing there, or no way to look, both mean no template of its own
+    tp.mine = mine.error || tp.errKind==="nobucket" ? null : tplObj((Array.isArray(mine.data)?mine.data:[]).find(x=>x && x.name===TPL_PATH));
+    render();
+  })();
   render();
+  return tp.loading;
 }
-/* The template's bytes: from memory after the first time. Throws an Error with a message for the page. */
+/* The bytes of the template a build uses now, from memory after the first time. Throws an Error with a message for
+   the page. A team or personal template that has gone since the page looked is dropped, said in tp.note, and the
+   next one down is used. */
 async function templateBytes(pf){
-  const tp=pf.tpl; if(tp.bytes) return tp.bytes;
-  let data=null, error=null;
-  try{ ({data, error}=await S.sb.storage.from(TPL_BUCKET).download(TPL_PATH)); }catch(e){ error=e; }
-  if(error || !data){ const k=error?tplErrKind(error):"other"; if(k==="nofile"){ tp.info=null; tp.checked=true; } throw new Error(tplErrText(k, error, false)); }
-  let buf; try{ buf=await data.arrayBuffer(); }catch{ throw new Error(tplErrText("network", null, false)); }
-  if(S.pf===pf) tp.bytes=buf;
+  const tp=pf.tpl;
+  if(!tp.checked) await checkTemplate();
+  // storage couldn't be read when the page looked: look again, unless the standard template is the one chosen
+  if(tp.err && tp.errKind!=="nobucket" && tplChoice()!=="standard"){ tp.checked=false; await checkTemplate(); if(S.pf===pf && tp.err) throw new Error(tp.err); }
+  if(S.pf!==pf) throw new Error("");
+  const use=tplUse(); tp.bytes=tp.bytes||{};
+  if(tp.bytes[use]) return tp.bytes[use];
+  let buf;
+  if(use==="standard"){
+    let r=null; try{ r=await fetch(TPL_STD_SRC, {cache:"no-cache"}); }catch{}
+    if(!r || !r.ok) throw new Error("Couldn't get the standard template. Check your connection, reload the page and try again.");
+    try{ buf=await r.arrayBuffer(); }catch{ throw new Error("Couldn't get the standard template. Check your connection, reload the page and try again."); }
+  } else {
+    let data=null, error=null;
+    try{ ({data, error}=await S.sb.storage.from(TPL_BUCKET).download(use==="mine"?tplMinePath():TPL_PATH)); }catch(e){ error=e; }
+    if(S.pf!==pf) throw new Error("");
+    if(error || !data){
+      const k=error?tplErrKind(error):"other";
+      if(k!=="nofile") throw new Error(tplErrText(k, error, false, use));
+      tp[use]=null;   // gone since the page looked: use the next one down, and say so
+      tp.note=`${tplErrText(k, error, false, use)} This profile is built on ${tplWhat(tplUse())} instead.`;
+      return templateBytes(pf);
+    }
+    try{ buf=await data.arrayBuffer(); }catch{ throw new Error(tplErrText("network", null, false, use)); }
+  }
+  if(S.pf===pf) tp.bytes[use]=buf;
   return buf;
 }
-async function uploadTemplate(file){
-  const pf=S.pf, tp=pf.tpl; if(!file || tp.uploading || !isCorpDev()) return;
+function pickTemplate(k){
+  const tp=S.pf.tpl; if(!TPL_ORDER.includes(k) || !tplHave(k) || tp.uploading) return;
+  setTplChoice(k); tp.note=""; tp.upNote=""; tp.upErr=""; render();
+}
+const tplSize = n => +n<104858 ? "under 0.1 MB" : `${(+n/1048576).toFixed(1)} MB`;
+const tplInches = v => isNum(v) ? (+v).toFixed(2).replace(/\.?0+$/,"") : "n/d";
+/* who: "team" (Corp Dev only) or "mine" (any login). The file is checked in the browser before it is stored. */
+async function uploadTemplate(file, who){
+  who = who==="mine" ? "mine" : "team";
+  const pf=S.pf, tp=pf.tpl; if(!file || tp.uploading || (who==="team" && !isCorpDev())) return;
   const stop=msg=>{ if(S.pf!==pf) return; tp.uploading=""; tp.upErr=msg; render(); };
-  tp.upErr=""; tp.upNote="";
+  tp.upErr=""; tp.upNote=""; tp.upWho=who; tp.removing=false;
   if(!/\.pptx$/i.test(String(file.name||""))){ stop("Choose a PowerPoint file whose name ends in .pptx."); return; }
-  if(+file.size>TPL_MAX){ stop(`That file is ${(+file.size/1048576).toFixed(1)} MB. The template can be at most 50 MB.`); return; }
+  if(+file.size>TPL_MAX){ stop(`That file is ${(+file.size/1048576).toFixed(1)} MB. A template can be at most 50 MB.`); return; }
   tp.uploading="checking"; render();
   let bytes; try{ bytes=await file.arrayBuffer(); }catch{ stop("Couldn't read that file. Choose it again."); return; }
   try{ await loadProfileLibs(); }catch{ stop("Couldn't load the template check. Check your connection and try again."); return; }
   let r; try{ r=await window.SNLDeck.inspect(bytes); }catch{ r=null; }
   if(!S.session || S.pf!==pf) return;
-  if(!r || !r.ok){ stop(r&&!blank(r.message) ? String(r.message) : "That file can't be used as the template. Choose a PowerPoint file."); return; }
+  if(!r || !r.ok){ stop(r&&!blank(r.message) ? String(r.message) : "That file can't be used as a template. Choose a PowerPoint file."); return; }
   tp.uploading="uploading"; render();
-  const replaced=!!tp.info;
+  const replaced=!!tp[who];
   let error=null;
-  try{ ({error}=await S.sb.storage.from(TPL_BUCKET).upload(TPL_PATH, file, {upsert:true, contentType:PPTX_TYPE, cacheControl:"60"})); }catch(e){ error=e; }
+  try{ ({error}=await S.sb.storage.from(TPL_BUCKET).upload(who==="mine"?tplMinePath():TPL_PATH, file, {upsert:true, contentType:PPTX_TYPE, cacheControl:"60"})); }catch(e){ error=e; }
   if(!S.session || S.pf!==pf) return;
-  if(error){ stop(tplErrText(tplErrKind(error), error, true)); return; }
-  tp.uploading=""; tp.bytes=bytes; tp.info={at:new Date().toISOString(), size:+file.size||null}; tp.checked=true; tp.err=""; tp.errKind="";
-  tp.upNote=`Template ${replaced?"replaced":"uploaded"}: ${plural(r.slides,"slide")}, ${isNum(r.widthIn)?(+r.widthIn).toFixed(2).replace(/\.?0+$/,""):"n/d"} x ${isNum(r.heightIn)?(+r.heightIn).toFixed(2).replace(/\.?0+$/,""):"n/d"} in. Every profile from now on is built on it.`;
+  if(error){ stop(tplErrText(tplErrKind(error), error, true, who)); return; }
+  tp.uploading=""; tp.bytes=tp.bytes||{}; tp.bytes[who]=bytes; tp[who]={at:new Date().toISOString(), size:+file.size||null}; tp.checked=true; tp.note="";
+  if(tp.errKind!=="nobucket"){ tp.err=""; tp.errKind=""; }
+  setTplChoice(who);   // the one just uploaded is the one this login builds on now
+  const found=`${plural(r.slides,"slide")}, ${tplInches(r.widthIn)} x ${tplInches(r.heightIn)} in.${blank(r.note)?"":" "+String(r.note)}`;
+  tp.upNote = who==="mine" ? `Your template ${replaced?"replaced":"uploaded"}: ${found} Your profiles are built on it now. Nobody else can see it.`
+    : `Team template ${replaced?"replaced":"uploaded"}: ${found} Your profiles are built on it now, and so are those of every login without a template of its own.`;
+  render();
+}
+async function removeMyTemplate(){
+  const pf=S.pf, tp=pf.tpl; if(tp.uploading || !tp.mine) return;
+  tp.uploading="removing"; tp.upWho="mine"; tp.upErr=""; tp.upNote=""; render();
+  let data=null, error=null;
+  try{ ({data, error}=await S.sb.storage.from(TPL_BUCKET).remove([tplMinePath()])); }catch(e){ error=e; }
+  if(!S.session || S.pf!==pf) return;
+  // Storage answers a delete its rules don't allow with nothing removed and no error: look again to be sure it's gone
+  if(!error && !(Array.isArray(data) && data.length)){ tp.checked=false; await checkTemplate(); if(!S.session || S.pf!==pf) return; if(!tp.err && tp.mine) error={message:"row-level security"}; }
+  tp.uploading=""; tp.removing=false;
+  if(error){ const k=tplErrKind(error); tp.upErr = k==="network" ? "Couldn't reach storage to remove your template. Check your connection and try again." : k==="refused" ? tplErrText(k, error, true, "mine") : `Couldn't remove your template: ${error.message||"unknown error"}. Try again.`; render(); return; }
+  tp.mine=null; if(tp.bytes) delete tp.bytes.mine; tp.note="";
+  if(tplChoice()==="mine") setTplChoice("");
+  tp.upNote=`Your template is removed. Your profiles are built on ${tplWhat(tplUse())} now.`;
   render();
 }
 document.addEventListener("change", e=>{
-  if(e.target.id!=="pf_tplFile") return;
-  const f=e.target.files&&e.target.files[0]; uploadTemplate(f); try{ e.target.value=""; }catch{}
+  const who = e.target.id==="pf_tplFile" ? "team" : e.target.id==="pf_tplFileMine" ? "mine" : "";
+  if(!who) return;
+  const f=e.target.files&&e.target.files[0]; uploadTemplate(f, who); try{ e.target.value=""; }catch{}
 });
 
 /* ----- choosing the company or group: a small picker over the same company list the Statutory view uses ----- */
@@ -3028,7 +3108,7 @@ async function pfSample(){
   const r=await callFn("snl-profile",{action:"sample"});
   if(!S.session || S.pf!==pf) return;
   pf.busy="";
-  if(r.data && r.data.facts && typeof r.data.facts==="object" && r.data.text){ pfTake(pf, r.data); if(pfHasTemplate()){ await pfMake(pf); return; } }
+  if(r.data && r.data.facts && typeof r.data.facts==="object" && r.data.text){ pfTake(pf, r.data); await pfMake(pf); return; }
   else if(r.err!=="signin") pf.err = r.data ? {err:"bad_answer", msg:"The profile function sent back something the page can't read. Try again."} : r;
   render();
 }
@@ -3036,7 +3116,6 @@ async function pfSample(){
    build with the plain text, after a draft couldn't be had. */
 async function pfBuild(plain){
   const pf=S.pf; if(pf.busy || !pf.res || !pfHasData(pf.res.facts)) return;
-  if(!pfHasTemplate()){ pf.buildErr=tplErrText("nofile"); render(); return; }
   if(plain){ pf.draft=false; pf.draftErr=null; }
   if(!plain && pfDraftWanted() && !pf.drafted){
     pf.busy="draft"; pf.draftErr=null; pf.built=null; pf.buildErr=""; render();
@@ -3154,25 +3233,41 @@ function pfOutHTML(){
   if(pf.draftErr){ const r=pf.draftErr, calm=["limit","daily_limit","busy","not_configured"].includes(r.err);
     h+=`<div class="${calm?"info":"banner"}" id="pfDraftErr" role="${calm?"status":"alert"}"><span>${esc(pfDraftErrText(r))}</span><span class="inline"><button type="button" class="btn sm primary" data-act="pf-build-plain" ${pf.busy?"disabled":""}>Build with plain text</button>${r.err==="busy"||!calm?`<button type="button" class="btn sm" data-act="pf-build">Try the draft again</button>`:""}</span></div>`; }
   if(pf.drafted && pf.drafted.text.by!=="claude" && !blank(pf.drafted.text.note) && pfDraftWanted()) h+=`<div class="info" id="pfNote" role="status"><span><b>The slides use plain text.</b> ${esc(pf.drafted.text.note)}</span></div>`;
-  if(pf.buildErr) h+=`<div class="banner" id="pfBuildErr" role="alert"><span>${esc(pf.buildErr)}</span>${pfHasTemplate()?`<button type="button" class="btn sm" data-act="pf-build">Try again</button>`:""}</div>`;
+  if(pf.buildErr) h+=`<div class="banner" id="pfBuildErr" role="alert"><span>${esc(pf.buildErr)}</span><button type="button" class="btn sm" data-act="pf-build">Try again</button></div>`;
   if(pf.built && !pf.busy) h+=`<div class="info" id="pfBuilt" role="status"><span><b>Your profile is ready.</b> ${esc(pf.built.name)} was saved to your downloads. It was made in this browser and isn't stored or sent anywhere.</span><button type="button" class="btn sm" data-act="pf-again">Download again</button></div>`;
-  const tpl=pfHasTemplate(), label=pfDraftWanted()&&!pf.drafted ? "Draft with Claude and build" : pf.built ? "Build again" : "Build the PowerPoint file";
-  if(!tpl) h+=`<p class="t2" id="pfNoTplNote">${isCorpDev()?"Upload your PowerPoint template below to build the file.":"The file can be built once Corp Dev uploads the template."}</p>`;
-  if(!pf.draftErr) h+=`<div class="toolbar"><button type="button" class="btn primary" id="pf_buildBtn" data-act="pf-build" ${pf.busy||!tpl?"disabled":""}>${label}</button></div>`;
+  const label=pfDraftWanted()&&!pf.drafted ? "Draft with Claude and build" : pf.built ? "Build again" : "Build the PowerPoint file";
+  if(!pf.draftErr) h+=`<div class="toolbar"><button type="button" class="btn primary" id="pf_buildBtn" data-act="pf-build" ${pf.busy?"disabled":""}>${label}</button>${pfOnTplHTML("pfOnTpl")}</div>`;
   return h+`</section>`;
 }
+/* Beside a build button: which template the file will be built on. */
+function pfOnTplHTML(id){ return `<span class="t2 grow" id="${id}">Uses ${esc(tplWhat(tplUse()))}.</span>`; }
+const tplWhen = o => `${o.at?`last changed ${esc(whenAt(o.at))}`:"ready to use"}${isNum(o.size)?`, ${tplSize(o.size)}`:""}`;
 function pfTemplateHTML(){
   const pf=S.pf, tp=pf.tpl, cd=isCorpDev(), fnOk=!(pf.statusErr&&pf.statusErr.err==="not_deployed");
-  let h=`<section class="tcard" id="pfTpl" aria-label="PowerPoint template"><div><h3>PowerPoint template</h3><p class="t2">Every profile is built on your team's own template, kept privately for this site's logins.</p></div>`;
-  if(tp.loading && !tp.checked) h+=`<p class="t2" id="pfTplState" role="status">Checking for the template…</p>`;
-  else if(tp.err) h+= tp.errKind==="nobucket" ? `<div class="info" id="pfTplState" role="status"><span>${esc(tp.err)}</span><button type="button" class="btn sm" data-act="pf-tpl-retry">Check again</button></div>` : `<div class="banner" id="pfTplState" role="alert"><span>${esc(tp.err)}</span><button type="button" class="btn sm" data-act="pf-tpl-retry">Try again</button></div>`;
-  else if(tp.info) h+=`<p id="pfTplState" style="margin:0"><b>The template is uploaded.</b> <span class="t2">${tp.info.at?`Last changed ${esc(whenAt(tp.info.at))}`:"Ready to use"}${isNum(tp.info.size)?`, ${+tp.info.size<104858?"under 0.1":(+tp.info.size/1048576).toFixed(1)} MB`:""}.</span></p>`;
-  else h+=`<p id="pfTplState" style="margin:0"><b>No template yet.</b> <span class="t2">${cd?"Upload your team's PowerPoint template (.pptx, up to 50 MB). Profiles can be built once it is here.":"Ask Corp Dev to upload the template. Until then you can get the figures, but not build the file."}</span></p>`;
-  if(cd && tp.errKind!=="nobucket"){
-    const up=tp.uploading;
-    h+=`<div class="toolbar"><input type="file" id="pf_tplFile" class="sr" tabindex="-1" aria-hidden="true" accept=".pptx,${PPTX_TYPE}">
-      <button type="button" class="btn" data-act="pf-tpl-pick" ${up||tp.loading?"disabled":""}>${up==="checking"?"Checking the file…":up==="uploading"?"Uploading…":tp.info?"Replace template":"Upload template"}</button>
-      <span class="t2 grow">The file is checked here first: it must be a PowerPoint file with the cover and content layouts the builder uses.</span></div>`;
+  const use=tplUse(), chose=tplChoice(), up=tp.uploading, busy=!!up||(!!tp.loading&&!tp.checked), store=tp.errKind!=="nobucket";
+  let h=`<section class="tcard" id="pfTpl" aria-label="PowerPoint template"><div><h3>PowerPoint template</h3><p class="t2">A profile is built on your own template if you upload one, otherwise on your team's, otherwise on the standard template that comes with this site. You can choose which one to use.</p></div>`;
+  if(tp.err) h+= tp.errKind==="nobucket" ? `<div class="info" id="pfTplErrState" role="status"><span>${esc(tp.err)}</span><button type="button" class="btn sm" data-act="pf-tpl-retry">Check again</button></div>` : `<div class="banner" id="pfTplErrState" role="alert"><span>${esc(tp.err)}</span><button type="button" class="btn sm" data-act="pf-tpl-retry">Try again</button></div>`;
+  // the choice: Standard always, Team and Mine when storage holds them
+  const opts=TPL_ORDER.slice().reverse().filter(tplHave);
+  h+=`<div class="f"><span>Build on</span><div class="seg" role="group" aria-label="Template to build on" id="pf_tplUse">${opts.map(k=>`<button type="button" class="btn sm" data-act="pf-tpl-use" data-k="${k}" aria-pressed="${use===k}" ${up?"disabled":""}>${TPL_BTN[k]}</button>`).join("")}</div></div>`;
+  if(tp.loading && !tp.checked) h+=`<p class="t2" id="pfTplState" role="status">Checking for your team's template and your own…</p>`;
+  else if(use==="mine") h+=`<p id="pfTplState" style="margin:0"><b>Your own template.</b> <span class="t2">Used only for your profiles; nobody else can see it. It was ${tplWhen(tp.mine)}.</span></p>`;
+  else if(use==="team") h+=`<p id="pfTplState" style="margin:0"><b>Your team's template.</b> <span class="t2">Uploaded by Corp Dev for every login, ${tplWhen(tp.team)}.</span></p>`;
+  else h+=`<p id="pfTplState" style="margin:0"><b>The standard template.</b> <span class="t2">Plain white slides with no company branding, part of this site. ${!store?"":tp.team||tp.mine?"Choose another above to use it instead.":cd?"Upload your team's template or your own below to use it instead.":"Upload your own below, or ask Corp Dev to upload the team's, to use it instead."}</span></p>`;
+  // a chosen template that isn't there any more, or went missing at build time
+  const missing = tp.checked && !tp.err && chose && chose!==use ? `You chose ${chose==="mine"?"your own template":"the team template"}, but it isn't in storage any more, so ${tplWhat(use)} is used.` : "";
+  if(tp.note || missing) h+=`<div class="info" id="pfTplNote" role="status"><span>${esc(tp.note || missing)}</span></div>`;
+  if(store && (tp.checked || !tp.loading)){
+    const label=(who, have, upload, replace)=>up&&up!=="removing"&&tp.upWho===who ? (up==="checking"?"Checking the file…":"Uploading…") : have?replace:upload;
+    h+=`<div class="toolbar"><input type="file" id="pf_tplFileMine" class="sr" tabindex="-1" aria-hidden="true" accept=".pptx,${PPTX_TYPE}">
+      <button type="button" class="btn" data-act="pf-tpl-pick-mine" ${busy?"disabled":""}>${label("mine", tp.mine, "Upload my template", "Replace my template")}</button>
+      ${tp.mine&&!tp.removing?`<button type="button" class="btn" data-act="pf-tpl-remove" ${busy?"disabled":""}>Remove my template</button>`:""}`;
+    if(cd) h+=`<input type="file" id="pf_tplFile" class="sr" tabindex="-1" aria-hidden="true" accept=".pptx,${PPTX_TYPE}">
+      <button type="button" class="btn" data-act="pf-tpl-pick" ${busy?"disabled":""}>${label("team", tp.team, "Upload team template", "Replace team template")}</button>`;
+    h+=`</div>`;
+    if(tp.removing && tp.mine) h+=`<div class="notes" id="pfTplRemove" role="group" aria-label="Remove your template"><b>Remove your template?</b> Your profiles will be built on ${esc(tplWhat(TPL_ORDER.slice(1).find(tplHave)||"standard"))} instead. You can upload it again at any time.
+      <div class="inline"><button type="button" class="btn primary sm" data-act="pf-tpl-remove-yes" ${up?"disabled":""}>${up==="removing"?"Removing…":"Yes, remove it"}</button><button type="button" class="btn sm ghost" data-act="pf-tpl-remove-no" ${up?"disabled":""}>Keep it</button></div></div>`;
+    h+=`<p class="t2" id="pfTplHow" style="margin:0">A template is checked here before it is stored: a widescreen PowerPoint file (.pptx, up to 50 MB) with a cover layout and a title-only layout. If its layouts aren't named as the profile expects, the closest ones are used, and the page says which.</p>`;
   }
   if(tp.upErr) h+=`<p class="err" id="pfTplErr" role="alert">${esc(tp.upErr)}</p>`;
   if(tp.upNote) h+=`<div class="info" id="pfTplDone" role="status"><span>${esc(tp.upNote)}</span></div>`;
@@ -3185,7 +3280,7 @@ function renderProfile(){
   if(pfMode()==="filings") return fpRender();
   const pf=S.pf, s=pf.status, st=s&&s.statutory;
   let h=`<div><h2 class="action-title">Company profile as a PowerPoint file</h2>
-    <p class="sub">Choose a company or group, check what the profile will hold, then download it built on your team's template, with charts and tables you can edit.</p></div>`;
+    <p class="sub">Choose a company or group, check what the profile will hold, then download it built on your PowerPoint template, with charts and tables you can edit.</p></div>`;
   h+=fpModeHTML();
   if(pf.statusErr) h+= pf.statusErr.err==="not_deployed" ? `<div class="info" id="pfOff" role="status"><span>${esc(errText(pf.statusErr))}</span></div>` : `<div id="pfOff">${problemHTML(pf.statusErr, "Couldn't check whether profiles are set up.", "pf-status-retry")}</div>`;
   else if(!s) h+=`<div class="info" id="pfOff" role="status"><span>Checking whether statutory data is set up…</span></div>`;
@@ -3299,13 +3394,12 @@ async function fpSample(){
   const r=await callFn("snl-profile",{action:"filings_sample"});
   if(!S.session || S.pf.fp!==fp) return;
   fp.busy="";
-  if(r.data && r.data.facts && typeof r.data.facts==="object" && r.data.text){ fpTake(fp, r.data); if(pfHasTemplate()){ await fpMake(fp); return; } }
+  if(r.data && r.data.facts && typeof r.data.facts==="object" && r.data.text){ fpTake(fp, r.data); await fpMake(fp); return; }
   else if(r.err!=="signin") fp.err = r.data ? {err:"bad_answer", msg:"The profile function sent back something the page can't read. Try again."} : r;
   render();
 }
 async function fpBuild(plain){
   const pf=S.pf, fp=pf.fp; if(fp.busy || !fp.res) return;
-  if(!pfHasTemplate()){ fp.buildErr=tplErrText("nofile"); render(); return; }
   if(plain){ fp.draft=false; fp.draftErr=null; }
   if(!plain && fpDraftWanted() && !fp.drafted && fp.asked){
     fp.busy="draft"; fp.draftErr=null; fp.built=null; fp.buildErr=""; render();
@@ -3424,17 +3518,16 @@ function fpOutHTML(){
     h+=`<div class="${calm?"info":"banner"}" id="fpDraftErr" role="${calm?"status":"alert"}"><span>${esc(pfDraftErrText(r))}</span><span class="inline"><button type="button" class="btn sm primary" data-act="fp-build-plain" ${fp.busy?"disabled":""}>Build with plain text</button>${r.err==="busy"||!calm?`<button type="button" class="btn sm" data-act="fp-build">Try the draft again</button>`:""}</span></div>`; }
   if(fp.drafted && fp.drafted.text.by!=="claude" && !blank(fp.drafted.text.note) && fpDraftWanted()) h+=`<div class="info" id="fpNote" role="status"><span><b>The slides use plain text.</b> ${esc(fp.drafted.text.note)}</span></div>`;
   else if(fp.drafted && fp.drafted.text.by==="claude" && !blank(fp.drafted.text.note) && fpDraftWanted()) h+=`<div class="info" id="fpNote" role="status"><span><b>Some slides use plain text.</b> ${esc(fp.drafted.text.note)}</span></div>`;
-  if(fp.buildErr) h+=`<div class="banner" id="fpBuildErr" role="alert"><span>${esc(fp.buildErr)}</span>${pfHasTemplate()?`<button type="button" class="btn sm" data-act="fp-build">Try again</button>`:""}</div>`;
+  if(fp.buildErr) h+=`<div class="banner" id="fpBuildErr" role="alert"><span>${esc(fp.buildErr)}</span><button type="button" class="btn sm" data-act="fp-build">Try again</button></div>`;
   if(fp.built && !fp.busy) h+=`<div class="info" id="fpBuilt" role="status"><span><b>Your filings profile is ready.</b> ${esc(fp.built.name)} was saved to your downloads. It was made in this browser and isn't stored or sent anywhere.</span><button type="button" class="btn sm" data-act="fp-again">Download again</button></div>`;
-  const tpl=pfHasTemplate(), label=fpDraftWanted()&&!fp.drafted ? "Draft with Claude and build" : fp.built ? "Build again" : "Build the PowerPoint file";
-  if(!tpl) h+=`<p class="t2" id="fpNoTplNote">${isCorpDev()?"Upload your PowerPoint template below to build the file.":"The file can be built once Corp Dev uploads the template."}</p>`;
-  if(!fp.draftErr) h+=`<div class="toolbar"><button type="button" class="btn primary" id="fp_buildBtn" data-act="fp-build" ${fp.busy||!tpl||!fp.plan?"disabled":""}>${label}</button></div>`;
+  const label=fpDraftWanted()&&!fp.drafted ? "Draft with Claude and build" : fp.built ? "Build again" : "Build the PowerPoint file";
+  if(!fp.draftErr) h+=`<div class="toolbar"><button type="button" class="btn primary" id="fp_buildBtn" data-act="fp-build" ${fp.busy||!fp.plan?"disabled":""}>${label}</button>${pfOnTplHTML("fpOnTpl")}</div>`;
   return h+`</section>`;
 }
 function fpRender(){
   const pf=S.pf, fp=pf.fp;
   let h=`<div><h2 class="action-title">Company profile as a PowerPoint file</h2>
-    <p class="sub">A filings profile needs S&amp;P's filings alone: choose a company or a whole group and a period, check which slides it fills and what it costs, then download it built on your team's template, with charts and tables you can edit.</p></div>`;
+    <p class="sub">A filings profile needs S&amp;P's filings alone: choose a company or a whole group and a period, check which slides it fills and what it costs, then download it built on your PowerPoint template, with charts and tables you can edit.</p></div>`;
   h+=fpModeHTML();
   if(pf.statusErr) h+= pf.statusErr.err==="not_deployed" ? `<div class="info" id="pfOff" role="status"><span>${esc(errText(pf.statusErr))}</span></div>` : `<div id="pfOff">${problemHTML(pf.statusErr, "Couldn't check whether profiles are set up.", "pf-status-retry")}</div>`;
   else if(fpFilingsOff()) h+=`<div class="info" id="fpOff" role="status"><span><b>S&amp;P filings aren't set up yet,</b> so a new filings profile can't be searched. A profile whose search was run before still opens from its saved result. You can build the sample below meanwhile.</span></div>`;
@@ -5967,6 +6060,11 @@ document.addEventListener("click", e=>{
     case "pf-again": pfDownloadAgain(); break;
     case "pf-sample": pfSample(); break;
     case "pf-tpl-pick": document.getElementById("pf_tplFile")?.click(); break;
+    case "pf-tpl-pick-mine": document.getElementById("pf_tplFileMine")?.click(); break;
+    case "pf-tpl-use": pickTemplate(t.dataset.k); break;
+    case "pf-tpl-remove": S.pf.tpl.removing=true; S.pf.tpl.upErr=""; S.pf.tpl.upNote=""; render(); break;
+    case "pf-tpl-remove-no": S.pf.tpl.removing=false; render(); break;
+    case "pf-tpl-remove-yes": removeMyTemplate(); break;
     case "pf-tpl-retry": S.pf.tpl.checked=false; checkTemplate(); break;
     case "pf-mode": S.pf.mode=t.dataset.m==="full"?"full":"filings"; render(); break;
     case "fp-find": fpLookup(); break;

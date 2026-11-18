@@ -1,12 +1,14 @@
 // SNLDeck: builds a PowerPoint file (.pptx) on the team's own template, in the browser. It knows PowerPoint files and
 // nothing about insurance. Needs window.JSZip (3.10.1), loaded first. Plain script: no modules, no build step.
 //
-//   SNLDeck.inspect(bytes)       -> Promise<{ok:true, slides, widthIn, heightIn} | {ok:false, message}>
+//   SNLDeck.inspect(bytes)       -> Promise<{ok:true, slides, widthIn, heightIn, layouts:{cover:{name, named}, content:{name, named}}, note}
+//                                    | {ok:false, message}>   (note: a plain sentence saying which layouts were matched, or "")
 //   SNLDeck.build(bytes, spec)   -> Promise<Uint8Array>   (rejects with an Error whose message is a plain sentence)
 //
 // build opens the template (a zip of XML parts), removes its example slides cleanly (slide list, relationships,
 // content types, slide parts, notes, and any picture, chart or embedded file nothing else uses), then adds the
-// spec's slides on the template's own layouts, found by name. Everything is positioned in inches.
+// spec's slides on the template's own layouts: found by name, or else the closest match (see pickLayouts), so an
+// ordinary corporate template works too. Everything is positioned in inches.
 //
 // spec = { fileName?, layouts?: {cover, content}, slides: [ slide ] }
 //   cover slide:   { kind:"cover", kicker, title, subtitle }               (filled as the layout's placeholders)
@@ -205,18 +207,68 @@
     var number = phs.filter(function (p) { return p.type === "sldNum"; })[0] || null;
     return { title: title, subtitle: subtitle, kicker: kicker, number: number };
   }
+  // ---------- choosing the layouts ----------
+  // The layouts named in names (exactly, or with different spacing or letter case) when they have a title box.
+  // Otherwise the closest match, so an ordinary corporate template works too:
+  //   cover:   a layout with a title and a subtitle box (PowerPoint's "Title Slide" is the model)
+  //   content: a layout with a title box and as little else as possible (PowerPoint's "Title Only")
+  // Ties go to the layout listed first in the template. Pictures and footers drawn on a layout don't matter.
+  var DECOR = { dt: 1, ftr: 1, sldNum: 1, hdr: 1 };
+  var FILLS = { pic: 1, chart: 1, tbl: 1, dgm: 1, media: 1, clipArt: 1 };
+  function layoutType(l) { return l.doc.documentElement.getAttribute("type") || ""; }
+  function coverScore(l) {
+    var r = roles(l);
+    if (!r.title || !r.subtitle || r.subtitle.type === "obj") return -1;
+    var s = 1;
+    if (layoutType(l) === "title") s += 8;
+    if (r.title.type === "ctrTitle") s += 4;
+    if (r.subtitle.type === "subTitle") s += 4;
+    if (/\b(title slide|cover)\b/i.test(l.name)) s += 2;
+    if (placeholders(l.doc).some(function (p) { return FILLS[p.type]; })) s -= 3;   // a cover that expects a picture would show it empty
+    return Math.max(s, 0);
+  }
+  function contentScore(l) {
+    var r = roles(l);
+    if (!r.title) return -1;
+    var others = placeholders(l.doc).filter(function (p) { return p.el !== r.title.el && !DECOR[p.type]; });
+    var s = 1;
+    if (layoutType(l) === "titleOnly") s += 8;
+    if (/\btitle only\b/i.test(l.name)) s += 4;
+    if (!others.length) s += 4;
+    if (r.number) s += 1;
+    if (r.title.type === "ctrTitle") s -= 2;
+    return Math.max(s, 0);
+  }
+  function best(pkg, score, avoid) {
+    var top = null, topScore = -1;
+    pkg.layouts.forEach(function (l) { var s = score(l); if (s > topScore || (s === topScore && top === avoid && l !== avoid)) { top = l; topScore = s; } });
+    return topScore < 0 ? null : top;
+  }
+  function quoted(l) { return l.name ? "\"" + l.name + "\"" : "an unnamed layout"; }
+  // -> {cover:{layout, named}, content:{layout, named}, note} or {problem}
+  function pickLayouts(pkg, names) {
+    var cl = findLayout(pkg, names.cover), tl = findLayout(pkg, names.content), notes = [];
+    var cover = cl && roles(cl).title ? { layout: cl, named: true } : null;
+    var content = tl && roles(tl).title ? { layout: tl, named: true } : null;
+    if (!cover) {
+      var c = best(pkg, coverScore, content && content.layout);
+      if (!c) return { problem: "Your template has no layout the profile can use for the cover. It needs a layout named \"" + names.cover + "\", or one with a title box and a subtitle box, like PowerPoint's \"Title Slide\"." };
+      cover = { layout: c, named: false };
+      notes.push("It has no layout named \"" + names.cover + "\", so the cover uses " + quoted(c) + ".");
+    }
+    if (!content) {
+      var t = best(pkg, contentScore, cover.layout);
+      if (!t) return { problem: "Your template has no layout the profile can use for its other slides. It needs a layout named \"" + names.content + "\", or one with a title box, like PowerPoint's \"Title Only\"." };
+      content = { layout: t, named: false };
+      notes.push("It has no layout named \"" + names.content + "\", so the other slides use " + quoted(t) + ".");
+    }
+    return { cover: cover, content: content, note: notes.join(" ") };
+  }
   function check(pkg, names) {
     var w = Math.round(pkg.widthIn * 100) / 100, h = Math.round(pkg.heightIn * 100) / 100;
     if (Math.abs(pkg.widthIn - SLIDE_W) > 0.05 || Math.abs(pkg.heightIn - SLIDE_H) > 0.05)
-      return "Your template's slides are " + w + " x " + h + " in, but the profile is laid out for widescreen slides (13.33 x 7.5 in). Check you chose your team's PowerPoint template.";
-    var missing = [names.cover, names.content].filter(function (n) { return !findLayout(pkg, n); });
-    if (missing.length)
-      return "Your template has no layout named " + missing.map(function (n) { return "\"" + n + "\""; }).join(" or ") +
-        ". The profile uses \"" + names.cover + "\" for the cover and \"" + names.content + "\" for the other slides. Check you chose your team's PowerPoint template.";
-    var cover = roles(findLayout(pkg, names.cover)), content = roles(findLayout(pkg, names.content));
-    if (!cover.title) return "The \"" + names.cover + "\" layout in your template has no title box, so the cover can't be filled in.";
-    if (!content.title) return "The \"" + names.content + "\" layout in your template has no title box, so slide titles can't be filled in.";
-    return "";
+      return { problem: "Your template's slides are " + w + " x " + h + " in, but the profile is laid out for widescreen slides (13.33 x 7.5 in). Choose a widescreen PowerPoint template." };
+    return pickLayouts(pkg, names);
   }
   function slideList(pkg) {
     var lst = kid(pkg.pres.documentElement, NS.p, "sldIdLst");
@@ -225,9 +277,10 @@
 
   function inspect(bytes) {
     return open(bytes).then(function (pkg) {
-      var problem = check(pkg, LAYOUTS);
-      if (problem) return { ok: false, message: problem };
-      return { ok: true, slides: slideList(pkg).length, widthIn: Math.round(pkg.widthIn * 100) / 100, heightIn: Math.round(pkg.heightIn * 100) / 100 };
+      var pick = check(pkg, LAYOUTS);
+      if (pick.problem) return { ok: false, message: pick.problem };
+      return { ok: true, slides: slideList(pkg).length, widthIn: Math.round(pkg.widthIn * 100) / 100, heightIn: Math.round(pkg.heightIn * 100) / 100,
+        layouts: { cover: { name: pick.cover.layout.name, named: pick.cover.named }, content: { name: pick.content.layout.name, named: pick.content.named } }, note: pick.note };
     }, function (e) { return { ok: false, message: e.message }; });
   }
 
@@ -634,9 +687,9 @@
     var pkg, ct;
     return open(bytes).then(function (p) {
       pkg = p;
-      var problem = check(pkg, names);
-      if (problem) throw new Error(problem);
-      var cl = findLayout(pkg, names.cover), tl = findLayout(pkg, names.content);
+      var pick = check(pkg, names);
+      if (pick.problem) throw new Error(pick.problem);
+      var cl = pick.cover.layout, tl = pick.content.layout;
       var cover = { layout: cl, roles: roles(cl) }, content = { layout: tl, roles: roles(tl) };
       // draw first, so a bad spec fails before the template is touched
       pkg.drawn = spec.slides.map(function (sl, i) {

@@ -7,6 +7,7 @@ const { chromium } = require("playwright"); const fs = require("fs"); const path
 const JSZip = require("jszip");
 const ROOT = path.join(__dirname, "../..");
 const TEMPLATE = fs.readFileSync(path.join(ROOT, "tests/fixtures/standin-template.pptx"));
+const STANDARD = fs.readFileSync(path.join(ROOT, "web/standard-template.pptx"));
 let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else { fail++; console.log("FAIL " + n + "  " + JSON.stringify(x === undefined ? "" : x).slice(0, 600)); } };
 const EMU = v => Math.round(v * 914400);
 const NAVY = "262166", MAG = "EB008C";
@@ -87,6 +88,7 @@ const EVIL = '<script>alert(1)</script> & "q" \u0001\u0008\u000B ]]> \uFFFE <p:s
   // ----- inspect -----
   let r = await inspect(TEMPLATE);
   ok("inspect: the stand-in template is usable, with its size and example slide count", r.ok === true && r.slides === 3 && r.widthIn === 13.33 && r.heightIn === 7.5, r);
+  ok("inspect: its layouts are found by name, so there is nothing to say about them", JSON.stringify(r.layouts) === JSON.stringify({ cover: { name: "Title White", named: true }, content: { name: "Spectrum Title Only White", named: true } }) && r.note === "", r);
   r = await inspect(Buffer.from("this is just text, not a presentation"));
   ok("inspect: a text file is refused in plain words", r.ok === false && r.message === "This file isn't a PowerPoint file. Choose your template saved as a .pptx file.", r);
   const notPres = new JSZip(); notPres.file("word/document.xml", "<w:document/>"); notPres.file("_rels/.rels", '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
@@ -97,18 +99,31 @@ const EVIL = '<script>alert(1)</script> & "q" \u0001\u0008\u000B ]]> \uFFFE <p:s
   r = await inspect(Buffer.alloc(0));
   ok("inspect: an empty file is refused", r.ok === false && /empty/.test(r.message), r);
   async function variant(fn) { const z = await JSZip.loadAsync(TEMPLATE); await fn(z); return z.generateAsync({ type: "nodebuffer" }); }
-  const noCover = await variant(async z => { for (const n of names(z).filter(n => /slideLayouts\/slideLayout\d+\.xml$/.test(n))) z.file(n, (await read(z, n)).replace('name="Title White"', 'name="Title Blue"')); });
+  // ----- layouts not named as the profile expects: the closest match, and a note saying which -----
+  const layoutNames = async (z, map) => { for (const n of names(z).filter(n => /slideLayouts\/slideLayout\d+\.xml$/.test(n))) { let x = await read(z, n); for (const [a, b2] of map) x = x.replace(a, b2); z.file(n, x, { createFolders: false }); } };   // Office files have no folder entries
+  const noCover = await variant(z => layoutNames(z, [['name="Title White"', 'name="Title Blue"']]));
   r = await inspect(noCover);
-  ok("inspect: a template without the cover layout names it", r.ok === false && r.message === 'Your template has no layout named "Title White". The profile uses "Title White" for the cover and "Spectrum Title Only White" for the other slides. Check you chose your team\'s PowerPoint template.', r);
-  const noLayouts = await variant(async z => { for (const n of names(z).filter(n => /slideLayouts\/slideLayout\d+\.xml$/.test(n))) z.file(n, (await read(z, n)).replace(/<p:cSld name="[^"]*"/, '<p:cSld name="Other"')); });
-  r = await inspect(noLayouts);
-  ok("inspect: a template without either layout names both", r.ok === false && r.message.startsWith('Your template has no layout named "Title White" or "Spectrum Title Only White".'), r);
+  ok("inspect: no cover layout by that name: the title slide layout is used, and the note says so", r.ok === true && r.layouts.cover.name === "Title Blue" && r.layouts.cover.named === false && r.layouts.content.named === true &&
+    r.note === 'It has no layout named "Title White", so the cover uses "Title Blue".', r);
+  // a corporate template: its own names, and no layout types to go by, so only the placeholders tell
+  const corporate = await variant(z => layoutNames(z, [['name="Title White"', 'name="Cover page"'], ['name="Spectrum Title Only White"', 'name="Heading"'], [/<p:sldLayout([^>]*?) type="\w+"/, "<p:sldLayout$1"]]));
+  r = await inspect(corporate);
+  ok("inspect: a corporate template's own layouts are matched by their boxes: title and subtitle for the cover, a title alone for the rest", r.ok === true &&
+    JSON.stringify(r.layouts) === JSON.stringify({ cover: { name: "Cover page", named: false }, content: { name: "Heading", named: false } }) &&
+    r.note === 'It has no layout named "Title White", so the cover uses "Cover page". It has no layout named "Spectrum Title Only White", so the other slides use "Heading".', r);
   const narrow = await variant(async z => z.file("ppt/presentation.xml", (await read(z, "ppt/presentation.xml")).replace(/<p:sldSz cx="\d+"/, '<p:sldSz cx="9144000"')));
   r = await inspect(narrow);
-  ok("inspect: a 4:3 template is refused with its size", r.ok === false && r.message.startsWith("Your template's slides are 10 x 7.5 in, but the profile is laid out for widescreen slides (13.33 x 7.5 in)."), r);
+  ok("inspect: a 4:3 template is still refused with its size", r.ok === false && r.message === "Your template's slides are 10 x 7.5 in, but the profile is laid out for widescreen slides (13.33 x 7.5 in). Choose a widescreen PowerPoint template.", r);
   const noTitle = await variant(async z => { for (const n of names(z).filter(n => /slideLayouts\/slideLayout\d+\.xml$/.test(n))) { const x = await read(z, n); if (x.includes('name="Spectrum Title Only White"')) z.file(n, x.replace('<p:ph type="title"/>', '<p:ph type="body" idx="13"/>')); } });
   r = await inspect(noTitle);
-  ok("inspect: a content layout without a title box is refused", r.ok === false && r.message === 'The "Spectrum Title Only White" layout in your template has no title box, so slide titles can\'t be filled in.', r);
+  ok("inspect: the named content layout has no title box: another layout with one is used instead, never the cover", r.ok === true && r.layouts.content.named === false && ["Title and Content", "Section Header"].includes(r.layouts.content.name) &&
+    r.note === `It has no layout named "Spectrum Title Only White", so the other slides use "${r.layouts.content.name}".`, r);
+  const noTitles = await variant(z => layoutNames(z, [[/<p:ph type="(ctrTitle|title)"\/>/g, '<p:ph type="body" idx="14"/>']]));
+  r = await inspect(noTitles);
+  ok("inspect: no layout with a title box at all: refused, saying what a cover layout needs", r.ok === false && r.message === 'Your template has no layout the profile can use for the cover. It needs a layout named "Title White", or one with a title box and a subtitle box, like PowerPoint\'s "Title Slide".', r);
+  const coverOnly = await variant(z => layoutNames(z, [[/<p:ph type="title"\/>/g, '<p:ph type="body" idx="14"/>']]));
+  r = await inspect(coverOnly);
+  ok("inspect: a title box only on the cover layout: the cover's own layout is used for the rest too", r.ok === true && r.layouts.cover.name === "Title White" && r.layouts.content.name === "Title White", r);
 
   // the layouts in the stand-in are not numbered in order, so the builder must find them by name
   const tz = await JSZip.loadAsync(TEMPLATE);
@@ -218,8 +233,31 @@ const EVIL = '<script>alert(1)</script> & "q" \u0001\u0008\u000B ]]> \uFFFE <p:s
   // ----- what build refuses -----
   r = await build(Buffer.from("not a pptx"), SPEC);
   ok("build: a non-PowerPoint file is refused with an Error in plain words", !r.ok && r.isError && r.message === "This file isn't a PowerPoint file. Choose your template saved as a .pptx file.", r);
-  r = await build(noCover, SPEC);
-  ok("build: a template without the layouts is refused with the inspect message", !r.ok && r.message.startsWith('Your template has no layout named "Title White".'), r);
+  r = await build(noTitles, SPEC);
+  ok("build: a template with no usable layout is refused with the inspect message", !r.ok && r.message.startsWith("Your template has no layout the profile can use for the cover."), r);
+  r = await build(corporate, SPEC);
+  z = await unzip(r);
+  const cSlides = (await slides(z)).map(x => x.layoutName), cProblems = await packageProblems(z);
+  ok("build: a corporate template's matched layouts are the ones used", r.ok && JSON.stringify(cSlides) === JSON.stringify(["Cover page", "Heading", "Heading"]) && cProblems.length === 0, [cSlides, cProblems]);
+
+  // ----- the standard template that ships with the site (web/standard-template.pptx) -----
+  r = await inspect(STANDARD);
+  ok("standard: usable as it is, widescreen, no slides of its own, both layouts found by name", r.ok === true && r.slides === 0 && r.widthIn === 13.33 && r.heightIn === 7.5 &&
+    JSON.stringify(r.layouts) === JSON.stringify({ cover: { name: "Title White", named: true }, content: { name: "Spectrum Title Only White", named: true } }) && r.note === "", r);
+  const sz = await JSZip.loadAsync(STANDARD), sNames = names(sz);
+  const sText = (await Promise.all(sNames.filter(n => /\.(xml|rels)$/.test(n)).map(n => read(sz, n)))).join("\n");
+  ok("standard: no pictures, media, embedded files, thumbnail or macros", !sNames.some(n => /media\/|embeddings\/|thumbnail|vbaProject|\.(png|jpe?g|gif|emf|wmf|svg|bin)$/i.test(n)), sNames);
+  ok("standard: no company name or person in it (the name built from pieces, as orgname.test.mjs does)", !new RegExp(["a", "s", "c", "o", "t"].join("") + "|lloyd|python-pptx|steve|canny", "i").test(sText.replace(/name="Spectrum Title Only White"/g, "")) && /<dc:creator><\/dc:creator>/.test(await read(sz, "docProps/core.xml")) && /<cp:lastModifiedBy><\/cp:lastModifiedBy>/.test(await read(sz, "docProps/core.xml")));
+  const theme = await read(sz, "ppt/theme/theme1.xml");
+  ok("standard: a neutral theme in Arial, none of the house colours", /<a:theme [^>]*name="Standard"/.test(theme) && (theme.match(/<a:latin typeface="Arial"/g) || []).length >= 2 && !new RegExp(NAVY + "|" + MAG + "|E6007E|1E2761|2B2464", "i").test(sText));
+  ok("standard: five layouts, in an order and with names a person can work with", JSON.stringify(await Promise.all(sNames.filter(n => /slideLayouts\/slideLayout\d+\.xml$/.test(n)).map(async n => (await read(sz, n)).match(/<p:cSld name="([^"]*)"/)[1])).then(a => a.sort())) === JSON.stringify(["Blank", "Section Header", "Spectrum Title Only White", "Title White", "Title and Content"]));
+  r = await build(STANDARD, SPEC);
+  z = await unzip(r);
+  const sSlides = await slides(z);
+  ok("standard: a whole deck builds on it, with no package problems and well-formed parts", r.ok && sSlides.length === 3 && (await packageProblems(z)).length === 0 &&
+    (await wellFormed(await Promise.all(names(z).filter(n => /\.(xml|rels)$/.test(n)).map(async n => [n, await read(z, n)])))).length === 0);
+  ok("standard: on the layouts by name, with the cover's kicker, title and subtitle and the slide numbers filled", JSON.stringify(sSlides.map(x => x.layoutName)) === JSON.stringify(["Title White", "Spectrum Title Only White", "Spectrum Title Only White"]) &&
+    /idx="10"\/>.*Corporate development \| November 2026/.test(sSlides[0].xml) && /<p:ph type="subTitle" idx="1"\/>/.test(sSlides[0].xml) && /type="slidenum"><a:rPr lang="en-US"\/><a:t>2</.test(sSlides[1].xml));
   r = await build(TEMPLATE, { slides: [] });
   ok("build: an empty plan is refused", !r.ok && r.message === "There are no slides to build.", r);
   r = await build(TEMPLATE, { slides: [{ kind: "content", title: "t", items: [{ type: "tile", y: 1, w: 1, h: 1, value: "1", label: "x" }] }] });
