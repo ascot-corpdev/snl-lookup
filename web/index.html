@@ -425,6 +425,41 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 @media (max-width:1100px){.sntiles{grid-template-columns:repeat(3,minmax(0,1fr))}.sngrid,.sngrid.half{grid-template-columns:minmax(0,1fr)}}
 @media (max-width:820px){.snmap text{display:none}}
 @media (max-width:560px){.sntiles{grid-template-columns:repeat(2,minmax(0,1fr))}.sntile b{font-size:20px}}
+/* Programs and forms (#forms): two to four carriers' form filings and what their saved summaries say, side by side.
+   Wide tables scroll inside their own box; on a phone the filings lists become cards. */
+.fcout{display:flex;flex-direction:column;gap:26px;min-width:0}
+.fcout:empty{display:none}
+.fcblk{display:flex;flex-direction:column;gap:12px;min-width:0;border-top:2px solid var(--ink);padding-top:12px}
+.fcblk>.blk-h h3{font-size:16px}
+.fccar{display:flex;flex-direction:column;gap:8px;min-width:0}
+.fccar+.fccar{border-top:1px solid var(--grid);padding-top:14px}
+.fccar h4{margin:0;font-size:15px;overflow-wrap:anywhere}
+.fcsel{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 14px}
+.fcopts{display:flex;flex-wrap:wrap;gap:10px 24px;align-items:flex-end;min-width:0}
+.fcopts>*{min-width:0}
+.fcprog th,.fcprog td{min-width:220px}
+.fcprog th:first-child,.fcprog td:first-child{min-width:120px;width:140px}
+.fcprog ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+.fcprog li{min-width:0;overflow-wrap:anywhere}
+.fcq{display:block;font-size:12px;color:var(--ink);margin:3px 0;padding-left:8px;border-left:2px solid var(--grid);font-style:italic}
+.fcsrc{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;margin-top:3px}
+.fcsrc .t2{overflow-wrap:anywhere}
+.fcsay td{background:var(--tile)!important;font-weight:bold}
+.fcnone{color:var(--muted);font-size:12px}
+.fcforms td{overflow-wrap:normal}
+.fcforms td.c-t{min-width:200px;overflow-wrap:anywhere}
+.fcforms td.c-n{white-space:nowrap;font-weight:bold}
+.fcforms tr.fcold td{background:var(--surface);color:var(--muted)}
+.fcforms tr.fcold td.c-n{font-weight:normal;padding-left:22px}
+.fcnotes{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px}
+.fcnotes li{min-width:0;overflow-wrap:anywhere}
+.fcfiled td.c-sum{min-width:260px;overflow-wrap:anywhere}
+.fcfiled .c-sum p{margin:0 0 4px}
+.fcres{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px;font-size:13px}
+.fcres li{overflow-wrap:anywhere}
+.fcres .no{color:var(--magenta)}
+.fcmk{display:flex;flex-direction:column;gap:10px;min-width:0}
+@media (max-width:700px){.fcsel{grid-template-columns:1fr}.fcprog th,.fcprog td{min-width:190px}.fcprog th:first-child,.fcprog td:first-child{min-width:96px;width:96px}}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
@@ -1576,6 +1611,7 @@ function askScreen(){
   }
   if(S.view==="profile") return pfScreen();
   if(S.view==="snapshot") return snapScreen();
+  if(S.view==="forms") return fcScreen();
   return null;
 }
 /* The same thing in one plain line, so what Claude is told is never a surprise. */
@@ -3175,6 +3211,563 @@ function snapToldText(sc, past){
   return `${past?"Claude started":"Claude starts"} from this carrier and period: ${sp.name||"the snapshot's companies"}${sp.kind==="group"?` and its ${plural(n,"company","companies")}`:""}, filings published ${fmtDay(s.from)} to ${fmtDay(s.to)} in ${plural(s.states.length,"state")}, every filing type and status. ${plural(sc.total,"filing")} on screen${sp.capped?", a partial result":""}.`;
 }
 
+/* ---------- Programs and forms: two to four carriers' form filings in one state, and what saved summaries say ----------
+   Page only, at the address #forms (no tab yet). It looks carriers up with the snl-filings "resolve" action, runs saved
+   searches ("search": one where the limits allow, otherwise several in turn) for one state, one type of insurance and
+   form filings, asks snl-digest for the saved summary of every filing found ("get", which costs nothing), makes new
+   summaries only when the reader chooses ("make", one filing a call), and lays out the programs, forms and notes the
+   saved summaries hold, each with its filing and page.
+   For the Compare view: renderForms() returns the view's HTML, enterForms() is called when it is shown, and
+   resetForms() forgets everything in it (resetState calls it on sign-out). */
+VIEWS.push("forms");
+FN["snl-digest"]="the summaries function";
+const FC_MIN=2, FC_MAX=4, FC_YEARS=[1,3,5], FC_MAKE_MAX=5, FC_MAKE_DEFAULT=2, FC_GET_BATCH=50;
+const FC_READ_PAGES=150;           // the front pages one summary reads at most (Claude's read limit, LIMITS in _shared/chat.ts)
+const FC_USD_150=[2.30, 3.50];     // what Claude reading 150 pages costs, from the README's cost section; an estimate
+const FC_SEGMENTS=["private client","middle market","standard","other"];
+const FC_ACTIONS=["new","revised","replaced","withdrawn","unchanged"];
+function freshForms(){ return {find:{q:"", asked:"", matches:null, groups:[], busy:false, err:""}, picks:[], picking:"", pickErr:"", state:"", toi:"", years:3, wide:false, formErr:"",
+  busy:false, step:null, ran:null, runs:null, dst:null, dstBusy:false, dErr:null, digests:{}, asked:{}, getBusy:false, getErr:null, n:String(FC_MAKE_DEFAULT), mk:null, results:{}, open:{}}; }
+S.fc=freshForms();
+function resetForms(){ S.fc=freshForms(); }
+function enterForms(){
+  fcSetHook();
+  if(!S.refs && !S.refsLoading) loadRefs(false);
+  if(!S.fc.dst && !S.fc.dErr && !S.fc.dstBusy) fcDigestStatus();
+  if(!S.chatUseAt || Date.now()-S.chatUseAt>60000) loadChatUse().then(()=>{ if(S.session && S.view==="forms") render(); });
+}
+/* Saved carrier sets (Contract A), when the sets block is on the page: a set of up to four companies gives one carrier
+   each; a bigger set is one carrier named after the set. Registered late, so it works wherever the sets block sits. */
+function fcSetHook(){ try{ if(typeof SET_TARGETS!=="undefined" && SET_TARGETS && !SET_TARGETS.forms) SET_TARGETS.forms=fcFromSet; }catch{} }
+function fcSetPickHTML(){ try{ return typeof setPickHTML==="function" ? String(setPickHTML("forms")||"") : ""; }catch{ return ""; } }
+function fcFromSet(companies, set){
+  const fc=S.fc; if(fc.busy) return;
+  const list=[], seen=new Set();
+  for(const c of Array.isArray(companies)?companies:[]){ if(!c || !["companyId","institutionId"].includes(c.kind) || !/^\d{1,12}$/.test(String(c.id??"").trim())) continue;
+    const k=c.kind+":"+String(c.id).trim(); if(seen.has(k)) continue; seen.add(k); list.push({kind:c.kind, id:String(c.id).trim(), name:blank(c.name)?"":String(c.name)}); }
+  const name=set&&!blank(set.name) ? String(set.name).slice(0,80) : "Saved set";
+  if(!list.length){ toast(`${name} has no companies with an S&P id, so nothing was added.`); return; }
+  if(list.length<=FC_MAX){
+    fc.picks=list.map(c=>({kind:"company", name:c.name||`S&P ${c.kind==="companyId"?"company":"institution"} id ${c.id}`, group:"", ids:[c], noId:0, cut:false}));
+    toast(`Each company in ${name} is now a carrier to compare.`);
+  } else {
+    if(fc.picks.length>=FC_MAX){ toast(`You can compare at most ${FC_MAX} carriers. Remove one to add ${name}.`); return; }
+    fc.picks.push({kind:"set", name, group:"", ids:list, noId:0, cut:false, over:list.length>MAX_COMPANIES});
+    toast(`${name} has ${count(list.length)} companies, so it was added as one carrier.`);
+  }
+  fc.formErr=""; fc.pickErr=""; render();
+}
+
+/* ----- choosing carriers: a company, or a whole group, from the company list (as the Snapshot does) ----- */
+async function fcLookup(){
+  const fc=S.fc, fd=fc.find, q=fd.q.trim();
+  if(!q){ fd.matches=null; fd.groups=[]; fd.err="Type part of a company or group name."; render(); return; }
+  fd.busy=true; fd.err=""; fd.matches=null; fd.groups=[]; fd.asked=q; fc.pickErr=""; render();
+  const r=await callFn("snl-filings",{action:"resolve", q});
+  if(!S.session || S.fc!==fc || fd.asked!==q) return;
+  fd.busy=false;
+  if(r.data){ fd.matches=Array.isArray(r.data.matches)?r.data.matches.filter(m=>m&&typeof m==="object"):[]; fd.groups=Array.isArray(r.data.groups)?r.data.groups.filter(g=>g&&typeof g==="object"&&Array.isArray(g.members)):[]; }
+  else if(r.err!=="signin") fd.err="Couldn't look that up. "+errText(r);
+  render();
+}
+// the groups to offer: whole groups the function listed, then groups named by the matching companies
+function fcGroupList(fd){
+  const out=[], seen=new Set();
+  for(const g of fd.groups||[]){ const name=blank(g.name)?"":String(g.name).trim(); if(!name || seen.has(name.toLowerCase())) continue; seen.add(name.toLowerCase()); out.push({name, key:name.toLowerCase(), whole:g}); }
+  for(const g of snapGroups(fd.matches||[])) if(!seen.has(g.key)){ seen.add(g.key); out.push({name:g.name, key:g.key, n:g.n}); }
+  return out;
+}
+function fcWholePick(name, whole){
+  const seen=new Set(), ids=[], n=v=>isNum(v)?Math.max(0, Math.round(+v)):0;
+  for(const m of whole.members){ const id=m&&typeof m==="object"?snapIdOf(m):null, k=id&&id.kind+":"+id.id; if(id && !seen.has(k)){ seen.add(k); ids.push(id); } }
+  return {kind:"group", name, group:name, ids, noId:Math.max(0, n(whole.companies)-n(whole.searchable)), cut:false, over:!!whole.tooBig || n(whole.searchable)>ids.length};
+}
+function fcAddPick(pk){
+  const fc=S.fc, key=p=>p.ids.map(c=>c.kind+":"+c.id).sort().join(",");
+  fc.picking="";
+  if(fc.picks.length>=FC_MAX){ fc.pickErr=`You can compare at most ${FC_MAX} carriers. Remove one to add another.`; render(); return; }
+  if(pk.ids.length && fc.picks.some(p=>key(p)===key(pk))){ toast(`${pk.name} is already chosen.`); fc.find.matches=null; fc.find.groups=[]; render(); return; }
+  fc.picks.push(pk); fc.find.matches=null; fc.find.groups=[]; fc.find.q=""; fc.formErr=""; fc.pickErr=""; render();
+  document.getElementById(fc.picks.length<FC_MAX?"fc_find":"fc_state")?.focus();
+}
+function fcChooseCompany(i){
+  const fc=S.fc, m=fc.find.matches&&fc.find.matches[i], id=m&&snapIdOf(m); if(!id || fc.busy) return;
+  fcAddPick({kind:"company", name:id.name||`S&P ${id.kind==="companyId"?"company":"institution"} id ${id.id}`, group:blank(m.naicGroupName)?"":String(m.naicGroupName), ids:[id], noId:0, cut:false});
+}
+async function fcChooseGroup(i){
+  const fc=S.fc, fd=fc.find, g=fcGroupList(fd)[i]; if(!g || fc.picking || fc.busy) return;
+  if(fc.picks.length>=FC_MAX){ fc.pickErr=`You can compare at most ${FC_MAX} carriers. Remove one to add another.`; render(); return; }
+  if(g.whole){ fcAddPick(fcWholePick(g.name, g.whole)); return; }
+  fc.picking=g.name; fc.pickErr=""; render();
+  let found=(fd.matches||[]).slice(), cut=false;
+  const q=snapGroupQuery(g.name);
+  if(q.length>=2){
+    const r=await callFn("snl-filings",{action:"resolve", q});
+    if(!S.session || S.fc!==fc || fc.picking!==g.name) return;
+    if(!r.data){ fc.picking=""; fc.pickErr="Couldn't list the group's companies. "+errText(r); render(); return; }
+    const whole=(Array.isArray(r.data.groups)?r.data.groups:[]).find(x=>x&&typeof x==="object"&&Array.isArray(x.members)&&String(x.name??"").trim().toLowerCase()===g.key);
+    if(whole){ fcAddPick(fcWholePick(g.name, whole)); return; }
+    const ms=Array.isArray(r.data.matches)?r.data.matches.filter(m=>m&&typeof m==="object"):[];
+    cut=ms.length>=SNAP_LOOKUP_MAX; found=found.concat(ms);
+  }
+  const seen=new Set(), ids=[]; let noId=0;
+  for(const m of found){
+    if(blank(m.naicGroupName) || String(m.naicGroupName).trim().toLowerCase()!==g.key) continue;
+    const id=snapIdOf(m), k=id ? id.kind+":"+id.id : "n:"+String(m.companyName??"").toLowerCase();
+    if(seen.has(k)) continue; seen.add(k);
+    if(id) ids.push(id); else noId++;
+  }
+  fcAddPick({kind:"group", name:g.name, group:g.name, ids, noId, cut});
+}
+
+/* ----- what is searched, and what it costs ----- */
+/* UNCONFIRMED: which of S&P's filing types are form filings. S&P's list of filing types (serffFilingType) has short
+   names such as "Form", "Rate", "Rule" and "Rate and rule" (Live check, 18 Nov 2026). A type counts as a form filing
+   when its name contains "form"; with the tick for rule and rate filings, also when it names a rule or a rate. Change
+   only this function if S&P names them some other way. */
+function fcFilingTypes(wide){
+  return refOptions("serffFilingType").map(o=>({id:Number(o.id), name:String(o.name??"")})).filter(o=>Number.isInteger(o.id))
+    .filter(o=>{ const n=o.name.toLowerCase(); return n.includes("form") || (wide && /\b(rules?|rates?)\b/.test(n)); });
+}
+const fcToiName = id => { const o=refOptions("typeOfInsurance").find(x=>String(x.id)===String(id)); return o ? String(o.name) : ""; };
+const fcStateName = s => s ? snapStateName(s) : "";
+const fcUniq = ids => { const seen=new Set(); return ids.filter(c=>{ const k=c.kind+":"+c.id; if(seen.has(k)) return false; seen.add(k); return true; }); };
+/* The carriers packed, in order, into as few searches as the limits allow: each search at most MAX_COMPANIES companies
+   and SNAP_MAX_REQUESTS S&P requests (one for each 10 ids of a kind for each 365 days, as snapCost counts). */
+function fcPlan(picks, years){
+  const rg=snapRange(years), out=[];
+  picks.forEach((pk,i)=>{
+    const s=out.find(x=>{ const m=fcUniq(x.ids.concat(pk.ids)); return m.length<=MAX_COMPANIES && snapCost(m, rg.from, rg.to)<=SNAP_MAX_REQUESTS; });
+    if(s){ s.ids=fcUniq(s.ids.concat(pk.ids)); s.carriers.push(i); } else out.push({ids:fcUniq(pk.ids), carriers:[i]});
+  });
+  return out.map(s=>({...s, cost:snapCost(s.ids, rg.from, rg.to)}));
+}
+function fcPickProblem(pk, years){
+  if(!pk.ids.length) return pk.kind==="group" ? `None of the companies in ${pk.name} has an S&P id in the company list, so its filings can't be searched. Remove it.` : `${pk.name} has no S&P id in the company list, so its filings can't be searched. Remove it.`;
+  if(pk.ids.length>MAX_COMPANIES || pk.over) return `${pk.name} has more than ${MAX_COMPANIES} companies with S&P ids, and one search takes at most ${MAX_COMPANIES}. Choose one of its companies instead.`;
+  if(pk.cut) return `${pk.name} has more companies in the company list than one look-up returns (${SNAP_LOOKUP_MAX}), so the search can't be sure to cover all of it. Choose one of its companies instead.`;
+  const rg=snapRange(years), need=snapCost(pk.ids, rg.from, rg.to);
+  if(need>SNAP_MAX_REQUESTS) return `${pk.name} needs at least ${need} S&P requests over the ${snapYearsText(years)}, more than the ${SNAP_MAX_REQUESTS} one search may use. Choose a shorter period or one of its companies.`;
+  return "";
+}
+function fcProblem(){
+  const fc=S.fc;
+  if(fc.picks.length<FC_MIN) return `Choose at least ${FC_MIN} carriers to compare: find each by name above.`;
+  for(const pk of fc.picks){ const p=fcPickProblem(pk, fc.years); if(p) return p; }
+  if(!fc.state) return "Choose a state.";
+  if(!fc.toi) return "Choose a type of insurance.";
+  if(!refOptions("serffFilingType").length) return "S&P's list of filing types isn't loaded, so form filings can't be picked out. Wait for the lists to load, or refresh them on the Filings view.";
+  if(!fcFilingTypes(false).length) return "S&P's list of filing types has no type named as a form filing, so the search can't be limited to form filings. Tell Corp Dev.";
+  return "";
+}
+function fcCostHTML(){
+  const fc=S.fc, rg=snapRange(fc.years), types=fcFilingTypes(fc.wide);
+  const what=`<span class="t2" id="fc_dates">${esc(fc.wide?"Form, rule and rate filings":"Form filings")} published ${fmtDay(rg.from)} to ${fmtDay(rg.to)}${fc.state?` in ${esc(fcStateName(fc.state))}`:""}${fc.toi&&fcToiName(fc.toi)?`, ${esc(fcToiName(fc.toi))}`:""}, every status${types.length?` (S&amp;P's filing ${types.length===1?"type":"types"} ${esc(types.map(t=>t.name).join(", "))})`:""}.</span>`;
+  if(fc.picks.length<FC_MIN || fc.picks.some(pk=>fcPickProblem(pk, fc.years))) return what+(fc.picks.length ? fc.picks.map(pk=>fcPickProblem(pk, fc.years)).filter(Boolean).map(m=>`<div class="banner" role="alert"><span>${esc(m)}</span></div>`).join("") : "");
+  const plan=fcPlan(fc.picks, fc.years), req=plan.reduce((a,s)=>a+s.cost,0);
+  return what+`<p class="t2" id="fc_cost" style="margin:0"><b>About ${plural(req,"S&amp;P request")}</b>${plan.length>1?` in ${count(plan.length)} searches run one after another, since one search takes at most ${MAX_COMPANIES} companies and ${SNAP_MAX_REQUESTS} requests`:" in one search"} (one for each 10 companies for each year of dates), more if S&amp;P has many filings. A search someone has already run costs none.</p>`;
+}
+
+/* ----- running the searches, then asking for the saved summaries ----- */
+async function fcRun(){
+  const fc=S.fc; if(fc.busy || (fc.mk&&fc.mk.busy)) return;
+  const problem=fcProblem(); if(problem){ fc.formErr=problem; render(); document.getElementById("fc_formErr")?.scrollIntoView({block:"nearest"}); return; }
+  const rg=snapRange(fc.years), types=fcFilingTypes(fc.wide), nums=(ids,k)=>ids.filter(c=>c.kind===k).map(c=>Number(c.id));
+  fc.ran={picks:JSON.parse(JSON.stringify(fc.picks)), state:fc.state, toi:fc.toi, toiName:fcToiName(fc.toi), years:fc.years, wide:fc.wide, types, from:rg.from, to:rg.to};
+  fc.runs=fcPlan(fc.picks, fc.years).map(s=>({carriers:s.carriers, cost:s.cost, res:null, err:null,
+    payload:{action:"search", companyIds:nums(s.ids,"companyId"), institutionIds:nums(s.ids,"institutionId"), states:[fc.state], from:rg.from, to:rg.to, typeOfInsuranceIds:[Number(fc.toi)], filingTypeIds:types.map(t=>t.id)}}));
+  fc.digests={}; fc.asked={}; fc.getErr=null; fc.results={}; fc.mk=null; fc.open={}; fc.formErr="";
+  await fcSearches(fc);
+}
+// runs every search not yet answered, one after another, then asks for the summaries of what came back
+async function fcSearches(fc){
+  const todo=fc.runs.filter(x=>!x.res); if(!todo.length) return;
+  fc.busy=true; render();
+  for(let k=0;k<todo.length;k++){
+    const run=todo[k]; run.err=null; fc.step={i:k+1, n:todo.length}; render();
+    const r=await callFn("snl-filings", run.payload);
+    if(!S.session || S.fc!==fc) return;   // signed out, or the session ended, while it ran
+    if(r.data && Array.isArray(r.data.rows)){ run.res=r.data; takeUsage(r.data); }
+    else run.err = r.data ? {err:"bad_answer", msg:"The filings function sent back something the page can't read. Try again."} : r;
+  }
+  fc.busy=false; fc.step=null; render(); loadStatus();
+  fcGetDigests(fc);
+}
+function fcRetry(){ const fc=S.fc; if(fc.busy || !fc.runs) return; fcSearches(fc); }
+/* Each carrier's filings, each filing once, newest first. A filing names a carrier when any of its companies has one of
+   the carrier's S&P ids. list is null while the carrier's search hasn't answered (err says why when it failed). */
+function fcCarriers(fc){
+  const ran=fc.ran; if(!ran || !fc.runs) return [];
+  return ran.picks.map((pk,i)=>{
+    const run=fc.runs.find(x=>x.carriers.includes(i));
+    if(!run || !run.res) return {pk, i, run, list:null};
+    const ids=new Set(pk.ids.map(c=>c.kind+":"+c.id)), has=(k,v)=>!blank(v) && ids.has(k+":"+String(v).trim());
+    const list=snapFilings(run.res.rows).filter(r=>has("companyId",r.companyId) || has("institutionId",r.institutionId) || r.companies.some(c=>c&&(has("companyId",c.companyId)||has("institutionId",c.institutionId))))
+      .map((r,j)=>({r, key:rowKey(r,"fc"+i+"-"+j), dk:docKeyOf(r), pub:parseDay(r.publishDate)})).sort(snapByDate);
+    return {pk, i, run, list};
+  });
+}
+const fcDigestOf = (fc, f) => f.dk ? fc.digests[f.dk] || (!blank(f.r.documentId) && fc.digests["d:"+f.r.documentId]) || (!blank(f.r.filingVersionId) && fc.digests["v:"+f.r.filingVersionId]) || null : null;
+function fcTake(fc, d, f){
+  if(!d || typeof d!=="object" || Array.isArray(d)) return;
+  if(!blank(d.documentId) && (typeof d.documentId==="number"||typeof d.documentId==="string")) fc.digests["d:"+d.documentId]=d;
+  if(!blank(d.filingVersionId) && (typeof d.filingVersionId==="number"||typeof d.filingVersionId==="string")) fc.digests["v:"+d.filingVersionId]=d;
+  if(f && f.dk) fc.digests[f.dk]=d;
+}
+const fcRef = r => { const o={}; if(!blank(r.documentId)) o.documentId=r.documentId; if(!blank(r.filingVersionId)) o.filingVersionId=r.filingVersionId; return o; };
+// the saved summary of every filing found, 50 a call; costs nothing
+async function fcGetDigests(fc){
+  if(fc.dErr && fc.dErr.err==="not_deployed") return;
+  const want=[], seen=new Set();
+  for(const c of fcCarriers(fc)) for(const f of c.list||[]) if(f.dk && !seen.has(f.dk) && !fc.asked[f.dk] && !fcDigestOf(fc,f)){ seen.add(f.dk); want.push(f); }
+  if(!want.length) return;
+  fc.getBusy=true; fc.getErr=null; render();
+  for(let i=0;i<want.length;i+=FC_GET_BATCH){
+    const part=want.slice(i, i+FC_GET_BATCH);
+    const r=await callFn("snl-digest",{action:"get", filings:part.map(f=>fcRef(f.r))});
+    if(!S.session || S.fc!==fc) return;
+    if(!r.data){ fc.getBusy=false; if(r.err==="not_deployed") fc.dErr=r; else fc.getErr=r; render(); return; }
+    for(const d of Array.isArray(r.data.digests)?r.data.digests:[]) fcTake(fc, d, null);
+    for(const f of part) fc.asked[f.dk]=true;
+  }
+  fc.getBusy=false; render();
+}
+async function fcDigestStatus(){
+  const fc=S.fc; fc.dstBusy=true;
+  const r=await callFn("snl-digest",{action:"status"});
+  if(!S.session || S.fc!==fc) return;
+  fc.dstBusy=false;
+  if(r.data){ fc.dst=r.data; fc.dErr=null; } else if(r.err!=="signin") fc.dErr=r;
+  render();
+}
+
+/* ----- summarising: only when the reader chooses, one filing at a time, with Stop ----- */
+const fcN = fc => { const n=Math.round(+fc.n); return n>=1 && n<=FC_MAKE_MAX ? n : FC_MAKE_DEFAULT; };
+/* The latest N filings of each carrier that have no saved summary and have a document, taken in turn (a filing named by
+   two carriers once), so Stop leaves the carriers evenly covered. */
+function fcQueue(fc){
+  const n=fcN(fc), lists=fcCarriers(fc).filter(c=>c.list).map(c=>c.list.slice(0,n).filter(f=>f.dk && !fcDigestOf(fc,f)).map(f=>({f, who:c.pk.name})));
+  const out=[], seen=new Set();
+  for(let k=0; k<n; k++) for(const l of lists){ const x=l[k]; if(x && !seen.has(x.f.dk)){ seen.add(x.f.dk); out.push(x); } }
+  return out;
+}
+const fcPagesRead = f => isNum(f.r.pages)&&+f.r.pages>0 ? Math.min(+f.r.pages, FC_READ_PAGES) : FC_READ_PAGES;
+const fcUsd = v => "$"+(+v).toLocaleString("en-US",{minimumFractionDigits:2, maximumFractionDigits:2});
+function fcEstimate(q){ const pages=q.reduce((a,x)=>a+fcPagesRead(x.f),0); return {pages, lo:pages*FC_USD_150[0]/FC_READ_PAGES, hi:pages*FC_USD_150[1]/FC_READ_PAGES, unknown:q.filter(x=>!(isNum(x.f.r.pages)&&+x.f.r.pages>0)).length}; }
+// the fields of the search row sent with a summary request (never a bare tracking number: filingNo is the labelled one)
+function fcMakeFiling(r){
+  const keep=["documentId","filingVersionId","serffFilingEntityEventId","sfcNumber","companyId","companyName","institutionId","naicGroupName","serffFilingStateId","serffFilingState","typeOfInsuranceId","typeOfInsurance","subTypeOfInsurance","serffFilingTypeId","serffFilingType","filingStatusId","filingStatus","dateSubmitted","publishDate","newBusReqEffDate","renewBusReqEffDate","overallRateImpact","filingDescription","pages"];
+  const o={}; for(const k of keep) if(!blank(r[k]) && typeof r[k]!=="object") o[k]=r[k];
+  o.companies=(Array.isArray(r.companies)?r.companies:[]).filter(c=>c&&typeof c==="object").map(c=>({companyId:c.companyId??null, companyName:c.companyName??null, institutionId:c.institutionId??null}));
+  const no=filingNoText(r); if(no) o.filingNo=no;
+  return o;
+}
+function fcWhy(r){
+  if(r.err==="limit" || r.err==="daily_limit") return "today's limit on questions is reached (each summary counts as one). Try again after midnight UTC.";
+  if(r.err==="busy") return "another summary or answer for your login was running. Try again in a minute.";
+  if(r.err==="too_large") return "the document is too large to read.";
+  if(r.err==="not_configured") return "summaries aren't set up yet. "+errText(r);
+  if(r.err==="not_deployed") return "the summaries function isn't set up on this site.";
+  return errText(r);
+}
+async function fcMake(){
+  const fc=S.fc; if(fc.busy || (fc.mk&&fc.mk.busy) || !fcCanMake(fc)) return;
+  const q=fcQueue(fc); if(!q.length){ toast("Every one of those filings already has a saved summary."); return; }
+  const mk=fc.mk={busy:true, stop:false, halt:"", n:q.length, i:0, cur:null, items:q, made:0, usd:0, usdKnown:false, sp:0};
+  for(const x of q) fc.results[x.f.dk]={state:"queued"};
+  render();
+  for(let i=0;i<q.length;i++){
+    const x=q[i];
+    if(mk.stop || mk.halt){ fc.results[x.f.dk]={state:"skipped", why:mk.halt||"you pressed Stop."}; continue; }
+    mk.i=i+1; mk.cur=x; fc.results[x.f.dk]={state:"running"}; render();
+    const r=await callFn("snl-digest",{action:"make", filing:fcMakeFiling(x.f.r)});
+    if(!S.session || S.fc!==fc) return;   // the session ended: everything here was forgotten with it
+    if(r.data && r.data.digest && typeof r.data.digest==="object"){
+      fcTake(fc, r.data.digest, x.f); fc.results[x.f.dk]={state:"made", fromStore:!!r.data.fromStore}; mk.made++;
+      const u=r.data.usage&&typeof r.data.usage==="object"?r.data.usage:{};
+      if(isNum(u.costUsd)){ mk.usd+=+u.costUsd; mk.usdKnown=true; } if(isNum(u.spRequests)) mk.sp+=+u.spRequests;
+    } else {
+      const res=r.data ? {err:"bad_answer", msg:"The summaries function sent back something the page can't read."} : r;
+      fc.results[x.f.dk]={state:"failed", code:res.err, why:fcWhy(res)};
+      if(["limit","daily_limit"].includes(res.err)) mk.halt="today's limit on questions was reached.";
+      if(["not_configured","not_deployed"].includes(res.err)) mk.halt="summaries aren't set up yet.";
+      if(res.err==="not_deployed") fc.dErr=res;
+    }
+  }
+  mk.busy=false; mk.cur=null; render();
+  loadStatus(); loadChatUse().then(()=>{ if(S.session && S.view==="forms") render(); });
+}
+function fcCanMake(fc){ const d=fc.dst; return !(fc.dErr&&fc.dErr.err==="not_deployed") && !!d && !(d.claude&&d.claude.configured===false) && !(d.filings&&d.filings.configured===false); }
+
+/* ----- the comparison, built only from saved summaries; every digest field is untrusted text ----- */
+const fcStr = (v, max) => typeof v==="string" ? v.replace(/\s+/g," ").trim().slice(0, max||300) : (typeof v==="number"&&isFinite(v)) ? String(v) : "";
+const fcPage = v => (typeof v==="number"||typeof v==="string") && /^\d{1,5}$/.test(String(v).trim()) && +v>0 ? +v : null;
+const fcList = v => Array.isArray(v) ? v.filter(x=>x&&typeof x==="object"&&!Array.isArray(x)) : [];
+const fcSeg = v => { const s=String(v??"").trim().toLowerCase(); return FC_SEGMENTS.includes(s) ? s : null; };
+const fcAct = v => { const s=String(v??"").trim().toLowerCase(); return FC_ACTIONS.includes(s) ? s : null; };
+const FC_NUM = ["no","one","two","three","four","five","six","seven","eight","nine","ten"];
+const fcNum = (n, cap) => { const w=n<=10?FC_NUM[n]:count(n); return cap ? w[0].toUpperCase()+w.slice(1) : w; };
+// the pages a summary rests on: "Rests on pages 1 to 150 of 624."
+function fcReadText(d, f){
+  const parts=fcList(d.read).map(x=>[fcPage(x.from), fcPage(x.to)]).filter(([a,b])=>a&&b&&b>=a).map(([a,b])=>a===b?`${count(a)}`:`${count(a)} to ${count(b)}`);
+  const total=fcPage(d.pages)||(isNum(f.r.pages)&&+f.r.pages>0?Math.round(+f.r.pages):null);
+  if(!parts.length) return `The pages it rests on aren't stated${total?` (the filing has ${plural(total,"page")})`:""}.`;
+  return `Rests on ${parts.length===1&&!parts[0].includes(" ")?"page":"pages"} ${parts.join(", ")}${total?` of ${count(total)}`:""}.`;
+}
+/* UNCONFIRMED: form editions are written month and year, as "06 25", "06/25" or "06 2025". An edition that reads that
+   way sorts by its date, newest first; any other edition sorts after them, by the date its filing was published. */
+function fcEdition(e){
+  const s=String(e??"").trim(); let m=s.match(/^(\d{1,2})\s*[\/ .-]?\s*(\d{4}|\d{2})$/);
+  if(!m) return null; const mo=+m[1]; let y=+m[2]; if(y<100) y+=y>=70?1900:2000; return mo>=1&&mo<=12 ? y*100+mo : null;
+}
+const fcFormKey = n => String(n).toUpperCase().replace(/\s+/g," ").trim();
+function fcCompare(fc){
+  return fcCarriers(fc).filter(c=>c.list).map(c=>{
+    const done=c.list.filter(f=>fcDigestOf(fc,f)).map(f=>({f, d:fcDigestOf(fc,f)}));
+    const progs=new Map(), forms=new Map(), rates=[], elig=[], notes=[];
+    for(const {f,d} of done){
+      for(const p of fcList(d.programs)){
+        const name=fcStr(p.name,120), seg=fcSeg(p.segment), k=name.toLowerCase()+"|"+(seg||"");
+        if(!progs.has(k)) progs.set(k,{name, seg, src:[]});
+        progs.get(k).src.push({f, basis:fcStr(p.basis), page:fcPage(p.page)});
+      }
+      for(const x of fcList(d.forms)){
+        const num=fcStr(x.number,60); if(!num) continue;
+        const k=fcFormKey(num); if(!forms.has(k)) forms.set(k,{num, list:[]});
+        forms.get(k).list.push({f, num, edition:fcStr(x.edition,30), ed:fcEdition(x.edition), title:fcStr(x.title), action:fcAct(x.action), replaces:fcStr(x.replaces,80), program:fcStr(x.program,120), page:fcPage(x.page)});
+      }
+      const rt=d.rate&&typeof d.rate==="object"&&!Array.isArray(d.rate) ? d.rate : null;
+      if(rt && ["overallPct","requestedPct","approvedPct","premium","policyholders","effectiveNew","effectiveRenewal"].some(k=>isNum(rt[k])||(typeof rt[k]==="string"&&rt[k].trim()))) rates.push({f, rt, page:fcPage(rt.page)});
+      for(const e of fcList(d.eligibility)){ const t=fcStr(e.text); if(t) elig.push({f, text:t, page:fcPage(e.page)}); }
+      for(const e of fcList(d.notable)){ const t=fcStr(e.text); if(t) notes.push({f, text:t, page:fcPage(e.page)}); }
+    }
+    const pl=[...progs.values()];
+    const fl=[...forms.values()].map(g=>({num:g.num, list:g.list.sort((a,b)=>(b.ed??-1)-(a.ed??-1) || snapByDate(a.f,b.f))})).sort((a,b)=>a.num.localeCompare(b.num, "en", {numeric:true, sensitivity:"base"}));
+    return {...c, done, progs:pl, forms:fl, rates, elig, notes};
+  });
+}
+/* One plain sentence on what the summaries show about a carrier's programs. It speaks of the summaries, never of fact. */
+function fcSays(cp){
+  const nSum=cp.done.length, ps=cp.progs, n=ps.length;
+  if(!cp.list.length) return "S&P returned nothing for this search, so there is nothing to summarise.";
+  if(!nSum) return "None of its filings found has a saved summary yet, so nothing can be said about its programs.";
+  if(!n) return nSum===1 ? "The summary names no program." : `The ${fcNum(nSum)} summaries name no program.`;
+  const has=s=>ps.some(p=>p.seg===s), segName=s=>s||"segment not stated";
+  const lead = n===1 ? `One program found (${segName(ps[0].seg)})`
+    : `${fcNum(n,true)} programs found: ${[...FC_SEGMENTS, null].map(s=>[s, ps.filter(p=>p.seg===s).length]).filter(x=>x[1]).map(([s,k])=>`${fcNum(k)} ${segName(s)}`).join(", ")}`;
+  const gap = !has("private client") ? "private client" : !has("middle market") ? "middle market" : "";
+  return gap ? `${lead}; the summaries do not show a separate ${gap} program.` : `${lead}.`;
+}
+const fcSrcHTML = (f, page) => `<div class="fcsrc"><span class="t2">${esc(filingNoText(f.r)||"Filing")}, ${f.pub?fmtD(f.pub):"date n/d"}, ${page?`page ${count(page)}`:"page n/d"}</span>${docButtonHTML(f.dk, page?`Open at page ${count(page)}`:"Open document", page||"")}</div>`;
+function fcProgramsHTML(cps){
+  const segs=["private client","middle market", ...["standard","other",null].filter(s=>cps.some(c=>c.progs.some(p=>p.seg===s)))];
+  const label=s=>s ? s[0].toUpperCase()+s.slice(1) : "Segment not stated";
+  const cell=(c,s)=>{ const ps=c.progs.filter(p=>p.seg===s);
+    if(!c.done.length) return `<span class="fcnone">No saved summaries</span>`;
+    if(!ps.length) return `<span class="fcnone">None in the summaries</span>`;
+    return `<ul>${ps.map(p=>`<li><b>${p.name?esc(p.name):"Program not named"}</b>${p.src.map(x=>`${x.basis?`<span class="fcq">“${esc(x.basis)}”</span>`:`<span class="fcq">The summary gives no words for this.</span>`}${fcSrcHTML(x.f, x.page)}`).join("")}</li>`).join("")}</ul>`; };
+  return `<div class="tbl-wrap" id="fcProgWrap" data-keep><table class="fcprog" id="fcProgTable"><caption class="sr">Programs found in the saved summaries, by segment and carrier</caption>
+    <thead><tr><th>Segment</th>${cps.map(c=>`<th>${esc(c.pk.name)}</th>`).join("")}</tr></thead>
+    <tbody><tr class="fcsay"><td>What the summaries show</td>${cps.map(c=>`<td data-i="${c.i}">${esc(fcSays(c))}</td>`).join("")}</tr>
+    ${segs.map(s=>`<tr data-seg="${esc(s||"none")}"><td><b>${esc(label(s))}</b></td>${cps.map(c=>`<td>${cell(c,s)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+}
+const fcActText = x => !x.action ? "n/d" : x.action==="replaced"||x.replaces ? `${x.action[0].toUpperCase()+x.action.slice(1)}${x.replaces?`; replaces ${x.replaces}`:""}` : x.action[0].toUpperCase()+x.action.slice(1);
+function fcFormsHTML(c){
+  if(!c.done.length) return `<p class="fcnone">No saved summaries for ${esc(c.pk.name)} yet.</p>`;
+  if(!c.forms.length) return `<p class="fcnone" data-none>The ${c.done.length===1?"summary lists":`${fcNum(c.done.length)} summaries list`} no forms.</p>`;
+  const row=(x, old, extra)=>`<tr${old?` class="fcold" data-old`:""}><td class="c-n">${esc(x.num)}</td><td>${x.edition?esc(x.edition):"n/d"}</td><td class="c-t">${x.title?esc(x.title):"n/d"}</td><td>${esc(fcActText(x))}</td><td>${x.program?esc(x.program):`<span class="fcnone">Not linked</span>`}</td><td>${esc(filingNoText(x.f.r)||"n/d")}</td><td>${x.f.pub?fmtD(x.f.pub):"n/d"}</td><td>${x.page?count(x.page):"n/d"}</td><td>${docButtonHTML(x.f.dk, x.page?`Open at page ${count(x.page)}`:"Open document", x.page||"")}${extra||""}</td></tr>`;
+  const body=c.forms.map(g=>{
+    const k=c.i+"|"+fcFormKey(g.num), on=!!S.fc.open[k], first=g.list[0], rest=g.list.slice(1), older=rest.every(x=>x.edition!==first.edition);
+    const tog=rest.length ? `<div><button type="button" class="lnk t2" data-act="fc-more" data-k="${esc(k)}" aria-expanded="${on}">${on?"Hide":"Show"} ${older?plural(rest.length,"earlier edition"):plural(rest.length,"more entry","more entries")}</button></div>` : "";
+    return row(first, false, tog)+(on?rest.map(x=>row(x, true)).join(""):""); }).join("");
+  return `<div class="tbl-wrap" id="fcFormsWrap${c.i}" data-keep><table class="fcforms" id="fcForms${c.i}"><caption class="sr">Forms in ${esc(c.pk.name)}'s summarised filings</caption><thead><tr><th>Form</th><th>Edition</th><th>Title</th><th>What the filing did</th><th>Program</th><th>Filing</th><th>Published</th><th class="num">Page</th><th>Document</th></tr></thead><tbody>${body}</tbody></table></div>`;
+}
+function fcRateText(rt){
+  const bits=[];
+  if(isNum(rt.overallPct)) bits.push(`overall rate change ${pct(rt.overallPct)}`);
+  if(isNum(rt.requestedPct)) bits.push(`requested ${pct(rt.requestedPct)}`);
+  if(isNum(rt.approvedPct)) bits.push(`approved ${pct(rt.approvedPct)}`);
+  if(isNum(rt.premium)) bits.push(`premium affected ${usdM(rt.premium)}`);
+  if(isNum(rt.policyholders)) bits.push(`${plural(rt.policyholders,"policyholder")} affected`);
+  const day=v=>typeof v==="string"&&parseDay(v)?fmtDay(v):fcStr(v,30);
+  if(!blank(rt.effectiveNew)&&day(rt.effectiveNew)) bits.push(`effective for new business ${day(rt.effectiveNew)}`);
+  if(!blank(rt.effectiveRenewal)&&day(rt.effectiveRenewal)) bits.push(`for renewals ${day(rt.effectiveRenewal)}`);
+  const s=bits.join("; "); return s ? s[0].toUpperCase()+s.slice(1)+"." : "";
+}
+function fcNotesHTML(c){
+  if(!c.done.length) return `<p class="fcnone">No saved summaries for ${esc(c.pk.name)} yet.</p>`;
+  const li=(lead, text, f, page)=>`<li>${lead?`<b>${lead}</b> `:""}${esc(text)}${fcSrcHTML(f, page)}</li>`;
+  const items=[...c.rates.map(x=>li("Rate:", fcRateText(x.rt), x.f, x.page)), ...c.elig.map(x=>li("Eligibility:", x.text, x.f, x.page)), ...c.notes.map(x=>li("Also:", x.text, x.f, x.page))];
+  return items.length ? `<ul class="fcnotes" id="fcNotes${c.i}">${items.join("")}</ul>` : `<p class="fcnone" data-none>The summaries carry no rate or eligibility notes.</p>`;
+}
+const fcExpHTML = tbl => `<span class="snexp"><button type="button" class="btn sm ghost" data-act="export" data-what="forms" data-tbl="${tbl}" data-fmt="csv">CSV</button><button type="button" class="btn sm ghost" data-act="export" data-what="forms" data-tbl="${tbl}" data-fmt="xlsx">Excel</button></span>`;
+function fcComparisonHTML(fc){
+  const cps=fcCompare(fc); if(!cps.length) return "";
+  let h=`<section class="fcblk" id="fcCompare" aria-labelledby="fcCompareH"><div class="blk-h"><h3 id="fcCompareH">The comparison, from saved summaries</h3></div>`;
+  if(!cps.some(c=>c.done.length)) return h+`<div class="info" id="fcNoDigests" role="status"><span>No summaries yet, so there is nothing to compare. Summarise some filings above; the comparison is built only from saved summaries.</span></div></section>`;
+  h+=`<div class="notes" id="fcRests"><b>What this rests on</b><ul>${cps.map(c=>`<li>${esc(c.pk.name)}: ${count(c.done.length)} of ${plural(c.list.length,"filing")} found ${c.done.length===1?"is":"are"} summarised.</li>`).join("")}
+    <li>Each summary rests only on the pages stated in it, often the first ${FC_READ_PAGES} of a much longer filing, so a program or form on other pages may be missing.</li>
+    <li>The segments (private client, middle market, standard, other) are judgements made when each filing was summarised. The words each rests on are quoted beside it.</li></ul></div>`;
+  h+=`<div class="blk"><div class="blk-h"><h3>Programs</h3>${fcExpHTML("programs")}</div>${fcProgramsHTML(cps)}</div>`;
+  h+=`<div class="blk"><div class="blk-h"><h3>Forms</h3>${fcExpHTML("forms")}</div><p class="t2">By form number; the latest edition of each form first, with earlier editions underneath.</p>${cps.map(c=>`<div class="fccar" id="fcFormsCar${c.i}"><h4>${esc(c.pk.name)}</h4>${fcFormsHTML(c)}</div>`).join("")}</div>`;
+  h+=`<div class="blk"><div class="blk-h"><h3>Rate and eligibility notes</h3></div>${cps.map(c=>`<div class="fccar" id="fcNotesCar${c.i}"><h4>${esc(c.pk.name)}</h4>${fcNotesHTML(c)}</div>`).join("")}</div>`;
+  return h+`</section>`;
+}
+
+/* ----- drawing the view ----- */
+function fcFinderHTML(){
+  const fc=S.fc, fd=fc.find, full=fc.picks.length>=FC_MAX;
+  let found="";
+  if(fd.busy) found=`<p class="t2" role="status">Looking for matches…</p>`;
+  else if(fd.matches!==null && !fd.matches.length && !fd.groups.length) found=`<div class="info" id="fc_noMatch" role="status"><span>No company in the app's company list matches "${esc(fd.asked)}". Try a shorter part of the name.</span></div>`;
+  else if(fd.matches!==null){
+    const groups=fcGroupList(fd).map((g,i)=>`<li><div><div class="t1">${esc(g.name)}</div><div class="t2">Group · ${g.whole?plural(isNum(g.whole.searchable)?g.whole.searchable:g.whole.members.length,"company","companies")+" with S&amp;P ids":plural(g.n,"matching company","matching companies")}; choosing it takes every member in the company list</div></div><button type="button" class="btn sm" data-act="fc-group" data-i="${i}" ${fc.picking||full?"disabled":""}>Choose group</button></li>`).join("");
+    const cos=fd.matches.map((m,i)=>{ const id=snapIdOf(m), meta=[id?`S&P ${id.kind==="companyId"?"company":"institution"} id ${id.id}`:"", blank(m.naicGroupName)?"":`group ${m.naicGroupName}`].filter(Boolean).join(" · ");
+      return `<li><div><div class="t1">${esc(m.companyName||"n/d")}</div>${meta?`<div class="t2">${esc(meta)}</div>`:""}</div>${id?`<button type="button" class="btn sm" data-act="fc-co" data-i="${i}" ${full?"disabled":""}>Choose</button>`:`<span class="t2 noadd">Can't be used: the company list has no S&amp;P id for it, so its filings can't be searched.</span>`}</li>`; }).join("");
+    found=`<ul class="matches" id="fc_matches" aria-label="Matching groups and companies">${groups}${cos}</ul>`;
+  }
+  return `<div class="f"><label for="fc_find">Carriers <em>${FC_MIN} to ${FC_MAX}; each a company or a whole group</em></label>
+    <div class="toolbar"><div class="grow"><input type="text" id="fc_find" data-bind="fc.find.q" value="${esc(fd.q)}" autocomplete="off" spellcheck="false" placeholder="For example Calloway"></div>
+      <button type="button" class="btn" data-act="fc-find" ${fd.busy?"disabled":""}>Find</button></div>
+    ${fcSetPickHTML()}
+    ${fd.err?`<p class="err" id="fc_findErr" role="alert">${esc(fd.err)}</p>`:""}${found}</div>`;
+}
+function fcChosenHTML(){
+  const fc=S.fc;
+  const chips=fc.picks.length ? `<div class="chips" id="fc_chips" aria-label="Chosen carriers">${fc.picks.map((pk,i)=>{ const d=pk.kind==="company" ? `S&P ${pk.ids[0].kind==="companyId"?"company":"institution"} id ${pk.ids[0].id}` : `${pk.kind==="set"?"saved set":"group"} of ${plural(pk.ids.length,"company","companies")}${pk.noId?`; ${count(pk.noId)} without an S&P id left out`:""}`;
+      return `<span class="cchip"><span><b>${esc(pk.name)}</b> <span class="t2">${esc(d)}</span></span><button type="button" data-act="fc-remove" data-i="${i}" aria-label="Remove ${esc(pk.name)}" ${fc.busy?"disabled":""}>×</button></span>`; }).join("")}</div>`
+    : `<p class="t2" id="fc_none">No carriers chosen yet.</p>`;
+  return `${fc.picking?`<p class="t2" id="fc_picking" role="status">Listing the companies in ${esc(fc.picking)}…</p>`:""}${fc.pickErr?`<p class="err" id="fc_pickErr" role="alert">${esc(fc.pickErr)}</p>`:""}${chips}`;
+}
+function fcFormHTML(){
+  const fc=S.fc, states=stateOptions(), tois=refOptions("typeOfInsurance"), waitRefs=S.refsLoading&&!S.refs;
+  const toiBox = tois.length ? `<select id="fc_toi" data-bind="fc.toi" data-live><option value="">Choose a type of insurance</option>${tois.map(o=>`<option value="${esc(o.id)}" ${String(o.id)===fc.toi?"selected":""}>${esc(o.name)}</option>`).join("")}</select>`
+    : `<p class="t2" id="fc_noToi">${waitRefs?"Loading S&amp;P's lists…":"S&amp;P's list of types of insurance isn't loaded yet, so this can't be chosen. Refresh the lists on the Filings view."}</p>`;
+  return `<form class="tcard" id="fcForm" novalidate aria-label="Choose carriers, a state, a type of insurance and a period">${fcFinderHTML()}${fcChosenHTML()}
+    <div class="fcsel">
+      <div class="f"><label for="fc_state">State <em>one</em></label><select id="fc_state" data-bind="fc.state" data-live><option value="">Choose a state</option>${states.map(s=>`<option value="${esc(s.id)}" ${s.id===fc.state?"selected":""}>${esc(s.name!==s.id?`${s.name} (${s.id})`:s.id)}</option>`).join("")}</select></div>
+      <div class="f"><label for="fc_toi">Type of insurance <em>one, from S&amp;P's list</em></label>${toiBox}${fc.toi?"":`<p class="t2" id="fc_toiHint">Choose one, such as Homeowners: the comparison is for one type of insurance.</p>`}</div>
+    </div>
+    <div class="fcopts"><div class="f"><span>Period</span><div class="seg" role="group" aria-label="Period">${FC_YEARS.map(y=>`<button type="button" class="btn sm" data-act="fc-years" data-y="${y}" aria-pressed="${fc.years===y}">${y===1?"Last year":`Last ${y} years`}</button>`).join("")}</div></div>
+      <label class="unl" for="fc_wide"><input type="checkbox" id="fc_wide" data-act="fc-wide" ${fc.wide?"checked":""}><span>Include rule and rate filings too <em class="t2" style="font-style:normal">Form filings alone by default</em></span></label></div>
+    <div id="fc_costBox" style="display:flex;flex-direction:column;gap:8px;min-width:0">${fcCostHTML()}</div>
+    ${fc.formErr?`<p class="err" id="fc_formErr" role="alert">${esc(fc.formErr)}</p>`:""}
+    <div class="toolbar"><button type="button" class="btn primary" id="fc_run" data-act="fc-run" ${fc.busy||fc.picking||waitRefs||(fc.mk&&fc.mk.busy)?"disabled":""}>${fc.busy?"Finding filings…":waitRefs?"Loading S&amp;P's lists…":"Find the filings"}</button></div></form>`;
+}
+// the digest function's state, in plain words: not set up, Claude or S&P not set up, or a problem
+function fcDigestNoteHTML(fc){
+  const e=fc.dErr, d=fc.dst;
+  if(e && e.err==="not_deployed") return `<div class="info" id="fcDigestOff" role="status"><span><b>Summaries aren't set up yet:</b> the summaries function isn't on this site${isCorpDev()?" (deploy snl-digest; see the README)":""}. The filings found are listed below, and each document opens.</span></div>`;
+  if(e && e.err!=="signin") return `<div class="banner" id="fcDigestErr" role="alert"><span><b>Couldn't check the summaries.</b> ${esc(errText(e))}</span><button class="btn sm" data-act="fc-dstatus-retry">Try again</button></div>`;
+  if(d && d.claude && d.claude.configured===false) return `<div class="info" id="fcDigestOff" role="status"><span><b>New summaries can't be made yet:</b> Claude isn't set up on this site. Saved summaries still show.</span></div>`;
+  if(d && d.filings && d.filings.configured===false) return `<div class="info" id="fcDigestOff" role="status"><span><b>New summaries can't be made yet:</b> S&amp;P isn't set up on this site. Saved summaries still show.</span></div>`;
+  return "";
+}
+function fcSumCellHTML(fc, f){
+  const d=fcDigestOf(fc,f), x=fc.results[f.dk];
+  if(d) return `${fcStr(d.summary,600)?`<p>${esc(fcStr(d.summary,600))}</p>`:`<p class="fcnone">The summary has no text.</p>`} <span class="t2">${esc(fcReadText(d,f))}</span>`;
+  if(!f.dk) return `<span class="fcnone">No document, so it can't be summarised.</span>`;
+  if(x && x.state==="running") return `<span class="t2" role="status">Summarising…</span>`;
+  if(x && x.state==="queued") return `<span class="t2">Waiting to be summarised.</span>`;
+  if(x && x.state==="failed") return `<span class="err">Not summarised: ${esc(x.why)}</span>`;
+  if(x && x.state==="skipped") return `<span class="fcnone">Not started: ${esc(x.why)}</span>`;
+  if(fc.getBusy && !fc.asked[f.dk]) return `<span class="t2">Checking for a saved summary…</span>`;
+  return `<span class="fcnone">No saved summary.</span>`;
+}
+function fcFiledHTML(fc, c){
+  if(!c.list) return c.run&&c.run.err ? `<p class="err" data-err>Its search didn't run: ${esc(errText(c.run.err))}</p>` : `<p class="t2" role="status">Waiting for its search…</p>`;
+  if(!c.list.length) return `<div class="notes" data-empty role="status"><b>S&amp;P returned nothing for this search</b> for ${esc(c.pk.name)}. That isn't proof that nothing was filed: check the carrier, or try a longer period${S.fc.ran.wide?"":" or include rule and rate filings"}.</div>`;
+  const t=v=>blank(v)?"n/d":esc(v);
+  return `<div class="tbl-wrap cardwrap" id="fcFiledWrap${c.i}" data-keep><table class="cards fcfiled" id="fcFiled${c.i}"><thead><tr><th>Filing</th><th>Filing type</th><th>Status</th><th>Submitted</th><th>Published</th><th class="num">Pages</th><th>Summary</th><th>Document</th></tr></thead><tbody>${c.list.map(f=>`<tr data-dk="${esc(f.dk)}">
+    <td class="c-tn">${filingNoHTML(f.r)}</td><td class="c-half" data-label="Filing type">${t(f.r.serffFilingType)}</td><td class="c-half" data-label="Status">${t(f.r.filingStatus)}</td>
+    <td class="c-half" data-label="Submitted">${fmtDay(f.r.dateSubmitted)}</td><td class="c-half" data-label="Published">${fmtDay(f.r.publishDate)}</td><td class="num c-half" data-label="Pages">${isNum(f.r.pages)?count(f.r.pages):"n/d"}</td>
+    <td class="c-sum" data-label="Summary">${fcSumCellHTML(fc,f)}</td><td class="c-doc">${docButtonHTML(f.dk, "Open document")}</td></tr>`).join("")}</tbody></table></div>`;
+}
+function fcMakeHTML(fc, cs){
+  const withList=cs.filter(c=>c.list&&c.list.length); if(!withList.length) return "";
+  const mk=fc.mk, n=fcN(fc), q=fcQueue(fc), est=fcEstimate(q), can=fcCanMake(fc), cu=S.chatUse, atLimit=chatAtLimit(cu);
+  let h=`<section class="fcblk" id="fcMake" aria-labelledby="fcMakeH"><div class="blk-h"><h3 id="fcMakeH">Summaries</h3></div>`;
+  h+=`<div class="counts" id="fcHave"><b>Saved summaries:</b>${cs.filter(c=>c.list).map(c=>{ const s=c.list.filter(f=>fcDigestOf(fc,f)).length; return `<span data-i="${c.i}">${esc(c.pk.name)}: ${count(s)} of ${count(c.list.length)}, ${count(c.list.length-s)} without</span>`; }).join("")}</div>`;
+  if(mk && mk.busy){
+    const cur=mk.cur;
+    return h+`<div class="fcmk"><div class="banner" id="fcMaking" role="status"><span><b>Summarising ${count(mk.i)} of ${count(mk.n)}:</b> ${esc(cur?`${filingNoText(cur.f.r)||"a filing"} (${cur.who})`:"")}… Each takes a minute or two. Keep this tab open.</span><button type="button" class="btn sm" data-act="fc-stop" ${mk.stop?"disabled":""}>${mk.stop?"Stopping after this one…":"Stop"}</button></div></div></section>`;
+  }
+  h+=`<div class="fcmk"><p style="margin:0" class="t2">Summaries are made once and saved for everyone. Making one reads the front of the filing: 1 S&amp;P request and one Claude read each, and it counts as one of the day's questions. Nothing is summarised until you choose.</p>`;
+  h+=`<div class="inline"><label for="fc_n" class="t2"><b>Summarise the latest</b></label><select id="fc_n" data-bind="fc.n" data-live style="width:auto">${Array.from({length:FC_MAKE_MAX},(_,i)=>`<option value="${i+1}" ${n===i+1?"selected":""}>${i+1}</option>`).join("")}</select><span class="t2"><b>for each carrier</b></span></div>`;
+  if(q.length){
+    const left = cu && isNum(cu.dailyLimit) && isNum(cu.askedToday) ? Math.max(0, +cu.dailyLimit - +cu.askedToday) : null;
+    h+=`<p style="margin:0" id="fcMakeCost"><b>${plural(q.length,"new summary","new summaries")}: ${plural(q.length,"S&amp;P request")} and roughly ${fcUsd(est.lo)} to ${fcUsd(est.hi)} of Claude reading.</b> <span class="t2">An estimate: up to the first ${FC_READ_PAGES} pages of each filing (${count(est.pages)} pages in all${est.unknown?`, counting ${plural(est.unknown,"filing")} with no page count as ${FC_READ_PAGES}`:""}), at the README's rate of ${fcUsd(FC_USD_150[0])} to ${fcUsd(FC_USD_150[1])} for ${FC_READ_PAGES} pages. What it really cost shows when it is done.</span></p>`;
+    if(cu && isNum(cu.askedToday)) h+=`<p class="t2${left!==null&&left<q.length?" bigwarn":""}" id="fcMakeDaily" style="margin:0">${left!==null&&left<q.length ? `Only ${plural(left,"question is","questions are")} left today, so at most ${count(left)} of these can be made today; the rest will say why.` : `You've asked ${count(cu.askedToday)}${isNum(cu.dailyLimit)?` of ${count(cu.dailyLimit)}`:""} questions today; these would add ${count(q.length)}.`}</p>`;
+  } else h+=`<p class="t2" id="fcMakeCost" style="margin:0">The latest ${count(n)} filings of each carrier already have saved summaries${withList.some(c=>c.list.slice(0,n).some(f=>!f.dk))?", or have no document to summarise":""}. Choose a larger number to summarise more.</p>`;
+  const off = !can ? "Summaries can't be made here yet (see above)." : atLimit ? "Today's limit on questions is reached, so no summary can be made until midnight UTC." : "";
+  if(off) h+=`<p class="t2" id="fcMakeOff" style="margin:0">${esc(off)}</p>`;
+  h+=`<div class="toolbar"><button type="button" class="btn primary" id="fc_make" data-act="fc-make" ${!q.length||off||fc.busy?"disabled":""}>Summarise ${plural(q.length,"filing")}</button></div>`;
+  if(mk) h+=fcMadeHTML(fc, mk);
+  return h+`</div></section>`;
+}
+function fcMadeHTML(fc, mk){
+  const st=x=>fc.results[x.f.dk]||{}, made=mk.items.filter(x=>st(x).state==="made"), failed=mk.items.filter(x=>st(x).state==="failed"), skipped=mk.items.filter(x=>st(x).state==="skipped");
+  const name=x=>`${esc(filingNoText(x.f.r)||"A filing")} (${esc(x.who)})`;
+  const lines=mk.items.map(x=>{ const s=st(x);
+    return s.state==="made" ? `<li>${name(x)}: summarised${s.fromStore?" (someone had just saved it)":""}.</li>` : s.state==="failed" ? `<li class="no">${name(x)}: not summarised: ${esc(s.why)}</li>` : `<li class="no">${name(x)}: not started: ${esc(s.why||"")}</li>`; }).join("");
+  const spent=[mk.usdKnown?`cost ${costText(mk.usd)}`:"", mk.sp?`used ${plural(mk.sp,"S&amp;P request")}`:""].filter(Boolean).join(" and ");
+  return `<div class="${failed.length||skipped.length?"banner":"info"}" id="fcMade" role="status" style="display:block"><b>${made.length===mk.items.length?`All ${plural(made.length,"summary","summaries")} made`:`${count(made.length)} of ${plural(mk.items.length,"summary","summaries")} made`}.</b>${spent?` These ${spent}.`:""}<ul class="fcres" id="fcMadeList">${lines}</ul></div>`;
+}
+function fcOutHTML(){
+  const fc=S.fc, ran=fc.ran; if(!ran) return "";
+  const cs=fcCarriers(fc), names=ran.picks.map(p=>p.name);
+  let h=`<div class="snhead" id="fcHead"><div><h3 id="fcName">${esc(names.join(", "))}</h3><p class="t2" id="fcMeta">${esc([`${ran.wide?"Form, rule and rate filings":"Form filings"} in ${fcStateName(ran.state)}`, ran.toiName||"type of insurance n/d", `published ${fmtDay(ran.from)} to ${fmtDay(ran.to)}`, "every status"].join(" · "))}</p></div>
+    <div class="toolbar"><button type="button" class="btn" id="fc_ask" data-act="fc-ask" ${fc.runs.some(x=>x.res)?"":"disabled"}>Ask Claude about this</button></div></div>`;
+  if(fc.busy) h+=`<div class="info" id="fcBusy" role="status"><span><b>Finding the filings${fc.step&&fc.step.n>1?`: search ${count(fc.step.i)} of ${count(fc.step.n)}`:""}…</b> A long period can take a minute. Each search is saved, so the same one opens at once next time.</span></div>`;
+  const failed=fc.runs.filter(x=>x.err);
+  if(!fc.busy && failed.length){
+    const calm=failed.every(x=>["not_configured","not_deployed"].includes(x.err.err)), who=failed.flatMap(x=>x.carriers.map(i=>ran.picks[i].name));
+    h+= calm ? `<div class="info" id="fcSearchErr" role="status"><span>${esc(errText(failed[0].err))}</span></div>`
+      : `<div class="banner" id="fcSearchErr" role="alert"><span><b>${failed.length===fc.runs.length?"Couldn't find the filings.":`Couldn't search for ${esc(who.join(", "))}.`}</b> ${esc(errText(failed[0].err))}</span><button type="button" class="btn sm" data-act="fc-retry">Try again</button></div>`;
+  }
+  for(const run of fc.runs) if(run.res && run.res.capped) h+=`<div class="banner" data-capped role="alert"><span><b>The filings for ${esc(run.carriers.map(i=>ran.picks[i].name).join(", "))} are incomplete.</b> The search stopped at its limit before S&amp;P had returned everything. Choose a shorter period and run it again.</span></div>`;
+  if(!fc.runs.some(x=>x.res)) return h;
+  h+=fcDigestNoteHTML(fc);
+  if(fc.getErr) h+=`<div class="banner" id="fcGetErr" role="alert"><span><b>Couldn't check for saved summaries.</b> ${esc(errText(fc.getErr))}</span><button type="button" class="btn sm" data-act="fc-get-retry">Try again</button></div>`;
+  h+=`<section class="fcblk" id="fcFound" aria-labelledby="fcFoundH"><div class="blk-h"><h3 id="fcFoundH">Filings found</h3></div>`;
+  h+=cs.map(c=>`<div class="fccar" id="fcCar${c.i}"><h4>${esc(c.pk.name)}</h4>${c.list?`<p class="t2" data-count>${c.list.length?`${plural(c.list.length,"filing")}, newest first; ${count(c.list.filter(f=>fcDigestOf(fc,f)).length)} with a saved summary, ${count(c.list.filter(f=>!fcDigestOf(fc,f)).length)} without.`:""}</p>`:""}${fcFiledHTML(fc,c)}</div>`).join("");
+  h+=`</section>`;
+  if(!(fc.dErr && fc.dErr.err==="not_deployed")) h+=fcMakeHTML(fc, cs)+fcComparisonHTML(fc);
+  return h+`<p class="source" id="fcSource">Source: S&amp;P Global Market Intelligence, SNL Insurance Product Filings; summaries saved by this site. Opening a document uses one S&amp;P request the first time.</p>`;
+}
+function renderForms(){
+  fcSetHook();
+  const fst=S.status&&S.status.filings;
+  let h=`<div><h2 class="action-title">Programs and forms side by side</h2>
+    <p class="sub">Two to four carriers' form filings in one state for one type of insurance, with the programs, forms and notes their saved summaries record. Every item names its filing and page, so it can be checked in the document.</p></div>`;
+  if(fst && fst.configured===false) h+=`<div class="info" id="fcOff" role="status"><span><b>S&amp;P filings aren't set up yet,</b> so a new search can't be run. Searches run before still open from their saved results.</span></div>`;
+  return h+fcFormHTML()+`<div id="fcOut" class="fcout" aria-live="polite">${fcOutHTML()}</div>`;
+}
+
+/* ----- exports, and what Ask Claude is told ----- */
+function fcExport(tbl){
+  const fc=S.fc, ran=fc.ran; if(!ran) return null;
+  const cps=fcCompare(fc), slug=[ran.state, ran.toiName].filter(Boolean).join("-").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,40)||"compare";
+  const base=f=>[filingNoText(f.r), dayOut(f.r.publishDate)], ids=f=>[f.r.documentId??null, f.r.filingVersionId??null];
+  if(tbl==="programs") return {name:`snl-programs-${slug}-${TODAY()}`, sheet:"Programs", cols:["Carrier","Program","Segment","Basis (words from the filing)","Filing","Date published","Page","Document id","Filing version id"],
+    rows:cps.flatMap(c=>c.progs.flatMap(p=>p.src.map(x=>[c.pk.name, p.name||"Program not named", p.seg||"not stated", x.basis, ...base(x.f), x.page, ...ids(x.f)])))};
+  if(tbl==="forms") return {name:`snl-forms-${slug}-${TODAY()}`, sheet:"Forms", cols:["Carrier","Form number","Edition","Latest edition","Title","What the filing did","Replaces","Program","Filing","Date published","Page","Document id","Filing version id"],
+    rows:cps.flatMap(c=>c.forms.flatMap(g=>g.list.map((x,j)=>[c.pk.name, x.num, x.edition, j===0?"Yes":"No", x.title, x.action||"", x.replaces, x.program, ...base(x.f), x.page, ...ids(x.f)])))};
+  return null;
+}
+/* Told to Claude in the Filings view's shape (the questions function reads only that and the Statutory one): every
+   company searched, the state, type of insurance, filing types and dates. */
+function fcScreen(){
+  const fc=S.fc, ran=fc.ran; if(!ran || !fc.runs || !fc.runs.some(x=>x.res)) return null;
+  const done=fc.runs.filter(x=>x.res), uniq=a=>[...new Set(a)];
+  const names=uniq([...ran.picks.map(p=>p.name), ...ran.picks.flatMap(p=>p.ids.map(c=>c.name))].filter(x=>!blank(x)).map(String)).slice(0,20);
+  const seen=new Set(); let total=0; for(const c of fcCarriers(fc)) for(const f of c.list||[]){ const k=f.dk||f.key; if(!seen.has(k)){ seen.add(k); total++; } }
+  return {view:"filings", search:{companyIds:uniq(done.flatMap(x=>x.payload.companyIds)), institutionIds:uniq(done.flatMap(x=>x.payload.institutionIds)), states:[ran.state], from:ran.from, to:ran.to,
+    typeOfInsuranceIds:[Number(ran.toi)], filingTypeIds:ran.types.map(t=>t.id), filingStatusIds:[]}, total, companies:names};
+}
+const FC_ASK = "Do these carriers have separate programs or forms for different kinds of customer, such as private client and middle market? Use their form filings in this search and cite the pages.";
+function fcAsk(){ if(!fcScreen()) return; if(!S.ask.turns.length && !S.ask.draft.trim()) S.ask.draft=FC_ASK; openAsk(); }
+
 /* ---------- render ---------- */
 /* The view (or the Ask Claude panel) is rebuilt from state each time: keep the cursor, the scroll position of boxes
    marked data-keep, and anything half-typed in boxes that aren't bound to state (the sign-in form). */
@@ -3205,7 +3798,7 @@ function render(){
   if(!on){ v.innerHTML=loginHTML(); keep(); renderDrawer(); renderAsk(); renderConn(); renderLive(); return; }
   document.querySelectorAll("nav.tabs a").forEach(a=>a.setAttribute("aria-current", a.dataset.view===S.view ? "page" : "false"));
   document.getElementById("stripIn").innerHTML=stripHTML();
-  v.innerHTML = S.view==="statutory" ? renderStatutory() : S.view==="profile" ? renderProfile() : S.view==="snapshot" ? renderSnapshot() : renderFilings();
+  v.innerHTML = S.view==="statutory" ? renderStatutory() : S.view==="profile" ? renderProfile() : S.view==="snapshot" ? renderSnapshot() : S.view==="forms" ? renderForms() : renderFilings();
   keep(); renderDrawer(); renderAsk();
   renderConn();
   renderLive();
@@ -3246,6 +3839,7 @@ function enterView(){
   if(S.view==="statutory" && !S.st.status && !S.st.loading) loadStatStatus();
   if(S.view==="profile") enterProfile();
   if(S.view==="snapshot") enterSnapshot();
+  if(S.view==="forms") enterForms();
 }
 function route(){
   const h=location.hash.replace(/^#/,""); let v=VIEWS.includes(h)?h:null;
@@ -3268,6 +3862,7 @@ function exportOf(t){
   if(t.dataset.what==="answer"){ const turn=S.ask.turns[+t.dataset.turn]; return turn?answerExport(turn):null; }
   if(t.dataset.what==="stat") return statExport(t.dataset.field);
   if(t.dataset.what==="snap") return snapExport(t.dataset.tbl);
+  if(t.dataset.what==="forms") return fcExport(t.dataset.tbl);
   return null;
 }
 document.addEventListener("click", e=>{
@@ -3380,6 +3975,21 @@ document.addEventListener("click", e=>{
     case "snap-map": S.snap.mapBy=t.dataset.by==="rate"?"rate":"count"; render(); break;
     case "snap-filings": snapToFilings(); break;
     case "snap-ask": snapAsk(t.dataset.q); break;   // fills the question box; sending is left to the reader
+
+    case "fc-find": fcLookup(); break;
+    case "fc-co": fcChooseCompany(+t.dataset.i); break;
+    case "fc-group": fcChooseGroup(+t.dataset.i); break;
+    case "fc-remove": if(!S.fc.busy){ S.fc.picks.splice(+t.dataset.i,1); S.fc.formErr=""; S.fc.pickErr=""; render(); document.getElementById("fc_find")?.focus(); } break;
+    case "fc-years": S.fc.years=FC_YEARS.includes(+t.dataset.y)?+t.dataset.y:3; S.fc.formErr=""; render(); break;
+    case "fc-wide": S.fc.wide=!!t.checked; S.fc.formErr=""; render(); break;
+    case "fc-run": fcRun(); break;
+    case "fc-retry": fcRetry(); break;
+    case "fc-get-retry": S.fc.getErr=null; fcGetDigests(S.fc); break;
+    case "fc-dstatus-retry": S.fc.dErr=null; render(); fcDigestStatus(); break;
+    case "fc-make": fcMake(); break;
+    case "fc-stop": if(S.fc.mk&&S.fc.mk.busy){ S.fc.mk.stop=true; render(); } break;
+    case "fc-more": S.fc.open[t.dataset.k]=!S.fc.open[t.dataset.k]; render(); break;
+    case "fc-ask": fcAsk(); break;
   }
 });
 function onInput(e){
@@ -3405,6 +4015,7 @@ document.addEventListener("keydown", e=>{
   if(e.target.id==="pf_find" && e.key==="Enter"){ e.preventDefault(); pfLookup(); return; }
   if(e.target.id==="pf_code" && e.key==="Enter"){ e.preventDefault(); pfFacts(); return; }
   if(e.target.id==="sn_find" && e.key==="Enter"){ e.preventDefault(); snapLookup(); return; }
+  if(e.target.id==="fc_find" && e.key==="Enter"){ e.preventDefault(); fcLookup(); return; }
   if(e.target.id==="su_like" && e.key==="Enter"){ e.preventDefault(); discover(null, false); return; }
   if(e.target.id==="ask_input" && e.key==="Enter" && !e.shiftKey && !e.isComposing){ e.preventDefault(); askQuestion(); return; }
   if(e.key==="Enter" && e.target.closest && e.target.closest("#pwForm")){ e.preventDefault(); savePassword(); return; }
@@ -3429,6 +4040,7 @@ function resetState(){
   S.w=freshWatch();
   S.pf=freshProfile();   // the template's bytes and any built file go with it
   S.snap=freshSnap();
+  resetForms();
 }
 async function onSignedIn(session){
   const {data, error}=await S.sb.from("profiles").select("username,display_name,role").eq("id", session.user.id).maybeSingle();

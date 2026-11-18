@@ -1,0 +1,28 @@
+{
+  "_about": "Made-up company-list look-ups for the Programs and forms page tests, in the shape the snl-filings function answers {action: \"resolve\"} with. calloway answers \"Calloway\": three matching companies and the whole group with every member (one member has no S&P id). tarrow answers \"Tarrow\": one company and a company with no S&P id; no whole group. nonesuch answers \"Nonesuch\": one company that S&P has no filings for in the search fixture.",
+  "calloway": {"query": "Calloway", "note": null, "groupNote": null,
+    "matches": [
+      {"companyId": null, "companyName": "Calloway Insurance Co", "naicCompanyCode": null, "institutionId": "5000001", "spStatEntityId": null, "naicGroupCode": null, "naicGroupName": "Calloway Group (SNL P&C Group)"},
+      {"companyId": null, "companyName": "Calloway Home Co", "naicCompanyCode": null, "institutionId": "5000002", "spStatEntityId": null, "naicGroupCode": null, "naicGroupName": "Calloway Group (SNL P&C Group)"},
+      {"companyId": null, "companyName": "Calloway Coastal Co", "naicCompanyCode": null, "institutionId": "5000003", "spStatEntityId": null, "naicGroupCode": null, "naicGroupName": "Calloway Group (SNL P&C Group)"}
+    ],
+    "groups": [
+      {"name": "Calloway Group (SNL P&C Group)", "code": null, "companies": 4, "searchable": 3, "tooBig": false, "requestsPerYear": 1,
+        "members": [
+          {"companyName": "Calloway Insurance Co", "companyId": null, "institutionId": "5000001"},
+          {"companyName": "Calloway Home Co", "companyId": null, "institutionId": "5000002"},
+          {"companyName": "Calloway Coastal Co", "companyId": null, "institutionId": "5000003"}
+        ]}
+    ]},
+  "tarrow": {"query": "Tarrow", "note": null, "groupNote": null,
+    "matches": [
+      {"companyId": null, "companyName": "Tarrow Mutual Insurance Co", "naicCompanyCode": null, "institutionId": "5100001", "spStatEntityId": null, "naicGroupCode": null, "naicGroupName": null},
+      {"companyId": null, "companyName": "Tarrow <b>Re</b> Co", "naicCompanyCode": "90011", "institutionId": null, "spStatEntityId": null, "naicGroupCode": null, "naicGroupName": null}
+    ],
+    "groups": []},
+  "nonesuch": {"query": "Nonesuch", "note": null, "groupNote": null,
+    "matches": [
+      {"companyId": null, "companyName": "Nonesuch Mutual Insurance Co", "naicCompanyCode": null, "institutionId": "5300001", "spStatEntityId": null, "naicGroupCode": null, "naicGroupName": null}
+    ],
+    "groups": []}
+}
