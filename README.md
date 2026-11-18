@@ -16,6 +16,8 @@ House rules for anyone changing the code are in [.github/copilot-instructions.md
 | Part | Where it runs | What it does |
 | --- | --- | --- |
 | `web/` | GitHub Pages | The site. One page, no build step. Holds only the Supabase address and publishable key. |
+| `worker/`, `wrangler.toml` | Cloudflare Worker | Optional, recommended (step 4a). Serves the same site at a `workers.dev` address behind Cloudflare Access, and is then the only way to a Supabase session. Holds no secrets. |
+| `snl-signin` | Supabase Edge Function | Optional (step 4a). Checks a Cloudflare sign-in itself and turns it into a one-hour Supabase session for that person. |
 | `snl-filings` | Supabase Edge Function | Filing search, reference lists and documents from S&P's Physical Documents API. Holds the S&P API credentials. |
 | `snl-chat` | Supabase Edge Function | Claude, with the filing search, filing documents and statutory data as tools. Holds the Anthropic key. |
 | `snl-statutory` | Supabase Edge Function | Statutory financials from S&P's data on Snowflake. Holds the Snowflake credentials. |
@@ -137,6 +139,123 @@ supabase functions deploy snl-chat --no-verify-jwt
 3. Merge to `main`, or run the "Deploy site to GitHub Pages" workflow. The site appears at `https://YOUR_GITHUB_ORG.github.io/snl-lookup/`.
 
 A merge to `main` is a deploy.
+
+### 4a. Cloudflare sign-on (optional, recommended: replaces usernames and passwords)
+
+The site is served by a Cloudflare Worker at `https://snl-lookup.YOUR_SUBDOMAIN.workers.dev`, behind Cloudflare Access. Colleagues sign in with a one-time code Cloudflare emails them. The owner can sign in with their Cloudflare account. Nobody needs a username or a password, and no login is made by a script.
+
+How it works:
+
+- **Cloudflare decides who comes in.** The list of email addresses is the Access policy. The Worker checks Cloudflare's signed sign-in on every request and serves nothing without it, including when Access is switched off.
+- **The back end is tied to the same sign-in.** A sign-in page in front of a static site protects nothing behind it, because the page talks straight to Supabase. So the page asks the Worker for a session, the Worker passes the Cloudflare sign-in to `snl-signin`, and `snl-signin` checks it again against Cloudflare's own keys before it gives out a Supabase token. Row-level security, each function's own login check and the storage rules are unchanged.
+- **The token lasts about an hour and cannot renew itself.** No refresh token ever leaves Supabase. The page comes back through Cloudflare for a new token before the old one ends.
+- **`SNL_ADMIN_EMAILS` decides who is Corp Dev.** Everyone else Cloudflare lets in is a reader. The role follows that list at every sign-in, up and down.
+- **Usernames** are the part of the address before the @ (`jane.doe`), with `-2`, `-3` when taken. The email address is shown in the account menu.
+
+The GitHub Pages copy keeps working with usernames and passwords until you retire them (the last step), so nothing breaks while you switch over.
+
+**1. Deploy the Worker.** From the repository root. Until its settings exist it answers 403 to everyone.
+
+```bash
+npx wrangler login
+```
+
+```bash
+npx wrangler deploy
+```
+
+**2. Switch on Access for its address.** Cloudflare dashboard > Workers & Pages > snl-lookup > Access > protect this Worker behind Access, for all traffic. The dashboard's wording may differ slightly.
+
+**3. Set who may come in.** In Zero Trust:
+
+1. Integrations > Identity providers: check **Cloudflare** is listed with "Restrict to account members" on, and add **One-time PIN**.
+2. Access controls > Applications > the snl-lookup application > Edit: add an Allow policy that includes your colleagues' email addresses, and tick both login methods.
+3. Copy the **Application Audience (AUD) tag** from the application's additional settings. Your team domain is `YOUR_TEAM.cloudflareaccess.com`: the address of the Cloudflare sign-in page shows it.
+4. Ask colleagues to allow mail from `noreply@notify.cloudflare.com`, which sends the codes.
+
+Keep "Restrict to account members" on. If the Cloudflare account has other members, they can come in as readers.
+
+**4. Set the Worker's settings.** Each command asks for the value. None is a secret, but none is committed, because the repository is public. A deploy never removes them. `ORG_NAME` is optional.
+
+```bash
+npx wrangler secret put TEAM_DOMAIN
+```
+
+```bash
+npx wrangler secret put POLICY_AUD
+```
+
+```bash
+npx wrangler secret put SUPABASE_URL
+```
+
+```bash
+npx wrangler secret put SUPABASE_PUBLISHABLE_KEY
+```
+
+```bash
+npx wrangler secret put ORG_NAME
+```
+
+Use the publishable key, never the secret key. A secret key set here by mistake is refused and never sent to a browser.
+
+**5. Set the Supabase secrets.** `SNL_ADMIN_EMAILS` is a comma-separated list; for the owner it is the email address of their Cloudflare account.
+
+```bash
+supabase secrets set CF_ACCESS_TEAM_DOMAIN=YOUR_TEAM.cloudflareaccess.com
+```
+
+```bash
+supabase secrets set CF_ACCESS_AUD=...
+```
+
+```bash
+supabase secrets set SNL_ADMIN_EMAILS=...
+```
+
+**6. Deploy `snl-signin`.** Authentication > Sign In / Providers > Email must stay on (the session is made through a sign-in link that is never sent). "Allow new users to sign up" can stay off.
+
+```bash
+supabase functions deploy snl-signin --no-verify-jwt
+```
+
+**7. Let the page call the functions from the new address.** Keep both addresses while you switch over.
+
+```bash
+supabase secrets set ALLOWED_ORIGIN=https://YOUR_GITHUB_ORG.github.io,https://snl-lookup.YOUR_SUBDOMAIN.workers.dev
+```
+
+**8. Keep your history.** Past answers, recent searches and saved things belong to your existing login. Point it at your real email address before your first Cloudflare sign-in, so that sign-in lands on the same login. Do the same for any colleague whose history should be kept. The `logins` commands here need `SUPABASE_URL` and `SUPABASE_SECRET_KEY` set as in step 2.
+
+```bash
+npm run logins -- link YOUR_USERNAME YOUR_EMAIL
+```
+
+**9. First sign-in.** Open the `workers.dev` address and sign in. The account menu should show your email address and "Corp Dev". This first sign-in is the live check of everything above.
+
+**10. Retire the passwords**, once everyone has signed in through Cloudflare. The first command only lists what it would do.
+
+```bash
+npm run logins -- retire-passwords
+```
+
+```bash
+npm run logins -- retire-passwords --apply
+```
+
+```bash
+supabase secrets set ALLOWED_ORIGIN=https://snl-lookup.YOUR_SUBDOMAIN.workers.dev
+```
+
+Then run `delete from auth.sessions;` once in the SQL editor: it ends any password session still open, and people on Cloudflare are signed in again by themselves. Optionally switch GitHub Pages off (Settings > Pages). After this, the only way to get a session is `snl-signin`, which gives one only for a sign-in Cloudflare signed for this application.
+
+**Adding a person:** add their email address to the Access policy. Their login and profile are made at their first sign-in.
+
+**Removing a person:** remove their address from the Access policy, then Zero Trust > Team & Resources > Users > select them > Revoke. The token already in their browser lasts until it expires, one hour by default (Supabase's Auth settings set the access token expiry; Supabase advises no less than 5 minutes). For an immediate cut-off, also run `npm run logins -- remove THEIR_USERNAME`.
+
+**Deploying the site** on this route is `npx wrangler deploy` again after a `git pull`. A merge to `main` deploys only the GitHub Pages copy.
+
+**Cost.** Free at this size: Cloudflare's free Workers plan allows 100,000 requests a day, and Zero Trust is free for up to 50 users. Cloudflare describes `workers.dev` addresses as meant for projects that are not business-critical and recommends a custom domain for production.
 
 ### 5. S&P filings API
 
@@ -488,6 +607,7 @@ Nothing in this list is guessed in the code: each item is either handled both wa
 | **The storage rules for the template.** The migration uses the statements Supabase documents for storage policies, but has not been run against a real project. | `0004_profile_template.sql` | First upload of the template |
 | **How the profile comes out on the real template.** It is tested on a made-up stand-in with the same layout names. | `web/deck.js` | The sample profile, opened in PowerPoint |
 | **Who pays for Snowflake credits** and whether use is capped. | n/a | S&P |
+| **Cloudflare sign-on against the live services.** Tested with stand-ins for Cloudflare and Supabase only. Unconfirmed until the first sign-in: that Access passes its sign-in header to a Worker serving static files; the two Supabase calls that make a session, with sign-ups off; that `snl-signin` accepts a call carrying only the publishable key; that Access's logout address signs the browser out on a `workers.dev` address; the exact dashboard wording in step 4a. | `worker/index.js`, `_shared/access.ts` | First Cloudflare sign-in (step 4a) |
 | **Claude reading real filings.** Tested against a stand-in for Anthropic's API only. Watch the first live answer: the page citations, the cost and how long each step takes. | `_shared/chat.ts` | First live answer |
 
 S&P's "SNL Insurance Product Filings User Guide" was not available when this was built. The code follows the summary of it in the build brief and S&P's public API specification.
