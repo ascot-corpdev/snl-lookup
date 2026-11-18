@@ -40,7 +40,7 @@ const lookup = (id: string) => toolUse(id, "resolve_entity", { query: "calloway"
   const id = await w.ask();
   const steps = w.claude.calls.filter((c) => c.body.tools);
   ok("until the limit, Claude is free to look things up", steps.slice(0, LIMITS.rounds).every((c) => c.body.tool_choice === undefined));
-  ok("once the step limit is reached the next request allows no more lookups, so an answer must come back", forced.tool_choice?.type === "none" && forced.tools.length === 4, forced.tool_choice);
+  ok("once the step limit is reached the next request allows no more lookups, so an answer must come back", forced.tool_choice?.type === "none" && forced.tools.length === 5, forced.tool_choice);
   ok("the answer is kept, not thrown away", w.job(id).status === "done" && (w.job(id).result as any).answer[0].text === "An answer from what was found.", w.job(id).error);
   ok("and it says the limit was reached", (w.job(id).result as any).caps.some((c: string) => c === `Claude stopped at the limit of ${LIMITS.rounds} steps for one question. Ask a narrower question to go further.`), (w.job(id).result as any).caps);
   ok("no lookup ran after the limit", (w.job(id).result as any).lookups.length === LIMITS.rounds && steps.length === LIMITS.rounds + 1);

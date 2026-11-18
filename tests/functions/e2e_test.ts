@@ -101,7 +101,7 @@ ok("the answer's saved place is cleared", !db.states.has(jobId));
 const first = claude.calls[0];
 ok("Claude Opus 5.5 by default, streaming, adaptive thinking, high effort", first.body.model === "claude-opus-5-5" && first.stream && first.body.thinking?.type === "adaptive" && first.body.output_config?.effort === "high", first.body.output_config);
 ok("server-side fallback is on", first.body.fallbacks === "default" && (first.betas ?? "").includes("server-side-fallback-2026-07-01"), first.betas);
-ok("four strict tools", first.body.tools.length === 4 && first.body.tools.every((t: any) => t.strict === true && t.input_schema.additionalProperties === false) && first.body.tools.map((t: any) => t.name).join() === "resolve_entity,search_filings,read_filing_document,query_statutory");
+ok("five strict tools", first.body.tools.length === 5 && first.body.tools.every((t: any) => t.strict === true && t.input_schema.additionalProperties === false) && first.body.tools.map((t: any) => t.name).join() === "resolve_entity,resolve_entities,search_filings,read_filing_document,query_statutory");
 ok("Claude sees only the question (and today's date), no deal data", JSON.stringify(first.body.messages) === JSON.stringify([{ role: "user", content: [{ type: "text", text: QUESTION }, { type: "text", text: "Today is 2026-11-13." }] }]), first.body.messages);
 ok("the system prompt carries S&P's saved reference ids", first.body.system[1].text.includes("4 = Homeowners") && first.body.system[1].text.includes("0 = Form"), first.body.system[1].text);
 const tr = seenByClaude.tableRequest;

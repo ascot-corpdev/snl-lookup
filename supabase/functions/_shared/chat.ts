@@ -12,7 +12,7 @@
 
 import Anthropic, { toFile } from "npm:@anthropic-ai/sdk@1.8.0";
 import type { Db, Step } from "./db.ts";
-import { downloadDocument, type Filing, getReference, parseDocRef, parseSearch, resolveEntity, savedOrFreshSearch } from "./filings.ts";
+import { downloadDocument, type Filing, getReference, MATCHES_PER_NAME, MAX_IDS, MAX_LOOKUP_NAMES, MAX_MEMBERS, parseDocRef, parseSearch, resolveEntity, resolveMany, savedOrFreshSearch } from "./filings.ts";
 import type { Env } from "./http.ts";
 import { credsReady, Snowflake, snowflakeCreds, SnowflakeError } from "./snowflake.ts";
 import { type Gate, makeGate, NOT_CONFIGURED, planLimits, Spgmi, SpgmiError } from "./spgmi.ts";
@@ -48,13 +48,15 @@ export const systemPrompt = (org = ""): string => `You answer questions for ${or
 What you can use
 - SNL Insurance Product Filings: rate, rule and form filings that insurers make with US state regulators. search_filings finds them; read_filing_document attaches a filing's original document so you can read it.
 - SNL statutory financials (premiums by line and state, policyholder surplus, loss, expense and combined ratios) through query_statutory, when it is set up.
-- resolve_entity turns a company name or NAIC code into the S&P ids that search_filings needs.
+- resolve_entity turns a company name or NAIC code into the S&P ids that search_filings needs. resolve_entities does the same for several names in one call, and turns an insurer group's name into all of its member companies.
 Take facts about filings, forms, rates and statutory figures only from these tools. Don't fill gaps from other knowledge. If the data doesn't cover something, say so and say what would answer it. You have no access to ${org ? org + "'s" : "the team's"} deals, pipeline or internal information; if asked, say this tool only covers S&P's insurance data.
 
 Rules that matter
 - An empty search result means S&P's data returned nothing for that search. It does not show that no filings exist. Say it that way, for each state or company it applies to, and pass on the notes the search returns.
-- S&P's filings API has no company search. resolve_entity only knows companies that have appeared in earlier results. If it finds nothing, say so and tell the user they can add the company on the Filings view by its S&P company id or institution id. Don't guess ids.
+- S&P's filings API has no company search: every search needs S&P company ids or institution ids. resolve_entity and resolve_entities find them in the app's company list, which holds the companies the owner loaded plus every company seen in earlier results. They never call S&P. If a company isn't in the list, say so and tell the user they can add it on the Filings view by its S&P company id or institution id. Don't guess ids.
 - An insurer group usually files through several companies. Search every company the user names.
+- S&P can't list every company that filed in a market, so a question about a market or a segment rather than named companies (for example "which carriers filed high net worth homeowners forms in Florida this year") needs a list of companies to check. Choosing that list is the one place to use your general knowledge: pick the carriers or groups most likely to write that business there, usually 10 to 15, and look them all up in one resolve_entities call, with insurer groups under groups so every member company comes back. Then search the searchBatches it returns. In the answer, say plainly that the carriers checked are your own choice, not a list from S&P, and may miss carriers. Describe the results as covering the carriers checked, never the whole market. Name the candidates that weren't in the company list and tell the user they can add them on the Filings view by S&P company id or institution id.
+- Narrow a search before you run it, so it fits the limits on one question: only the states asked about, dates no wider than the question needs (each 364 days of dates costs one S&P request for every 10 companies, so "this year" is one request for each 10), and the type_of_insurance_ids and filing_type_ids that fit the question (for example homeowners and form filings). You see at most ${LIMITS.rowsToClaude} filings from one search, so a wide search hides the rest. One search takes up to ${MAX_IDS} ids.
 - Reading documents is slow and counts against S&P's request limit, so read the filings that decide the answer, not every filing. Start from the search results (filing type, description, sub-type and dates), then read what you need. When you state something a document says, rely on the document so the page citation is recorded.
 - Insurers often file separate programs for different customers, for example a private client or high net worth program alongside a standard program. When asked whether forms differ by customer segment, work from the program, product and form names and numbers in the filings, say what you based each classification on, and follow any mapping the user gives (for example which product is the private client one). If the filings don't settle it, say so.
 - There are limits on lookups and document pages for one question. If a tool says a limit is reached, answer from what you have and say what you couldn't check.
@@ -86,9 +88,23 @@ const TABLE_SCHEMA = {
 export const TOOLS: Anthropic.Beta.BetaTool[] = [
   {
     name: "resolve_entity",
-    description: "Find a company's S&P ids from its name, NAIC company code or an S&P id. Only knows companies that have appeared in earlier search results; it never calls S&P. Returns companyId, institutionId, NAIC codes and group for each match. A match with no companyId and no institutionId has only a NAIC code: use it with query_statutory; search_filings can't search it.",
+    description: "Find a company's S&P ids from its name, NAIC company code or an S&P id. Looks in the app's company list: the companies the owner loaded plus those that appeared in earlier search results. It never calls S&P. Returns companyId, institutionId, NAIC codes and group for each match. A match with no companyId and no institutionId has only a NAIC code: use it with query_statutory; search_filings can't search it. For several companies, or a whole group, use resolve_entities.",
     strict: true,
     input_schema: { type: "object", properties: { query: { type: "string", description: "Part of a company name, a NAIC code, or an S&P company or institution id" } }, required: ["query"], additionalProperties: false },
+  },
+  {
+    name: "resolve_entities",
+    description: `Look up several companies and insurer groups in the app's company list in one call, for example the candidate carriers for a market question. Each name under names is matched like resolve_entity (up to ${MATCHES_PER_NAME} companies a name). Each entry under groups is a group name, or a NAIC group code, and brings back every member company in the list. It never calls S&P. Returns the matches for each name and group, notFound (names and groups that matched nothing in the list), searchBatches (every searchable company found, once, split into lists of at most ${MAX_IDS} ids that search_filings takes, with the S&P requests each needs for every 364 days of dates) and notes. At most ${MAX_LOOKUP_NAMES} names and groups, and ${MAX_MEMBERS} group members, in one call; the rest come back under notLookedUp.`,
+    strict: true,
+    input_schema: {
+      type: "object",
+      properties: {
+        names: { type: "array", items: { type: "string" }, description: "Company names, NAIC company codes or S&P ids, or [] for none" },
+        groups: { type: "array", items: { type: "string" }, description: "Insurer group names (for example \"Calloway Group\") or NAIC group codes, or [] for none" },
+      },
+      required: ["names", "groups"],
+      additionalProperties: false,
+    },
   },
   {
     name: "search_filings",
@@ -672,10 +688,22 @@ function makeTools(ctx: ChatCtx, st: ChatState, api: Spgmi | null, client: Anthr
   async function resolve(input: Record<string, unknown>): Promise<ToolOut> {
     const q = String(input.query ?? "").trim();
     if (!q) return fail("Give a company name, a NAIC code or an S&P id.");
-    await step(`Looking up "${q.slice(0, 60)}" in companies seen before`);
+    await step(`Looking up "${q.slice(0, 60)}" in the company list`);
     const found = await resolveEntity(db, q);
     st.lookups.push({ tool: "resolve_entity", detail: `${q.slice(0, 60)}: ${plural(found.matches.length, "match", "matches")}` });
     return { result: found };
+  }
+
+  async function resolveSeveral(input: Record<string, unknown>): Promise<ToolOut> {
+    const names = Array.isArray(input.names) ? input.names : [], groups = Array.isArray(input.groups) ? input.groups : [];
+    if (![...names, ...groups].some((n) => String(n ?? "").trim())) return fail("Give at least one company name or group name.");
+    const asked = names.length + groups.length;
+    await step(`Looking up ${plural(Math.min(asked, MAX_LOOKUP_NAMES), "name", "names")} in the company list`);
+    const out = await resolveMany(db, names, groups);
+    const looked = out.names.length + out.groups.length, ids = out.searchBatches.reduce((n, b) => n + b.company_ids.length + b.institution_ids.length, 0);
+    st.lookups.push({ tool: "resolve_entities", detail: `${plural(looked, "name", "names")}: ${plural(looked - out.notFound.length, "found", "found")}, ${plural(out.notFound.length, "not in the company list", "not in the company list")}, ${plural(ids, "company to search", "companies to search")}` });
+    if (out.notLookedUp.length || out.groups.some((g) => g.cut)) cap(`One look-up stopped at its limit of ${MAX_LOOKUP_NAMES} names and groups and ${MAX_MEMBERS} group members, so some companies weren't looked up. Ask about fewer carriers to cover them all.`);
+    return { result: out };
   }
 
   async function search(input: Record<string, unknown>): Promise<ToolOut> {
@@ -797,6 +825,7 @@ function makeTools(ctx: ChatCtx, st: ChatState, api: Spgmi | null, client: Anthr
       try {
         switch (c.name) {
           case "resolve_entity": return await resolve(input);
+          case "resolve_entities": return await resolveSeveral(input);
           case "search_filings": return await search(input);
           case "read_filing_document": return await read(input);
           case "query_statutory": return await statutory(input);
