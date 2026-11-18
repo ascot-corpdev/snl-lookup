@@ -88,7 +88,7 @@ const PART2={...copy(SEARCH), rows:[row(3,5000001,"Calloway Insurance Co","TX","
   ok("S&P's lists are loaded once, for the states", same(t.of("reference").map(c=>c.body),[{action:"reference"}]));
   ok("nothing chosen yet, 3 years by default, and no cost until two are chosen", (await t.txt("#cm_count"))==="none chosen yet; choose 2 to 8" && (await p.getAttribute('[data-act="cmp-years"][data-y="3"]',"aria-pressed"))==="true"
     && (await t.txt("#cm_cost"))==="Choose at least 2 carriers to see what the comparison costs." && (await t.txt("#cm_dates"))==="Filings published 15 Nov 2023 to 13 Nov, in all 7 states in S&P's list, every filing type and status.");
-  ok("without the sets feature, no saved-set control and no error", !(await p.$("#setPickStandin")) && await p.evaluate(()=>typeof SET_TARGETS==="undefined"));
+  ok("with no saved sets, no saved-set control shows, and Compare is still registered as a place sets can be used", !(await p.$("#setpick_compare")) && await p.evaluate(()=>typeof SET_TARGETS==="object" && typeof SET_TARGETS.compare==="function"));
   await p.click('[data-act="cmp-find"]'); await p.waitForTimeout(100);
   ok("find with an empty box: says what to type", (await t.txt("#cm_findErr"))==="Type part of a company or group name." && t.of("resolve").length===0);
   await t.find("Zzz");
@@ -414,11 +414,11 @@ const PART2={...copy(SEARCH), rows:[row(3,5000001,"Calloway Insurance Co","TX","
   ok("kept out of Recent searches when the Filings form says so", same(t.of("search")[0].body,{...MAIN, unlisted:true}));
   await t.ctx.close();
 
-  // ----- saved carrier sets, with a stand-in for the sets feature -----
+  // ----- saved carrier sets: the real control, fed from the shared "carrier_sets" setting -----
   {
-    const init=()=>{ window.SET_TARGETS={}; window.setPickHTML=w=>w==="compare"?'<div class="setpick" id="setPickStandin">Use a saved set</div>':""; };
-    t=await open({}, {init}); p=t.p;
-    ok("with the sets feature: its control shows and Compare registers itself", (await t.txt("#setPickStandin"))==="Use a saved set" && await p.evaluate(()=>typeof SET_TARGETS.compare==="function"));
+    const SETS={sets:[{id:"s-ab12cd", name:"Florida homeowners peers", note:"", companies:[{companyName:"Calloway Insurance Co", companyId:null, institutionId:"5000001"}], groups:[], updatedAt:"2026-11-13T10:00:00Z"}]};
+    t=await open({seed:[["snl_settings","carrier_sets",{doc:SETS}]]}); p=t.p; await p.waitForTimeout(300);
+    ok("with a saved set: the control shows on Compare, and Compare is registered", !!(await p.$("#setpick_compare")) && !!(await p.$('#setpick_compare [data-act="set-use"][data-target="compare"]')) && await p.evaluate(()=>typeof SET_TARGETS.compare==="function"), await p.evaluate(()=>document.querySelector("#setpick_compare")?.outerHTML.slice(0,200)));
     const co=(name,id,extra)=>({kind:"institutionId", id:String(id), name, ...extra});
     await p.evaluate(([cs])=>SET_TARGETS.compare(cs, {id:"s-ab12cd", name:"Florida homeowners peers", leftOut:1, companies:[{companyName:"Calloway Insurance Co", companyId:null, institutionId:"5000001"},{companyName:"Nonesuch Coastal Co", companyId:null, institutionId:"5200001"}], groups:["Tarrow Group (SNL P&C Group)"]}),
       [[co("Calloway Insurance Co",5000001), co("Nonesuch Coastal Co",5200001), co("Tarrow Mutual Insurance Co",5100001), co("Tarrow Specialty Co",5100002)]]); await p.waitForTimeout(200);
