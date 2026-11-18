@@ -583,6 +583,25 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 .mkstart{display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--grid);padding-top:12px;min-width:0}
 .mkcost,.mkcov span{overflow-wrap:anywhere}
 .mkmiss summary,.mkrecent summary{cursor:pointer;font-size:12px;font-weight:bold;color:var(--blue)}
+/* "Narrow it down": states and types of insurance on Snapshot, Compare, Market and the filings profile */
+.nwbox{border:1px solid var(--grid);background:var(--alt);padding:10px 12px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.nwhead{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;min-width:0}
+.nwhead b{font-size:13px}
+.nwgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px;min-width:0}
+.nwcol{display:flex;flex-direction:column;gap:6px;min-width:0}
+.nwlab{font-size:12px;font-weight:bold}
+.nwrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-width:0}
+.nwall{display:inline-flex;align-items:center;padding:4px 10px;background:var(--surface);border:1px dashed var(--grid);font-size:12px;color:var(--muted)}
+.nwrow .cchip{background:var(--surface);border:1px solid var(--grid)}
+.nwpanel{border:1px solid var(--grid);background:var(--surface);padding:10px 12px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.nwpanel .stpick{grid-template-columns:minmax(0,3fr) minmax(0,2fr)}
+.nwpanel .stbox{max-height:300px}
+.nwregions{display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-width:0}
+.nwpanel .checks{max-height:220px;background:var(--surface)}
+.nwnote{margin:0;overflow-wrap:anywhere}
+.nwshown,.nwwide{align-items:center}
+.nwshown span,.nwwide span{flex:1 1 260px;min-width:0;overflow-wrap:anywhere}
+@media (max-width:700px){.nwgrid{grid-template-columns:1fr}.nwpanel .stpick{grid-template-columns:1fr}}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
@@ -3485,11 +3504,16 @@ function fpTooBig(pick, years){
   const fit=FP_YEARS.filter(y=>fpPlanned(pick.ids, y)<=FP_MAX_PLANNED);
   return `A filings profile of ${pick.name} over ${fpYearsText(years)} needs at least ${need} S&P requests (one for each 10 companies and each year of dates), more than the ${FP_MAX_PLANNED} one filings profile may plan. ${fit.length?`Choose ${fpYearsText(Math.max(...fit))} instead.`:"Profile one of its companies instead."}`;
 }
-function fpBody(action, pick, years){
+function fpBody(action, pick, years, scope){
   const b={action, kind:pick.kind, years};
   if(pick.kind==="group") b.group=pick.name; else b[pick.ids[0].kind]=String(pick.ids[0].id);
+  // Narrow it down: only when something is chosen, so a profile nobody narrowed asks exactly what it always has
+  if(scope && scope.states && scope.states.length) b.states=scope.states.slice();
+  const ids=(scope&&scope.tois||[]).map(t=>Number(t.id)).filter(Number.isInteger); if(ids.length) b.typeOfInsuranceIds=ids;
   return b;
 }
+// what a filings profile was narrowed to: the facts' own scope (the function's words), else not narrowed
+function fpScopeOf(f){ const s=f&&f.scope; return s&&typeof s==="object"&&s.narrowed===true&&typeof s.words==="string"&&typeof s.short==="string" ? s : null; }
 
 /* ----- the figures, Claude's draft and the file ----- */
 function fpReset(fp){ fp.res=null; fp.err=null; fp.plan=null; fp.libsErr=""; fp.drafted=null; fp.draftErr=null; fp.built=null; fp.buildErr=""; }
@@ -3497,8 +3521,8 @@ async function fpFacts(){
   const fp=S.pf.fp; if(fp.busy) return;
   if(!fp.pick){ fp.formErr="Choose a company or a group first: find it by name above."; render(); return; }
   const big=fpTooBig(fp.pick, fp.years); if(big){ fp.formErr=big; render(); return; }
-  fp.formErr=""; fpReset(fp); fp.busy="facts"; fp.asked={pick:JSON.parse(JSON.stringify(fp.pick)), years:fp.years}; render();
-  const r=await callFn("snl-profile", fpBody("filings_facts", fp.asked.pick, fp.asked.years));
+  fp.formErr=""; fpReset(fp); fp.busy="facts"; fp.asked={pick:JSON.parse(JSON.stringify(fp.pick)), years:fp.years, scope:nwKeep("fp")}; render();
+  const r=await callFn("snl-profile", fpBody("filings_facts", fp.asked.pick, fp.asked.years, fp.asked.scope));
   if(!S.session || S.pf.fp!==fp) return;
   fp.busy="";
   if(r.data && r.data.facts && typeof r.data.facts==="object" && r.data.text){ fpTake(fp, r.data); loadStatus(); }
@@ -3530,7 +3554,7 @@ async function fpBuild(plain){
   if(plain){ fp.draft=false; fp.draftErr=null; }
   if(!plain && fpDraftWanted() && !fp.drafted && fp.asked){
     fp.busy="draft"; fp.draftErr=null; fp.built=null; fp.buildErr=""; render();
-    const r=await callFn("snl-profile", fpBody("filings_draft", fp.asked.pick, fp.asked.years));
+    const r=await callFn("snl-profile", fpBody("filings_draft", fp.asked.pick, fp.asked.years, fp.asked.scope));
     if(!S.session || S.pf.fp!==fp) return;
     pfChatUse(); loadStatus();
     if(r.data && r.data.facts && typeof r.data.facts==="object" && r.data.text){
@@ -3560,7 +3584,7 @@ async function fpMake(fp){
 function fpScreen(){
   const fp=S.pf.fp, r=fp.res, s=r&&r.search; if(!r || r.facts.sample || !s) return null;
   const ints=a=>(Array.isArray(a)?a:[]).map(Number).filter(Number.isInteger);
-  return {view:"filings", search:{companyIds:ints(s.companyIds), institutionIds:ints(s.institutionIds), states:(Array.isArray(s.states)?s.states:[]).map(String), from:String(s.from||""), to:String(s.to||""), typeOfInsuranceIds:[], filingTypeIds:[], filingStatusIds:[]},
+  return {view:"filings", search:{companyIds:ints(s.companyIds), institutionIds:ints(s.institutionIds), states:(Array.isArray(s.states)?s.states:[]).map(String), from:String(s.from||""), to:String(s.to||""), typeOfInsuranceIds:ints(s.typeOfInsuranceIds), filingTypeIds:[], filingStatusIds:[]},
     total:isNum(r.facts.totals&&r.facts.totals.filings)?+r.facts.totals.filings:0, companies:blank(r.facts.entity&&r.facts.entity.name)?[]:[String(r.facts.entity.name)]};
 }
 
@@ -3590,19 +3614,19 @@ function fpChosenHTML(){
   return `<p id="fp_chosen" style="margin:0">Chosen: <b>${esc(pk.name)}</b> <span class="t2">${esc(detail)}</span> <button type="button" class="lnk t2" data-act="fp-clear">Clear</button></p>`;
 }
 function fpCostHTML(){
-  const fp=S.pf.fp, pk=fp.pick, rg=fpRange(fp.years);
-  const dates=`<span class="t2" id="fp_dates">Filings published ${fmtDay(rg.from)} to ${fmtDay(rg.to)}, in every state in S&amp;P's list, every filing type and status.</span>`;
+  const fp=S.pf.fp, pk=fp.pick, rg=fpRange(fp.years), sc=nwNow("fp");
+  const dates=`<span class="t2" id="fp_dates">Filings published ${fmtDay(rg.from)} to ${fmtDay(rg.to)}, ${sc.states.length?`in ${esc(sc.stWords)}`:"in every state in S&amp;P's list"}, ${sc.tois.length?`${esc(sc.toiWords)} only, `:""}every filing type and status.${sc.narrowed?" Every slide will say so.":""}</span>`;
   if(!pk) return dates;
   const big=fpTooBig(pk, fp.years);
   if(big) return `${dates}<div class="banner" id="fp_tooBig" role="alert"><span>${esc(big)}</span></div>`;
   const need=fpPlanned(pk.ids, fp.years);
-  return `${dates}<p class="t2" id="fp_cost" style="margin:0"><b>About ${plural(need,"S&amp;P request")}</b> (one for each 10 companies and each year of dates), plus up to ${FP_OVERHEAD} for signing in and S&amp;P's lists, and more if S&amp;P has over 500 filings in a year. One filings profile may use at most ${FP_MAX_SP_REQUESTS}. None if the same search was run before, here or on the Snapshot view, and saved.</p>`;
+  return `${dates}<p class="t2" id="fp_cost" style="margin:0"><b>About ${plural(need,"S&amp;P request")}</b> (one for each 10 companies and each year of dates), plus up to ${FP_OVERHEAD} for signing in and S&amp;P's lists, and more if S&amp;P has over 500 filings in a year. One filings profile may use at most ${FP_MAX_SP_REQUESTS}. None if the same search was run before, here or on the Snapshot view, and saved.${sc.narrowed?" Narrowing the states or types doesn't change the number of S&amp;P requests, which depends on the companies and years; it means fewer filings come back.":""}</p>`;
 }
 function fpPlanHTML(fp){
   if(fp.libsErr) return `<div class="banner" id="fpLibsErr" role="alert"><span>${esc(fp.libsErr)}</span><button type="button" class="btn sm" data-act="fp-libs-retry">Try again</button></div>`;
   if(!fp.plan) return `<p class="t2" role="status">Working out which slides these filings fill…</p>`;
-  const n=fp.plan.filter(s=>s.included).length;
-  return `<div class="f"><span>The slides <em>${plural(n,"slide")} of ${count(fp.plan.length)} can be filled from these filings</em></span>
+  const n=fp.plan.filter(s=>s.included).length, sc=fp.res&&fpScopeOf(fp.res.facts);
+  return `<div class="f"><span>The slides <em>${plural(n,"slide")} of ${count(fp.plan.length)} can be filled from these filings${sc?` of ${esc(sc.words)}; each slide says so`:""}</em></span>
     <ol class="pfplan" id="fpPlan">${fp.plan.map(s=>`<li class="${s.included?"in":"out"}"><span class="t1">${esc(s.label||s.id)}</span>${s.included?`<span class="pill in">Included</span>`:`<span class="pfwhy">Left out: ${esc(blank(s.reason)?"its figures aren't available":s.reason)}</span>`}</li>`).join("")}</ol></div>`;
 }
 function fpDraftHTML(fp){
@@ -3631,8 +3655,9 @@ function fpOutHTML(){
   let h=`<section class="tcard" id="fpContents" aria-label="What the filings profile will contain">`;
   if(f.sample) h+=`<div class="info" id="fpSample" role="status"><span><b>This is a sample filings profile.</b> The group, its companies and every filing in it are made up, so you can check how your template comes out.</span></div>`;
   const who = e.kind==="group" ? `Group of ${plural(e.companies,"company","companies")}${e.noId?`, ${count(e.noId)} more without S&P ids left out`:""}` : "Company";
-  h+=`<div class="blk-h"><div><h3 id="fpName">${esc(blank(e.name)?"n/d":e.name)}</h3><p class="t2" id="fpMeta">${esc([who, `filings published ${fmtDay(P.from)} to ${fmtDay(P.to)}`].join(" · "))}</p></div></div>`;
-  if(!T.filings) h+=`<div class="info" id="fpNothing" role="status"><span><b>S&amp;P returned nothing for this search.</b> No filings came back for ${esc(e.name||"this choice")} in any state over ${fpYearsText(P.years||fp.years)}. That doesn't prove nothing was filed. Check the choice, or try a longer period.</span></div>`;
+  const sc=fpScopeOf(f);
+  h+=`<div class="blk-h"><div><h3 id="fpName">${esc(blank(e.name)?"n/d":e.name)}${sc?` <span class="t2" id="fpScope">${esc(sc.short)}</span>`:""}</h3><p class="t2" id="fpMeta">${esc([who, `filings published ${fmtDay(P.from)} to ${fmtDay(P.to)}`, sc?`narrowed to ${sc.words}`:""].filter(Boolean).join(" · "))}</p></div></div>`;
+  if(!T.filings) h+=`<div class="info" id="fpNothing" role="status"><span><b>S&amp;P returned nothing for this search${sc?` of ${esc(sc.words)}`:""}.</b> No filings came back for ${esc(e.name||"this choice")} ${sc?`there`:"in any state"} over ${fpYearsText(P.years||fp.years)}. That doesn't prove nothing was filed${sc?", and it says nothing about other states or types of insurance":""}. Check the choice, or try a longer period${sc?" or a wider choice of states and types":""}.</span></div>`;
   else h+=`<div class="pftiles" id="fpHead"><div class="pftile" data-k="filings"><span class="t2">Filings</span><b>${count(T.filings)}</b></div><div class="pftile" data-k="rate"><span class="t2">Rate filings</span><b>${count(T.rate)}</b></div><div class="pftile" data-k="states"><span class="t2">States with filings</span><b>${count(T.states)}</b></div></div>`;
   if(sh.capped) h+=`<div class="banner" id="fpCapped" role="alert"><span><b>The search stopped early,</b> so these filings may be incomplete and the slides say so. Choose a shorter period or one company for a complete profile.</span></div>`;
   h+=fpPlanHTML(fp);
@@ -3662,6 +3687,7 @@ function fpRender(){
   else if(fpFilingsOff()) h+=`<div class="info" id="fpOff" role="status"><span><b>S&amp;P filings aren't set up yet,</b> so a new filings profile can't be searched. A profile whose search was run before still opens from its saved result. You can build the sample below meanwhile.</span></div>`;
   h+=`<form class="tcard" id="fpForm" novalidate aria-label="Choose a company or group and a period">${fpFinderHTML()}${fpChosenHTML()}
     <div class="f"><span>Period</span><div class="snper"><div class="seg" role="group" aria-label="Period">${FP_YEARS.map(y=>`<button type="button" class="btn sm" data-act="fp-years" data-y="${y}" aria-pressed="${fp.years===y}">${y===1?"Last year":`Last ${y} years`}</button>`).join("")}</div></div></div>
+    ${nwHTML("fp", {busy:!!fp.busy, note:"Only the states and types chosen are searched, and every slide, title, map and source line says what the profile was narrowed to. To change it, choose again and get the filings again."})}
     <div id="fp_costBox" style="display:flex;flex-direction:column;gap:8px;min-width:0">${fpCostHTML()}</div>
     ${fp.formErr?`<p class="err" id="fpFormErr" role="alert">${esc(fp.formErr)}</p>`:""}
     <div class="toolbar"><button type="button" class="btn primary" id="fp_get" data-act="fp-facts" ${fp.busy||(pf.statusErr&&pf.statusErr.err==="not_deployed")?"disabled":""}>${fp.busy==="facts"?"Getting the filings…":"Get the filings"}</button><span class="t2 grow">Shows which slides the profile will hold before anything is built.</span></div>
@@ -3722,7 +3748,8 @@ function fpSumHTML(fp){
   const R=c("rate"), F=c("form"), older=(+R.older||0)+(+F.older||0);
   let h=`<section class="fpsum" id="fpSum" aria-labelledby="fpSumH"><div class="f"><span id="fpSumH">Filing summaries <em>what the exposure, rate adequacy and programs slides rest on</em></span></div>`;
   if(!U.checked){ h+=`<p class="t2" id="fpSumHave">${esc(blank(U.note)?"Saved summaries weren't looked up for this profile.":U.note)}</p>`; return h+`</section>`; }
-  h+=`<p style="margin:0" id="fpSumHave"><b>Saved summaries:</b> ${count(R.summarised)} of ${plural(R.filings,"rate filing")} and ${count(F.summarised)} of ${plural(F.filings,"form filing")}${older?`; ${plural(older,"was","were")} made before the newer rate figures (loss costs, indicated change, assumptions) were read, and can be made again`:""}. Saved summaries cost nothing to use.</p>`;
+  const sw=fpScopeOf(f);
+  h+=`<p style="margin:0" id="fpSumHave"><b>Saved summaries:</b> ${count(R.summarised)} of ${plural(R.filings,"rate filing")} and ${count(F.summarised)} of ${plural(F.filings,"form filing")}${sw?` in ${esc(sw.short)}`:""}${older?`; ${plural(older,"was","were")} made before the newer rate figures (loss costs, indicated change, assumptions) were read, and can be made again`:""}. Saved summaries cost nothing to use.</p>`;
   const mk=fp.mk;
   if(fp.busy==="refresh") h+=`<div class="info" id="fpRefreshing" role="status"><span><b>Working out the figures again with the new summaries…</b> From the saved search: no new S&amp;P search.</span></div>`;
   if(fp.refreshErr) h+=`<div class="banner" id="fpRefreshErr" role="alert"><span><b>The new summaries are saved, but the figures couldn't be worked out again.</b> ${esc(errText(fp.refreshErr))}</span><button type="button" class="btn sm" data-act="fp-refresh-retry">Try again</button></div>`;
@@ -3735,7 +3762,7 @@ function fpSumHTML(fp){
   if(!cand.rate.length && !cand.form.length){ h+=`<p class="t2" id="fpSumNone">Every rate and form filing with a document already has a current summary${R.withDocument<R.filings||F.withDocument<F.filings?", or has no document to summarise":""}.</p>`; return h+(mk?fpSumMadeHTML(mk):"")+`</section>`; }
   const opts=(max, cur)=>Array.from({length:max+1},(_,i)=>`<option value="${i}" ${cur===i?"selected":""}>${i}</option>`).join("");
   h+=`<div class="inline fpsumpick"><label for="fp_nRate" class="t2"><b>Summarise the latest</b></label><select id="fp_nRate" data-bind="pf.fp.nRate" data-live style="width:auto" ${fp.busy?"disabled":""}>${opts(Math.min(FP_SUM_MAX, cand.rate.length), n.r)}</select><label for="fp_nForm" class="t2"><b>rate filings and the latest</b></label><select id="fp_nForm" data-bind="pf.fp.nForm" data-live style="width:auto" ${fp.busy?"disabled":""}>${opts(Math.min(FP_SUM_MAX, cand.form.length), n.f)}</select><span class="t2"><b>form filings</b></span></div>`;
-  h+=`<p class="t2" id="fpSumWhich" style="margin:0">${plural(cand.rate.length,"rate filing")} and ${plural(cand.form.length,"form filing")} have no current summary${cand.rate.some(x=>x.older)||cand.form.some(x=>x.older)?" (older summaries are made again)":""}; the newest are taken first.</p>`;
+  h+=`<p class="t2" id="fpSumWhich" style="margin:0">${plural(cand.rate.length,"rate filing")} and ${plural(cand.form.length,"form filing")}${sw?` in ${esc(sw.short)}`:""} have no current summary${cand.rate.some(x=>x.older)||cand.form.some(x=>x.older)?" (older summaries are made again)":""}; the newest are taken first.</p>`;
   if(q.length){
     const est=fpSumEstimate(q), cu=S.chatUse, left = cu && isNum(cu.dailyLimit) && isNum(cu.askedToday) ? Math.max(0, +cu.dailyLimit - +cu.askedToday) : null;
     h+=`<p style="margin:0" id="fpSumCost"><b>${plural(q.length,"new summary","new summaries")}: ${plural(q.length,"S&amp;P request")}, roughly ${fpUsd(est.lo)} to ${fpUsd(est.hi)} of Claude reading, and ${plural(q.length,"of today's questions","of today's questions")}.</b> <span class="t2">An estimate: up to the first 150 pages of each filing (${count(est.pages)} pages in all${est.unknown?`, counting ${plural(est.unknown,"filing")} with no page count as 150`:""}). What it really cost shows when it is done. Summaries are saved for everyone, so nobody pays to read these filings again.</span></p>`;
@@ -3782,12 +3809,184 @@ async function fpSumMake(){
 async function fpRefresh(fp){
   if(!fp.asked || fp.busy) return;
   fp.busy="refresh"; fp.refreshErr=null; render();
-  const r=await callFn("snl-profile", fpBody("filings_facts", fp.asked.pick, fp.asked.years));
+  const r=await callFn("snl-profile", fpBody("filings_facts", fp.asked.pick, fp.asked.years, fp.asked.scope));
   if(!S.session || S.pf.fp!==fp) return;
   fp.busy="";
   if(r.data && r.data.facts && typeof r.data.facts==="object" && r.data.text){ const keep=fp.mk; fpTake(fp, r.data); fp.mk=keep; fp.drafted=null; fp.built=null; fp.nRate=null; fp.nForm=null; }
   else if(r.err!=="signin") fp.refreshErr = r.data ? {err:"bad_answer", msg:"The profile function sent back something the page can't read. Try again."} : r;
   render();
+}
+
+/* ---------- Narrow it down: states and types of insurance on Snapshot, Compare, Market and the filings profile ----------
+   One small set of helpers for four views. Each view keeps its own choice in its own state object (S.snap.nw, S.cmp.nw,
+   S.pf.fp.nw, S.mk.nw), made when first drawn and forgotten with the view's state on sign-out. Nothing chosen means
+   every state and every type of insurance, as before. Before a search, the choice goes into the search the view
+   already makes (states and typeOfInsuranceIds, as the Filings form sends them; the Market sends states and type
+   names to the market index). After a search, where the view holds the rows, the same choice narrows what is shown
+   at once when it is inside what was searched, and offers a new search when it is wider.
+   The picker: a "Choose states" panel with the Filings view's map and a list (each row a toggle button, the list being
+   the control for keyboards and screen readers), the US Census regions as shortcuts, and a "Choose types" panel with
+   S&P's list and a filter box. The chosen ones show as chips that can be removed. */
+function nwFresh(){ return {states:[], tois:[], open:"", stQ:"", toiQ:""}; }
+const NW_OF = {snap:()=>S.snap, cmp:()=>S.cmp, fp:()=>S.pf&&S.pf.fp, mk:()=>S.mk};
+const NW_PATH = {snap:"snap", cmp:"cmp", fp:"pf.fp", mk:"mk"};
+function nwOf(k){ const o=NW_OF[k]&&NW_OF[k](); if(!o) return null; if(!o.nw || typeof o.nw!=="object") o.nw=nwFresh(); return o.nw; }
+// US Census regions, as shortcuts that add their states (DC with the South)
+const NW_REGIONS = [["Northeast","CT ME MA NH RI VT NJ NY PA"],["Midwest","IL IN MI OH WI IA KS MN MO NE ND SD"],["South","DE DC FL GA MD NC SC VA WV AL KY MS TN AR LA OK TX"],["West","AZ CO ID MT NV NM UT WY AK CA HI OR WA"]];
+const nwStateName = s => US_MAP[s] ? US_MAP[s][1] : s;
+// the states a view can search: S&P's list (or the app's), or for the Market the states its index holds
+function nwStateOpts(k){ return k==="mk" ? mkStates().map(s=>({id:String(s.state), name:nwStateName(String(s.state))})) : stateOptions(); }
+// the types of insurance a view can choose: S&P's list by id, or for the Market the index's own names in the states chosen
+function nwToiOpts(k){
+  if(k!=="mk") return refOptions("typeOfInsurance").map(o=>({id:String(o.id), name:blank(o.name)?String(o.id):String(o.name)}));
+  const mk=S.mk, sts=nwStates("mk").length ? nwStates("mk") : mkStates().map(s=>String(s.state)), seen=new Map();
+  for(const s of sts) for(const n of (mk.types&&mk.types[s])||[]) if(!seen.has(n.toLowerCase())) seen.set(n.toLowerCase(), {id:n, name:n});
+  return [...seen.values()].sort((a,b)=>a.name.localeCompare(b.name));
+}
+const nwToiWaiting = k => k==="mk" ? !!S.mk.typesBusy : (S.refsLoading && !S.refs);
+// what is chosen and can be used: states in the view's list; types in S&P's list (the Market keeps names as chosen)
+function nwStates(k){ const nw=nwOf(k); if(!nw) return []; const ok=new Set(nwStateOpts(k).map(s=>s.id)); return [...new Set(nw.states)].filter(s=>ok.has(s)).sort(); }
+function nwTois(k){
+  const nw=nwOf(k); if(!nw) return [];
+  if(k==="mk") return [...new Set(nw.tois)].map(n=>({id:n, name:n}));
+  const opts=nwToiOpts(k); return [...new Set(nw.tois)].map(id=>opts.find(o=>o.id===id)).filter(Boolean);
+}
+/* A scope in words, as the profile function writes it (fpScopeOf in profile.ts): words for sentences ("Florida and
+   Texas, homeowners"), short for headings, names and source lines ("FL and TX, homeowners"); "" when not narrowed. */
+const nwLower = s => /^[A-Z][a-z]/.test(s) ? s[0].toLowerCase()+s.slice(1) : s;
+const nwAnd = a => a.length<2 ? a.join("") : a.slice(0,-1).join(", ")+" and "+a[a.length-1];
+function nwScope(states, tois){
+  const st=[...new Set((states||[]).map(String))].sort(), ty=(tois||[]).filter(t=>t&&!blank(t.name));
+  if(!st.length && !ty.length) return {narrowed:false, states:[], tois:[], words:"", short:"", stWords:"every state", toiWords:"every type of insurance"};
+  const stW=!st.length ? "every state" : st.length<=3 ? nwAnd(st.map(nwStateName)) : st.length<=8 ? nwAnd(st) : `${st.slice(0,6).join(", ")} and ${st.length-6} more states`;
+  const stS=!st.length ? "all states" : st.length<=4 ? nwAnd(st) : `${st.slice(0,3).join(", ")} and ${st.length-3} more`;
+  const tyW=!ty.length ? "every type of insurance" : ty.length<=3 ? nwAnd(ty.map(t=>nwLower(String(t.name)))) : `${ty.length} types of insurance`;
+  const tyS=!ty.length ? "all types" : ty.length<=2 ? nwAnd(ty.map(t=>nwLower(String(t.name)))) : `${ty.length} types of insurance`;
+  return {narrowed:true, states:st, tois:ty, words:`${stW}, ${tyW}`, short:`${stS}, ${tyS}`, stWords:stW, toiWords:tyW};
+}
+// the scope a view would search now
+const nwNow = k => nwScope(nwStates(k), nwTois(k));
+// a scope as kept with a run: {states:[codes]|null, tois:[{id,name}]}; older runs have none (every state and type)
+const nwRunScope = sc => nwScope(sc&&Array.isArray(sc.states)?sc.states:[], sc&&Array.isArray(sc.tois)?sc.tois.filter(t=>t&&typeof t==="object"):[]);
+function nwKeep(k){ const st=nwStates(k), ti=nwTois(k); return {states:st.length?st:null, tois:ti.map(t=>({id:t.id, name:t.name}))}; }
+// a file name part for a narrowed scope: "-fl-tx-homeowners"
+const nwSlug = sc => sc&&sc.narrowed ? "-"+String(sc.short).toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,40) : "";
+
+/* ----- drawing the picker ----- */
+function nwMapHTML(k, opts, why){
+  const on=new Set(nwOf(k).states), can=new Map(opts.map(s=>[s.id, s.name]));
+  let shapes="", labels="";
+  for(const c of Object.keys(US_MAP)){
+    const [d, name, x, y]=US_MAP[c], ok=can.has(c), sel=ok&&on.has(c);
+    shapes+=`<path d="${d}" class="${ok?"":"off"}${sel?" on":""}"${ok?` data-act="nw-st" data-k="${k}" data-map="1" data-s="${c}"`:""}><title>${esc(ok ? `${name} (${c})` : `${name} (${c}) ${why}`)}</title></path>`;
+    if(isNum(x)) labels+=`<text x="${x}" y="${y+6}" class="${ok?"":"off"}${sel?" on":""}">${c}</text>`;
+  }
+  return `<svg class="stmap" id="nw_${k}_map" viewBox="0 0 975 610" aria-hidden="true" focusable="false">${shapes}${labels}</svg>`;
+}
+function nwStatePanelHTML(k, opts, why){
+  const nw=nwOf(k), on=new Set(nw.states), q=String(nw.stQ||"").trim().toLowerCase();
+  const shown=q ? opts.filter(s=>s.id.toLowerCase().includes(q) || String(s.name).toLowerCase().includes(q)) : opts;
+  const rows=shown.map(s=>`<button type="button" class="strow" id="nw_${k}_st_${esc(s.id)}" data-act="nw-st" data-k="${k}" data-s="${esc(s.id)}" aria-pressed="${on.has(s.id)}"><span class="stn">${esc(s.name!==s.id?s.name:nwStateName(s.id))}</span> <span class="stc">${esc(s.id)}</span></button>`).join("") || `<p class="t2" style="margin:8px">No state matches.</p>`;
+  const regions = k==="mk" ? "" : `<div class="nwregions" role="group" aria-label="Add a region"><span class="t2">Add a region:</span>${NW_REGIONS.map(([n])=>`<button type="button" class="btn sm" data-act="nw-region" data-k="${k}" data-r="${n}">${n}</button>`).join("")}</div>`;
+  return `<div class="nwpanel" id="nw_${k}_stp" role="group" aria-label="Choose states">
+    ${regions}
+    <div class="stpick"><div class="stmapbox">${nwMapHTML(k, opts, why)}<p class="t2" style="margin:0">Click a state on the map, or choose it from the list.</p></div>
+      <div class="stlist"><input type="search" id="nw_${k}_stq" data-bind="${NW_PATH[k]}.nw.stQ" data-live value="${esc(nw.stQ||"")}" placeholder="Find a state" aria-label="Find a state in the list" autocomplete="off" spellcheck="false">
+        <div class="stbox" id="nw_${k}_states" role="group" aria-label="States" data-keep>${rows}</div></div></div>
+    <div class="toolbar"><button type="button" class="btn sm primary" data-act="nw-open" data-k="${k}" data-w="" id="nw_${k}_stDone">Done</button><button type="button" class="btn sm ghost" data-act="nw-st-all" data-k="${k}">All states</button><span class="t2 grow">${plural(nwStates(k).length,"state")} chosen of ${count(opts.length)}.</span></div></div>`;
+}
+function nwToiPanelHTML(k, opts){
+  const nw=nwOf(k), on=new Set(nw.tois), q=String(nw.toiQ||"").trim().toLowerCase();
+  const shown=q ? opts.filter(o=>String(o.name).toLowerCase().includes(q)) : opts;
+  return `<div class="nwpanel" id="nw_${k}_toip" role="group" aria-label="Choose types of insurance">
+    <input type="search" id="nw_${k}_toiq" data-bind="${NW_PATH[k]}.nw.toiQ" data-live value="${esc(nw.toiQ||"")}" placeholder="Filter this list" aria-label="Filter the list of types of insurance" autocomplete="off" spellcheck="false">
+    <div class="checks" id="nw_${k}_tois" data-keep>${shown.map((o,i)=>`<label><input type="checkbox" id="nw_${k}_t${i}_${esc(String(o.id).replace(/[^A-Za-z0-9]/g,"").slice(0,20))}" data-act="nw-toi" data-k="${k}" data-id="${esc(o.id)}" ${on.has(o.id)?"checked":""}>${esc(o.name)}</label>`).join("") || `<span class="t2">Nothing in the list matches.</span>`}</div>
+    <div class="toolbar"><button type="button" class="btn sm primary" data-act="nw-open" data-k="${k}" data-w="" id="nw_${k}_toiDone">Done</button><button type="button" class="btn sm ghost" data-act="nw-toi-none" data-k="${k}">All types of insurance</button><span class="t2 grow">${plural(nwTois(k).length,"type")} chosen of ${count(opts.length)}.</span></div></div>`;
+}
+/* The block: a heading, the chosen states and types as chips (or "All states", "All types of insurance"), the two
+   "Choose" buttons, the open panel, and a note on what narrowing does for this view. o: {note, why (a state that can't
+   be chosen), toiOff (text when the list of types isn't there), busy}. */
+function nwHTML(k, o){
+  o=o||{}; const nw=nwOf(k), sts=nwStates(k), tis=nwTois(k), sopts=nwStateOpts(k), topts=nwToiOpts(k), waitT=nwToiWaiting(k);
+  const chip=(label, sub, act, id, aria)=>`<span class="cchip"><span><b>${esc(label)}</b>${sub?` <span class="t2">${esc(sub)}</span>`:""}</span><button type="button" data-act="${act}" data-k="${k}" data-id="${esc(id)}" aria-label="${esc(aria)}" ${o.busy?"disabled":""}>×</button></span>`;
+  const stChips = sts.length ? sts.map(s=>chip(nwStateName(s), s, "nw-st-x", s, `Remove ${nwStateName(s)}`)).join("") : `<span class="nwall" id="nw_${k}_allst">All states</span>`;
+  const toiOff = !topts.length && !tis.length;
+  const toiChips = tis.length ? tis.map(t=>chip(t.name, "", "nw-toi-x", t.id, `Remove ${t.name}`)).join("") : `<span class="nwall" id="nw_${k}_alltoi">All types of insurance</span>`;
+  const toiNote = waitT ? `<p class="t2 nwnote" id="nw_${k}_toiwait">Loading the list of types of insurance…</p>` : toiOff ? `<p class="t2 nwnote" id="nw_${k}_toioff">${esc(o.toiOff||"S&P's lists aren't loaded yet, so this filter is left out of the search.")}</p>` : "";
+  const open=nw.open, btn=(w, label, n)=>`<button type="button" class="btn sm" id="nw_${k}_${w}b" data-act="nw-open" data-k="${k}" data-w="${open===w?"":w}" aria-expanded="${open===w}" aria-controls="nw_${k}_${w}p" ${o.busy||(w==="toi"&&toiOff)?"disabled":""}>${open===w?"Close the list":label}</button>`;
+  let h=`<div class="nwbox" id="nw_${k}" role="group" aria-labelledby="nw_${k}_h"><div class="nwhead"><b id="nw_${k}_h">Narrow it down</b><span class="t2">optional: by state and type of insurance</span></div>
+    <div class="nwgrid">
+      <div class="nwcol"><span class="nwlab" id="nw_${k}_stl">States</span><div class="nwrow chips" aria-labelledby="nw_${k}_stl">${stChips}</div><div class="nwrow">${btn("st", sts.length?"Change states":"Choose states")}${sts.length?`<button type="button" class="lnk t2" data-act="nw-st-all" data-k="${k}">All states</button>`:""}</div></div>
+      <div class="nwcol"><span class="nwlab" id="nw_${k}_toil">Type of insurance</span><div class="nwrow chips" aria-labelledby="nw_${k}_toil">${toiChips}</div><div class="nwrow">${btn("toi", tis.length?"Change types":"Choose types")}${tis.length?`<button type="button" class="lnk t2" data-act="nw-toi-none" data-k="${k}">All types</button>`:""}</div>${toiNote}</div>
+    </div>`;
+  if(open==="st") h+=nwStatePanelHTML(k, sopts, o.why||"isn't in S&P's list of states");
+  else if(open==="toi" && topts.length) h+=nwToiPanelHTML(k, topts);
+  if(o.note) h+=`<p class="t2 nwnote" id="nw_${k}_note">${o.note}</p>`;
+  return h+`</div>`;
+}
+
+/* ----- after a search: the same choice narrows what is shown, when it is inside what was searched ----- */
+/* sc: the run's scope (nwRunScope). Returns the states and types to show (null: no narrowing of that kind), and what
+   is chosen beyond what was searched (wider). A chosen type is matched to a row by S&P's name for it; when the search
+   itself was narrowed to exactly the types chosen, rows aren't matched again (S&P has done it). */
+function nwShown(k, sc){
+  const chSt=nwStates(k), chT=nwTois(k), sSt=sc.states.length?sc.states:null, sT=sc.tois;
+  let states=null, tois=null; const wideSt=[], wideT=[];
+  if(chSt.length){ const inS=sSt?chSt.filter(s=>sSt.includes(s)):chSt; if(sSt) wideSt.push(...chSt.filter(s=>!sSt.includes(s))); if(!(sSt && inS.length===sSt.length)) states=inS; }
+  else if(sSt) wideSt.push("every state");
+  if(chT.length){ const ids=sT.map(t=>String(t.id)), inS=sT.length?chT.filter(t=>ids.includes(String(t.id))):chT; if(sT.length) wideT.push(...chT.filter(t=>!ids.includes(String(t.id))).map(t=>t.name)); if(!(sT.length && inS.length===sT.length)) tois=inS; }
+  else if(sT.length) wideT.push("every type of insurance");
+  const shown=nwScope(states||sc.states, tois||sc.tois);
+  return {states, tois, wideSt, wideT, narrowed:!!(states||tois), wider:!!(wideSt.length||wideT.length), shown};
+}
+const nwToiKey = s => String(s??"").trim().toLowerCase();
+function nwRowOk(sh, r){
+  if(sh.states){ const st=snapState(r); if(!st || !sh.states.includes(st)) return false; }
+  if(sh.tois){ const t=nwToiKey(r.typeOfInsurance); if(!t || !sh.tois.some(x=>nwToiKey(x.name)===t)) return false; }
+  return true;
+}
+// rows kept, and how many were left out for having no type of insurance in S&P's data
+function nwFilterRows(sh, rows){
+  const list=Array.isArray(rows)?rows:[];
+  if(!sh.narrowed) return {rows:list, noToi:0};
+  return {rows:list.filter(r=>r&&typeof r==="object"&&nwRowOk(sh, r)), noToi:sh.tois?snapFilings(list.filter(r=>r&&typeof r==="object"&&blank(r.typeOfInsurance)&&(!sh.states||sh.states.includes(snapState(r))))).length:0};
+}
+/* The lines over a narrowed result: what is shown of what was searched, with "Show everything"; and, when the choice
+   is wider than the search, an offer to search again. what: "snapshot" or "comparison". */
+function nwShownHTML(k, sh, n, of, noToi, what){
+  let h="";
+  if(sh.narrowed) h+=`<div class="info nwshown" id="${k}Shown" role="status"><span><b>Showing ${esc(sh.shown.short)}: ${count(n)} of ${plural(of,"filing")}.</b> Narrowed on this page from what the ${what} searched, without asking S&amp;P again.${noToi?` ${plural(noToi,"filing has","filings have")} no type of insurance in S&amp;P's data and ${noToi===1?"isn't":"aren't"} shown.`:""}</span><button type="button" class="btn sm" data-act="nw-show-all" data-k="${k}">Show everything</button></div>`;
+  if(sh.wider){
+    const more=[sh.wideSt.length?(sh.wideSt[0]==="every state"?"every state":nwAnd(sh.wideSt)):"", sh.wideT.length?(sh.wideT[0]==="every type of insurance"?"every type of insurance":nwAnd(sh.wideT.map(nwLower))):""].filter(Boolean).join(" and ");
+    h+=`<div class="banner nwwide" id="${k}Wider" role="status"><span><b>You've chosen more than this ${what} searched:</b> ${esc(more)}. What is below covers only what was searched. Search again to include it.</span><button type="button" class="btn sm" data-act="nw-research" data-k="${k}">Search again</button></div>`;
+  }
+  return h;
+}
+// "Show everything": back to what was searched
+function nwShowAll(k, sc){ const nw=nwOf(k); if(!nw) return; nw.states=sc.states.slice(); nw.tois=sc.tois.map(t=>String(t.id)); nw.open=""; }
+function nwSetFrom(k, sc){ const nw=nwOf(k); if(!nw) return; const s=nwRunScope(sc); nw.states=s.states.slice(); nw.tois=s.tois.map(t=>String(t.id)); nw.open=""; nw.stQ=""; nw.toiQ=""; }
+
+/* ----- clicks ----- */
+function nwAct(a, t){
+  const k=t.dataset.k, nw=nwOf(k); if(!nw) return;
+  if(a==="nw-open"){ const was=nw.open; nw.open=t.dataset.w||""; render(); document.getElementById(nw.open ? `nw_${k}_${nw.open}q` : `nw_${k}_${was||"st"}b`)?.focus({preventScroll:true}); return; }
+  if(a==="nw-st"){ const s=t.dataset.s; nw.states=nw.states.includes(s)?nw.states.filter(x=>x!==s):nw.states.concat(s); }
+  else if(a==="nw-st-x"){ const s=t.dataset.id; nw.states=nw.states.filter(x=>x!==s); }
+  else if(a==="nw-st-all") nw.states=[];
+  else if(a==="nw-region"){ const r=NW_REGIONS.find(x=>x[0]===t.dataset.r), ok=new Set(nwStateOpts(k).map(s=>s.id)); if(r) nw.states=[...new Set(nw.states.concat(r[1].split(" ").filter(s=>ok.has(s))))]; }
+  else if(a==="nw-toi"){ const id=t.dataset.id; nw.tois=nw.tois.includes(id)?nw.tois.filter(x=>x!==id):nw.tois.concat(id); }
+  else if(a==="nw-toi-x"){ const id=t.dataset.id; nw.tois=nw.tois.filter(x=>x!==id); }
+  else if(a==="nw-toi-none") nw.tois=[];
+  else if(a==="nw-show-all"){ if(k==="snap") snapShowAll(); else if(k==="cmp") cmpShowAll(); render(); return; }
+  else if(a==="nw-research"){ if(k==="snap") snapRun(false); else if(k==="cmp") cmpRun(); return; }
+  nwChanged(k); render();
+  if(a==="nw-st" && t.dataset.map){ const box=document.getElementById(`nw_${k}_states`), r=box&&box.querySelector(`[data-s="${CSS.escape(t.dataset.s)}"]`); if(r && (r.offsetTop<box.scrollTop || r.offsetTop+r.offsetHeight>box.scrollTop+box.clientHeight)) box.scrollTop=Math.max(0, r.offsetTop-(box.clientHeight-r.offsetHeight)/2); }
+  else if(a==="nw-st-x" || a==="nw-toi-x") document.getElementById(`nw_${k}_${a==="nw-st-x"?"st":"toi"}b`)?.focus({preventScroll:true});
+}
+// what a change does in each view: a new choice clears the form's message; the Market loads the types of new states
+function nwChanged(k){
+  const o=NW_OF[k]&&NW_OF[k](); if(o && "formErr" in o) o.formErr="";
+  if(k==="mk") mkNarrowChanged();
 }
 
 /* ---------- Snapshot: one company or group over 1, 3 or 5 years, on one page ----------
@@ -3905,7 +4104,7 @@ function snapRecentList(){
 // only a complete, saved result is listed: reopening it sends the same search, which opens from the saved result
 function snapRemember(run, res){
   if(res.capped || res.saved===false) return;
-  const key=JSON.stringify(run.payload), list=[{pick:run.pick, years:run.years, payload:run.payload, at:new Date().toISOString()}].concat(snapRecentList().filter(x=>JSON.stringify(x.payload)!==key)).slice(0,SNAP_RECENT);
+  const key=JSON.stringify(run.payload), list=[{pick:run.pick, years:run.years, ...(run.scope?{scope:run.scope}:{}), payload:run.payload, at:new Date().toISOString()}].concat(snapRecentList().filter(x=>JSON.stringify(x.payload)!==key)).slice(0,SNAP_RECENT);
   try{ localStorage.setItem(snapRecentKey(), JSON.stringify(list)); }catch{}
 }
 async function snapRun(refresh, given){
@@ -3916,8 +4115,8 @@ async function snapRun(refresh, given){
   else{
     if(!sn.pick){ sn.formErr="Choose a company or a group first: find it by name above."; render(); return; }
     const big=snapTooBig(sn.pick, sn.years); if(big){ sn.formErr=big; render(); return; }
-    const {from, to}=snapRange(sn.years), nums=k=>sn.pick.ids.filter(c=>c.kind===k).map(c=>Number(c.id));
-    run={pick:JSON.parse(JSON.stringify(sn.pick)), years:sn.years, payload:{action:"search", companyIds:nums("companyId"), institutionIds:nums("institutionId"), states:stateOptions().map(s=>s.id).sort(), from, to}};
+    const {from, to}=snapRange(sn.years), nums=k=>sn.pick.ids.filter(c=>c.kind===k).map(c=>Number(c.id)), scope=nwKeep("snap");
+    run={pick:JSON.parse(JSON.stringify(sn.pick)), years:sn.years, scope, payload:snapPayload(nums("companyId"), nums("institutionId"), scope, from, to)};
   }
   sn.formErr=""; sn.busy=true; sn.err=null; if(!refresh) sn.res=null; sn.ran=run; render();
   const r=await callFn("snl-filings", refresh ? {...run.payload, refresh:true} : run.payload);
@@ -3927,9 +4126,28 @@ async function snapRun(refresh, given){
   else if(r.err!=="signin") sn.err = r.data ? {err:"bad_answer", msg:"The filings function sent back something the page can't read. Try again."} : r;
   render();
 }
+/* The search a snapshot runs: every state in the list, or only those chosen; the types of insurance chosen, by S&P's id,
+   only when there are some (a snapshot nobody narrowed sends exactly what it always has). */
+function snapPayload(companyIds, institutionIds, scope, from, to){
+  const p={action:"search", companyIds, institutionIds, states:(scope&&scope.states&&scope.states.length?scope.states:stateOptions().map(s=>s.id)).slice().sort(), from, to};
+  const ids=(scope&&scope.tois||[]).map(t=>Number(t.id)).filter(Number.isInteger);
+  if(ids.length) p.typeOfInsuranceIds=ids;
+  return p;
+}
+// the result as shown: the rows narrowed on this page (when the choice is inside what was searched), and what says so
+function snapView(r, run){
+  const sc=nwRunScope(run&&run.scope), sh=nwShown("snap", sc), f=nwFilterRows(sh, r.rows), p=r.params||run&&run.payload||{};
+  return {sc, sh, noToi:f.noToi, res:sh.narrowed ? {...r, rows:f.rows, params:{...p, states:sh.states?sh.states.slice():p.states}} : r};
+}
+// how the map and its key name a state that isn't in the snapshot
+function snapNsWhy(c, v){
+  if(v.sh.states){ c.nsWhy="not shown: this page is narrowed to "+v.sh.shown.stWords; c.nsKey="Not shown: outside what this page is narrowed to"; c.shownOnly=true; }
+  else if(v.sc.states.length){ c.nsWhy="not searched: this snapshot was narrowed to "+v.sc.stWords; c.nsKey="Not searched: outside what this snapshot was narrowed to"; }
+}
+function snapShowAll(){ const run=S.snap.ran; if(run) nwShowAll("snap", nwRunScope(run.scope)); }
 function snapReopen(i){
   const sn=S.snap, run=snapRecentList()[i]; if(!run || sn.busy) return;
-  sn.pick=run.pick; sn.years=SNAP_YEARS.includes(+run.years)?+run.years:3; sn.find.matches=null;
+  sn.pick=run.pick; sn.years=SNAP_YEARS.includes(+run.years)?+run.years:3; sn.find.matches=null; nwSetFrom("snap", run.scope);
   snapRun(false, run);
 }
 /* The same search on the Filings view, form filled in, so every row can be read there. A complete result opens from
@@ -3939,7 +4157,7 @@ function snapToFilings(){
   if(f.busy){ toast("The Filings view is still running a search. Try again when it has finished."); return; }
   const p=run.payload;
   f.chips=run.pick.ids.slice(0, MAX_COMPANIES).map(c=>({kind:c.kind, id:String(c.id), name:c.name||""}));
-  f.states=[...p.states]; f.from=p.from; f.to=p.to; f.toi=[]; f.ftype=[]; f.fstatus=[]; f.toiFilter=""; f.tracking="";
+  f.states=[...p.states]; f.from=p.from; f.to=p.to; f.toi=(Array.isArray(p.typeOfInsuranceIds)?p.typeOfInsuranceIds:[]).map(String); f.ftype=[]; f.fstatus=[]; f.toiFilter=""; f.tracking="";
   f.q=""; f.matches=null; f.resolveNote=""; f.resolveErr=""; f.formErr="";
   location.hash="#filings";
   if(r.capped){ f.res=null; f.err=null; toast("The form is filled in. Press Search filings to run it: a partial result isn't saved, so it asks S&P again."); }
@@ -4066,7 +4284,7 @@ function snapMapHTML(c, by){
   for(const code of Object.keys(US_MAP)){
     const [d, name, lx, ly]=US_MAP[code], s=stats.get(code);
     let cls="", fill="", what="";
-    if(!searched.has(code) && !s){ cls="ns"; what=`${name} (${code}): not searched, as it isn't in S&P's list of states`; }
+    if(!searched.has(code) && !s){ cls="ns"; what=`${name} (${code}): ${c.nsWhy||"not searched, as it isn't in S&P's list of states"}`; }
     else if(!s || !s.n){ cls="none"; what=`${name} (${code}): S&P returned nothing for this search`; }
     else if(by==="rate"){
       if(!s.latest){ cls="nrate"; what=`${name} (${code}): ${plural(s.n,"filing")}, none with a rate impact`; }
@@ -4080,7 +4298,7 @@ function snapMapHTML(c, by){
     : bins.map(b=>`<li><span class="sw" style="background:${b.fill}" aria-hidden="true"></span>${esc(b.label)}</li>`).join("");
   const ns=Object.keys(US_MAP).some(k=>!searched.has(k)&&!stats.has(k));
   return `<svg class="snchart snmap" id="snMapSvg" viewBox="0 0 975 610" role="img" aria-label="${by==="rate"?"Map of the latest overall rate impact in each state":"Map of the number of filings in each state"}. The same figures are in the table beside it." focusable="false">${shapes}${last}${labels}</svg>
-    <ul class="snlegend" id="snMapKey">${key}<li><span class="sw none" aria-hidden="true"></span>Dashed outline: S&amp;P returned nothing for this search</li>${ns?`<li><span class="sw" style="background:var(--tile)" aria-hidden="true"></span>Not searched: not in S&amp;P's list of states</li>`:""}</ul>`;
+    <ul class="snlegend" id="snMapKey">${key}<li><span class="sw none" aria-hidden="true"></span>Dashed outline: S&amp;P returned nothing for this search</li>${ns?`<li><span class="sw" style="background:var(--tile)" aria-hidden="true"></span>${esc(c.nsKey||"Not searched: not in S&P's list of states")}</li>`:""}</ul>`;
 }
 function snapMapBlockHTML(c){
   const sn=S.snap, by=sn.mapBy, rows=c.byState.filter(s=>s.n).sort((a,b)=>b.n-a.n || a.st.localeCompare(b.st)), none=c.byState.filter(s=>!s.n).map(s=>s.st).sort();
@@ -4129,7 +4347,7 @@ const snapExpHTML = tbl => `<span class="snexp"><button type="button" class="btn
 function snapTilesHTML(c){
   const t=c.tiles, tile=(k, label, v, sub)=>`<div class="sntile" data-k="${k}"><span class="t2">${label}</span><b>${v}</b>${sub?`<span class="t2">${sub}</span>`:""}</div>`;
   return `<div class="sntiles" id="snTiles">${tile("n","Filings",count(t.n),"in the period")}${tile("rate","Rate filings",count(t.rate))}${tile("rule","Rule filings",count(t.rule))}${tile("form","Form filings",count(t.form))}
-    ${tile("states","States with filings",count(t.states),`of ${plural(c.searched.length,"state")} searched`)}${tile("latest","Latest filing",t.latest?fmtD(t.latest):"n/d",t.latest?"published":"")}</div>
+    ${tile("states","States with filings",count(t.states),`of ${plural(c.searched.length,"state")} ${c.shownOnly?"shown":"searched"}`)}${tile("latest","Latest filing",t.latest?fmtD(t.latest):"n/d",t.latest?"published":"")}</div>
     <p class="t2" id="snTileNote">Each filing version counts once, however many of the companies are on it. A filing of more than one type, such as rate and rule, counts in each.${t.other?` ${plural(t.other,"filing is","filings are")} of another type or ${t.other===1?"has":"have"} none given.`:""}</p>`;
 }
 function snapByCompanyHTML(res, run){
@@ -4147,16 +4365,19 @@ function snapOutHTML(){
     const wide=/needs at least \d+ S&P requests/.test(String(sn.err.msg||""));
     return `<div id="snErr">${problemHTML(sn.err, wide?"This snapshot is too big for one search.":"Couldn't get the snapshot.", wide?"":"snap-retry")}</div>`;
   }
-  const c=snapCompute(r, run), p=c.p, pk=run&&run.pick;
-  let h=`<div class="snhead" id="snHead"><div><h3 id="snName">${esc(who||"Snapshot")}</h3><p class="t2" id="snMeta">${esc([pk&&pk.kind==="group"?`Group of ${plural(pk.ids.length,"company","companies")} with S&P ids${pk.noId?`; ${plural(pk.noId,"company","companies")} without one left out`:""}`:pk&&pk.group?`Part of ${pk.group}`:"", `filings published ${fmtDay(p.from)} to ${fmtDay(p.to)}`, `${plural(c.searched.length,"state")} searched`, "every filing type and status"].filter(Boolean).join(" · "))}</p></div>
+  const v=snapView(r, run), c=snapCompute(v.res, run), p=c.p, pk=run&&run.pick, sc=v.sc, all=v.sh.narrowed?snapFilings(r.rows).length:c.fs.length;
+  snapNsWhy(c, v);
+  let h=`<div class="snhead" id="snHead"><div><h3 id="snName">${esc(who||"Snapshot")}${sc.narrowed?` <span class="t2" id="snScope">${esc(sc.short)}</span>`:""}</h3><p class="t2" id="snMeta">${esc([pk&&pk.kind==="group"?`Group of ${plural(pk.ids.length,"company","companies")} with S&P ids${pk.noId?`; ${plural(pk.noId,"company","companies")} without one left out`:""}`:pk&&pk.group?`Part of ${pk.group}`:"", `filings published ${fmtDay(p.from)} to ${fmtDay(p.to)}`, sc.states.length?`searched in ${sc.stWords}`:`${plural((r.params&&Array.isArray(r.params.states)?r.params.states:run.payload.states||[]).length,"state")} searched`, sc.tois.length?`${sc.toiWords} only`:"", "every filing type and status"].filter(Boolean).join(" · "))}</p></div>
     <div class="toolbar"><button type="button" class="btn" id="sn_ask" data-act="snap-ask" data-q="all">Ask Claude about this</button><button type="button" class="btn" id="sn_toFilings" data-act="snap-filings" ${sn.busy?"disabled":""}>See every filing on the Filings view</button><span class="inline"><span class="t2">All filings:</span>${snapExpHTML("filings")}</span></div></div>`;
   if(sn.busy) h+=`<div class="banner" role="status" id="snRefreshing"><span>Asking S&amp;P again… What is below is from ${fmtAt(r.fetchedAt)} until the new result arrives.</span></div>`;
   else if(sn.err) h+=problemHTML(sn.err, "Couldn't refresh the snapshot.", "snap-refresh");
   else if(r.fromStore) h+=`<div class="info" id="snFromStore" role="status"><span>From the saved result fetched ${fmtAt(r.fetchedAt)}, so opening it used no S&amp;P requests.</span><button type="button" class="btn sm" data-act="snap-refresh">Refresh from S&amp;P</button></div>`;
+  h+=nwShownHTML("snap", v.sh, c.fs.length, all, v.noToi, "snapshot");
   if(r.capped) h+=`<div class="banner" id="snPartial" role="alert"><span><b>This snapshot is partial.</b> The search stopped at its limit before S&amp;P had returned everything, so every count below is lower than it should be. Choose a shorter period${pk&&pk.kind==="group"?" or one of the group's companies":""} and run it again.</span></div>`;
   if(!c.fs.length){
     const notes=(Array.isArray(r.notes)?r.notes:[]).filter(n=>!blank(n)&&!/^S&P returned no filings for [A-Z]{2} in this search/.test(String(n)));
-    return h+`<div class="notes" id="snEmpty" role="status"><b>S&amp;P returned nothing for this search, and that isn't proof that nothing was filed</b><ul>${[EMPTY_RESULT, ...notes].map(n=>`<li>${esc(n)}</li>`).join("")}</ul><p class="t2" style="margin:6px 0 0">Check that this is the company you meant, or try a longer period.</p></div>`;
+    if(v.sh.narrowed && r.rows.length) return h+`<div class="info" id="snEmpty" role="status"><span>None of the ${plural(all,"filing")} searched is in ${esc(v.sh.shown.words)}. Choose Show everything to see them all.</span></div>`;
+    return h+`<div class="notes" id="snEmpty" role="status"><b>S&amp;P returned nothing for this search${sc.narrowed?` of ${esc(sc.words)}`:""}, and that isn't proof that nothing was filed</b><ul>${[EMPTY_RESULT, ...(sc.narrowed?[`The search was narrowed to ${sc.words}, so it says nothing about other states or types of insurance.`]:[]), ...notes].map(n=>`<li>${esc(n)}</li>`).join("")}</ul><p class="t2" style="margin:6px 0 0">Check that this is the company you meant, or try a longer period${sc.narrowed?" or a wider choice of states and types":""}.</p></div>`;
   }
   const notes=(Array.isArray(r.notes)?r.notes:[]).filter(n=>!blank(n)&&!/^S&P returned no filings for [A-Z]{2} in this search/.test(String(n)));   // empty states are on the map
   h+=snapTilesHTML(c)+snapByCompanyHTML(r, run);
@@ -4191,17 +4412,17 @@ function snapChosenHTML(){
   return `<p id="sn_chosen" style="margin:0">Chosen: <b>${esc(pk.name)}</b> <span class="t2">${esc(detail)}</span> <button type="button" class="lnk t2" data-act="snap-clear">Clear</button></p>`;
 }
 function snapCostHTML(){
-  const sn=S.snap, pk=sn.pick, rg=snapRange(sn.years), states=stateOptions().length;
-  const dates=`<span class="t2" id="sn_dates">Filings published ${fmtDay(rg.from)} to ${fmtDay(rg.to)}, in all ${plural(states,"state")} in ${S.refs&&refOptions("serffFilingState").length?"S&amp;P's list":"the app's list"}, every filing type and status.</span>`;
+  const sn=S.snap, pk=sn.pick, rg=snapRange(sn.years), states=stateOptions().length, sc=nwNow("snap");
+  const dates=`<span class="t2" id="sn_dates">Filings published ${fmtDay(rg.from)} to ${fmtDay(rg.to)}, ${sc.states.length?`in ${esc(sc.stWords)}`:`in all ${plural(states,"state")} in ${S.refs&&refOptions("serffFilingState").length?"S&amp;P's list":"the app's list"}`}, ${sc.tois.length?`${esc(sc.toiWords)} only, `:""}every filing type and status.</span>`;
   if(!pk) return dates;
   const big=snapTooBig(pk, sn.years);
   if(big) return `${dates}<div class="banner" id="sn_tooBig" role="alert"><span>${esc(big)}</span></div>`;
   const need=snapCost(pk.ids, rg.from, rg.to);
-  return `${dates}<p class="t2" id="sn_cost" style="margin:0"><b>About ${plural(need,"S&amp;P request")}</b> (one for each 10 companies for each year of dates), more if S&amp;P has many filings. Once it has run, the result is saved: reopening it below costs no S&amp;P requests.</p>`;
+  return `${dates}<p class="t2" id="sn_cost" style="margin:0"><b>About ${plural(need,"S&amp;P request")}</b> (one for each 10 companies for each year of dates), more if S&amp;P has many filings.${sc.narrowed?" Narrowing the states or types doesn't change that number, which depends on the companies and years; it means fewer filings come back, so fewer extra pages may be needed.":""} Once it has run, the result is saved: reopening it below costs no S&amp;P requests.</p>`;
 }
 function snapRecentHTML(){
   const list=snapRecentList(); if(!list.length) return "";
-  return `<div class="snrecent" id="sn_recent"><span class="t2"><b>Snapshots run in this browser.</b> Reopening one uses no S&amp;P requests.</span><ul>${list.map((x,i)=>`<li><button type="button" class="chip" data-act="snap-recent" data-i="${i}" ${S.snap.busy?"disabled":""}><b>${esc(x.pick.name)}</b> <span class="t2">${esc(`${fmtDay(x.payload.from)} to ${fmtDay(x.payload.to)}`)}</span></button></li>`).join("")}</ul></div>`;
+  return `<div class="snrecent" id="sn_recent"><span class="t2"><b>Snapshots run in this browser.</b> Reopening one uses no S&amp;P requests.</span><ul>${list.map((x,i)=>`<li><button type="button" class="chip" data-act="snap-recent" data-i="${i}" ${S.snap.busy?"disabled":""}><b>${esc(x.pick.name)}</b> <span class="t2">${esc(`${fmtDay(x.payload.from)} to ${fmtDay(x.payload.to)}${nwRunScope(x.scope).narrowed?`, ${nwRunScope(x.scope).short}`:""}`)}</span></button></li>`).join("")}</ul></div>`;
 }
 function renderSnapshot(){
   const sn=S.snap, fst=S.status&&S.status.filings, waitStates=S.refsLoading&&!S.refs;
@@ -4210,6 +4431,7 @@ function renderSnapshot(){
   if(fst && fst.configured===false) h+=`<div class="info" id="snOff" role="status"><span><b>S&amp;P filings aren't set up yet,</b> so a new snapshot can't be run. Snapshots run before still open from their saved results.</span></div>`;
   h+=`<form class="tcard" id="snForm" novalidate aria-label="Choose a company or group and a period">${snapFinderHTML()}${snapChosenHTML()}
     <div class="f"><span>Period</span><div class="snper"><div class="seg" role="group" aria-label="Period">${SNAP_YEARS.map(y=>`<button type="button" class="btn sm" data-act="snap-years" data-y="${y}" aria-pressed="${sn.years===y}">${y===1?"Last year":`Last ${y} years`}</button>`).join("")}</div></div></div>
+    ${nwHTML("snap", {busy:sn.busy, note:"Only the states and types chosen are asked of S&amp;P. After a snapshot has run, choosing fewer narrows what is shown at once, without asking S&amp;P again."})}
     <div id="sn_costBox" style="display:flex;flex-direction:column;gap:8px;min-width:0">${snapCostHTML()}</div>
     ${sn.formErr?`<p class="err" id="sn_formErr" role="alert">${esc(sn.formErr)}</p>`:""}
     <div class="toolbar"><button type="button" class="btn primary" id="sn_run" data-act="snap-run" ${sn.busy||sn.picking||waitStates?"disabled":""}>${sn.busy?"Getting the snapshot…":waitStates?"Loading S&amp;P's list of states…":"Show snapshot"}</button></div>
@@ -4220,7 +4442,7 @@ function renderSnapshot(){
 /* ----- exports, and what Ask Claude is told ----- */
 function snapExport(tbl){
   const sn=S.snap, r=sn.res; if(!r) return null;
-  const c=snapCompute(r, sn.ran), slug=String(sn.ran&&sn.ran.pick.name||"snapshot").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,40)||"snapshot";
+  const v=snapView(r, sn.ran), c=snapCompute(v.res, sn.ran), slug=(String(sn.ran&&sn.ran.pick.name||"snapshot").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,40)||"snapshot")+nwSlug(v.sh.narrowed?v.sh.shown:v.sc);
   const out=(name, sheet, cols, rows)=>({name:`snl-snapshot-${slug}-${name}-${TODAY()}`, sheet, cols, rows});
   const day=d=>d?iso(d):"", n=v=>v===null||v===undefined?null:+v;
   if(tbl==="filings") return out("filings","Filings",["Company","S&P company id","S&P institution id","All companies on the filing","State","Filing type","Type of insurance","Sub-type of insurance","Status","Date submitted","Date published","Effective date, new business","Effective date, renewals","Rate impact","Rate impact (number)","Description","Tracking number","Document id","Filing version id"],
@@ -4243,7 +4465,7 @@ function snapScreen(){
   const sn=S.snap, r=sn.res, run=sn.ran; if(!r || !run) return null;
   const p=r.params||run.payload, ints=a=>(Array.isArray(a)?a:[]).map(Number).filter(Number.isInteger);
   const names=[...new Set([run.pick.name, ...run.pick.ids.map(c=>c.name)].filter(x=>!blank(x)).map(String))].slice(0,20);
-  return {view:"filings", search:{companyIds:ints(p.companyIds), institutionIds:ints(p.institutionIds), states:(Array.isArray(p.states)?p.states:[]).map(String), from:String(p.from||""), to:String(p.to||""), typeOfInsuranceIds:[], filingTypeIds:[], filingStatusIds:[]},
+  return {view:"filings", search:{companyIds:ints(p.companyIds), institutionIds:ints(p.institutionIds), states:(Array.isArray(p.states)?p.states:[]).map(String), from:String(p.from||""), to:String(p.to||""), typeOfInsuranceIds:ints(p.typeOfInsuranceIds), filingTypeIds:[], filingStatusIds:[]},
     total:snapFilings(r.rows).length, companies:names,
     // that it is a Snapshot: an older snl-chat ignores this and describes the search alone
     snapshot:{name:snapAskName(run.pick.name, ""), kind:run.pick.kind==="group"?"group":"company", years:SNAP_YEARS.includes(+run.years)?+run.years:null, capped:!!r.capped}};
@@ -4259,11 +4481,11 @@ const snapAskStates = (fs, n) => [...new Set(fs.map(f=>f.st).filter(Boolean))].s
 const snapAskKinds = fs => snapAskList([fs.some(f=>f.k.form)?"form":"", fs.some(f=>f.k.rule)?"rule":""].filter(Boolean));
 function snapAskQs(){
   const sn=S.snap, r=sn.res, run=sn.ran; if(!r || !run) return null;
-  const c=snapCompute(r, run), who=snapAskName(run.pick.name, "this carrier"), d=parseDay(c.from);
+  const v=snapView(r, run), c=snapCompute(v.res, run), who=snapAskName(run.pick.name, "this carrier"), d=parseDay(c.from), sw=v.sh.narrowed?v.sh.shown:v.sc;
   const since=d ? d.toLocaleDateString("en-GB",{month:"short", year:"numeric"}) : fmtDay(c.from), inSt=a=>a.length?` in ${snapAskList(a)}`:"";
   const q={};
   if(!c.fs.length){
-    q.all=`S&P returned no filings for ${who} published since ${since} in this snapshot. Check whether ${run.pick.kind==="group"?"the group's companies file":"it files"} under other company names, and search those.`;
+    q.all=`S&P returned no filings for ${who} published since ${since} in this snapshot${sw.narrowed?`, which covers ${sw.words} only`:""}. Check whether ${run.pick.kind==="group"?"the group's companies file":"it files"} under other company names, and search those.`;
     q.names=`Which company names does ${who} file under, and in which states?`;
     return q;
   }
@@ -4291,7 +4513,7 @@ function snapAskQs(){
   }
   // the whole snapshot
   const parts=[withRate.some(f=>f.rate!==0)?`the largest rate changes${inSt(snapAskStates(withRate.filter(f=>f.rate!==0),2))}`:"", latest.length?`what the latest ${snapAskKinds(latest)} filings changed`:"", busy.length?`where it files most`:""].filter(Boolean);
-  q.all=`Give me an overview of what ${who} has filed since ${since}${parts.length?`: ${snapAskList(parts)}`:""}.${r.capped?" The snapshot on screen is partial, so its counts are lower than they should be.":""}`;
+  q.all=`Give me an overview of what ${who} has filed since ${since}${sw.narrowed?` in ${sw.words}`:""}${parts.length?`: ${snapAskList(parts)}`:""}.${r.capped?" The snapshot on screen is partial, so its counts are lower than they should be.":""}`;
   return q;
 }
 // the panel's starting points over a Snapshot: three or four from what is on screen, or what a snapshot can answer
@@ -4312,7 +4534,8 @@ function snapAsk(k){
 // the line under the question box over a Snapshot
 function snapToldText(sc, past){
   const s=sc.search, sp=sc.snapshot, n=s.companyIds.length+s.institutionIds.length;
-  return `${past?"Claude started":"Claude starts"} from this carrier and period: ${sp.name||"the snapshot's companies"}${sp.kind==="group"?` and its ${plural(n,"company","companies")}`:""}, filings published ${fmtDay(s.from)} to ${fmtDay(s.to)} in ${plural(s.states.length,"state")}, every filing type and status. ${plural(sc.total,"filing")} on screen${sp.capped?", a partial result":""}.`;
+  const nw=nwScope(s.states.length<stateOptions().length?s.states:[], (s.typeOfInsuranceIds||[]).map(id=>({id:String(id), name:(refOptions("typeOfInsurance").find(o=>String(o.id)===String(id))||{}).name||`type of insurance id ${id}`})));
+  return `${past?"Claude started":"Claude starts"} from this carrier and period: ${sp.name||"the snapshot's companies"}${sp.kind==="group"?` and its ${plural(n,"company","companies")}`:""}, filings published ${fmtDay(s.from)} to ${fmtDay(s.to)} in ${nw.states.length?nw.stWords:plural(s.states.length,"state")}${nw.tois.length?`, ${nw.toiWords} only`:""}, every filing type and status. ${plural(sc.total,"filing")} on screen${sp.capped?", a partial result":""}.`;
 }
 
 /* ---------- Programs and forms: two to four carriers' form filings in one state, and what saved summaries say ----------
@@ -4749,10 +4972,11 @@ function fcFormHTML(){
   const toiBox = tois.length ? `<select id="fc_toi" data-bind="fc.toi" data-live><option value="">Choose a type of insurance</option>${tois.map(o=>`<option value="${esc(o.id)}" ${String(o.id)===fc.toi?"selected":""}>${esc(o.name)}</option>`).join("")}</select>`
     : `<p class="t2" id="fc_noToi">${waitRefs?"Loading S&amp;P's lists…":"S&amp;P's list of types of insurance isn't loaded yet, so this can't be chosen. Refresh the lists on the Filings view."}</p>`;
   return `<form class="tcard" id="fcForm" novalidate aria-label="Choose carriers, a state, a type of insurance and a period">${fcFinderHTML()}${fcChosenHTML()}
+    <div class="nwbox" id="fc_narrow" role="group" aria-labelledby="fc_narrowH"><div class="nwhead"><b id="fc_narrowH">Narrow it down</b><span class="t2">one state and one type of insurance: programs and forms are compared within one market</span></div>
     <div class="fcsel">
       <div class="f"><label for="fc_state">State <em>one</em></label><select id="fc_state" data-bind="fc.state" data-live><option value="">Choose a state</option>${states.map(s=>`<option value="${esc(s.id)}" ${s.id===fc.state?"selected":""}>${esc(s.name!==s.id?`${s.name} (${s.id})`:s.id)}</option>`).join("")}</select></div>
       <div class="f"><label for="fc_toi">Type of insurance <em>one, from S&amp;P's list</em></label>${toiBox}${fc.toi?"":`<p class="t2" id="fc_toiHint">Choose one, such as Homeowners: the comparison is for one type of insurance.</p>`}</div>
-    </div>
+    </div></div>
     <div class="fcopts"><div class="f"><span>Period</span><div class="seg" role="group" aria-label="Period">${FC_YEARS.map(y=>`<button type="button" class="btn sm" data-act="fc-years" data-y="${y}" aria-pressed="${fc.years===y}">${y===1?"Last year":`Last ${y} years`}</button>`).join("")}</div></div>
       <label class="unl" for="fc_wide"><input type="checkbox" id="fc_wide" data-act="fc-wide" ${fc.wide?"checked":""}><span>Include rule and rate filings too <em class="t2" style="font-style:normal">Form filings alone by default</em></span></label></div>
     <div id="fc_costBox" style="display:flex;flex-direction:column;gap:8px;min-width:0">${fcCostHTML()}</div>
@@ -5047,7 +5271,7 @@ function cmpRecentList(){
 // only a comparison whose every search came back complete and saved is listed: reopening it sends the same searches
 function cmpRemember(run, parts){
   if(!parts.every(p=>p.state==="ok" && p.res && !p.res.capped && p.res.saved!==false)) return;
-  const key=JSON.stringify(run.parts), list=[{carriers:run.carriers, years:run.years, parts:run.parts, at:new Date().toISOString()}].concat(cmpRecentList().filter(x=>JSON.stringify(x.parts)!==key)).slice(0,CMP_RECENT);
+  const key=JSON.stringify(run.parts), list=[{carriers:run.carriers, years:run.years, ...(run.scope?{scope:run.scope}:{}), parts:run.parts, at:new Date().toISOString()}].concat(cmpRecentList().filter(x=>JSON.stringify(x.parts)!==key)).slice(0,CMP_RECENT);
   try{ localStorage.setItem(cmpRecentKey(), JSON.stringify(list)); }catch{}
 }
 async function cmpRun(given){
@@ -5056,7 +5280,8 @@ async function cmpRun(given){
   if(!run){
     if(cm.carriers.length<CMP_MIN){ cm.formErr=`Choose at least ${CMP_MIN} carriers to compare: find each by name above.`; render(); return; }
     const big=cmpTooBig(cm.carriers, cm.years); if(big){ cm.formErr=big; render(); return; }
-    run={carriers:JSON.parse(JSON.stringify(cm.carriers)), years:cm.years, parts:cmpPlan(cm.carriers, cm.years, stateOptions().map(s=>s.id).sort()).parts};
+    const scope=nwKeep("cmp"), toi=scope.tois.map(x=>Number(x.id)).filter(Number.isInteger);
+    run={carriers:JSON.parse(JSON.stringify(cm.carriers)), years:cm.years, scope, parts:cmpPlan(cm.carriers, cm.years, scope.states||stateOptions().map(s=>s.id).sort()).parts.map(p=>toi.length?{...p, typeOfInsuranceIds:toi}:p)};
   }
   cm.ran=run; cm.parts=run.parts.map(payload=>({payload, state:"wait", res:null, err:null})); cm.who="all"; cm.shown=CMP_LATEST;
   await cmpGo(cm, cm.parts.map((_,i)=>i), false);
@@ -5077,11 +5302,12 @@ async function cmpGo(cm, which, refresh){
   }
   cm.busy=false; cm.step=null; loadStatus(); cmpRemember(cm.ran, cm.parts); render();
 }
+function cmpShowAll(){ const run=S.cmp.ran; if(run) nwShowAll("cmp", nwRunScope(run.scope)); }
 function cmpRetry(){ const cm=S.cmp; if(cm.busy || !cm.parts) return; const bad=cm.parts.map((p,i)=>p.state==="err"?i:-1).filter(i=>i>=0); if(bad.length) cmpGo(cm, bad, false); }
 function cmpRefresh(){ const cm=S.cmp; if(cm.busy || !cm.parts) return; cmpGo(cm, cm.parts.map((_,i)=>i), true); }
 function cmpReopen(i){
   const cm=S.cmp, run=cmpRecentList()[i]; if(!run || cm.busy) return;
-  cm.carriers=JSON.parse(JSON.stringify(run.carriers)); cm.years=SNAP_YEARS.includes(+run.years)?+run.years:3; cm.find.matches=null; cm.pickErr=""; cm.setNote="";
+  cm.carriers=JSON.parse(JSON.stringify(run.carriers)); cm.years=SNAP_YEARS.includes(+run.years)?+run.years:3; cm.find.matches=null; cm.pickErr=""; cm.setNote=""; nwSetFrom("cmp", run.scope);
   cmpRun(run);
 }
 
@@ -5106,7 +5332,10 @@ function cmpCompute(cm){
   const index=new Map(); cars.forEach((c,i)=>c.ids.forEach(x=>{ const k=x.kind+":"+x.id; if(!index.has(k)) index.set(k,[]); index.get(k).push(i); }));
   const cover=cars.map(c=>{ const ps=c.ids.map(x=>parts[partOf.get(x.kind+":"+x.id)]), have=ps.filter(p=>p&&p.res);
     return {got:have.length, of:ps.length, all:have.length===ps.length, none:!have.length, capped:have.some(p=>p.res.capped)}; });
-  const all=snapFilings(got.flatMap(p=>p.res.rows)).map(r=>({r, k:snapKinds(r.serffFilingType), st:snapState(r), toi:blank(r.typeOfInsurance)?"":String(r.typeOfInsurance), type:blank(r.serffFilingType)?"":String(r.serffFilingType),
+  // narrowed on this page when the choice is inside what was searched (Narrow it down); every carrier alike
+  const sc=nwRunScope(run.scope), sh=nwShown("cmp", sc), rows0=got.flatMap(p=>p.res.rows), fr=nwFilterRows(sh, rows0);
+  const allN=sh.narrowed ? snapFilings(rows0).filter(r=>cmpOwners(r, index).length).length : null;
+  const all=snapFilings(fr.rows).map(r=>({r, k:snapKinds(r.serffFilingType), st:snapState(r), toi:blank(r.typeOfInsurance)?"":String(r.typeOfInsurance), type:blank(r.serffFilingType)?"":String(r.serffFilingType),
     pub:parseDay(r.publishDate), sub:parseDay(r.dateSubmitted), rate:isNum(r.overallRateImpact)?+r.overallRateImpact:null, ok:snapApproved(r.filingStatus)}));
   for(const f of all) f.owners=cmpOwners(f.r, index);
   const fs=all.filter(f=>f.owners.length), stray=all.length-fs.length, shared=fs.filter(f=>f.owners.length>1).length;
@@ -5118,14 +5347,14 @@ function cmpCompute(cm){
   const matrix=(keyOf, keys)=>{ const m=new Map(keys.map(k=>[k, []])); for(const f of fs){ const k=keyOf(f); if(k===null) continue; if(!m.has(k)) m.set(k,[]); m.get(k).push(f); }
     return [...m.entries()].map(([k, l])=>({k, all:l.length, cells:cars.map((c,i)=>{ const x=l.filter(f=>f.owners.includes(i)); return {n:x.length, latest:cmpLatestRate(x)}; })}))
       .map(r=>({...r, filers:r.cells.filter(x=>x.n).length})).sort((a,b)=>b.all-a.all || String(a.k).localeCompare(String(b.k))); };
-  const searched=[...new Set((Array.isArray(p0.states)?p0.states:[]).map(s=>String(s).toUpperCase()))];
+  const searched=sh.states ? sh.states.slice() : [...new Set((Array.isArray(p0.states)?p0.states:[]).map(s=>String(s).toUpperCase()))];
   const stateRows=matrix(f=>f.st||null, searched);
   const toiRows=matrix(f=>f.toi, []);
   // filings by year published, per carrier
   const y0=parseDay(p0.from), y1=parseDay(p0.to), years=[];
   if(y0 && y1) for(let y=y0.getFullYear(); y<=y1.getFullYear() && years.length<20; y++) years.push(y);
   const yearRows=cars.map((c,i)=>{ const l=of(i); return {by:years.map(y=>l.filter(f=>f.pub&&f.pub.getFullYear()===y).length), undated:l.filter(f=>!f.pub).length}; });
-  return {from:p0.from, to:p0.to, cars, cover, fs, stray, shared, sum, searched, stateRows, toiRows, years, yearRows, noState:fs.filter(f=>!f.st).length,
+  return {from:p0.from, to:p0.to, sc, sh, allN, noToi:fr.noToi, cars, cover, fs, stray, shared, sum, searched, stateRows, toiRows, years, yearRows, noState:fs.filter(f=>!f.st).length,
     ratePts:cars.map((c,i)=>of(i).filter(f=>f.rate!==null&&f.pub).sort((a,b)=>a.pub-b.pub)), rateNoDate:fs.filter(f=>f.rate!==null&&!f.pub).length,
     latest:fs.slice().sort(snapByDate), got, notes:[...new Set(got.flatMap(p=>Array.isArray(p.res.notes)?p.res.notes:[]))].filter(n=>!blank(n)&&!/^S&P returned no(thing| filings) for /.test(String(n))&&!/^The search stopped|^S&P was answering slowly/.test(String(n)))};
 }
@@ -5281,9 +5510,10 @@ function cmpOutHTML(){
     return `<div id="cmErr">${problemHTML(e, "Couldn't run the comparison.", "cmp-retry")}</div>`;
   }
   const c=cmpCompute(cm), n=cm.parts.length;
-  let h=`<div class="snhead" id="cmHead"><div><h3 id="cmName">Comparing ${plural(c.cars.length,"carrier")}</h3><p class="t2" id="cmMeta">${esc([`filings published ${fmtDay(c.from)} to ${fmtDay(c.to)}`, `${plural(c.searched.length,"state")} searched`, "every filing type and status", `${plural(cmpUnion(c.cars).length,"company","companies")} in ${plural(n,"search","searches")}`].join(" · "))}</p></div>
+  let h=`<div class="snhead" id="cmHead"><div><h3 id="cmName">Comparing ${plural(c.cars.length,"carrier")}${c.sc.narrowed?` <span class="t2" id="cmScope">${esc(c.sc.short)}</span>`:""}</h3><p class="t2" id="cmMeta">${esc([`filings published ${fmtDay(c.from)} to ${fmtDay(c.to)}`, c.sc.states.length?`searched in ${c.sc.stWords}`:`${plural(c.sh.states?(Array.isArray(run.parts[0].states)?run.parts[0].states.length:0):c.searched.length,"state")} searched`, c.sc.tois.length?`${c.sc.toiWords} only`:"", "every filing type and status", `${plural(cmpUnion(c.cars).length,"company","companies")} in ${plural(n,"search","searches")}`].filter(Boolean).join(" · "))}</p>${c.sc.narrowed?`<p class="t2" id="cmAlike" style="margin:2px 0 0">Every carrier was searched for ${esc(c.sc.words)} alike, so the tables and charts below compare like with like.</p>`:""}</div>
     <div class="toolbar">${n===1?`<button type="button" class="btn" id="cm_toFilings" data-act="cmp-filings" data-k="0" ${cm.busy?"disabled":""}>See every filing on the Filings view</button>`:`<span class="inline" id="cm_toFilings"><span class="t2">See every filing on the Filings view, one search at a time:</span>${cm.parts.map((p,k)=>`<button type="button" class="btn sm" data-act="cmp-filings" data-k="${k}" ${cm.busy?"disabled":""}>Search ${k+1}</button>`).join("")}</span>`}<span class="inline"><span class="t2">All filings:</span>${cmpExpHTML("filings")}</span></div></div>`;
   if(cm.busy) h+=cmpProgressHTML(cm);
+  h+=nwShownHTML("cmp", c.sh, c.fs.length, c.allN===null?c.fs.length:c.allN, c.noToi, "comparison");
   h+=cmpFailedHTML(c, cm);
   if(!cm.busy && got.length===n && got.every(p=>p.res.fromStore)) h+=`<div class="info" id="cmFromStore" role="status"><span>From saved results fetched ${fmtAt(got.map(p=>p.res.fetchedAt).filter(Boolean).sort()[0])}, so opening it used no S&amp;P requests.</span><button type="button" class="btn sm" data-act="cmp-refresh">Refresh from S&amp;P</button></div>`;
   const capped=cm.parts.map((p,i)=>p.res&&p.res.capped?i:-1).filter(i=>i>=0);
@@ -5297,7 +5527,8 @@ function cmpOutHTML(){
     ${c.notes.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>`;
   if(!c.fs.length){
     if(cm.busy) return h;
-    return h+`<div class="notes" id="cmEmpty" role="status"><b>S&amp;P returned nothing for this comparison, and that isn't proof that nothing was filed</b><ul><li>${esc(EMPTY_RESULT)}</li></ul><p class="t2" style="margin:6px 0 0">Check that these are the carriers you meant, or try a longer period.</p></div>`;
+    if(c.sh.narrowed && c.allN) return h+`<div class="info" id="cmEmpty" role="status"><span>None of the ${plural(c.allN,"filing")} searched is in ${esc(c.sh.shown.words)}. Choose Show everything to see them all.</span></div>`;
+    return h+`<div class="notes" id="cmEmpty" role="status"><b>S&amp;P returned nothing for this comparison${c.sc.narrowed?` of ${esc(c.sc.words)}`:""}, and that isn't proof that nothing was filed</b><ul><li>${esc(EMPTY_RESULT)}</li>${c.sc.narrowed?`<li>${esc(`The comparison was narrowed to ${c.sc.words}, so it says nothing about other states or types of insurance.`)}</li>`:""}</ul><p class="t2" style="margin:6px 0 0">Check that these are the carriers you meant, or try a longer period${c.sc.narrowed?" or a wider choice of states and types":""}.</p></div>`;
   }
   h+=cmpSummaryHTML(c)+cmpRateBlockHTML(c)+cmpByBlockHTML(c,"states")+cmpByBlockHTML(c,"types")+cmpYearBlockHTML(c)+cmpLatestBlockHTML(c);
   return h+`<p class="source" id="cmSource">Source: ${esc(got[0].res.source||"S&P Global Market Intelligence, SNL Insurance Product Filings")}, fetched ${fmtAt(got.map(p=>p.res.fetchedAt).filter(Boolean).sort()[0])}. Worked out in this browser from the filings S&amp;P returned. Opening a document uses one S&amp;P request the first time.</p>`;
@@ -5327,17 +5558,17 @@ function cmpChosenHTML(){
     ${chips}${n?`<span><button type="button" class="lnk t2" data-act="cmp-clear" ${cm.busy?"disabled":""}>Clear all</button></span>`:""}</div>`;
 }
 function cmpCostHTML(){
-  const cm=S.cmp, rg=snapRange(cm.years), states=stateOptions().length;
-  const dates=`<span class="t2" id="cm_dates">Filings published ${fmtDay(rg.from)} to ${fmtDay(rg.to)}, in all ${plural(states,"state")} in ${S.refs&&refOptions("serffFilingState").length?"S&amp;P's list":"the app's list"}, every filing type and status.</span>`;
+  const cm=S.cmp, rg=snapRange(cm.years), states=stateOptions().length, sc=nwNow("cmp");
+  const dates=`<span class="t2" id="cm_dates">Filings published ${fmtDay(rg.from)} to ${fmtDay(rg.to)}, ${sc.states.length?`in ${esc(sc.stWords)}`:`in all ${plural(states,"state")} in ${S.refs&&refOptions("serffFilingState").length?"S&amp;P's list":"the app's list"}`}, ${sc.tois.length?`${esc(sc.toiWords)} only, `:""}every filing type and status${sc.narrowed?", for every carrier alike":""}.</span>`;
   if(cm.carriers.length<CMP_MIN) return dates+`<p class="t2" id="cm_cost" style="margin:0">Choose at least ${CMP_MIN} carriers to see what the comparison costs.</p>`;
   const big=cmpTooBig(cm.carriers, cm.years);
   if(big) return `${dates}<div class="banner" id="cm_tooBig" role="alert"><span>${esc(big)}</span></div>`;
   const plan=cmpPlan(cm.carriers, cm.years, []), sum=cm.carriers.reduce((a,c)=>a+c.ids.length,0), twice=sum-plan.ids.length;
-  return `${dates}<p class="t2" id="cm_cost" style="margin:0"><b>About ${plural(plan.requests,"S&amp;P request")} in ${plural(plan.parts.length,"search","searches")}</b> (one for each 10 companies for each year of dates), more if S&amp;P has many filings. ${plural(plan.ids.length,"company","companies")} in all${twice?`; ${plural(twice,"company is","companies are")} in more than one carrier and searched once`:""}.${plan.parts.length>1?` A search takes at most ${MAX_COMPANIES} companies, so they run one after another.`:""} A search run before costs nothing, and once this has run, reopening it below costs no S&amp;P requests.</p>`;
+  return `${dates}<p class="t2" id="cm_cost" style="margin:0"><b>About ${plural(plan.requests,"S&amp;P request")} in ${plural(plan.parts.length,"search","searches")}</b> (one for each 10 companies for each year of dates), more if S&amp;P has many filings. ${plural(plan.ids.length,"company","companies")} in all${twice?`; ${plural(twice,"company is","companies are")} in more than one carrier and searched once`:""}.${plan.parts.length>1?` A search takes at most ${MAX_COMPANIES} companies, so they run one after another.`:""} A search run before costs nothing, and once this has run, reopening it below costs no S&amp;P requests.${sc.narrowed?" Narrowing the states or types doesn't change the number of S&amp;P requests, which depends on the companies and years; it means fewer filings come back.":""}</p>`;
 }
 function cmpRecentHTML(){
   const list=cmpRecentList(); if(!list.length) return "";
-  return `<div class="snrecent" id="cm_recent"><span class="t2"><b>Comparisons run in this browser.</b> Reopening one uses no S&amp;P requests.</span><ul>${list.map((x,i)=>`<li><button type="button" class="chip" data-act="cmp-recent" data-i="${i}" ${S.cmp.busy?"disabled":""}><b>${esc(andList(x.carriers.map(c=>String(c.name)), 3))}</b> <span class="t2">${esc(`${fmtDay(x.parts[0].from)} to ${fmtDay(x.parts[0].to)}`)}</span></button></li>`).join("")}</ul></div>`;
+  return `<div class="snrecent" id="cm_recent"><span class="t2"><b>Comparisons run in this browser.</b> Reopening one uses no S&amp;P requests.</span><ul>${list.map((x,i)=>`<li><button type="button" class="chip" data-act="cmp-recent" data-i="${i}" ${S.cmp.busy?"disabled":""}><b>${esc(andList(x.carriers.map(c=>String(c.name)), 3))}</b> <span class="t2">${esc(`${fmtDay(x.parts[0].from)} to ${fmtDay(x.parts[0].to)}${nwRunScope(x.scope).narrowed?`, ${nwRunScope(x.scope).short}`:""}`)}</span></button></li>`).join("")}</ul></div>`;
 }
 // the saved-set control, when the sets feature is there (Contract A); its click is handled by that feature
 function cmpSetHTML(){
@@ -5361,6 +5592,7 @@ function renderCompare(){
   if(fst && fst.configured===false) h+=`<div class="info" id="cmOff" role="status"><span><b>S&amp;P filings aren't set up yet,</b> so a new comparison can't be run. Comparisons run before still open from their saved results.</span></div>`;
   h+=`<form class="tcard" id="cmForm" novalidate aria-label="Choose carriers and a period">${cmpSetHTML()}${cmpFinderHTML()}${cmpChosenHTML()}
     <div class="f"><span>Period</span><div class="snper"><div class="seg" role="group" aria-label="Period">${SNAP_YEARS.map(y=>`<button type="button" class="btn sm" data-act="cmp-years" data-y="${y}" aria-pressed="${cm.years===y}">${y===1?"Last year":`Last ${y} years`}</button>`).join("")}</div></div></div>
+    ${nwHTML("cmp", {busy:cm.busy, note:"Every carrier is searched for the same states and types. After a comparison has run, choosing fewer narrows what is shown at once, without asking S&amp;P again."})}
     <div id="cm_costBox" style="display:flex;flex-direction:column;gap:8px;min-width:0">${cmpCostHTML()}</div>
     ${cm.formErr?`<p class="err" id="cm_formErr" role="alert">${esc(cm.formErr)}</p>`:""}
     <div class="toolbar"><button type="button" class="btn primary" id="cm_run" data-act="cmp-run" ${cm.busy||cm.picking||waitStates?"disabled":""}>${cm.busy?"Comparing…":waitStates?"Loading S&amp;P's list of states…":"Compare"}</button></div>
@@ -5373,9 +5605,9 @@ function cmpToSnapshot(i){
   const cm=S.cmp, car=cm.ran&&cm.ran.carriers[i], sn=S.snap; if(!car) return;
   if(sn.busy){ toast("The Snapshot view is still getting a snapshot. Try again when it has finished."); return; }
   const pick={kind:car.kind, name:car.name, group:car.kind==="group"?car.name:(car.group||""), ids:car.ids.map(x=>({kind:x.kind, id:String(x.id), name:x.name||""})), noId:car.noId||0, cut:false};
-  const {from, to}=snapRange(cm.ran.years), nums=k=>pick.ids.filter(x=>x.kind===k).map(x=>Number(x.id));
-  const payload={action:"search", companyIds:nums("companyId"), institutionIds:nums("institutionId"), states:stateOptions().map(s=>s.id).sort(), from, to};
-  sn.pick=pick; sn.years=cm.ran.years; sn.find.matches=null; sn.formErr=""; sn.pickErr="";
+  const {from, to}=snapRange(cm.ran.years), nums=k=>pick.ids.filter(x=>x.kind===k).map(x=>Number(x.id)), scope=cm.ran.scope||null;
+  const payload=snapPayload(nums("companyId"), nums("institutionId"), scope, from, to);
+  sn.pick=pick; sn.years=cm.ran.years; sn.find.matches=null; sn.formErr=""; sn.pickErr=""; nwSetFrom("snap", scope);
   const saved=snapRecentList().find(x=>JSON.stringify(x.payload)===JSON.stringify(payload));
   location.hash="#snapshot";
   if(saved) snapRun(false, saved);   // run before in this browser: opens from the saved result
@@ -5386,7 +5618,7 @@ function cmpToFilings(k){
   if(f.busy){ toast("The Filings view is still running a search. Try again when it has finished."); return; }
   const p=part.payload, names=new Map(); run.carriers.forEach(c=>c.ids.forEach(x=>{ if(!names.get(x.kind+":"+x.id)) names.set(x.kind+":"+x.id, x.name||""); }));
   f.chips=cmpPartIds(p).map(x=>({kind:x.kind, id:x.id, name:names.get(x.kind+":"+x.id)||""}));
-  f.states=[...p.states]; f.from=p.from; f.to=p.to; f.toi=[]; f.ftype=[]; f.fstatus=[]; f.toiFilter=""; f.tracking="";
+  f.states=[...p.states]; f.from=p.from; f.to=p.to; f.toi=(Array.isArray(p.typeOfInsuranceIds)?p.typeOfInsuranceIds:[]).map(String); f.ftype=[]; f.fstatus=[]; f.toiFilter=""; f.tracking="";
   f.q=""; f.matches=null; f.resolveNote=""; f.resolveErr=""; f.formErr="";
   location.hash="#filings";
   if(part.state!=="ok" || !part.res || part.res.capped){ f.res=null; f.err=null; toast("The form is filled in. Press Search filings to run it: this search wasn't saved complete, so it asks S&P again."); }
@@ -5396,7 +5628,7 @@ function cmpToFilings(k){
 /* ----- exports, and what Ask Claude is told ----- */
 function cmpExport(tbl){
   const cm=S.cmp; if(!cm.ran || !cm.parts || !cm.parts.some(p=>p.res)) return null;
-  const c=cmpCompute(cm), out=(name, sheet, cols, rows)=>({name:`snl-compare-${c.cars.length}-carriers-${name}-${TODAY()}`, sheet, cols, rows});
+  const c=cmpCompute(cm), out=(name, sheet, cols, rows)=>({name:`snl-compare-${c.cars.length}-carriers${nwSlug(c.sh.narrowed?c.sh.shown:c.sc)}-${name}-${TODAY()}`, sheet, cols, rows});
   const day=d=>d?iso(d):"", n=v=>v===null||v===undefined?null:+v, who=f=>cmpNames(c, f).join("; "), cos=f=>(Array.isArray(f.r.companies)?f.r.companies:[]).map(x=>x&&x.companyName).filter(x=>!blank(x)).join("; ");
   const note=i=>c.cover[i].none?"Not fetched: the search didn't run":!c.sum[i].n?"S&P returned nothing for this carrier":cmpCoverText(c.cover[i]);
   if(tbl==="summary") return out("summary","Summary",["Carrier","Kind","Companies","Filings","Rate filings","Rule filings","Form filings","States with filings","Rate filings with an impact","Lowest rate impact (%)","Highest rate impact (%)","Latest rate change (%)","Latest rate change, state","Latest rate change, date published","Latest rate change, status","Latest filing, date published","Note"],
@@ -5421,7 +5653,7 @@ function cmpScreen(){
   const cm=S.cmp, run=cm.ran; if(!run || !cm.parts || cm.parts.length!==1 || cm.parts[0].state!=="ok" || !cm.parts[0].res) return null;
   const r=cm.parts[0].res, p=r.params||run.parts[0], ints=a=>(Array.isArray(a)?a:[]).map(Number).filter(Number.isInteger);
   const names=[...new Set([...run.carriers.map(c=>c.name), ...run.carriers.flatMap(c=>c.ids.map(x=>x.name))].filter(x=>!blank(x)).map(String))].slice(0,20);
-  return {view:"filings", search:{companyIds:ints(p.companyIds), institutionIds:ints(p.institutionIds), states:(Array.isArray(p.states)?p.states:[]).map(String), from:String(p.from||""), to:String(p.to||""), typeOfInsuranceIds:[], filingTypeIds:[], filingStatusIds:[]},
+  return {view:"filings", search:{companyIds:ints(p.companyIds), institutionIds:ints(p.institutionIds), states:(Array.isArray(p.states)?p.states:[]).map(String), from:String(p.from||""), to:String(p.to||""), typeOfInsuranceIds:ints(p.typeOfInsuranceIds), filingTypeIds:[], filingStatusIds:[]},
     total:snapFilings(r.rows).length, companies:names};
 }
 
@@ -5916,6 +6148,7 @@ async function loadMarket(quiet){
     mk.status=r.data; mk.statusErr=null; takeUsage({used:r.data.usage, limits:r.data.limits, account:r.data.account});
     const st=mkStates().map(s=>s.state);
     if(!st.includes(mk.state)) mk.state=st[0]||"";
+    mkNarrowInit();
     if(mk.state && !mk.types[mk.state]) mkLoadTypes(mk.state);
   } else if(r.err!=="signin") mk.statusErr=r;
   if(S.view==="market") render();
@@ -5928,19 +6161,49 @@ async function mkLoadTypes(state){
   mk.types[state]=r.data&&Array.isArray(r.data.groups) ? r.data.groups.map(g=>String(g&&g.name||"")).filter(n=>n&&n!=="n/d") : [];
   if(S.view==="market") render();
 }
+/* Narrow it down on the Market: the states (the index's own) and types of insurance (the index's names) chosen. The
+   first indexed state is chosen to start with, as the one state always was. Nothing chosen means every indexed state,
+   at most MK_MAX_STATES (the snl-index function's MAX_QUERY_STATES). One state and one type are asked exactly as
+   before; several go as lists, which the index answers after migration 0009. */
+const MK_MAX_STATES = 10;
+function mkNarrowInit(){
+  const mk=S.mk, nw=nwOf("mk"), have=new Set(mkStates().map(s=>String(s.state)));
+  if(!nw.touched) nw.states=mk.state?[mk.state]:[];
+  nw.states=nw.states.filter(s=>have.has(s));
+}
+const mkAskStates = () => { const c=nwStates("mk"); return c.length ? c : mkStates().map(s=>String(s.state)).sort(); };
+const mkAskTypes = () => nwTois("mk").map(t=>t.name);
+async function mkNarrowChanged(){
+  const mk=S.mk, nw=nwOf("mk"), before=mk.state; nw.touched=true;
+  const sts=mkAskStates(); mk.state=sts[0]||"";
+  if(JSON.stringify(sts)!==JSON.stringify(mk.lastStates||[before])){ mk.res=null; mk.byCo=null; mk.err=null; }
+  mk.lastStates=sts;
+  for(const s of sts.slice(0, MK_MAX_STATES)) if(!mk.types[s] && S.mk===mk){ await mkLoadTypes(s); }
+}
+// the scope of an answer, from the question it echoes: its states and types
+function mkScopeOf(q){
+  const sts=Array.isArray(q&&q.states)&&q.states.length ? q.states : q&&q.state ? [q.state] : [];
+  const tys=Array.isArray(q&&q.types)&&q.types.length ? q.types : q&&q.typeOfInsurance ? [q.typeOfInsurance] : [];
+  return nwScope(sts, tys.map(t=>({id:String(t), name:String(t)})));
+}
 function mkQuery(extra){
-  const mk=S.mk, f=mk.f;
-  return {action:"query", state:mk.state, typeOfInsurance:f.toi||null, filingType:f.ftype||null, status:f.fstatus.trim()||null, from:f.from||null, to:f.to||null, words:f.words.trim()||null, ...extra};
+  const mk=S.mk, f=mk.f, sts=mkAskStates(), tys=mkAskTypes();
+  const q={action:"query", state:sts[0]||mk.state, typeOfInsurance:tys.length===1?tys[0]:null, filingType:f.ftype||null, status:f.fstatus.trim()||null, from:f.from||null, to:f.to||null, words:f.words.trim()||null, ...extra};
+  if(sts.length>1 || tys.length>1){ q.states=sts; q.typesOfInsurance=tys; }
+  return q;
 }
 async function mkSearch(){
   const mk=S.mk; if(mk.busy || !mk.state) return;
+  if(mkAskStates().length>MK_MAX_STATES){ mk.err={err:"bad", msg:`Choose at most ${MK_MAX_STATES} states: the index answers up to ${MK_MAX_STATES} at once.`}; render(); return; }
   if(mk.f.from && mk.f.to && mk.f.from>mk.f.to){ mk.err={err:"bad", msg:"The start date is after the end date."}; render(); return; }
   mk.busy=true; mk.err=null; render();
   const q=mkQuery({});
   const [rows, byCo]=await Promise.all([callFn("snl-index",{...q, group:"rows", limit:MK_PAGE, offset:0}), callFn("snl-index",{...q, group:"company", limit:100})]);
   if(!S.session || S.mk!==mk) return;
   mk.busy=false;
-  if(rows.data){ mk.res=rows.data; mk.asked=q; mk.more=!!rows.data.more; mk.byCo=byCo.data||null; }
+  // several states or types asked of a function from before Narrow it down would be answered wider: shown as not done
+  if(rows.data && (q.states||q.typesOfInsurance) && !(rows.data.query&&Array.isArray(rows.data.query.states))){ mk.err={err:"not_updated", msg:"The market index function on this site can only search one state and one type of insurance at a time. Choose one of each, or ask Corp Dev to deploy snl-index again (README, Market index)."}; mk.res=null; mk.byCo=null; }
+  else if(rows.data){ mk.res=rows.data; mk.asked=q; mk.more=!!rows.data.more; mk.byCo=byCo.data||null; }
   else if(rows.err!=="signin"){ mk.err=rows; mk.res=null; mk.byCo=null; }
   render();
 }
@@ -5954,28 +6217,28 @@ async function mkMore(){
   else if(r.err!=="signin") toast("Couldn't load more. "+errText(r));
   render();
 }
-/* The coverage line: what an answer rests on, always on screen while a state is chosen. */
-function mkCoverageHTML(cov){
+/* The coverage line: what an answer rests on, always on screen while a state is chosen; one for each state. */
+function mkCoverageHTML(cov, i){
   if(!cov) return "";
   const missed=Array.isArray(cov.missed)?cov.missed.filter(x=>!blank(x)):[];
   const shown=missed.slice(0,5);
-  return `<div class="info mkcov" id="mkCov" role="note"><span>${esc(cov.sentence||"")}${+cov.companiesMissed&&shown.length?` Not covered: ${esc(shown.join("; "))}${+cov.companiesMissed>shown.length?` and ${count(+cov.companiesMissed-shown.length)} more`:""}.`:""}</span></div>`;
+  return `<div class="info mkcov" id="mkCov${i?"_"+esc(String(cov.state||i)):""}" role="note"><span>${esc(cov.sentence||"")}${+cov.companiesMissed&&shown.length?` Not covered: ${esc(shown.join("; "))}${+cov.companiesMissed>shown.length?` and ${count(+cov.companiesMissed-shown.length)} more`:""}.`:""}</span></div>`;
 }
 const mkCovOf = state => { const s=mkStates().find(x=>x.state===state); return s||null; };
 function mkSearchHTML(){
   const mk=S.mk, f=mk.f, states=mkStates(), types=mk.types[mk.state]||[];
   const opt=(v,label,on)=>`<option value="${esc(v)}"${on?" selected":""}>${esc(label)}</option>`;
+  const ask=mkAskStates();
   return `<form class="tcard" id="mkForm" novalidate aria-label="Search the market index">
+    ${nwHTML("mk", {busy:mk.busy, why:"isn't in the market index", toiOff:"The index lists no types of insurance for these states yet.", note:`Each state is answered over what its own sweep covers, with its own coverage line. Nothing chosen means every state the index holds${mkStates().length>MK_MAX_STATES?`, and the index answers up to ${MK_MAX_STATES} at once`:""}. Costs no S&amp;P requests.`})}
     <div class="fgrid three">
-      <label class="f">State<select id="mk_state">${states.map(s=>opt(s.state, `${s.state} ${mkStateName(s.state)}`, s.state===mk.state)).join("")}</select></label>
-      <label class="f">Type of insurance<select id="mk_toi"><option value="">Any</option>${types.map(t=>opt(t,t,t===f.toi)).join("")}${f.toi&&!types.includes(f.toi)?opt(f.toi,f.toi,true):""}</select></label>
       <label class="f">Filing type<select id="mk_ftype"><option value="">Any</option>${MK_FTYPES.map(t=>opt(t,t,t===f.ftype)).join("")}</select></label>
       <label class="f"><span>Status <em>words in it</em></span><input type="text" id="mk_status" data-bind="mk.f.fstatus" value="${esc(f.fstatus)}" autocomplete="off" spellcheck="false" placeholder="For example Approved"></label>
       <label class="f">Published from<input type="date" id="mk_from" data-bind="mk.f.from" value="${esc(f.from)}"></label>
       <label class="f">Published to<input type="date" id="mk_to" data-bind="mk.f.to" value="${esc(f.to)}"></label>
       <label class="f full"><span>Words <em>in the description or a company name</em></span><input type="search" id="mk_words" data-bind="mk.f.words" value="${esc(f.words)}" autocomplete="off" spellcheck="false" placeholder="For example Calloway"></label>
     </div>
-    ${mk.res?"":mkCoverageHTML(mkCovOf(mk.state))}
+    ${mk.res?"":ask.slice(0, MK_MAX_STATES).map((s,i)=>mkCoverageHTML(mkCovOf(s), i)).join("")}
     <div class="toolbar"><button type="submit" class="btn primary" id="mk_go" data-act="mk-search" ${mk.busy?"disabled":""}>${mk.busy?"Searching the index…":"Search the index"}</button><span class="t2">Costs no S&amp;P requests.</span></div>
   </form>`;
 }
@@ -6000,8 +6263,9 @@ function mkResultsHTML(){
   if(!r) return "";
   const rows=Array.isArray(r.rows)?r.rows:[], total=isNum(r.total)?+r.total:rows.length, notes=Array.isArray(r.notes)?r.notes.filter(n=>!blank(n)):[];
   const q=r.query||{}, cov=r.coverage||null;
-  let h=`<h2 class="sec">Results</h2>${mkCoverageHTML(cov)}`;
-  h+=`<p class="sub" id="mkSummary" style="margin:0">${total?`<b>${plural(total,"filing")}</b> in the index`:`<b>No filing in the index matches</b>`} for ${esc(q.state||"")}${q.from&&q.to?`, published ${fmtDay(q.from)} to ${fmtDay(q.to)}`:""}.${total?` ${count(r.rateFilings)} ${+r.rateFilings===1?"is a rate filing":"are rate filings"}.`:""}</p>`;
+  const covs=Array.isArray(r.coverages)&&r.coverages.length ? r.coverages : [cov], sc=mkScopeOf(q), many=Array.isArray(q.states)&&(q.states.length>1||(q.types||[]).length>1);
+  let h=`<h2 class="sec">Results</h2>${covs.map((x,i)=>mkCoverageHTML(x, i)).join("")}`;
+  h+=`<p class="sub" id="mkSummary" style="margin:0">${total?`<b>${plural(total,"filing")}</b> in the index`:`<b>No filing in the index matches</b>`} for ${esc(many?sc.words:(q.state||""))}${!many&&q.typeOfInsurance?`, ${esc(nwLower(String(q.typeOfInsurance)))} only`:""}${q.from&&q.to?`, published ${fmtDay(q.from)} to ${fmtDay(q.to)}`:""}.${total?` ${count(r.rateFilings)} ${+r.rateFilings===1?"is a rate filing":"are rate filings"}.`:""}</p>`;
   if(notes.length) h+=`<div class="notes" id="mkNotes" role="status"><b>Read this before you rely on the results</b><ul>${notes.map(n=>`<li>${esc(n)}</li>`).join("")}</ul></div>`;
   if(!total) return h;
   h+=`<div class="toolbar"><div class="seg" role="group" aria-label="Show"><button type="button" class="btn sm" data-act="mk-tab" data-tab="rows" aria-pressed="${mk.tab==="rows"}">Filings</button><button type="button" class="btn sm" data-act="mk-tab" data-tab="company" aria-pressed="${mk.tab==="company"}">By company</button></div>
@@ -6028,7 +6292,8 @@ function mkByCompanyHTML(){
 }
 async function mkExport(fmt){
   const mk=S.mk; if(!mk.res || mk.exporting) return;
-  const stamp=`${mk.asked&&mk.asked.state||"index"}-${TODAY()}`;
+  const q0=mk.res&&mk.res.query||mk.asked||{}, many=Array.isArray(q0.states)&&(q0.states.length>1||(q0.types||[]).length>1);
+  const stamp=`${many?nwSlug(mkScopeOf(q0)).slice(1):(mk.asked&&mk.asked.state||"index")}-${TODAY()}`;
   if(mk.tab==="company"){
     const g=mk.byCo&&Array.isArray(mk.byCo.groups)?mk.byCo.groups:[];
     exportTable({name:`snl-market-${stamp}-by-company`, sheet:"By company", cols:["Company","S&P company id","Institution id","Filings","Rate filings","Lowest rate impact","Highest rate impact","Latest published"],
@@ -6347,6 +6612,7 @@ document.addEventListener("click", e=>{
     case "snap-map": S.snap.mapBy=t.dataset.by==="rate"?"rate":"count"; render(); break;
     case "snap-filings": snapToFilings(); break;
     case "snap-ask": snapAsk(t.dataset.q); break;   // fills the question box; sending is left to the reader
+    case "nw-open": case "nw-st": case "nw-st-x": case "nw-st-all": case "nw-region": case "nw-toi": case "nw-toi-x": case "nw-toi-none": case "nw-show-all": case "nw-research": nwAct(a, t); break;   // Narrow it down, on four views
 
     case "fc-find": fcLookup(); break;
     case "fc-co": fcChooseCompany(+t.dataset.i); break;

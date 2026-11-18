@@ -78,15 +78,19 @@ const TYPES=q=>({coverage:COV(q.state), total:60, group:"type", groupTotal:2, gr
   ok("#market shows the market index, and its tab is the one lit", (await t.txt("#view h2.action-title"))==="Market index" && (await p.getAttribute('nav.tabs a[href="#market"]',"aria-current"))==="page" && (await p.$$('nav.tabs a[aria-current="page"]')).length===1);
   ok("the status is asked once, and the types of insurance for the first state", t.icalls("status").length===1 && same(t.queries("type").map(q=>q.state),["FL"]));
   ok("a reader sees no index manager", !(await p.$("#mkMgr")) && !(await p.$('[data-act="mk-start"]')) && !(await p.$('[data-act="mk-topup"]')));
-  ok("the state list holds the indexed states only", same(await p.$$eval("#mk_state option",o=>o.map(x=>x.value)),["FL","GA"]) && (await t.txt("#mk_state option >> nth=0"))==="FL Florida");
-  ok("the types of insurance come from the index", same(await p.$$eval("#mk_toi option",o=>o.map(x=>x.value)),["","Homeowners","Commercial Auto"]));
+  // Narrow it down (view-filters): the state and type are chosen in the shared picker; the first indexed state to start with
+  ok("the first indexed state is chosen to start with", same(await t.all("#nw_mk .nwcol >> nth=0 >> .cchip b"),["Florida"]));
+  await p.click("#nw_mk_stb"); await p.waitForTimeout(150);
+  ok("the state list holds the indexed states only", same(await p.$$eval("#nw_mk_states .strow",o=>o.map(x=>x.dataset.s)),["FL","GA"]) && (await t.txt("#nw_mk_states .strow >> nth=0"))==="Florida FL");
+  await p.click("#nw_mk_stb"); await p.click("#nw_mk_toib"); await p.waitForTimeout(150);
+  ok("the types of insurance come from the index", same(await t.all("#nw_mk_tois label"),["Commercial Auto","Homeowners"]));
   ok("the coverage line is on screen before any search", (await t.txt("#mkCov")).startsWith("The market index of FL holds filings published 19 Nov 2025 to 18 Nov 2026") && (await t.txt("#mkCov")).includes("isn't the whole market") && (await t.txt("#mkCov")).includes("Not covered: Nonesuch Carrier No. 10 Co; Nonesuch Carrier No. 11 Co and 8 more."), await t.txt("#mkCov"));
   ok("no S&P request is suggested: the search says it costs none", (await t.txt("#mkForm")).includes("Costs no S&P requests."));
-  await p.selectOption("#mk_toi","Homeowners"); await p.selectOption("#mk_ftype","Rate"); await p.fill("#mk_status","approved"); await p.fill("#mk_from","2026-01-01");
+  await p.click('#nw_mk_tois input[data-id="Homeowners"]'); await p.waitForTimeout(100); await p.click("#nw_mk_toib"); await p.selectOption("#mk_ftype","Rate"); await p.fill("#mk_status","approved"); await p.fill("#mk_from","2026-01-01");
   await p.click("#mk_go"); await p.waitForTimeout(400);
   const asked=t.queries("rows")[0], askedCo=t.queries("company")[0];
   ok("a search asks for the filings and the summary by company, with the filters chosen", !!asked && asked.state==="FL" && asked.typeOfInsurance==="Homeowners" && asked.filingType==="Rate" && asked.status==="approved" && asked.from==="2026-01-01" && asked.to===null && asked.words===null && asked.limit===50 && asked.offset===0 && !!askedCo && askedCo.typeOfInsurance==="Homeowners", {asked, askedCo});
-  ok("the summary says how many filings and rate filings", (await t.txt("#mkSummary"))==="60 filings in the index for FL, published 1 Jan to 18 Nov. 40 are rate filings.", await t.txt("#mkSummary"));
+  ok("the summary says how many filings and rate filings", (await t.txt("#mkSummary"))==="60 filings in the index for FL, homeowners only, published 1 Jan to 18 Nov. 40 are rate filings.", await t.txt("#mkSummary"));
   ok("the results carry the coverage line, once", (await p.$$("#mkCov")).length===1 && (await t.txt("#mkOut #mkCov")).startsWith("The market index of FL"));
   ok("50 filings are shown first", (await p.$$("#mkTable tbody tr")).length===50 && (await t.txt("#mkCount")).startsWith("Showing 50 of 60"));
   ok("the columns: company, type, filing type, status, published, rate impact, filing number, document; no empty description column", same(await t.all("#mkTable thead th"),["Company","Type of insurance","Filing type","Status","Published","Rate impact","Filing number","Document"]) && (await t.txt("#mkNoDesc"))==="S&P gave no description for these filings, so there is no description column.", await t.all("#mkTable thead th"));
@@ -112,7 +116,7 @@ const TYPES=q=>({coverage:COV(q.state), total:60, group:"type", groupTotal:2, gr
   await p.setViewportSize({width:1440,height:900});
   // a search by words on a state whose filings have no description says so
   t.query=q=>({status:200, body:q.group==="rows"?ANSWER(q,{total:0, rows:[], more:false, notes:["No filing in the index of GA has a description (S&P left them empty), so the words were matched against company names only.","No filing in the index matches. The index of GA covers 2,700 companies in the app's list for 19 Nov 2025 to 18 Nov 2026; that isn't proof that none were filed."]}):q.group==="type"?TYPES(q):BYCO(q)});
-  await p.selectOption("#mk_state","GA"); await p.waitForTimeout(250);
+  await p.click("#nw_mk_stb"); await p.click('#nw_mk_states [data-s="GA"]'); await p.click('#nw_mk [data-act="nw-st-x"][data-id="FL"]'); await p.click('#nw_mk [data-act="nw-toi-x"]'); await p.waitForTimeout(250);
   ok("choosing another state shows its coverage and clears the old results", (await t.txt("#mkCov")).startsWith("The market index of GA") && !(await p.$("#mkTable")) && t.queries("type").at(-1).state==="GA");
   await p.fill("#mk_words","high value"); await p.press("#mk_words","Enter"); await p.waitForTimeout(300);
   ok("Enter in the words box searches; the words are sent", t.queries("rows").at(-1).words==="high value" && t.queries("rows").at(-1).state==="GA");
