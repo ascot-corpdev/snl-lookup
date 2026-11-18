@@ -103,7 +103,7 @@ const bigGroup=n=>({name:"Nonesuch Group", code:null, companies:n, searchable:n,
 
   // ----- the view as it opens -----
   let t=await open(); let p=t.p;
-  ok("the view opens at #forms with no tab of its own", (await t.txt(".action-title"))==="Programs and forms side by side" && same(await t.list("nav.tabs a"),["Filings","Snapshot","Statutory","Profile"]) && (await p.$$('nav.tabs a[aria-current="page"]')).length===0);
+  ok("the view opens at #forms with no tab of its own", (await t.txt(".action-title"))==="Programs and forms side by side" && same(await t.list("nav.tabs a"),["Filings","Snapshot","Compare","Statutory","Profile"]) && (await p.$$('nav.tabs a[aria-current="page"]')).length===0);
   ok("on opening: S&P's lists once, the summaries function's status once, and the day's questions", same(t.of("snl-filings","reference").map(c=>c.body),[{action:"reference"}]) && same(t.of("snl-digest","status").map(c=>c.body),[{action:"status"}]) && t.of("snl-chat","status").length===1 && t.of("snl-digest","get").length===0);
   ok("nothing chosen; no state, no type of insurance, with a plain prompt to choose one; 3 years", (await t.txt("#fc_none"))==="No carriers chosen yet." && (await p.inputValue("#fc_state"))==="" && (await p.inputValue("#fc_toi"))==="" && (await t.txt("#fc_toiHint"))==="Choose one, such as Homeowners: the comparison is for one type of insurance." && (await p.getAttribute('[data-act="fc-years"][data-y="3"]',"aria-pressed"))==="true");
   ok("type of insurance offers S&P's list", same((await t.list("#fc_toi option")).slice(0,3),["Choose a type of insurance","Homeowners","Private passenger auto"]) && (await p.$$("#fc_toi option")).length===REFS.lists.typeOfInsurance.options.length+1);
