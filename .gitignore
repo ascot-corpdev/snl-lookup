@@ -8,6 +8,9 @@ supabase/.temp/
 *.pem
 *.key
 *.p8
+*.jwk
+.dev.vars
+.wrangler/
 
 # Company lists and other exports may be S&P's data: load them with scripts/companies.mjs, never commit them
 *.csv

@@ -22,6 +22,7 @@ npm test
 | `functions/resilience_test.ts`, `functions/pages_test.ts` | What keeps an answer safe when things go wrong: limits, time running out, a failed save, oversized documents, clearing up. |
 | `functions/migration_test.ts` | The migration keeps row-level security on and gives anonymous visitors nothing. It reads the SQL as text; to see it run, apply the migrations to a scratch Postgres database. |
 | `scripts/*.test.mjs` | The login script and the company-list import against a local stand-in for Supabase, and the shell steps of the Pages and keep-awake workflows. |
+| `scripts/worker.test.mjs`, `web/accesslogin.test.cjs` | The Cloudflare Access sign-in: the Worker checking Access's token (signature, audience, issuer, expiry) or `ctx.access`, admin and reader roles, finding or creating the Supabase login and profile, the minted token's claims and signature (HS256, ES256, RS256), and the page signing in, renewing the token, recovering a dropped token and signing out through Access, against made-up keys and a stand-in for Supabase. |
 | `fixtures/` | Test data. **Every company, NAIC code, id, tracking number and filing text in it is made up.** |
 | `out/` | Screenshots from the last run. Not committed. |
 

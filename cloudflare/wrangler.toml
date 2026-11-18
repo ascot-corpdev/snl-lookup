@@ -1,0 +1,23 @@
+# SNL lookup on Cloudflare Workers, behind Cloudflare Access. See the README, "Sign-in with Cloudflare Access".
+# Deploy from the repository root:
+#   npx wrangler@4.156.0 deploy --config cloudflare/wrangler.toml
+# Nothing about the deployment is in this file. Every setting is a Worker secret (wrangler secret put NAME), listed at
+# the top of worker.js and in the README.
+
+name = "snl-lookup"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+# The site is served at https://snl-lookup.<your-subdomain>.workers.dev. Turn on Cloudflare Access for it before
+# sharing the address (README step 3).
+workers_dev = true
+preview_urls = false
+
+# web/ as static assets. The Worker itself runs only for its two addresses; everything else is the site.
+[assets]
+directory = "../web"
+binding = "ASSETS"
+run_worker_first = ["/config.js", "/access/*"]
+
+[observability]
+enabled = true

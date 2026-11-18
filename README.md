@@ -32,8 +32,9 @@ House rules for anyone changing the code are in [.github/copilot-instructions.md
 | `supabase/migrations/0007_answer_library.sql` | Supabase Postgres | Optional. The team library of saved answers. |
 | `scripts/logins.mjs` | Your computer | Creates logins. There is no self sign-up. |
 | `scripts/companies.mjs` | Your computer | Loads a company list so companies can be found by name or NAIC code. |
+| `cloudflare/worker.js`, `cloudflare/bridge.js` | Cloudflare Workers | Optional. The same site behind Cloudflare Access: people sign in with a one-time code sent to their email, and the Worker gives the page a short-lived Supabase token. See [Sign-in with Cloudflare Access](#sign-in-with-cloudflare-access). |
 
-Security in one paragraph: the repository is public and holds no secret. Every credential lives in Supabase secrets and is used only inside the functions. Each function checks the caller's login itself. Saved S&P data sits in Supabase tables that only signed-in logins can read and only the functions can write (row-level security is on everywhere, and anonymous visitors get nothing). Filing documents are never stored: they pass straight through to the browser, and the copies Claude reads are deleted from Anthropic when the answer finishes. If an answer is abandoned part-way, its copies are deleted the next time anyone opens the app or asks a question, once it has been idle for an hour. Finished answers (the question, the answer and its quotes) are kept in Supabase for 30 days, readable only by the login that asked.
+Security in one paragraph: the repository is public and holds no secret. Every credential lives in Supabase secrets and is used only inside the functions (with the Cloudflare Access sign-in, the Worker also holds the Supabase secret key and the token-signing secret, as Worker secrets). Each function checks the caller's login itself. Saved S&P data sits in Supabase tables that only signed-in logins can read and only the functions can write (row-level security is on everywhere, and anonymous visitors get nothing). Filing documents are never stored: they pass straight through to the browser, and the copies Claude reads are deleted from Anthropic when the answer finishes. If an answer is abandoned part-way, its copies are deleted the next time anyone opens the app or asks a question, once it has been idle for an hour. Finished answers (the question, the answer and its quotes) are kept in Supabase for 30 days, readable only by the login that asked.
 
 ## Setup (about 30 minutes)
 
@@ -375,6 +376,96 @@ Anyone can save one of their own finished answers from Claude where every login 
 - **Carrier sets.** Corp Dev logins save named sets of companies and whole groups from the **Carrier sets** button beside the company pickers. Every login can see and use them on the Filings form, the Snapshot, Compare, Programs and forms and the watchlist, and Claude checks a matching saved set instead of choosing carriers itself. Sets are visible to every login, so a set shows which companies the team follows. A group is kept by name and expanded to its member companies each time the set is used.
 - **Ask about a Snapshot.** "Ask Claude about this" on a finished Snapshot writes a question from what is on screen and puts it in the box; nothing is sent until you press Ask.
 
+## Sign-in with Cloudflare Access
+
+Optional. The site can also run on Cloudflare, behind Cloudflare Access. Access is then the only sign-in: each person types their email, gets a one-time code and is in. There are no passwords. The admin's email (or emails) gets the Corp Dev role; everyone else the policy lets in gets the Reader role. The GitHub Pages site keeps working, with its password logins, until you switch it off.
+
+How it works: Access checks the person before any request reaches the site. The Worker (`cloudflare/bridge.js`) checks Access's sign-in again, finds or creates that person's Supabase login, sets their role in `profiles`, and gives the page a Supabase token for 15 minutes, signed the way Supabase signs its own. The page asks for a new one 5 minutes before it runs out. Row-level security, `auth.uid()` and the functions' login checks work on it unchanged; no function, table or policy changes.
+
+You need: a Cloudflare account (free), Node 22 on your computer, and the Supabase project from Setup. About 30 minutes.
+
+### Set it up
+
+1. **Zero Trust team.** In the Cloudflare dashboard open **Zero Trust**. The first time, pick a team name and the Free plan (up to 50 people). Your team domain is `https://TEAM_NAME.cloudflareaccess.com`; it is shown under **Zero Trust > Settings**.
+2. **One-time codes.** **Zero Trust > Integrations > Identity providers > Add new identity provider > One-time PIN.** Nothing to fill in.
+3. **Deploy the Worker.** In a copy of this repository:
+
+   ```bash
+   npx wrangler@4.156.0 login
+   ```
+
+   ```bash
+   npx wrangler@4.156.0 deploy --config cloudflare/wrangler.toml
+   ```
+
+   It prints the address, `https://snl-lookup.YOUR_SUBDOMAIN.workers.dev`. Until the steps below are done the page there says sign-in isn't set up, and no token is given out.
+4. **Put Access in front.** **Workers & Pages > snl-lookup > Access > Protect this Worker behind Access**, choose **All traffic**, then **Apply Access**. Then open the application it made under **Zero Trust > Access > Applications** (newer dashboards: **Access controls > Applications**):
+   - **Policies:** one Allow policy. Include **Emails** with your email and each person's, or **Emails ending in** with your company's domain.
+   - **Login methods:** One-time PIN.
+   - Copy the **Application Audience (AUD) Tag**.
+5. **Supabase signing.** **Supabase > Project settings > JWT Keys.**
+   - If it shows a **Legacy JWT secret** that is not revoked, copy it. You'll set it as `SUPABASE_JWT_SECRET`.
+   - If the legacy secret is revoked, or you'd rather not use it, make a key on your computer and import it instead. The command writes `signing-key.jwk` (ignored by git):
+
+     ```bash
+     node -e 'crypto.subtle.generateKey({name:"ECDSA",namedCurve:"P-256"},true,["sign"]).then(async k=>{const {kty,crv,x,y,d}=await crypto.subtle.exportKey("jwk",k.privateKey);require("fs").writeFileSync("signing-key.jwk",JSON.stringify({kty,crv,x,y,d,kid:crypto.randomUUID(),alg:"ES256"}))})'
+     ```
+
+     In **JWT Keys**, create a standby key by importing that file's contents, then **Rotate keys** so it is the current key. Supabase then signs its own tokens with it too; the previous key stays trusted until you revoke it, so password logins keep working. You'll set the file's contents as `SUPABASE_SIGNING_JWK`, then delete the file.
+6. **Worker settings.** Each command asks for the value; type or paste it at the prompt. Never put them in a file in this repository.
+
+   ```bash
+   npx wrangler@4.156.0 secret put TEAM_DOMAIN --config cloudflare/wrangler.toml
+   ```
+
+   Do the same for:
+   - `POLICY_AUD`: the AUD tag from step 4
+   - `ADMIN_EMAILS`: your email; several separated by commas
+   - `SUPABASE_URL`: `https://YOUR_PROJECT_REF.supabase.co`
+   - `SUPABASE_PUBLISHABLE_KEY`: the `sb_publishable_...` key the site already uses
+   - `SUPABASE_SECRET_KEY`: the `sb_secret_...` key (it creates logins, so treat the Cloudflare account like the Supabase project: two-factor sign-in, few people)
+   - `SUPABASE_JWT_SECRET` from step 5, or instead `SUPABASE_SIGNING_JWK` with `npx wrangler@4.156.0 secret put SUPABASE_SIGNING_JWK --config cloudflare/wrangler.toml < signing-key.jwk`
+   - Optional: `ORG_NAME` (as for GitHub Pages), `TOKEN_MINUTES` (how long a token lasts, 5 to 60, default 15)
+
+   A new setting takes effect straight away; there is nothing to redeploy.
+7. **Let the functions answer the new address.** Keep the GitHub Pages address in the list until you switch:
+
+   ```bash
+   supabase secrets set ALLOWED_ORIGIN=https://YOUR_GITHUB_ORG.github.io,https://snl-lookup.YOUR_SUBDOMAIN.workers.dev
+   ```
+
+8. **Try it.** Open the workers.dev address, type your email, then the code from the email. The site opens signed in, with your email as your name and the Corp Dev role. There is no Change password; Sign out signs you out of Access.
+
+After a change to `web/` or `cloudflare/`, run the deploy command in step 3 again. Merging to `main` still publishes only GitHub Pages.
+
+### Add a person
+
+1. Add their email to the Allow policy (step 4). With an **Emails ending in** policy, there is nothing to do.
+2. Send them the address. Their first sign-in creates their Supabase login with the Reader role.
+
+To make someone an admin, set `ADMIN_EMAILS` again with every admin's email. Roles follow `ADMIN_EMAILS` at each sign-in, so a role set with `npm run logins` doesn't stick for someone who signs in through Access. A change reaches a signed-in person within 15 minutes.
+
+### Remove a person
+
+1. Take their email out of the Allow policy. With an **Emails ending in** policy, add an **Exclude** rule with their email.
+2. **Zero Trust > Team & Resources > Users** (older dashboards: **My Team > Users**): revoke their session, then remove them to free their seat.
+3. Their open page loses its token within 15 minutes.
+4. Optional: **Supabase > Authentication > Users**, delete their login. Their own past answers go with it; answers they saved to the team library stay.
+
+### Switch off GitHub Pages (when everyone uses the new address)
+
+1. **GitHub > Actions > Deploy site to GitHub Pages > Disable workflow**, then **Settings > Pages** and unpublish the site.
+2. `supabase secrets set ALLOWED_ORIGIN=https://snl-lookup.YOUR_SUBDOMAIN.workers.dev`
+3. **Supabase > Authentication > Sign In / Providers > Email:** turn email sign-in off, so no password works anywhere. Logins made by the Worker never had a usable password.
+4. Remove the old shared logins with the login script, as in Setup step 2: `remove corpdev1`, then `remove corpdev2`.
+
+### Roll back
+
+- Until step 1 above, GitHub Pages and its password logins still work: send people back to that address.
+- To take the Worker down: `npx wrangler@4.156.0 delete --config cloudflare/wrangler.toml`.
+- After switching off GitHub Pages: enable and run the deploy workflow again, turn email sign-in back on, add the GitHub Pages address back to `ALLOWED_ORIGIN`, and give people passwords with `npm run logins -- add` or `reset`.
+- Logins the Worker created can stay. Nobody can sign in with them except through Access.
+
 ## The first live search
 
 After step 5:
@@ -489,6 +580,8 @@ Nothing in this list is guessed in the code: each item is either handled both wa
 | **How the profile comes out on the real template.** It is tested on a made-up stand-in with the same layout names. | `web/deck.js` | The sample profile, opened in PowerPoint |
 | **Who pays for Snowflake credits** and whether use is capped. | n/a | S&P |
 | **Claude reading real filings.** Tested against a stand-in for Anthropic's API only. Watch the first live answer: the page citations, the cost and how long each step takes. | `_shared/chat.ts` | First live answer |
+| **A real Supabase project accepting the Worker's token** (Cloudflare Access sign-in). Supabase Auth's source (18 Nov 2026) checks a token with no key id against the legacy JWT secret, and one with a key id against the project's signing keys; it needs no session id, only a `sub` that is an existing login. Supabase's documents say the legacy secret stays trusted until revoked, and an imported key once it is the current key. The migrations' row-level security was run in Postgres 16 with the token's claims and behaved as with a password login. Not yet tried against a hosted project, its Data API or Storage. | `mintToken` in `cloudflare/bridge.js` | The first sign-in through Access: the site opens signed in, and the template downloads on Profile |
+| **How Access hands the sign-in to a Worker on workers.dev**: the `Cf-Access-Jwt-Assertion` header, the `CF_Authorization` cookie, or only `ctx.access`. The Worker checks a token when one comes and otherwise uses `ctx.access`, with the audience checked either way. | `makeAccessCheck` in `cloudflare/bridge.js` | The first sign-in through Access |
 
 S&P's "SNL Insurance Product Filings User Guide" was not available when this was built. The code follows the summary of it in the build brief and S&P's public API specification.
 

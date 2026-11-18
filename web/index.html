@@ -5498,7 +5498,8 @@ function render(){
   const v=document.getElementById("view"), on=!!S.session;
   document.getElementById("tabs").hidden=!on;
   document.getElementById("signoutBtn").hidden=!on;
-  document.getElementById("pwBtn").hidden=!on;
+  document.getElementById("pwBtn").hidden=!on||!!CFG.accessLogin;
+  document.querySelector('#whoMenu [data-act="change-pw"]').hidden=!!CFG.accessLogin;
   document.getElementById("strip").hidden=!on;
   const wn=document.getElementById("whoName"); wn.textContent=on?S.session.name:""; wn.title=on?`${S.session.username||""} · ${ROLES[S.session.role]||""}`:"";
   document.getElementById("whoMenuName").innerHTML=on?`<b>${esc(S.session.name)}</b><span>${esc(S.session.username||"")} · ${esc(ROLES[S.session.role]||"")}</span>`:"";
@@ -6152,9 +6153,34 @@ async function doLogin(){
   await onSignedIn(data.session);
 }
 async function signOut(){
+  if(CFG.accessLogin){ clearTimeout(S.accessTimer); S.leaving=true; try{ await S.sb.auth.signOut({scope:"local"}); }catch{} location.assign(CFG.logoutUrl||"/cdn-cgi/access/logout"); return; }
   S.leaving=true; try{ await S.sb.auth.signOut(); }catch{} S.leaving=false;
   resetState(); S.loginErr=""; history.replaceState(null,"",location.pathname); render();
 }
+/* ---------- auth behind Cloudflare Access (the Worker's config.js sets accessLogin; cloudflare/worker.js) ----------
+   Access signs people in with a one-time code by email. The Worker checks that sign-in and hands the page a Supabase
+   token for 15 minutes; the page asks for a new one 5 minutes before it runs out. No password, no refresh token. */
+async function accessSignIn(){
+  clearTimeout(S.accessTimer);
+  let r=null, body=null;
+  try{ r=await fetch(CFG.accessSessionUrl||"/access/session", {cache:"no-store", credentials:"same-origin", headers:{accept:"application/json"}}); body=await r.json(); }catch{}
+  if(!body || !body.access_token) return {error: body&&body.message ? String(body.message)
+    : r ? `The sign-in service answered ${r.status}. Sign in again; if it keeps happening, tell the site owner.` : "Your sign-in has ended or the connection dropped. Sign in again."};
+  let res=null; S.leaving=true;
+  try{ res=await S.sb.auth.setSession({access_token:body.access_token, refresh_token:"cloudflare-access"}); }catch(e){ res={error:e}; }
+  S.leaving=false;
+  if(!res || res.error || !res.data || !res.data.session) return {error:"Supabase didn't accept the sign-in"+(res&&res.error&&res.error.message?` (${res.error.message})`:"")+". Tell the site owner."};
+  const life=Number(body.expires_in)||900;
+  S.accessExp=Date.now()+life*1000;
+  S.accessTimer=setTimeout(accessRenew, Math.max(60, life-300)*1000);
+  return {session:res.data.session};
+}
+async function accessRenew(){
+  if(!S.session) return;
+  const a=await accessSignIn();
+  if(a.error) sessionEnded(a.error);
+}
+if(CFG.accessLogin) document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="visible" && S.session && S.accessExp-Date.now()<360000) accessRenew(); });
 /* A function said the login is no longer good: back to the sign-in form, with its message. */
 async function sessionEnded(msg){
   if(!S.session) return;
@@ -6169,6 +6195,10 @@ function loginHTML(){
     <p><b>On your own computer:</b> fill in <code>supabaseUrl</code> and <code>supabaseAnonKey</code> in <code>web/config.js</code>. Use the publishable key, never the secret key.</p>
     <p class="source">The README has the steps.</p>`);
   if(!S.authChecked) return wrap(`<h2>SNL lookup</h2><p>Loading…</p>`);
+  if(CFG.accessLogin) return wrap(`<div class="kicker">Strategy and corporate development</div><h2>Sign in to SNL lookup</h2>
+    ${S.loginErr?`<p class="err" role="alert">${esc(S.loginErr)}</p>`:"<p>Signing you in…</p>"}
+    <div class="inline"><a class="btn primary" id="accessAgain" href="./">Sign in again</a></div>
+    <p class="source">You sign in with a one-time code sent to your email. If your email isn't let in, ask the site owner.</p>`);
   return wrap(`<div class="kicker">Strategy and corporate development</div><h2>Sign in to SNL lookup</h2>
     <form id="loginForm" style="display:flex;flex-direction:column;gap:12px" novalidate>
       <label class="f">Username<input type="text" id="li_user" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
@@ -6180,13 +6210,15 @@ function loginHTML(){
 async function boot(){
   S.f=freshFilings(); S.st=freshStat();
   if(!CFG.supabaseUrl || !CFG.supabaseAnonKey || !window.supabase){ S.configMissing=true; render(); return; }
-  S.sb=window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
+  // Behind Access the token comes from the Worker, which renews it; Supabase has no refresh token to use.
+  S.sb=CFG.accessLogin ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, {auth:{autoRefreshToken:false}}) : window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
   render();
   let session=null;
-  try{ ({data:{session}}=await S.sb.auth.getSession()); }catch{}
+  if(CFG.accessLogin){ const a=await accessSignIn(); if(a.error) S.loginErr=a.error; else session=a.session; }
+  else try{ ({data:{session}}=await S.sb.auth.getSession()); }catch{}
   S.authChecked=true;
   if(session) await onSignedIn(session); else render();
-  S.sb.auth.onAuthStateChange((event)=>{ if(event==="SIGNED_OUT" && S.session && !S.leaving){ resetState(); S.loginErr="You were signed out. Sign in again."; render(); } });
+  S.sb.auth.onAuthStateChange((event)=>{ if(event==="SIGNED_OUT" && S.session && !S.leaving){ if(CFG.accessLogin){ accessRenew(); return; } resetState(); S.loginErr="You were signed out. Sign in again."; render(); } });
 }
 boot();
 </script>

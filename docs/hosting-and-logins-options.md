@@ -1,6 +1,12 @@
 # Hosting and logins: options
 
-Status: exploration, 18 Nov 2026. Nothing here changes the live app, its workflows or its functions. The prototype in `prototypes/cloudflare/` is not wired in.
+Status: exploration written 18 Nov 2026; decision and build the same day (below). Nothing here changes the GitHub Pages site, its workflows or the functions.
+
+## Decision (18 Nov 2026)
+
+Cloudflare Access is the login: a one-time code by email for everyone, the admin included. No Entra app registration (IT hasn't approved one). The admin is named by email in the Worker setting `ADMIN_EMAILS` and gets the `corpdev` role; everyone else the Access policy lets in gets `reader`. The site runs on a Worker on a workers.dev address; GitHub Pages keeps working until the owner switches. Supabase stays for data, functions, storage and cron. Built in `cloudflare/`; set-up in the README, "Sign-in with Cloudflare Access".
+
+One change from option A3 as first sketched: the Worker signs tokens with the project's own key (the legacy JWT secret, or a key imported into Supabase) instead of registering itself as a custom OIDC issuer. Supabase Auth then accepts the token like its own, so `auth.getUser` in the functions works unchanged, and no proxy or public `/.well-known` address is needed. Supabase Auth's source shows it checks a token without a key id against the legacy secret, needs no session id, and only needs `sub` to be an existing login; the Worker creates that login with the admin API.
 
 The ask: "let's explore moving to AWS and Cloudflare logins with worker devs and multiple logins". Read as: where the app could run (Cloudflare Workers, AWS, or both), how people would sign in (Cloudflare Access with the company's Microsoft Entra ID, one-time PINs for outsiders, several identity providers, a login per person), per-branch preview sites on `*.workers.dev`, and what happens to Supabase.
 
@@ -38,7 +44,7 @@ Moving everything to Cloudflare (option B) or to AWS (option C) is possible but 
 | Foreign keys | `profiles.id` and `snl_jobs.owner` reference `auth.users(id)`. |
 | `auth.uid()` in SQL | `app_role()`, the `snl_jobs` read policy, `snl_settings.updated_by` and the `stamp_update` trigger. |
 
-`whoIs` matters most for any change: a token that Supabase Auth did not issue fails `auth.getUser` even if Postgres accepts it. Any option that replaces Supabase Auth must change `whoIs` to check the token another way (for example, verify it against the issuer's keys, or ask Postgres `select auth.uid()` with it).
+`whoIs` matters most for any change: a token from another issuer (custom OIDC, Cognito) fails `auth.getUser` even if Postgres accepts it. A token signed with the project's own key, for an existing login, passes (see the decision above). Any option that replaces Supabase Auth must change `whoIs` to check the token another way (for example, verify it against the issuer's keys, or ask Postgres `select auth.uid()` with it).
 
 ### Row-level security
 
@@ -124,9 +130,9 @@ The site moves from GitHub Pages to a Worker serving `web/` as static assets. Ac
 
 | | A1. Double gate | A2. Microsoft sign-in in Supabase | A3. Worker as identity broker |
 | --- | --- | --- | --- |
-| How | Access (Entra, PIN) guards the site. Supabase password logins unchanged. | Access guards the site. Supabase Auth uses its Azure provider, locked to Ascot's tenant. Passwords switched off. | Access is the only login. A Worker checks the Access token, looks up the person's profile, mints a 5-minute RS256 token and forwards the call to Supabase. Supabase trusts the Worker as a custom OIDC issuer. |
+| How | Access (Entra, PIN) guards the site. Supabase password logins unchanged. | Access guards the site. Supabase Auth uses its Azure provider, locked to the company's tenant. Passwords switched off. | Access is the only login. A Worker checks the Access token, looks up the person's profile, mints a 5-minute RS256 token and forwards the call to Supabase. Supabase trusts the Worker as a custom OIDC issuer. |
 | User sees | Microsoft sign-in, then the app's own sign-in | Microsoft sign-in twice, usually silent the second time | Microsoft sign-in once |
-| Supabase reachable without Access | Yes, with a password | Yes, but only by an Ascot Entra account with a profile | Yes at `*.supabase.co`, but with no way to get a token except through Access |
+| Supabase reachable without Access | Yes, with a password | Yes, but only by a company Entra account with a profile | Yes at `*.supabase.co`, but with no way to get a token except through Access |
 | Outsiders by PIN | Need a Supabase password login too | Need a password login or an Entra guest account | Work as is |
 | Code change | None in the app. New `wrangler.toml` and deploy workflow. | Sign-in button and redirect in `web/index.html`; `logins.mjs` pre-creates users by real email. | Page drops its sign-in form and session; `whoIs` checks the minted token instead of `auth.getUser`; a profile lookup the Worker can use. No RLS change if the token's `sub` is the existing `auth.users` id. |
 | Effort | 1 to 2 days | +2 to 3 days | +4 to 6 days, after a 1-day spike |
@@ -148,9 +154,9 @@ Preview origins change per branch, and `allowOrigin` in `_shared/http.ts` only m
 - A3 rests on Supabase accepting Worker-minted tokens through custom OIDC; documented, but this app hasn't tried it. Supabase must reach the Worker's `/.well-known/*` without Access (a bypass rule for that path, or a separate issuer Worker).
 - GitHub Pages must be switched off or the old URL stays up (it shows only the sign-in page, but still).
 - Access free plan logs last 24 hours; audit wants may push to pay-as-you-go.
-- Seats are held until removed; other Ascot use of the same Zero Trust account shares the 50 seats.
+- Seats are held until removed; other use at the company of the same Zero Trust account shares the 50 seats.
 
-**Sign-off.** Entra app registration for Access (admin consent for the Graph permissions above), and for A2 a second registration or redirect URI for Supabase. Cloudflare as a vendor (security review, DPA). A DNS record under an Ascot domain, if not `workers.dev`.
+**Sign-off.** Entra app registration for Access (admin consent for the Graph permissions above), and for A2 a second registration or redirect URI for Supabase. Cloudflare as a vendor (security review, DPA). A DNS record under a company domain, if not `workers.dev`.
 
 ## Option B: Cloudflare-native, Supabase removed
 
@@ -180,7 +186,7 @@ S3 and CloudFront (or Amplify Hosting) for the site, Cognito federated with Entr
 - **Effort.** 10 to 15 days keeping Supabase for data; 20 to 25 days with RDS (RLS still works in plain Postgres, but PostgREST is gone, so the page's direct reads need an API).
 - **Cost.** Cognito about $0 (under 50 federated MAU free). Lambda, API Gateway, S3 and CloudFront: a few dollars a month at most at this volume (estimate). RDS or Aurora: roughly $15 to $60 a month for the smallest always-on Postgres (estimate, not checked; price it in the AWS calculator).
 - **Risks.** Most moving parts to own (IAM, VPC if RDS, CloudFront, Cognito). Cognito's sign-in pages and token handling are heavier for a one-page site.
-- **Sign-off.** An Ascot AWS account inside IT's organisation and guardrails, region choice, the Entra enterprise app for Cognito.
+- **Sign-off.** A company AWS account inside IT's organisation and guardrails, region choice, the Entra enterprise app for Cognito.
 
 ## Option D: hybrid
 
@@ -227,23 +233,23 @@ The same steps apply, with these differences:
 - **Cron** (weekly digest) and the keepalive work as here.
 - One Cloudflare account and one Zero Trust organisation can serve both apps; each user takes one seat across both.
 
-## The prototype
+## What was built
 
-`prototypes/cloudflare/` proves the riskiest piece of A3 in isolation. It is not wired in, not deployed, and changes nothing in `web/` or `supabase/`.
+`cloudflare/` replaces the earlier prototype.
 
-- `worker.js` checks the `Cf-Access-Jwt-Assertion` token against the team's keys (RS256, `aud`, `iss`, expiry), looks up the person's email in a KV map of profiles, mints a 5-minute RS256 token (`sub` = the existing user id, `role: authenticated`, `app_role`), and forwards `/sb/functions/v1/*`, `/sb/rest/v1/*` and `/sb/storage/v1/*` to Supabase with it. It serves the matching `/.well-known/openid-configuration` and `jwks.json` for Supabase's custom OIDC set-up, and refuses `/sb/auth/v1/*`.
-- `wrangler.toml` shows the bindings and that previews and `workers.dev` are on. Placeholders only.
-- `worker.test.mjs` runs with `node prototypes/cloudflare/worker.test.mjs` (Node 22, no packages). It fakes the Access keys and Supabase, and checks refusals, the forwarded request and that the minted token verifies against the published keys.
+- `bridge.js` checks Access's sign-in (the token against the team's keys, with audience, issuer and expiry, or the Workers runtime's `ctx.access`), maps `ADMIN_EMAILS` to `corpdev` and everyone else to `reader`, finds or creates the Supabase login and its profile with the secret key, and mints a 15-minute token (HS256 with the legacy secret, or ES256 or RS256 with an imported key).
+- `worker.js` is the entry point; `wrangler.toml` serves `web/` as static assets, with the Worker running first only for `/config.js` and `/access/session`. No setting is in the file.
+- `web/index.html` signs in through the Worker when `config.js` sets `accessLogin`, renews the token, and signs out through Access. Without `accessLogin` the password form is unchanged.
 
-What it does not prove: that Supabase accepts the minted token, that `whoIs` works with it (it won't, until `whoIs` stops calling `auth.getUser`), and that Storage policies see `auth.uid()`. That is the 1-day spike: a throwaway Supabase project, the Worker on `workers.dev`, one table with the current RLS, one storage object.
+Checked: unit tests for the Worker and the page; the Worker run in Cloudflare's runtime (`wrangler dev`) against a fake Access key server and a fake Supabase; the migrations' row-level security run in Postgres 16 with the minted token's claims. Not yet checked: a hosted Supabase project accepting the token, and how Access hands the sign-in to a workers.dev Worker (both handled; see the README's "What is still unconfirmed").
 
 ## Open questions
 
-1. **Entra.** Will Ascot IT register an Entra app for Cloudflare Access, with admin consent for `Directory.Read.All` and `GroupMember.Read.All` (or narrower, if they prefer and we test it)? Is there an Entra group for Corp Dev, or should one be made?
-2. **Cloudflare at Ascot.** Does Ascot already have a Cloudflare account or Zero Trust organisation? If so, whose seats does it use, and will IT own the Access policies?
-3. **AWS.** Is AWS required by IT, preferred, or only an option? Is there an Ascot AWS organisation this would sit in?
-4. **Domain.** Is `*.workers.dev` acceptable, or should it live under an Ascot domain (needs a DNS record or a zone on Cloudflare)?
-5. **Outsiders.** Who would sign in by PIN? Does the S&P licence allow people outside Ascot to see S&P data through this app?
+1. **Entra.** Will the company's IT register an Entra app for Cloudflare Access, with admin consent for `Directory.Read.All` and `GroupMember.Read.All` (or narrower, if they prefer and we test it)? Is there an Entra group for Corp Dev, or should one be made?
+2. **Cloudflare at the company.** Does the company already have a Cloudflare account or Zero Trust organisation? If so, whose seats does it use, and will IT own the Access policies?
+3. **AWS.** Is AWS required by IT, preferred, or only an option? Is there a company AWS organisation this would sit in?
+4. **Domain.** Is `*.workers.dev` acceptable, or should it live under a company domain (needs a DNS record or a zone on Cloudflare)?
+5. **Outsiders.** Who would sign in by PIN? Does the S&P licence allow people outside the company to see S&P data through this app?
 6. **Data residency.** Must data stay in the US? Which region is the Supabase project in? Is Cloudflare's global edge acceptable for traffic passing through?
 7. **Roles.** Should roles come from Entra groups (IT manages) or stay in the app (Corp Dev manages)?
 8. **Supabase plan.** Is a second (dev) Supabase project acceptable, and on which plan?

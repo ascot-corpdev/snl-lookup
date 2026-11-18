@@ -165,10 +165,16 @@
         M.uid = other ? other[1].id : ME;
         M.signedOut = false; return {data:{session:session()}, error:null};
       },
-      async signOut(){ M.signedOut = true; M.log.push({op:"signOut"}); M.fire("SIGNED_OUT"); return {error:null}; },
+      // Behind Cloudflare Access the page hands over the Worker's token. failSetSession: a message, and it fails with it.
+      async setSession(s){
+        M.log.push({op:"setSession", access_token:s&&s.access_token, refresh_token:s&&s.refresh_token});
+        if(M.failSetSession) return {data:{session:null, user:null}, error:{message:M.failSetSession}};
+        M.signedOut = false; const ss = {...session(), access_token:s.access_token}; return {data:{session:ss, user:ss.user}, error:null};
+      },
+      async signOut(o){ M.signedOut = true; M.log.push({op:"signOut", scope:o&&o.scope||"global"}); M.fire("SIGNED_OUT"); return {error:null}; },
       onAuthStateChange(cb){ authCbs.push(cb); return {data:{subscription:{unsubscribe(){}}}}; },
       async updateUser(v){ M.log.push({op:"updateUser", password:v&&v.password}); return {error: M.failUpdateUser ? {message:M.failUpdateUser} : null}; }
     }
   };
-  window.supabase = { createClient(url, key){ M.created = {url, key}; return client; } };
+  window.supabase = { createClient(url, key, opts){ M.created = opts ? {url, key, opts:clone(opts)} : {url, key}; return client; } };
 })();

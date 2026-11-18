@@ -8,6 +8,7 @@ SNL lookup is a small web app for a Strategy & Corporate Development team at an 
 - **Functions:** three Supabase Edge Functions in Deno (`supabase/functions/snl-filings`, `snl-statutory`, `snl-chat`) with shared code in `supabase/functions/_shared/`. They hold every credential. Each checks the caller's login itself, so they are deployed with `--no-verify-jwt`.
 - **Database:** `supabase/migrations/0001_snl.sql`. Logins and roles (`profiles`), saved S&P results (`snl_store`), the S&P request counter and throttle (`snl_usage`, `snl_take_slot`), Claude answers in progress (`snl_jobs`, `snl_job_state`), shared settings (`snl_settings`).
 - **Logins:** `scripts/logins.mjs`. No self sign-up.
+- **Cloudflare Access sign-in (optional):** `cloudflare/worker.js` serves `web/` on Cloudflare Workers behind Access and, from `cloudflare/bridge.js`, gives the page a short-lived Supabase token for the person Access signed in. The page switches to it when `config.js` sets `accessLogin`; without it (GitHub Pages) the password form is unchanged. Worker settings are Worker secrets, never in `wrangler.toml`.
 - **Company list:** `scripts/companies.mjs` loads a CSV of companies into `snl_store` so they can be found by name. The list is never committed.
 - **Tests:** `npm test`. See `tests/README.md`.
 
