@@ -13,8 +13,11 @@
 //   resolve   {q}                                 -> companies in the app's company list, by name, NAIC code or S&P id,
 //                                                    and whole groups whose name or group code matches {groups, groupNote}
 //   search    {companyIds, institutionIds, states, from, to, filingStatusIds?, typeOfInsuranceIds?, filingTypeIds?,
-//              spStatEntityIds?, trackingNumbers?, refresh?, unlisted?}
+//              spStatEntityIds?, trackingNumbers?, refresh?, unlisted?, steps?, cursor?}
 //                                                 -> {rows, total, notes, byState, byCompany, requests, capped, fetchedAt, ...}
+//                                                    At most STEP_ROWS filings a call. With steps: true, a wider search
+//                                                    comes in parts: {..., part, parts, partsAbout, more, cursor}; send the
+//                                                    same search with that cursor for the next part (_shared/filings.ts).
 //   document  {documentId} or {filingVersionId}   -> the document itself, as S&P sends it (usually a PDF)
 //   check                                         -> the S&P connection check: sign-in, entitlement, the four lists
 //                                                    (at most five S&P requests), as a plain-English report
@@ -25,6 +28,7 @@ import { adminClient, type Env, type Json, readBody, sleep, type WhoIs, whoIs, w
 import { type Db, supabaseDb } from "../_shared/db.ts";
 import { downloadDocument, getReference, MAX_SEARCH_REQUESTS, parseDocRef, parseSearch, type Reference, REFERENCE_FIELDS, type ReferenceField, resolveEntity, savedOrFreshSearch } from "../_shared/filings.ts";
 import { groupChoices } from "../_shared/filings.ts";
+import { searchStep, StepError } from "../_shared/filings.ts";
 import { clearOld } from "../_shared/chat.ts";
 import { type Gate, makeGate, NOT_CONFIGURED, planLimits, Spgmi, SpgmiError } from "../_shared/spgmi.ts";
 import { snowflakeConfigured } from "../_shared/snowflake.ts";
@@ -98,7 +102,9 @@ async function serve(req: Request, deps: Deps, json: Json, cors: Record<string, 
         const parsed = parseSearch(body, new Date(now).toISOString().slice(0, 10));
         if (!parsed.ok) return json(400, { error: "bad", message: parsed.message });
         // unlisted: kept out of the shared Recent searches list (still saved, so the same search costs nothing again).
-        const answer = await savedOrFreshSearch(api, db, parsed.params, { now, refresh: body.refresh === true, maxRequests: MAX_SEARCH_REQUESTS, deadline: now + SEARCH_TIME_MS, clock: deps.now ?? Date.now, unlisted: body.unlisted === true });
+        const o = { now, refresh: body.refresh === true, maxRequests: MAX_SEARCH_REQUESTS, deadline: now + SEARCH_TIME_MS, clock: deps.now ?? Date.now, unlisted: body.unlisted === true };
+        // steps: the page fetches a wide search in parts, one call each; without it a search stops at one part's worth
+        const answer = body.steps === true ? await searchStep(api, db, parsed.params, { ...o, cursor: body.cursor }) : await savedOrFreshSearch(api, db, parsed.params, o);
         return json(200, { ...answer, ...(await usage()) });
       }
 
@@ -128,6 +134,7 @@ async function serve(req: Request, deps: Deps, json: Json, cors: Record<string, 
         return json(400, { error: "bad", message: "Unknown action. Use status, reference, resolve, search, document or check." });
     }
   } catch (e) {
+    if (e instanceof StepError) return json(409, { error: e.code === "moved" ? "search_moved" : "search_lost", message: e.message });
     const answer = spgmiAnswer(e);
     if (answer) return json(answer.status, answer.body);
     throw e;

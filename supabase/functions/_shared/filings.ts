@@ -242,6 +242,8 @@ export function planSearch(p: SearchParams): Record<string, unknown>[] {
 
 export type SearchResult = {
   rows: Filing[]; total: number; requests: number; capped: boolean;
+  /** Cut short because it found more filings than one function call may hold (STEP_ROWS). */
+  atBound?: boolean;
   byState: { state: string; rows: number }[];
   byCompany: { kind: "companyId" | "institutionId"; id: number; name: string | null; rows: number }[];
   notes: string[];
@@ -286,49 +288,144 @@ export const emptyStateNote = (state: string) =>
     removed. Stops at maxRequests and says so. knownStates is S&P's own list of filing states, when the app has it.
     Pages are numbered from 1 and the answer carries totalPages: seen in the Live check on 18 Nov 2026, on one live
     search of one company; without totalPages a full page still means there may be another. */
-export async function searchFilings(api: Spgmi, p: SearchParams, opts: { maxRequests?: number; pageSize?: number; knownStates?: string[]; deadline?: number; now?: () => number } = {}): Promise<SearchResult> {
+export async function searchFilings(api: Spgmi, p: SearchParams, opts: { maxRequests?: number; pageSize?: number; knownStates?: string[]; deadline?: number; now?: () => number; maxRows?: number } = {}): Promise<SearchResult> {
   const maxRequests = opts.maxRequests ?? MAX_SEARCH_REQUESTS, pageSize = opts.pageSize ?? PAGE_SIZE;
-  const raw: Record<string, Cell>[] = [];
-  let requests = 0, capped = false, slow = false;
-  outer: for (const base of planSearch(p)) {
-    for (let page = 1; ; page++) {
-      if (requests >= maxRequests) { capped = true; break outer; }
-      // A function call may only run so long: stop while there is still time to answer with what came back.
-      if (opts.deadline !== undefined && (opts.now ?? Date.now)() > opts.deadline) { capped = slow = true; break outer; }
-      const resp = await api.json("POST", "/api/v1/search", { body: { properties: { ...base, pageNumber: page, pageSize } } });
-      requests++;
-      const rows = mapRows(resp);
-      raw.push(...rows);
-      const totalPages = Number(resp.totalPages);
-      // S&P's totalPages decides when it is there; without it, a full page means there may be another.
-      if (Number.isFinite(totalPages) && totalPages > 0 ? page >= totalPages : rows.length < pageSize) break;
+  // At most STEP_ROWS rows are held (maxRows, for a caller that holds rows of its own already): a search with more
+  // stops there and says so. The Filings view fetches a wider search in parts (searchStep).
+  const got = await fetchPages(api, planSearch(p), { unit: 0, page: 1 }, { maxRequests, pageSize, maxRows: opts.maxRows ?? STEP_ROWS, deadline: opts.deadline, now: opts.now });
+  const rows = mergeOwnRows(got.raw);
+  got.raw.length = 0;
+  const t = newTally();
+  tallyRows(t, rows, p);
+  rows.sort(newestFirst);
+  const capped = got.stop !== null, slow = got.stop === "time", atBound = got.stop === "rows";
+  const sum = summarise(t, p, { requests: got.requests, maxRequests, capped, slow, atBound, knownStates: opts.knownStates });
+  return { rows, total: sum.total, requests: got.requests, capped, ...(atBound ? { atBound: true } : {}), byState: sum.byState, byCompany: sum.byCompany, notes: sum.notes };
+}
+
+// ---------- searches too big for one function call ----------
+// A function call has 256 MB of memory and about 2 seconds of CPU (README, "Supabase limits that matter"), and a saved
+// result must be under 4 MB (migration 0001). A search held every row at once: 30,000 made-up filings were a 35 MB
+// document and over 300 MB of memory. So no call holds more than STEP_ROWS rows from S&P. A search with more is
+// either stopped there and said to be incomplete (searchFilings, for the functions' own searches) or fetched in
+// parts (searchStep, for the pages): each call fetches the next STEP_PAGES pages, saves them as one part, and
+// answers with them and a place to carry on from; the page puts the parts together.
+// Measured with made-up rows in the fixture's shape and a 200-character description (tests/bench/search_memory.ts):
+// one part of 2,000 filings is a 2.4 MB document and peaks at about 100 MB of process memory and 0.1 seconds of CPU.
+
+/** The most rows from S&P one function call holds (four of S&P's pages of 500). */
+export const STEP_ROWS = 2000;
+export const STEP_PAGES = Math.floor(STEP_ROWS / PAGE_SIZE);
+
+export type PagePlace = { unit: number; page: number };
+/** What one stretch of paging brought back. next: where to carry on (null when the plan is done). stop: why it
+    stopped before the end: the rows it may hold, the requests it may make, or the time. pages: totalPages per unit. */
+export type Fetched = { raw: Record<string, Cell>[]; next: PagePlace | null; requests: number; stop: "rows" | "requests" | "time" | null; pages: Record<string, number> };
+
+/** Pages through a search plan from a place in it, one S&P request a second (the api's gate), stopping before it
+    would hold more than maxRows rows, make more than maxRequests requests, or run past the deadline. Pages are
+    numbered from 1 and the answer carries totalPages (seen in the Live check on 18 Nov 2026); without totalPages a
+    full page still means there may be another. */
+export async function fetchPages(api: Spgmi, plan: Record<string, unknown>[], from: PagePlace, o: { maxRequests: number; maxRows: number; pageSize: number; deadline?: number; now?: () => number }): Promise<Fetched> {
+  const raw: Record<string, Cell>[] = [], pages: Record<string, number> = {};
+  let requests = 0, unit = from.unit, page = from.page;
+  const out = (stop: Fetched["stop"]): Fetched => ({ raw, next: stop ? { unit, page } : null, requests, stop, pages });
+  while (unit < plan.length) {
+    if (requests >= o.maxRequests) return out("requests");
+    // One more page could take it over what one call may hold.
+    if (raw.length + o.pageSize > o.maxRows) return out("rows");
+    // A function call may only run so long: stop while there is still time to answer with what came back.
+    if (o.deadline !== undefined && (o.now ?? Date.now)() > o.deadline) return out("time");
+    const resp = await api.json("POST", "/api/v1/search", { body: { properties: { ...plan[unit], pageNumber: page, pageSize: o.pageSize } } });
+    requests++;
+    const rows = mapRows(resp);
+    for (const r of rows) raw.push(r);
+    const totalPages = Number(resp.totalPages);
+    if (Number.isFinite(totalPages) && totalPages > 0) pages[unit] = totalPages;
+    // S&P's totalPages decides when it is there; without it, a full page means there may be another.
+    if (Number.isFinite(totalPages) && totalPages > 0 ? page >= totalPages : rows.length < o.pageSize) { unit++; page = 1; } else page++;
+  }
+  return out(null);
+}
+
+const newestFirst = (a: Filing, b: Filing) => String(b.publishDate ?? "").localeCompare(String(a.publishDate ?? ""));
+const keyOf = (r: Record<string, unknown>) => r.filingVersionId !== null && r.filingVersionId !== undefined ? `v:${r.filingVersionId}`
+  : r.serffFilingEntityEventId !== null && r.serffFilingEntityEventId !== undefined ? `e:${r.serffFilingEntityEventId}` : null;
+/** A short stand-in for a row with neither id (FNV-1a over its text), so the running count need not keep whole rows. */
+const rowHash = (r: unknown) => { let h = 0x811c9dc5; const s = JSON.stringify(r); for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return `j:${h.toString(36)}:${s.length}`; };
+
+/** dedupe, for rows this code made itself: the same result, without a second copy of every row (the first row of
+    each filing version is kept and given its companies). */
+function mergeOwnRows(raw: Record<string, Cell>[]): Filing[] {
+  const byKey = new Map<string, Filing>(), out: Filing[] = [];
+  for (const r of raw) {
+    const key = keyOf(r) ?? `j:${JSON.stringify(r)}`;
+    const company = { companyId: r.companyId ?? null, companyName: r.companyName ?? null, naicCompanyCode: r.naicCompanyCode ?? null, institutionId: r.institutionId ?? null, spStatEntityId: r.spStatEntityId ?? null };
+    const kept = byKey.get(key);
+    if (!kept) { const f = r as Filing; f.companies = [company]; byKey.set(key, f); out.push(f); continue; }
+    if (!kept.companies!.some((c) => String(c.companyId) === String(company.companyId) && c.companyName === company.companyName)) kept.companies!.push(company);
+  }
+  return out;
+}
+
+/** The running count of a search, in one pass over its filings and small enough to keep between parts: each filing
+    once ([state, publish date, order seen, the asked companies it names...]), filings by state, filings by asked
+    company, and each asked company's name as the newest filing naming it gives it (the order seen breaks ties, as
+    the newest-first sort does). */
+export type Tally = { n: number; keys: Record<string, (string | number)[]>; states: Record<string, number>; cos: number[]; names: ([string, number, string | null] | null)[] };
+export const newTally = (): Tally => ({ n: 0, keys: {}, states: {}, cos: [], names: [] });
+const askedOf = (p: SearchParams) => [...p.companyIds.map((id) => ({ kind: "companyId" as const, id })), ...p.institutionIds.map((id) => ({ kind: "institutionId" as const, id }))];
+
+/** Adds filings (each version once within the list, as dedupe gives them) to the count. A filing counted before
+    (an earlier part) adds only the asked companies it names that were not counted for it yet. */
+export function tallyRows(t: Tally, rows: Filing[], p: SearchParams): void {
+  const ask = new Map<string, number[]>();
+  askedOf(p).forEach((a, i) => { const k = a.kind + "|" + idText(a.id); ask.set(k, [...(ask.get(k) ?? []), i]); });
+  for (const r of rows) {
+    const key = keyOf(r) ?? rowHash(r);
+    let e = t.keys[key];
+    if (!e) {
+      e = [idText(r.serffFilingStateId) ?? "", String(r.publishDate ?? ""), t.n++];
+      t.keys[key] = e;
+      if (e[0]) t.states[e[0]] = (t.states[e[0]] ?? 0) + 1;
+    }
+    for (const c of r.companies ?? []) for (const kind of ["companyId", "institutionId"] as const) {
+      for (const i of ask.get(kind + "|" + idText(c[kind])) ?? []) {
+        if (e.indexOf(i, 3) >= 0) continue;
+        e.push(i);
+        t.cos[i] = (t.cos[i] ?? 0) + 1;
+        const name = c.companyName === null || c.companyName === undefined ? null : String(c.companyName), cur = t.names[i];
+        const date = String(e[1]), order = Number(e[2]);
+        if (!cur || date.localeCompare(cur[0]) > 0 || (date === cur[0] && order < cur[1])) t.names[i] = [date, order, name];
+      }
     }
   }
-  const rows = dedupe(raw).sort((a, b) => String(b.publishDate ?? "").localeCompare(String(a.publishDate ?? "")));
+}
 
-  const byState = p.states.map((state) => ({ state, rows: rows.filter((r) => sameId(r.serffFilingStateId, state)).length }));
-  const named = (kind: "companyId" | "institutionId", id: number) =>
-    rows.filter((r) => r.companies!.some((c) => sameId(c[kind], id)));
-  const byCompany = [
-    ...p.companyIds.map((id) => ({ kind: "companyId" as const, id })),
-    ...p.institutionIds.map((id) => ({ kind: "institutionId" as const, id })),
-  ].map(({ kind, id }) => {
-    const hits = named(kind, id);
-    const name = hits[0]?.companies!.find((c) => sameId(c[kind], id))?.companyName;
-    return { kind, id, name: name === null || name === undefined ? null : String(name), rows: hits.length };
-  });
-
+/** The counts and notes of a search from its tally. */
+export function summarise(t: Tally, p: SearchParams, o: { requests: number; maxRequests: number; capped: boolean; slow?: boolean; atBound?: boolean; knownStates?: string[] }): Pick<SearchResult, "total" | "byState" | "byCompany" | "notes"> {
+  const byState = p.states.map((state) => ({ state, rows: t.states[idText(state) ?? ""] ?? 0 }));
+  const byCompany = askedOf(p).map(({ kind, id }, i) => ({ kind, id, name: t.names[i]?.[2] ?? null, rows: t.cos[i] ?? 0 }));
   const notes: string[] = [];
-  if (slow) notes.push(`S&P was answering slowly, so the search stopped after ${requests} S&P requests to stay inside the time limit. These results are incomplete. Narrow the dates, states or companies and search again.`);
-  else if (capped) notes.push(`The search stopped after ${maxRequests} S&P requests to stay inside the time limit, so these results are incomplete. Narrow the dates, states or companies and search again.`);
+  if (o.slow) notes.push(`S&P was answering slowly, so the search stopped after ${o.requests} S&P requests to stay inside the time limit. These results are incomplete. Narrow the dates, states or companies and search again.`);
+  else if (o.atBound) notes.push(boundNote(o.requests));
+  else if (o.capped) notes.push(`The search stopped after ${o.maxRequests} S&P requests to stay inside the time limit, so these results are incomplete. Narrow the dates, states or companies and search again.`);
   for (const s of byState) {
     if (s.rows) continue;
-    if (opts.knownStates?.length && !opts.knownStates.includes(s.state)) notes.push(`${s.state} isn't in S&P's list of filing states, so S&P's data may not cover it. An empty result for ${s.state} says nothing about whether filings exist.`);
-    else if (!s.rows && !capped) notes.push(emptyStateNote(s.state));
+    if (o.knownStates?.length && !o.knownStates.includes(s.state)) notes.push(`${s.state} isn't in S&P's list of filing states, so S&P's data may not cover it. An empty result for ${s.state} says nothing about whether filings exist.`);
+    else if (!o.capped) notes.push(emptyStateNote(s.state));
   }
-  for (const c of byCompany) if (!c.rows && !capped && rows.length) notes.push(`S&P returned nothing for ${c.kind === "companyId" ? "company" : "institution"} id ${c.id} in this search. Check the id; an empty result doesn't prove no filings exist.`);
-  return { rows, total: rows.length, requests, capped, byState, byCompany, notes };
+  for (const c of byCompany) if (!c.rows && !o.capped && t.n) notes.push(`S&P returned nothing for ${c.kind === "companyId" ? "company" : "institution"} id ${c.id} in this search. Check the id; an empty result doesn't prove no filings exist.`);
+  return { total: t.n, byState, byCompany, notes };
 }
+
+const n0 = (n: number) => n.toLocaleString("en-US");
+/** Why a search held by a function stopped at STEP_ROWS. */
+export const boundNote = (requests: number) =>
+  `This search found more filings than the site can hold at once (${n0(STEP_ROWS)}), so it stopped after ${requests} S&P ${requests === 1 ? "request" : "requests"} and these results are incomplete. Narrow the dates, states or companies and search again.`;
+/** The same, for a saved search that was fetched in parts and is larger than one function call may hold. */
+export const savedBoundNote = (total: number, held: number) =>
+  `This saved search holds ${n0(total)} filings, more than the site can hold at once (${n0(STEP_ROWS)}), so only ${n0(held)} of them are here and these results are incomplete. Open it on the Filings view to see them all, or narrow the dates, states or companies.`;
 
 export const SOURCE = "S&P Global Market Intelligence, SNL Insurance Product Filings";
 export type SearchAnswer = SearchResult & { params: SearchParams & { allStatuses: boolean }; source: string; fetchedAt: string; fromStore: boolean; saved: boolean; unlisted?: boolean };
@@ -350,7 +447,7 @@ export async function savedOrFreshSearch(api: Spgmi | null, db: Db, params: Sear
   }
   const id = await searchKey({ ...p, filingStatusIds: allStatuses ? [] : p.filingStatusIds });
   const saved = opts.refresh ? null : await db.getStore(id);
-  if (saved) return { ...(saved.doc as unknown as SearchAnswer), fetchedAt: saved.fetched_at, fromStore: true, saved: true };
+  if (saved) return await heldFromSaved(db, id, saved, p);
   if (!api) throw new SpgmiError("not_configured", NOT_CONFIGURED);
   if (!p.filingStatusIds.length) throw new SpgmiError("server", "S&P's list of filing statuses came back empty, and S&P needs a status on every search. Refresh the reference lists on the Filings view and try again.");
   // A search that can't finish inside its request limit is refused before any request is spent on it.
@@ -365,6 +462,203 @@ export async function savedOrFreshSearch(api: Spgmi | null, db: Db, params: Sear
   // A search that was cut short isn't saved, so the next try asks S&P again.
   const wasSaved = result.capped ? false : await db.putStore({ id, kind: "search", label: `${p.states.join(",")} ${p.from} to ${p.to}`.slice(0, 400), doc });
   return { ...doc, fetchedAt: new Date(opts.now).toISOString(), fromStore: false, saved: wasSaved };
+}
+
+/** A saved search as a function's own search opens it: whole when it is within STEP_ROWS (every result saved before
+    searches ran in parts, and every one-part result since), otherwise its first part (or, for a large result saved
+    before parts, its newest STEP_ROWS filings), counted again and said plainly to be incomplete. */
+async function heldFromSaved(db: Db, id: string, saved: StoreRow, p: SearchParams): Promise<SearchAnswer> {
+  const doc = saved.doc as Record<string, unknown>;
+  const answer = { ...(doc as unknown as SearchAnswer), fetchedAt: saved.fetched_at, fromStore: true, saved: true };
+  const inParts = typeof doc.parts === "number", all = Array.isArray(doc.rows) ? doc.rows as Filing[] : [];
+  if (!inParts && all.length <= STEP_ROWS) return answer;
+  let rows: Filing[] = all.slice(0, STEP_ROWS);
+  if (inParts) {
+    const first = await db.getStore(`${id}:1`);
+    rows = first && first.doc.run === doc.run && Array.isArray(first.doc.rows) ? (first.doc.rows as Filing[]).slice(0, STEP_ROWS) : [];
+  }
+  const t = newTally();
+  tallyRows(t, rows, p);
+  rows.sort(newestFirst);
+  const sum = summarise(t, p, { requests: Number(doc.requests) || 0, maxRequests: MAX_SEARCH_REQUESTS, capped: true });
+  const whole = Number(doc.total) || all.length;
+  const { parts: _parts, run: _run, ...rest } = answer as SearchAnswer & { parts?: unknown; run?: unknown };
+  return { ...rest, rows, total: sum.total, capped: true, atBound: true, byState: sum.byState, byCompany: sum.byCompany, notes: [savedBoundNote(whole, sum.total), ...sum.notes.slice(1)] };
+}
+
+// ---------- a search in parts, for the pages ----------
+// The pages send {steps: true}. The first call answers the whole search when it fits in one part (saved as one result,
+// as before). Otherwise it answers part 1 with a cursor; the page sends the same search with that cursor for each
+// next part until there is none. Between calls the function keeps its place and the running count at
+// "<search id>:run" (only the function writes it). Each part's filings are saved at "<search id>:<part>", and when
+// the last part is in, the search itself is saved at "<search id>" with the counts, the notes and how many parts it
+// has, so it is listed once in Recent searches and opens again, part by part, without asking S&P. Parts and the
+// running count are marked unlisted. The request limit (MAX_SEARCH_REQUESTS) is for the whole search, across parts.
+
+export const RUN_SUFFIX = ":run";
+export type StepCursor = { run: string; part: number };
+/** One part of a search, as the page gets it. rows: this part's filings (each filing version once within the part,
+    in the order S&P sent them; a filing named again in a later part lists companies to add). total, byState and
+    byCompany count the whole search so far; notes come with the last part. parts: how many there are, once known;
+    partsAbout: the best guess until then. */
+export type StepAnswer = SearchAnswer & { part: number; parts: number | null; partsAbout: number; more: boolean; cursor: StepCursor | null };
+type Progress = { unlisted: true; progress: true; run: string; at: PagePlace | null; requests: number; parts: number; pages: Record<string, number>; tally: Tally; knownStates: string[]; unsaved: boolean; done?: boolean };
+
+export const LOST_PLACE = "This search lost its place between parts, so it can't carry on. Search again.";
+export const MOVED = "This saved search was refreshed while it was opening, so its parts no longer match. Open it again.";
+/** A search in parts that can't carry on: its place is gone, or the saved result changed under it. */
+export class StepError extends Error { constructor(public code: "lost" | "moved", message: string) { super(message); } }
+
+/** The cursor the page sent back: {run, part}, or null when there is none. Anything else is refused. */
+export function parseCursor(v: unknown): StepCursor | null {
+  if (v === undefined || v === null) return null;
+  const c = v as { run?: unknown; part?: unknown };
+  if (typeof v !== "object" || Array.isArray(v) || typeof c.run !== "string" || !/^[a-z0-9]{4,40}$/.test(c.run) || !Number.isInteger(c.part) || (c.part as number) < 1 || (c.part as number) > 1000) throw new StepError("lost", LOST_PLACE);
+  return { run: c.run, part: c.part as number };
+}
+
+/** The filing statuses of a search: those chosen, or every status in S&P's list when none was (S&P needs one). */
+async function withStatuses(api: Spgmi | null, db: Db, params: SearchParams, now: number): Promise<{ p: SearchParams; allStatuses: boolean; id: string }> {
+  const allStatuses = !params.filingStatusIds.length;
+  const p = { ...params };
+  if (allStatuses) {
+    const statuses = await getReference(api, db, "filingStatus", { now });
+    const ids = (statuses?.options ?? []).map((o) => Number(o.id)).filter((n) => Number.isInteger(n));
+    if (ids.length) p.filingStatusIds = ids;
+  }
+  return { p, allStatuses, id: await searchKey({ ...p, filingStatusIds: allStatuses ? [] : p.filingStatusIds }) };
+}
+const isPartRow = (doc: Record<string, unknown>) => doc.progress === true || typeof doc.partOf === "string";
+const savedToken = (saved: StoreRow) => typeof saved.doc.parts === "number" && typeof saved.doc.run === "string" ? "s" + saved.doc.run : "s" + saved.fetched_at.replace(/[^0-9]/g, "").slice(0, 30);
+
+/** One part of a search: the next part of a fresh search (asking S&P), or a part of a saved one (asking nothing).
+    The search must be the same in every call; only the cursor changes. */
+export async function searchStep(api: Spgmi | null, db: Db, params: SearchParams, opts: { now: number; refresh?: boolean; maxRequests?: number; deadline?: number; clock?: () => number; unlisted?: boolean; cursor?: unknown }): Promise<StepAnswer> {
+  const cur = parseCursor(opts.cursor);
+  const { p, allStatuses, id } = await withStatuses(api, db, params, opts.now);
+  const allowed = opts.maxRequests ?? MAX_SEARCH_REQUESTS;
+  if (cur && cur.run.startsWith("s")) {
+    // the next part of a saved search
+    const saved = await db.getStore(id);
+    if (!saved || isPartRow(saved.doc) || savedToken(saved) !== cur.run) throw new StepError("moved", MOVED);
+    return await savedPart(db, id, saved, cur.part);
+  }
+  if (cur) {
+    const kept = await db.getStore(id + RUN_SUFFIX), prog = kept?.doc as Progress | undefined;
+    if (!prog || prog.progress !== true || prog.run !== cur.run) throw new StepError("lost", LOST_PLACE);
+    if (prog.done || cur.part === prog.parts) {
+      // the answer to the last call was lost on its way (a retry): send that part again, from the store
+      const saved = await db.getStore(id);
+      if (prog.done && saved && saved.doc.run === prog.run) return await savedPart(db, id, saved, cur.part);
+      const part = !prog.done && cur.part === prog.parts ? await db.getStore(`${id}:${cur.part}`) : null;
+      if (!part || part.doc.run !== prog.run || !Array.isArray(part.doc.rows)) throw new StepError("lost", LOST_PLACE);
+      return stepAnswer(p, allStatuses, prog, part.doc.rows as Filing[], { allowed, finished: false, saved: false, now: opts.now, unlisted: opts.unlisted });
+    }
+    if (cur.part !== prog.parts + 1 || !prog.at) throw new StepError("lost", LOST_PLACE);
+    if (!api) throw new SpgmiError("not_configured", NOT_CONFIGURED);
+    return await freshPart(api, db, id, p, allStatuses, prog, { ...opts, allowed });
+  }
+  if (!opts.refresh) {
+    const saved = await db.getStore(id);
+    if (saved && !isPartRow(saved.doc)) return await savedPart(db, id, saved, 1);
+  }
+  if (!api) throw new SpgmiError("not_configured", NOT_CONFIGURED);
+  if (!p.filingStatusIds.length) throw new SpgmiError("server", "S&P's list of filing statuses came back empty, and S&P needs a status on every search. Refresh the reference lists on the Filings view and try again.");
+  // A search that can't finish inside its request limit is refused before any request is spent on it.
+  const needed = planSearch(p).length;
+  if (needed > allowed) throw new SpgmiError("bad_request", tooWide(needed, allowed, p));
+  const states = await getReference(api, db, "serffFilingState", { now: opts.now });
+  const knownStates = (states?.options ?? []).map((o) => String(o.id).toUpperCase()).filter((x) => /^[A-Z]{2}$/.test(x));
+  const prog: Progress = { unlisted: true, progress: true, run: crypto.randomUUID().replace(/-/g, "").slice(0, 20), at: { unit: 0, page: 1 }, requests: 0, parts: 0, pages: {}, tally: newTally(), knownStates, unsaved: false };
+  return await freshPart(api, db, id, p, allStatuses, prog, { ...opts, allowed });
+}
+
+/** Part k of a saved search. A search saved in parts reads that part; a search saved whole (before parts, or one that
+    fitted in one part) is sent in pieces of STEP_ROWS, so even a large result saved earlier opens. */
+async function savedPart(db: Db, id: string, saved: StoreRow, k: number): Promise<StepAnswer> {
+  const doc = saved.doc as Record<string, unknown>, run = savedToken(saved);
+  let rows: Filing[], n: number, meta: Record<string, unknown>;
+  if (typeof doc.parts === "number") {
+    n = doc.parts;
+    const part = k <= n ? await db.getStore(`${id}:${k}`) : null;
+    if (!part || part.doc.run !== doc.run || !Array.isArray(part.doc.rows)) throw new StepError("moved", MOVED);
+    rows = part.doc.rows as Filing[];
+    const { parts: _p, run: _r, ...m } = doc;
+    meta = m;
+  } else {
+    const all = Array.isArray(doc.rows) ? doc.rows as Filing[] : [];
+    n = Math.max(1, Math.ceil(all.length / STEP_ROWS));
+    if (k > n) throw new StepError("moved", MOVED);
+    rows = all.length > STEP_ROWS ? all.slice((k - 1) * STEP_ROWS, k * STEP_ROWS) : all;
+    meta = doc;
+  }
+  return { ...(meta as unknown as SearchAnswer), rows, fetchedAt: saved.fetched_at, fromStore: true, saved: true, part: k, parts: n, partsAbout: n, more: k < n, cursor: k < n ? { run, part: k + 1 } : null };
+}
+
+/** The next part of a fresh search: at most STEP_PAGES pages from S&P, saved as one part, with the running count. */
+async function freshPart(api: Spgmi, db: Db, id: string, p: SearchParams, allStatuses: boolean, prog: Progress, o: { now: number; allowed: number; deadline?: number; clock?: () => number; unlisted?: boolean }): Promise<StepAnswer> {
+  const plan = planSearch(p);
+  const got = await fetchPages(api, plan, prog.at!, { maxRequests: o.allowed - prog.requests, maxRows: STEP_ROWS, pageSize: PAGE_SIZE, deadline: o.deadline, now: o.clock });
+  prog.requests += got.requests;
+  Object.assign(prog.pages, got.pages);
+  const rows = mergeOwnRows(got.raw);
+  got.raw.length = 0;
+  tallyRows(prog.tally, rows, p);
+  await db.putEntities(entitiesFrom(rows));
+  const part = prog.parts + 1, capped = got.stop === "requests", finished = got.next === null || capped;
+  const label = `${p.states.join(",")} ${p.from} to ${p.to}`.slice(0, 400);
+  prog.parts = part;
+  prog.at = got.next;
+  if (part === 1 && finished) {
+    // The whole search fitted in one part: saved and answered as a search always was.
+    rows.sort(newestFirst);
+    const sum = summarise(prog.tally, p, { requests: prog.requests, maxRequests: o.allowed, capped, knownStates: prog.knownStates });
+    const doc = { params: { ...p, allStatuses }, rows, total: sum.total, requests: prog.requests, capped, byState: sum.byState, byCompany: sum.byCompany, notes: sum.notes, source: SOURCE, ...(o.unlisted ? { unlisted: true } : {}) };
+    // A search that was cut short isn't saved, so the next try asks S&P again.
+    const saved = capped ? false : await db.putStore({ id, kind: "search", label, doc });
+    return { ...doc, fetchedAt: new Date(o.now).toISOString(), fromStore: false, saved, part: 1, parts: 1, partsAbout: 1, more: false, cursor: null };
+  }
+  if (!await db.putStore({ id: `${id}:${part}`, kind: "search", label, doc: { unlisted: true, partOf: id, run: prog.run, part, rows } })) prog.unsaved = true;
+  let saved = false;
+  if (finished) {
+    const sum = summarise(prog.tally, p, { requests: prog.requests, maxRequests: o.allowed, capped, knownStates: prog.knownStates });
+    if (!capped && !prog.unsaved) {
+      saved = await db.putStore({ id, kind: "search", label, doc: { params: { ...p, allStatuses }, total: sum.total, requests: prog.requests, capped: false, byState: sum.byState, byCompany: sum.byCompany, notes: sum.notes, source: SOURCE, parts: part, run: prog.run, ...(o.unlisted ? { unlisted: true } : {}) } });
+    }
+    // The running count is no longer needed: only the run is kept, so a lost answer to this call can be sent again.
+    await db.putStore({ id: id + RUN_SUFFIX, kind: "search", label, doc: { unlisted: true, progress: true, run: prog.run, parts: part, done: true } });
+    return stepAnswer(p, allStatuses, { ...prog, done: true }, rows, { allowed: o.allowed, finished: true, capped, saved, now: o.now, unlisted: o.unlisted });
+  }
+  if (!await db.putStore({ id: id + RUN_SUFFIX, kind: "search", label, doc: prog as unknown as Record<string, unknown> })) {
+    // Without its place kept, the next part can't follow: stop here and say so.
+    const a = stepAnswer(p, allStatuses, { ...prog, done: true }, rows, { allowed: o.allowed, finished: true, capped: true, saved: false, now: o.now, unlisted: o.unlisted });
+    return { ...a, notes: [KEEP_PLACE_FAILED, ...a.notes.slice(1)] };
+  }
+  return stepAnswer(p, allStatuses, prog, rows, { allowed: o.allowed, finished: false, saved: false, now: o.now, unlisted: o.unlisted });
+}
+export const KEEP_PLACE_FAILED = "The search couldn't keep its place in the database, so it stopped after this part and these results are incomplete. Try again in a minute.";
+
+/** A part's answer: its rows, the whole search's counts so far, and where to carry on. */
+function stepAnswer(p: SearchParams, allStatuses: boolean, prog: Progress, rows: Filing[], o: { allowed: number; finished: boolean; capped?: boolean; saved: boolean; now: number; unlisted?: boolean }): StepAnswer {
+  const capped = o.capped === true;
+  const sum = summarise(prog.tally, p, { requests: prog.requests, maxRequests: o.allowed, capped, knownStates: prog.knownStates });
+  return {
+    params: { ...p, allStatuses }, rows, total: sum.total, requests: prog.requests, capped, byState: sum.byState, byCompany: sum.byCompany,
+    notes: o.finished ? sum.notes : [], source: SOURCE, ...(o.unlisted ? { unlisted: true } : {}),
+    fetchedAt: new Date(o.now).toISOString(), fromStore: false, saved: o.saved,
+    part: prog.parts, parts: o.finished ? prog.parts : null, partsAbout: o.finished ? prog.parts : prog.parts + partsLeft(prog, planLength(p), o.allowed),
+    more: !o.finished, cursor: o.finished ? null : { run: prog.run, part: prog.parts + 1 },
+  };
+}
+const planLength = (p: SearchParams) => dateWindows(p.from, p.to).length * (Math.ceil(p.companyIds.length / MAX_IDS_PER_REQUEST) + Math.ceil(p.institutionIds.length / MAX_IDS_PER_REQUEST));
+/** About how many more parts a search needs: the pages S&P said its batches have, a batch not reached yet taken as
+    the average so far (one page before any is known), within the requests left. */
+function partsLeft(prog: Progress, units: number, allowed: number): number {
+  if (!prog.at) return 0;
+  const known = Object.values(prog.pages), avg = known.length ? Math.max(1, Math.round(known.reduce((a, b) => a + b, 0) / known.length)) : 1;
+  let pages = 0;
+  for (let u = prog.at.unit; u < units; u++) { const tp = prog.pages[u] ?? avg; pages += u === prog.at.unit ? Math.max(1, tp - prog.at.page + 1) : tp; }
+  return Math.max(1, Math.ceil(Math.min(pages, Math.max(1, allowed - prog.requests)) / STEP_PAGES));
 }
 
 /** The companies named in a set of results, so later searches can find them by name or NAIC code. */
