@@ -174,7 +174,7 @@ const member=(i, group)=>({companyId:null, companyName:`Nonesuch Member ${i} Co`
   ok("time with the regulator: approximate, and says what is left out", (await t.txt("#snDaysNote"))==="Days from the date a filing was submitted to the date S&P published it, which is close to, but not always the same as, the date the regulator decided it. Read these as approximate. 2 filings don't have both dates and are left out." && (await t.txt("#snDaysH"))==="Time with the regulator, approximately");
   ok("time with the regulator: median and range by state, and all states", same(await t.cells("#snDaysTable"),[["California (CA)","2","146","50 to 241"],["Florida (FL)","6","46","19 to 80"],["Georgia (GA)","5","28","15 to 70"],["South Carolina (SC)","2","40","35 to 45"],["Texas (TX)","1","35","35"],["All states","16","44","15 to 241"]]), await t.cells("#snDaysTable"));
   ok("source line", (await t.txt("#snSource"))==="Source: S&P Global Market Intelligence, SNL Insurance Product Filings, fetched 13 Nov. Worked out in this browser from the filings S&P returned. Opening a document uses one S&P request the first time.");
-  { const names=["Calloway Group (SNL P&C Group)","Calloway Insurance Co","Calloway Home Co","Calloway Coastal Co","Filings view","S&P"," Nov"], loud=(await t.list("#view h2,#view h3,#view button,nav a")).filter(s=>/\s[A-Z][a-z]+/.test(names.reduce((a,n)=>a.split(n).join("x"),s)));
+  { const names=["Calloway Group (SNL P&C Group)","Calloway Insurance Co","Calloway Home Co","Calloway Coastal Co","Filings view","S&P"," Nov"," Claude"], loud=(await t.list("#view h2,#view h3,#view button,nav a")).filter(s=>/\s[A-Z][a-z]+/.test(names.reduce((a,n)=>a.split(n).join("x"),s)));
     ok("headings and buttons are in sentence case", loud.length===0, loud); }
   ok("no page errors so far", errs.length===0, errs);
   await p.screenshot({path:OUTDIR+"/snapshot-1440.png",fullPage:true});
@@ -201,10 +201,10 @@ const member=(i, group)=>({companyId:null, companyName:`Nonesuch Member ${i} Co`
 
   // ----- Ask Claude starts from the snapshot -----
   await p.click("#askFab"); await p.waitForTimeout(200);
-  ok("Ask Claude says what it will be told: the snapshot's search", (await t.txt("#askTold"))==="Claude will be told what is on screen: 18 filings for 3 institutions in CA, FL, GA, NY, SC, TX, 15 Nov 2023 to 13 Nov.", await t.txt("#askTold"));
+  ok("Ask Claude says it starts from this carrier and period", (await t.txt("#askTold"))==="Claude starts from this carrier and period: Calloway Group (SNL P&C Group) and its 3 companies, filings published 15 Nov 2023 to 13 Nov in 6 states, every filing type and status. 18 filings on screen.", await t.txt("#askTold"));
   await p.fill("#ask_input","What has this group been filing?"); await p.press("#ask_input","Enter"); await p.waitForTimeout(300);
   const ask=t.calls.find(c=>c.fn==="snl-chat" && c.body.action==="ask");
-  ok("the question goes with the search behind the snapshot and the companies' names", !!ask && same(ask.body.screen,{view:"filings", search:{companyIds:[], institutionIds:[5000001,5000002,5000003], states:["CA","FL","GA","NY","SC","TX"], from:"2023-11-15", to:"2026-11-13", typeOfInsuranceIds:[], filingTypeIds:[], filingStatusIds:[]}, total:18, companies:["Calloway Group (SNL P&C Group)","Calloway Insurance Co","Calloway Home Co","Calloway Coastal Co"]}), ask&&ask.body.screen);
+  ok("the question goes with the search behind the snapshot and the companies' names", !!ask && same(ask.body.screen,{view:"filings", search:{companyIds:[], institutionIds:[5000001,5000002,5000003], states:["CA","FL","GA","NY","SC","TX"], from:"2023-11-15", to:"2026-11-13", typeOfInsuranceIds:[], filingTypeIds:[], filingStatusIds:[]}, total:18, companies:["Calloway Group (SNL P&C Group)","Calloway Insurance Co","Calloway Home Co","Calloway Coastal Co"], snapshot:{name:"Calloway Group (SNL P&C Group)", kind:"group", years:3, capped:false}}), ask&&ask.body.screen);
   await p.click("#askClose"); await p.waitForTimeout(100);
 
   // ----- the same search on the Filings view -----

@@ -376,6 +376,7 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 .snout:empty{display:none}
 .snhead{display:flex;flex-wrap:wrap;gap:10px 20px;align-items:flex-end;justify-content:space-between;min-width:0}
 .snhead>div{min-width:0;flex:1 1 320px;overflow-wrap:anywhere}
+.snblk .blk-h .snask{margin-right:auto;font-weight:normal}
 .snhead h3{font-size:20px;color:var(--ink)}
 .snper{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;min-width:0}
 .sntiles{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
@@ -1581,6 +1582,7 @@ function askScreen(){
 function askToldText(sc, past){
   if(!sc) return past ? "" : "Nothing is on screen yet, so Claude starts from your question alone.";
   const list=a=>a.length<2 ? a.join("") : a.slice(0,-1).join(", ")+" and "+a[a.length-1];
+  if(sc.view==="filings" && sc.snapshot) return snapToldText(sc, past);
   const lead=past ? "Claude was told what was on screen: " : "Claude will be told what is on screen: ";
   if(sc.view==="filings"){
     const s=sc.search, who=[s.companyIds.length?plural(s.companyIds.length,"company","companies"):"", s.institutionIds.length?plural(s.institutionIds.length,"institution"):""].filter(Boolean);
@@ -1856,7 +1858,7 @@ function askFabHTML(){
 function askPanelHTML(){
   const a=S.ask, busy=!!activeTurn(), off=S.status&&S.status.claude&&S.status.claude.configured===false, sc=askScreen();
   const limited=!busy && chatAtLimit(S.chatUse);   // the daily limit is reached: the box says why it is off and when it comes back
-  const start = sc ? `<div id="askSuggest"><p class="t2">Claude searches S&amp;P's filings, reads the filing documents and looks up statutory data. To start from what is on screen, pick a question or type your own:</p>
+  const start = sc || S.view==="snapshot" ? `<div id="askSuggest"><p class="t2">Claude searches S&amp;P's filings, reads the filing documents and looks up statutory data. ${sc?"To start from what is on screen":"To see what a snapshot can answer"}, pick a question or type your own:</p>
         <div class="ccchips">${ASK_SUGGEST[askSuggestKey(sc)].map((q,i)=>`<button type="button" class="chip" data-act="ask-suggest" data-v="${askSuggestKey(sc)}" data-i="${i}">${esc(q)}</button>`).join("")}</div></div>`
     : `<p class="t2" id="askHint">For example: "Pull the homeowners form filings two companies made in Florida since 2021 and compare what changed." Name the companies, the state and the dates you care about. Claude searches S&amp;P's filings, reads the filing documents and looks up statutory data, then answers with sources you can open at the page it cites.</p>`;
   return `<aside class="askpanel${a.wide?" wide":""}" id="askPanel" role="dialog" aria-modal="false" aria-label="Ask Claude">
@@ -2295,7 +2297,7 @@ function freshProfile(){
 }
 S.pf=freshProfile();
 ASK_SUGGEST.profile=["What stands out in this company's results over these years?", "How has policyholder surplus moved against premiums written?", "Which lines of business and states drive this company's premiums?"];
-const askSuggestKey = sc => S.view==="profile" && sc && sc.view==="statutory" ? "profile" : sc.view;
+const askSuggestKey = sc => S.view==="snapshot" ? "snapshot" : S.view==="profile" && sc && sc.view==="statutory" ? "profile" : sc.view;
 const pfLive = () => { const s=S.pf.status&&S.pf.status.statutory; return !!(s&&s.configured&&s.mapped); };
 const pfClaude = () => !!(S.pf.status&&S.pf.status.claude&&S.pf.status.claude.configured);
 const pfHasData = f => !!f && Array.isArray(f.years) && f.years.length>0;
@@ -2894,7 +2896,7 @@ function snapRateChart(c){
 }
 function snapRateBlockHTML(c){
   const exp=snapExpHTML("rates");
-  let h=`<section class="snblk" id="snRates" aria-labelledby="snRateH"><div class="blk-h"><h3 id="snRateH">Rate changes over time</h3>${exp}</div>`;
+  let h=`<section class="snblk" id="snRates" aria-labelledby="snRateH"><div class="blk-h"><h3 id="snRateH">Rate changes over time</h3>${c.rateFs.length?snapAskLinkHTML("rates"):""}${exp}</div>`;
   h+=`<p class="t2 snnote" id="snRateNote">Each mark is one filing's overall rate impact as S&amp;P gives it. It isn't weighted by premium, and for a filing that isn't approved it may be what the company asked for rather than what was approved. Each filing's status is shown, and nothing here is averaged.</p>`;
   if(!c.rateFs.length) return h+`<div class="info" id="snNoRates" role="status"><span>S&amp;P returned no rate filings for this search, so there are no rate changes to show.</span></div></section>`;
   if(!c.ratePts.length && !c.rateNoDate) h+=`<div class="info" id="snNoRates" role="status"><span>None of the ${plural(c.rateFs.length,"rate filing")} carries an overall rate impact in S&amp;P's data, so there is nothing to chart. The table below still lists them.</span></div>`;
@@ -2943,7 +2945,7 @@ function snapMapHTML(c, by){
 function snapMapBlockHTML(c){
   const sn=S.snap, by=sn.mapBy, rows=c.byState.filter(s=>s.n).sort((a,b)=>b.n-a.n || a.st.localeCompare(b.st)), none=c.byState.filter(s=>!s.n).map(s=>s.st).sort();
   const table=`<div class="tbl-wrap"><table class="sntbl" id="snStateTable"><caption class="sr">Filings by state</caption><thead><tr><th>State</th><th class="num">Filings</th><th class="num">Rate filings</th><th class="num">Latest rate impact</th></tr></thead><tbody>${rows.map(s=>`<tr><td>${esc(snapStLabel(s.st))}</td><td class="num">${count(s.n)}</td><td class="num">${count(s.rates)}</td><td class="num">${s.latest?`${esc(pct(s.latest.rate))}<div class="t2">${s.latest.pub?fmtD(s.latest.pub):"date n/d"}, ${esc(snapStatus(s.latest))}</div>`:"n/d"}</td></tr>`).join("")}</tbody></table></div>`;
-  return `<section class="snblk" id="snMap" aria-labelledby="snMapH"><div class="blk-h"><h3 id="snMapH">Where it files</h3><span class="inline"><span class="seg" role="group" aria-label="Colour the map by"><button type="button" class="btn sm" data-act="snap-map" data-by="count" aria-pressed="${by!=="rate"}">Number of filings</button><button type="button" class="btn sm" data-act="snap-map" data-by="rate" aria-pressed="${by==="rate"}">Latest rate impact</button></span>${snapExpHTML("states")}</span></div>
+  return `<section class="snblk" id="snMap" aria-labelledby="snMapH"><div class="blk-h"><h3 id="snMapH">Where it files</h3>${snapAskLinkHTML("states")}<span class="inline"><span class="seg" role="group" aria-label="Colour the map by"><button type="button" class="btn sm" data-act="snap-map" data-by="count" aria-pressed="${by!=="rate"}">Number of filings</button><button type="button" class="btn sm" data-act="snap-map" data-by="rate" aria-pressed="${by==="rate"}">Latest rate impact</button></span>${snapExpHTML("states")}</span></div>
     <div class="sngrid"><div>${snapMapHTML(c, by)}</div><div>${table}${none.length?`<p class="t2" id="snStateNone">S&amp;P returned nothing for this search in ${esc(andList(none, 12))}. That isn't proof that nothing was filed there.</p>`:""}</div></div></section>`;
 }
 const SNAP_TYPE_FILL = ["#00539E","#EB008C","#00857C","#944599","#C46A1B","#0081C3","#262166"];
@@ -2964,12 +2966,12 @@ function snapYearChart(c){
 function snapYearBlockHTML(c){
   const key=`<ul class="snlegend" id="snYearKey">${c.types.map((t,i)=>`<li><span class="sw" style="background:${snapTypeFill(t,i)}" aria-hidden="true"></span>${esc(snapTypeName(t))}</li>`).join("")}</ul>`;
   const table=`<div class="tbl-wrap"><table class="sntbl" id="snYearTable"><caption class="sr">Filings by year published and filing type</caption><thead><tr><th>Year</th>${c.types.map(t=>`<th class="num">${esc(snapTypeName(t))}</th>`).join("")}<th class="num">All</th></tr></thead><tbody>${c.years.map(y=>`<tr><td>${y.year}</td>${y.by.map(n=>`<td class="num">${count(n)}</td>`).join("")}<td class="num"><b>${count(y.total)}</b></td></tr>`).join("")}</tbody></table></div>`;
-  return `<section class="snblk" id="snYears" aria-labelledby="snYearH"><div class="blk-h"><h3 id="snYearH">Filings by year and type</h3>${snapExpHTML("years")}</div>
+  return `<section class="snblk" id="snYears" aria-labelledby="snYearH"><div class="blk-h"><h3 id="snYearH">Filings by year and type</h3>${c.years.some(y=>y.total)?snapAskLinkHTML("years"):""}${snapExpHTML("years")}</div>
     <div class="sngrid half"><div>${snapYearChart(c)}${key}</div><div>${table}<p class="t2">By the year S&amp;P published each filing; the first and last years are part years.${c.undated?` ${plural(c.undated,"filing has","filings have")} no publish date and ${c.undated===1?"isn't":"aren't"} counted here.`:""}</p></div></div></section>`;
 }
 function snapLatestBlockHTML(c){
   const list=c.latestFR.slice(0, SNAP_LATEST);
-  let h=`<section class="snblk" id="snLatest" aria-labelledby="snLatestH"><div class="blk-h"><h3 id="snLatestH">Latest form and rule filings</h3>${snapExpHTML("forms")}</div>`;
+  let h=`<section class="snblk" id="snLatest" aria-labelledby="snLatestH"><div class="blk-h"><h3 id="snLatestH">Latest form and rule filings</h3>${list.length?snapAskLinkHTML("forms"):""}${snapExpHTML("forms")}</div>`;
   if(!list.length) return h+`<div class="info" id="snNoForms" role="status"><span>S&amp;P returned no form or rule filings for this search.</span></div></section>`;
   h+=`<p class="t2">The ${list.length<c.latestFR.length?`${count(list.length)} most recent of ${count(c.latestFR.length)}`:plural(list.length,"filing")}, newest first by the date S&amp;P published ${list.length===1?"it":"them"}.</p>`;
   h+=`<div class="tbl-wrap cardwrap" id="snLatestWrap" data-keep><table class="cards filings" id="snLatestTable"><thead><tr><th>Company</th><th>State</th><th>Filing type</th><th>Type of insurance</th><th>Status</th><th>Dates</th><th class="num">Rate impact</th><th>Description</th><th>Tracking number</th><th>Document</th></tr></thead>
@@ -3007,7 +3009,7 @@ function snapOutHTML(){
   }
   const c=snapCompute(r, run), p=c.p, pk=run&&run.pick;
   let h=`<div class="snhead" id="snHead"><div><h3 id="snName">${esc(who||"Snapshot")}</h3><p class="t2" id="snMeta">${esc([pk&&pk.kind==="group"?`Group of ${plural(pk.ids.length,"company","companies")} with S&P ids${pk.noId?`; ${plural(pk.noId,"company","companies")} without one left out`:""}`:pk&&pk.group?`Part of ${pk.group}`:"", `filings published ${fmtDay(p.from)} to ${fmtDay(p.to)}`, `${plural(c.searched.length,"state")} searched`, "every filing type and status"].filter(Boolean).join(" · "))}</p></div>
-    <div class="toolbar"><button type="button" class="btn" id="sn_toFilings" data-act="snap-filings" ${sn.busy?"disabled":""}>See every filing on the Filings view</button><span class="inline"><span class="t2">All filings:</span>${snapExpHTML("filings")}</span></div></div>`;
+    <div class="toolbar"><button type="button" class="btn" id="sn_ask" data-act="snap-ask" data-q="all">Ask Claude about this</button><button type="button" class="btn" id="sn_toFilings" data-act="snap-filings" ${sn.busy?"disabled":""}>See every filing on the Filings view</button><span class="inline"><span class="t2">All filings:</span>${snapExpHTML("filings")}</span></div></div>`;
   if(sn.busy) h+=`<div class="banner" role="status" id="snRefreshing"><span>Asking S&amp;P again… What is below is from ${fmtAt(r.fetchedAt)} until the new result arrives.</span></div>`;
   else if(sn.err) h+=problemHTML(sn.err, "Couldn't refresh the snapshot.", "snap-refresh");
   else if(r.fromStore) h+=`<div class="info" id="snFromStore" role="status"><span>From the saved result fetched ${fmtAt(r.fetchedAt)}, so opening it used no S&amp;P requests.</span><button type="button" class="btn sm" data-act="snap-refresh">Refresh from S&amp;P</button></div>`;
@@ -3102,7 +3104,75 @@ function snapScreen(){
   const p=r.params||run.payload, ints=a=>(Array.isArray(a)?a:[]).map(Number).filter(Number.isInteger);
   const names=[...new Set([run.pick.name, ...run.pick.ids.map(c=>c.name)].filter(x=>!blank(x)).map(String))].slice(0,20);
   return {view:"filings", search:{companyIds:ints(p.companyIds), institutionIds:ints(p.institutionIds), states:(Array.isArray(p.states)?p.states:[]).map(String), from:String(p.from||""), to:String(p.to||""), typeOfInsuranceIds:[], filingTypeIds:[], filingStatusIds:[]},
-    total:snapFilings(r.rows).length, companies:names};
+    total:snapFilings(r.rows).length, companies:names,
+    // that it is a Snapshot: an older snl-chat ignores this and describes the search alone
+    snapshot:{name:snapAskName(run.pick.name, ""), kind:run.pick.kind==="group"?"group":"company", years:SNAP_YEARS.includes(+run.years)?+run.years:null, capped:!!r.capped}};
+}
+
+/* ----- Ask Claude about this snapshot: a question written from what is on screen, put in the box; nothing is sent
+   until the reader presses Ask. Each question names only states, lines and changes that are really on screen. ----- */
+const snapAskName = (n, none) => String(n??"").replace(/[\u0000-\u001f\u007f]/g," ").replace(/\s+/g," ").trim().slice(0,120) || none;
+const snapAskList = a => a.length<2 ? a.join("") : a.slice(0,-1).join(", ")+" and "+a[a.length-1];
+const snapAskLinkHTML = q => `<button type="button" class="lnk t2 snask" data-act="snap-ask" data-q="${q}">Ask about this</button>`;
+// the states (full names) that come first in a list of filings, each once, at most n
+const snapAskStates = (fs, n) => [...new Set(fs.map(f=>f.st).filter(Boolean))].slice(0,n).map(snapStateName);
+const snapAskKinds = fs => snapAskList([fs.some(f=>f.k.form)?"form":"", fs.some(f=>f.k.rule)?"rule":""].filter(Boolean));
+function snapAskQs(){
+  const sn=S.snap, r=sn.res, run=sn.ran; if(!r || !run) return null;
+  const c=snapCompute(r, run), who=snapAskName(run.pick.name, "this carrier"), d=parseDay(c.from);
+  const since=d ? d.toLocaleDateString("en-GB",{month:"short", year:"numeric"}) : fmtDay(c.from), inSt=a=>a.length?` in ${snapAskList(a)}`:"";
+  const q={};
+  if(!c.fs.length){
+    q.all=`S&P returned no filings for ${who} published since ${since} in this snapshot. Check whether ${run.pick.kind==="group"?"the group's companies file":"it files"} under other company names, and search those.`;
+    q.names=`Which company names does ${who} file under, and in which states?`;
+    return q;
+  }
+  // rate changes: the states of the largest changes by size, up or down
+  const withRate=c.rateFs.filter(f=>f.rate!==null).sort((a,b)=>Math.abs(b.rate)-Math.abs(a.rate) || snapByDate(a,b)), top=withRate[0];
+  if(top && top.rate!==0){
+    const what=`a ${Math.abs(top.rate).toFixed(1)}% ${top.rate>0?"increase":"decrease"}${top.toi?` for ${top.toi.slice(0,60)}`:""}${top.st?` in ${snapStateName(top.st)}`:""}${top.ok||blank(top.r.filingStatus)?"":`, ${String(top.r.filingStatus).slice(0,30).toLowerCase()}`}`;
+    q.rates=`What explains the rate changes ${who} filed${inSt(snapAskStates(withRate.filter(f=>f.rate!==0),3))} since ${since}? The largest on screen is ${what}. Read the filings behind the largest ones.`;
+  } else if(top) q.rates=`The rate filings ${who} made${inSt(snapAskStates(withRate,3))} since ${since} show no change in overall rate on screen. What did they change? Read the filings behind them.`;
+  else if(c.rateFs.length) q.rates=`The rate filings ${who} made${inSt(snapAskStates(c.rateFs.slice().sort(snapByDate),3))} since ${since} carry no overall rate impact in S&P's data. Read the most recent ones and say what each changed.`;
+  // where it files: the busiest states
+  const busy=c.byState.filter(s=>s.n).sort((a,b)=>b.n-a.n || a.st.localeCompare(b.st)).slice(0,3).map(s=>snapStateName(s.st));
+  if(busy.length) q.states=`Which lines of business and filing types make up the filings ${who} made in ${snapAskList(busy)}, ${busy.length===1?"the only state with filings on screen":"its busiest states"}, since ${since}?`;
+  // filings by year and type
+  const yrs=c.years.filter(y=>y.total), types=c.types.filter(Boolean).slice(0,3).map(t=>t.slice(0,40).toLowerCase()), tt=types.length?` ${snapAskList(types)}`:"";
+  if(yrs.length>1){ const most=yrs.reduce((a,b)=>b.total>=a.total?b:a);
+    q.years=`How did the filings ${who} made change from ${c.years[0].year} to ${c.years[c.years.length-1].year}, and what was behind ${most.year}, the year with the most? Look at the${tt} filings.`; }
+  else if(yrs.length) q.years=`What did the${tt} filings ${who} made in ${yrs[0].year} change?`;
+  // latest form and rule filings: the state that comes up most among those shown, newest first on a tie
+  const latest=c.latestFR.slice(0, SNAP_LATEST), tally=new Map(); for(const f of latest) tally.set(f.st, (tally.get(f.st)||0)+1);
+  if(latest.length){
+    const st=[...tally.entries()].reduce((a,b)=>b[1]>a[1]?b:a)[0], mine=latest.filter(f=>f.st===st), lines=[...new Set(mine.map(f=>f.toi).filter(Boolean))];
+    const gone=mine.filter(f=>/withdr/i.test(String(f.r.filingStatus??""))).length;
+    q.forms=`Summarise what the latest ${snapAskKinds(mine)} filings ${who} made${st?` in ${snapStateName(st)}`:""}${lines.length&&lines.length<=3?` for ${snapAskList(lines.map(l=>l.slice(0,60)))}`:""} changed.${gone?` ${gone===1?"One of them was":`${gone} of them were`} withdrawn: say what the filing gives as the reason, if it gives one.`:""}`;
+  }
+  // the whole snapshot
+  const parts=[withRate.some(f=>f.rate!==0)?`the largest rate changes${inSt(snapAskStates(withRate.filter(f=>f.rate!==0),2))}`:"", latest.length?`what the latest ${snapAskKinds(latest)} filings changed`:"", busy.length?`where it files most`:""].filter(Boolean);
+  q.all=`Give me an overview of what ${who} has filed since ${since}${parts.length?`: ${snapAskList(parts)}`:""}.${r.capped?" The snapshot on screen is partial, so its counts are lower than they should be.":""}`;
+  return q;
+}
+// the panel's starting points over a Snapshot: three or four from what is on screen, or what a snapshot can answer
+function snapAskSuggest(){
+  const q=snapAskQs();
+  if(q) return ["all","rates","forms","states","years","names"].map(k=>q[k]).filter(Boolean).slice(0,4);
+  const pk=S.snap.pick, who=pk?snapAskName(pk.name, "this carrier"):"this carrier", yrs=`the last ${S.snap.years===1?"year":`${S.snap.years} years`}`, tail=pk?"":" Carrier: ";
+  return [`What rate changes has ${who} filed in each state over ${yrs}, and what explains the largest?${tail}`,
+    `Summarise what the latest form and rule filings ${who} made changed.${tail}`,
+    `In which states has ${who} filed most over ${yrs}, and for which lines of business?${tail}`];
+}
+Object.defineProperty(ASK_SUGGEST, "snapshot", {get:snapAskSuggest, enumerable:true});
+function snapAsk(k){
+  const q=(snapAskQs()||{})[k]; if(!q) return;
+  S.ask.draft=q.slice(0, MAX_QUESTION); openAsk();
+  const box=document.getElementById("ask_input"); if(box){ box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+}
+// the line under the question box over a Snapshot
+function snapToldText(sc, past){
+  const s=sc.search, sp=sc.snapshot, n=s.companyIds.length+s.institutionIds.length;
+  return `${past?"Claude started":"Claude starts"} from this carrier and period: ${sp.name||"the snapshot's companies"}${sp.kind==="group"?` and its ${plural(n,"company","companies")}`:""}, filings published ${fmtDay(s.from)} to ${fmtDay(s.to)} in ${plural(s.states.length,"state")}, every filing type and status. ${plural(sc.total,"filing")} on screen${sp.capped?", a partial result":""}.`;
 }
 
 /* ---------- render ---------- */
@@ -3309,6 +3379,7 @@ document.addEventListener("click", e=>{
     case "snap-recent": snapReopen(+t.dataset.i); break;
     case "snap-map": S.snap.mapBy=t.dataset.by==="rate"?"rate":"count"; render(); break;
     case "snap-filings": snapToFilings(); break;
+    case "snap-ask": snapAsk(t.dataset.q); break;   // fills the question box; sending is left to the reader
   }
 });
 function onInput(e){
