@@ -118,7 +118,7 @@ const charCite = (document_index: number, cited_text: string) => ({ type: "char_
 
 // ---------- the tools and the system prompt ----------
 {
-  ok("there are five tools, each strict with no extra properties allowed", same(TOOLS.map((t) => t.name), ["resolve_entity", "resolve_entities", "search_filings", "read_filing_document", "query_statutory"]) && TOOLS.every((t: any) => t.strict === true && t.input_schema.type === "object" && t.input_schema.additionalProperties === false));
+  ok("there are six tools, each strict with no extra properties allowed", same(TOOLS.map((t) => t.name), ["resolve_entity", "resolve_entities", "search_filings", "read_filing_document", "get_filing_summaries", "query_statutory"]) && TOOLS.every((t: any) => t.strict === true && t.input_schema.type === "object" && t.input_schema.additionalProperties === false));
   ok("every property of every tool is required, as strict tools need", TOOLS.every((t: any) => same([...t.input_schema.required].sort(), Object.keys(t.input_schema.properties).sort())), TOOLS.map((t: any) => t.input_schema.required));
   ok("every tool and every list or text property has a description for Claude", TOOLS.every((t: any) => typeof t.description === "string" && t.description.length > 40));
   ok("resolve_entity's description says it never calls S&P and knows the loaded company list and companies seen before", /never calls S&P/.test(TOOLS[0].description!) && /earlier search results/.test(TOOLS[0].description!) && /the companies the owner loaded/.test(TOOLS[0].description!));

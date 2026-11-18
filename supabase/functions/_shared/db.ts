@@ -44,6 +44,17 @@ export type FoundFiling = {
   rate_impact: string | null; description: string | null; tracking_number: string | null; document_id: number | null;
 };
 
+/** A saved filing summary (migration 0005, public.snl_digests): the digest itself (Contract B, see digest.ts) and the
+    columns search uses. form_keys: the form numbers without spacing or punctuation, in capitals, space-separated with a
+    space at each end; search_body: the summary, program names, form titles and points, which Postgres indexes for
+    word search (the generated column search_text). */
+export type DigestRow = {
+  id: string; filing_version_id: string | null; document_id: number | null; state: string | null; company: string | null;
+  form_keys: string; search_body: string; pages_read: number; made_at: string; doc: Record<string, unknown>;
+};
+/** What a search of saved summaries asks the database: a form number (letters and digits only), words, a state. */
+export type DigestQuery = { formKey: string | null; words: string[]; state: string | null; limit: number };
+
 export interface Db {
   /** Takes the next one-second S&P slot and counts the request (migration 0001, snl_take_slot). */
   takeSlot(limits: Usage): Promise<Slot>;
@@ -106,6 +117,15 @@ export interface Db {
   countJobsSince(owner: string, since: string): Promise<number>;
   /** The usage part of the result of each of the login's finished answers started since the given time. */
   usageSince(owner: string, since: string): Promise<Record<string, unknown>[]>;
+  // ---------- saved filing summaries (migration 0005); optional, so a stand-in without them still works ----------
+  /** The saved summaries of filings with these document ids or filing version ids. */
+  getDigests?(ids: { documentIds: number[]; versionIds: string[] }): Promise<DigestRow[]>;
+  /** Saves a summary, replacing the row with the same id. */
+  putDigest?(row: DigestRow): Promise<void>;
+  /** Saved summaries whose form numbers contain the form number, or whose text has the words, newest first. */
+  searchDigests?(q: DigestQuery): Promise<DigestRow[]>;
+  /** How many summaries are saved. */
+  countDigests?(): Promise<number>;
 }
 
 // A saved place is kept as text inside its row. Postgres re-orders the keys of JSON it stores, and Claude must
@@ -494,6 +514,54 @@ export function supabaseDb(sb: SupabaseClient, now: () => number = Date.now): Db
       const { data, error } = await sb.from("snl_jobs").select("usage:result->usage").eq("owner", owner).eq("status", "done").gte("created_at", since);
       if (error) throw new Error(`Couldn't add up today's costs: ${error.message}`);
       return (data ?? []).map((r) => (r as { usage?: unknown }).usage).filter((u): u is Record<string, unknown> => !!u && typeof u === "object" && !Array.isArray(u));
+    },
+    // ---------- saved filing summaries (migration 0005) ----------
+    async getDigests(ids) {
+      const cols = "id,filing_version_id,document_id,state,company,form_keys,search_body,pages_read,made_at,doc";
+      const out = new Map<string, DigestRow>();
+      // Two plain filters rather than one combined one, so no id has to be written into a filter's text.
+      for (let i = 0; i < ids.documentIds.length; i += 100) {
+        const { data, error } = await sb.from("snl_digests").select(cols).in("document_id", ids.documentIds.slice(i, i + 100)).limit(1000);
+        if (error) throw new Error(`Couldn't read the saved summaries: ${error.message}`);
+        for (const r of (data ?? []) as DigestRow[]) out.set(r.id, r);
+      }
+      for (let i = 0; i < ids.versionIds.length; i += 100) {
+        const { data, error } = await sb.from("snl_digests").select(cols).in("filing_version_id", ids.versionIds.slice(i, i + 100)).limit(1000);
+        if (error) throw new Error(`Couldn't read the saved summaries: ${error.message}`);
+        for (const r of (data ?? []) as DigestRow[]) out.set(r.id, r);
+      }
+      return [...out.values()];
+    },
+    async putDigest(row) {
+      const { error } = await sb.from("snl_digests").upsert(row, { onConflict: "id" });
+      if (error) throw new Error(`Couldn't save the summary: ${error.message}`);
+    },
+    async searchDigests(q) {
+      const cols = "id,filing_version_id,document_id,state,company,form_keys,search_body,pages_read,made_at,doc";
+      const out = new Map<string, DigestRow>();
+      const take = (res: { data: unknown[] | null; error: { message: string } | null }) => {
+        if (res.error) throw new Error(`Couldn't search the saved summaries: ${res.error.message}`);
+        for (const r of (res.data ?? []) as DigestRow[]) out.set(r.id, r);
+      };
+      // A form number: letters and digits only, so it can't change the filter.
+      if (q.formKey && /^[A-Z0-9]{1,40}$/.test(q.formKey)) {
+        let b = sb.from("snl_digests").select(cols).ilike("form_keys", `%${q.formKey}%`);
+        if (q.state) b = b.eq("state", q.state);
+        take(await b.order("made_at", { ascending: false }).limit(q.limit));
+      }
+      // Words: Postgres's own word search over the generated column, any of them (the function decides where all match).
+      const words = q.words.map((w) => w.replace(/[^\p{L}\p{N}]/gu, "")).filter(Boolean);
+      if (words.length) {
+        let b = sb.from("snl_digests").select(cols).textSearch("search_text", words.join(" or "), { type: "websearch", config: "english" });
+        if (q.state) b = b.eq("state", q.state);
+        take(await b.order("made_at", { ascending: false }).limit(q.limit));
+      }
+      return [...out.values()].sort((a, b) => String(b.made_at).localeCompare(String(a.made_at))).slice(0, q.limit);
+    },
+    async countDigests() {
+      const { count, error } = await sb.from("snl_digests").select("id", { count: "exact", head: true });
+      if (error) throw new Error(`Couldn't count the saved summaries: ${error.message}`);
+      return count ?? 0;
     },
   };
 }

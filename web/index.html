@@ -304,6 +304,26 @@ body.signed footer.foot .wrap{padding-bottom:calc(68px + env(safe-area-inset-bot
 code{font-family:Consolas,Menlo,monospace;font-size:12px;overflow-wrap:anywhere}
 textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220px;white-space:pre;overflow:auto}
 
+/* Filing summaries: the Summary control on a filings row, its drawer, and Search saved summaries */
+.dg-cell{display:flex;flex-direction:column;align-items:flex-start;gap:4px;margin-top:6px}
+.dg .drawer-b{gap:18px}
+.dg h3{margin:0 0 6px;font-size:14px}
+.dg section{min-width:0;overflow-wrap:anywhere}
+.dg ul.dgl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.dg ul.dgl li{border-left:3px solid var(--grid);padding-left:10px;min-width:0}
+.dg .basis{font-style:italic}
+.dg .pill{margin-left:4px;color:var(--purple)}
+.dg table{table-layout:fixed;width:100%}
+.dg td,.dg th{overflow-wrap:anywhere;padding:6px 6px}
+.dg th{text-align:left}
+.dg .c-pg{width:64px}
+.dg .rate{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;font-size:13px}
+.dg .rate b{text-align:right}
+.dgs form{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;min-width:0}
+.dgs form label.f{flex:1 1 220px;min-width:0}
+.dgs form select{max-width:100%}
+.dgs .hit{padding:8px 10px;display:flex;flex-direction:column;gap:4px;min-width:0;overflow-wrap:anywhere}
+.dgs .hit .inline{gap:6px}
 @media (prefers-reduced-motion:no-preference){.drawer{animation:slide .18s ease-out}@keyframes slide{from{transform:translateX(24px);opacity:.6}}
   .askfab.working .mark{animation:pulse 1.1s ease-in-out infinite}@keyframes pulse{50%{opacity:.25}}}
 @media (max-width:900px){.fgrid.three{grid-template-columns:1fr}}
@@ -1146,7 +1166,7 @@ function filingRowHTML({r,key}){
     <td class="num c-rate c-half" data-label="Rate impact">${esc(rateImpact(r))}</td>
     <td class="c-desc c-late" data-label="Description">${descH}</td>
     <td class="c-tn c-late" data-label="Tracking number">${filingNoHTML(r)}</td>
-    <td class="c-doc c-late">${docButtonHTML(docKeyOf(r), "Open document")}${isNum(r.pages)?`<div class="t2">${plural(r.pages,"page")}</div>`:""}</td></tr>`;
+    <td class="c-doc c-late">${docButtonHTML(docKeyOf(r), "Open document")}${isNum(r.pages)?`<div class="t2">${plural(r.pages,"page")}</div>`:""}${dgRowHTML(r, docKeyOf(r))}</td></tr>`;
 }
 function filingsResultsHTML(){
   const f=S.f, r=f.res;
@@ -1182,7 +1202,8 @@ function renderFilings(){
   return `<div><h2 class="action-title">Search rate, rule and form filings</h2>
     <p class="sub">S&amp;P's SNL Insurance Product Filings by company, state, type of insurance, filing type and date. Open any filing's original document.</p></div>
     ${watchHTML()}
-    ${recentHTML()}${filingsFormHTML()}<div id="results" style="display:flex;flex-direction:column;gap:14px;min-width:0" aria-live="polite">${filingsResultsHTML()}</div>`;
+    ${recentHTML()}
+    ${dgSearchHTML()}${filingsFormHTML()}<div id="results" style="display:flex;flex-direction:column;gap:14px;min-width:0" aria-live="polite">${filingsResultsHTML()}</div>`;
 }
 function filingsExport(){
   const cols=["Company","NAIC company code","S&P company id","All companies on the filing","NAIC group","State","Filing type","Type of insurance","Sub-type of insurance","Status","Date submitted","Date published","Effective date, new business","Effective date, renewals","Rate impact","Rate impact (number)","Description","Tracking number","SFC number","Document id","Filing version id","Pages"];
@@ -1527,6 +1548,195 @@ async function openDoc(key, page){
   d.name=docName(r.res.headers.get("Content-Disposition"), key, d.type);
   d.url=URL.createObjectURL(d.type==="application/pdf" ? blob.slice(0, blob.size, "application/pdf") : blob);
   showDoc(d, page, w); render(); loadStatus();
+}
+
+/* ---------- filing summaries: a Summary control on each filings row, its drawer, and Search saved summaries ----------
+   The snl-digest function keeps what Claude found when it read a filing (Contract B in the build notes), so the filing
+   needn't be read again. "get" and "search" cost nothing; "make" reads the front of the document (1 S&P request and one
+   request to Claude) and counts as one of the login's questions. Everything in a summary came from a filing or from
+   Claude: it all goes through esc(). */
+FN["snl-digest"]="the summaries function";
+const DG_PAGES=150;                       // pages one summary rests on: the first 150 of a longer filing
+const DG_TOKENS_PER_PAGE=4000;            // Anthropic counts about 3,100 to 4,600 tokens a page, text and image
+const DG_USD_PER_MTOK_IN=4, DG_OUT_USD=0.12;   // Claude Opus 5.5 list price for reading, and about 6,000 tokens written
+const DG_WHERE={"form number":"Form number","form title":"Form title","program":"Program","summary":"Summary","notable":"Notable point"};
+function freshDigests(){ return {known:{}, asked:{}, off:"", dr:null, find:{open:false, q:"", state:"", busy:false, res:null, err:null, asked:null}, last:""}; }
+const dgOf = () => S.dg || (S.dg=freshDigests());
+const dgKeyOfDigest = d => d ? docKeyOf({documentId:d.documentId, filingVersionId:d.filingVersionId}) : "";
+const dgName = d => !blank(d&&d.filingNo) ? String(d.filingNo) : d&&!blank(d.documentId) ? `document ${d.documentId}` : "this filing";
+function dgReadText(read, of){
+  const r=(Array.isArray(read)?read:[]).filter(x=>x&&isNum(x.from)&&isNum(x.to));
+  if(!r.length) return "pages n/d";
+  const parts=r.map(x=>+x.from===+x.to?count(x.from):`${count(x.from)} to ${count(x.to)}`);
+  const list=parts.length===1?parts[0]:`${parts.slice(0,-1).join(", ")} and ${parts[parts.length-1]}`;
+  return `${r.length===1&&+r[0].from===+r[0].to?"page":"pages"} ${list}${isNum(of)?` of ${count(of)}`:""}`;
+}
+const dgReadAll = d => { const r=Array.isArray(d.read)?d.read:[]; return isNum(d.pages) && r.length===1 && +r[0].from===1 && +r[0].to>=+d.pages; };
+/* What making a summary of this row costs, from its page count: the pages Claude reads, at list price. */
+function dgCost(r){
+  const known=isNum(r&&r.pages) && +r.pages>0, pages=known ? Math.min(+r.pages, DG_PAGES) : DG_PAGES;
+  const usd=pages*DG_TOKENS_PER_PAGE*DG_USD_PER_MTOK_IN/1e6 + DG_OUT_USD;
+  const what = !known ? `up to its first ${DG_PAGES} pages (its page count is n/d)` : +r.pages>DG_PAGES ? `its first ${DG_PAGES} of ${count(r.pages)} pages` : `all ${plural(pages,"page")}`;
+  return `Summarising reads ${what} with Claude. It uses 1 S&amp;P request and ${known?"":"up to "}${costText(usd)} of Claude's time (about ${count(pages*DG_TOKENS_PER_PAGE)} tokens at list price), and counts as one of your questions today. The summary is then saved for everyone, so nobody pays to read these pages again.`;
+}
+/* Saved summaries of the rows on screen, asked for once each: the button shows which have one. Free. */
+async function dgPrefetch(){
+  const g=dgOf(); if(g.off || !S.session || S.view!=="filings" || !S.f.res) return;
+  const keys=visibleRows().slice(0,S.f.shown).map(x=>docKeyOf(x.r)).filter(k=>k && !(k in g.asked)).slice(0,50);
+  if(!keys.length) return;
+  for(const k of keys) g.asked[k]=true;
+  const r=await callFn("snl-digest", {action:"get", filings:keys.map(k=>k.startsWith("d:")?{documentId:Number(k.slice(2))}:{filingVersionId:k.slice(2)})});
+  if(!S.session) return;
+  if(r.err){ if(r.err==="not_deployed"||r.err==="no_tables") g.off=r.err; return; }   // the Summary button still opens and says what is missing
+  for(const k of keys) if(!(k in g.known)) g.known[k]=null;
+  for(const d of Array.isArray(r.data.digests)?r.data.digests:[]){ const k=dgKeyOfDigest(d); if(k) g.known[k]=d; if(!blank(d.documentId)) g.known["d:"+d.documentId]=d; if(!blank(d.filingVersionId)) g.known["v:"+d.filingVersionId]=d; }
+  render();
+}
+/* The Summary control under a row's document button. */
+function dgRowHTML(r, key){
+  if(!key) return "";
+  const d=dgOf().known[key];
+  return `<div class="dg-cell"><button type="button" class="btn sm" data-act="dg-open" data-doc="${esc(key)}" aria-haspopup="dialog">Summary</button>${d?`<span class="t2">Saved ${esc(fmtAt(d.madeAt))}</span>`:""}</div>`;
+}
+function dgRowOf(key){ return ((S.f.res&&Array.isArray(S.f.res.rows))?S.f.res.rows:[]).find(r=>docKeyOf(r)===key) || null; }
+/* A search row from a saved summary, for making it again from the search results. */
+function dgRowFromDigest(d){
+  const no=String(d.filingNo||""), sp=no.startsWith(SP_NO+" ");
+  return {documentId:d.documentId, filingVersionId:d.filingVersionId, trackingNumber:sp?"":no, sfcNumber:sp?no.slice(SP_NO.length+1):null, companyName:d.company, serffFilingStateId:d.state, typeOfInsurance:d.typeOfInsurance, serffFilingType:d.filingType, filingStatus:d.status, publishDate:d.published, pages:d.pages};
+}
+/* What "make" is sent about a filing: the search row's fields, the filing named by filingNo and sfcNumber, never by a bare
+   tracking number. */
+function dgMakeBody(r){
+  const sp=filingNo(r);
+  return {documentId:r.documentId??null, filingVersionId:r.filingVersionId??null, filingNo:filingNoText(r)||null, sfcNumber:sp&&sp.kind==="sp"?sp.value:(blank(r.sfcNumber)?null:r.sfcNumber),
+    companies:companiesOf(r).map(c=>({companyId:c.companyId??null, companyName:c.companyName??null, institutionId:c.institutionId??null})),
+    serffFilingStateId:r.serffFilingStateId??null, typeOfInsurance:r.typeOfInsurance??null, serffFilingType:r.serffFilingType??null, filingStatus:r.filingStatus??null, publishDate:r.publishDate??null, pages:r.pages??null};
+}
+async function dgOpen(key, opener, digest){
+  const g=dgOf(), row=dgRowOf(key) || (digest?dgRowFromDigest(digest):null);
+  g.dr={key, row, digest:digest||g.known[key]||null, loading:false, err:null, making:false, confirm:false, made:null, opener};
+  if(!g.dr.digest){
+    g.dr.loading=true; renderDigest();
+    const r=await callFn("snl-digest", {action:"get", filings:[key.startsWith("d:")?{documentId:Number(key.slice(2))}:{filingVersionId:key.slice(2)}]});
+    if(!g.dr || g.dr.key!==key) return;
+    g.dr.loading=false;
+    if(r.err){ if(r.err!=="signin") g.dr.err=r; }
+    else { const d=(r.data.digests||[])[0]||null; g.dr.digest=d; g.known[key]=d; }
+  }
+  render(); document.getElementById("dgClose")?.focus();
+}
+/* Closes the drawer and puts the cursor back on the Summary button that opened it (rebuilt meanwhile, so found again). */
+function dgClose(){
+  const g=dgOf(), back=g.dr&&g.dr.opener, key=g.dr&&g.dr.key; g.dr=null; renderDigest();
+  if(back && document.contains(back)) back.focus();
+  else if(key) document.querySelector(`[data-act="dg-open"][data-doc="${CSS.escape(key)}"]`)?.focus();
+}
+async function dgMake(){
+  const g=dgOf(), dr=g.dr; if(!dr || dr.making || !dr.row) return;
+  dr.making=true; dr.err=null; dr.confirm=false; render();
+  const r=await callFn("snl-digest", {action:"make", filing:dgMakeBody(dr.row), refresh:!!dr.digest});
+  if(g.dr!==dr) return;
+  dr.making=false;
+  if(r.err){ if(r.err!=="signin") dr.err=r; }
+  else if(r.data.digest){ dr.digest=r.data.digest; dr.made={usage:r.data.usage||null, fromStore:!!r.data.fromStore, note:r.data.note||""}; g.known[dr.key]=r.data.digest; S.chatUseAt=0; loadStatus(); }
+  render(); document.getElementById("dgClose")?.focus({preventScroll:true});
+}
+function dgPageBtn(key, page){
+  if(!isNum(page)) return "";
+  return key ? `<button type="button" class="lnk t2" data-act="open-doc" data-doc="${esc(key)}" data-page="${esc(page)}" aria-label="Open the document at page ${esc(page)}">page ${esc(count(page))}</button>` : `<span class="t2">page ${esc(count(page))}</span>`;
+}
+function dgListHTML(items, key, empty, line){
+  return items.length ? `<ul class="dgl">${items.map(x=>`<li>${line(x)} ${dgPageBtn(key, x.page)}</li>`).join("")}</ul>` : `<p class="t2">${empty}</p>`;
+}
+function dgDigestHTML(d, key){
+  const arr=v=>Array.isArray(v)?v.filter(x=>x&&typeof x==="object"):[];
+  const programs=arr(d.programs), forms=arr(d.forms), elig=arr(d.eligibility), notable=arr(d.notable), rate=d.rate&&typeof d.rate==="object"?d.rate:{};
+  const none="None found on the pages read.";
+  let h=`<p class="t2" id="dgMeta">Made by Claude on ${esc(fmtAt(d.madeAt))} from ${esc(dgReadText(d.read, d.pages))}.${dgReadAll(d)?"":" It doesn't cover the other pages: open the document for those."} Claude's reading of the filing: check the page before you rely on a point.</p>`;
+  h+=`<section id="dgSummary"><h3>Summary</h3><p style="margin:0">${blank(d.summary)?"n/d":esc(d.summary)}</p></section>`;
+  h+=`<section id="dgPrograms"><h3>Programs</h3>${dgListHTML(programs, key, none, p=>`<b>${esc(p.name)}</b>${p.segment?` <span class="pill">${esc(p.segment)}</span>`:` <span class="t2">segment n/d</span>`}${!blank(p.basis)?`<div class="t2 basis">Based on: "${esc(p.basis)}"</div>`:""}`)}</section>`;
+  h+=`<section id="dgForms"><h3>Forms</h3>${forms.length?`<table><thead><tr><th>Form</th><th>Title</th><th class="c-pg">Page</th></tr></thead><tbody>${forms.map(f=>{
+      const act=[f.action?esc(String(f.action)[0].toUpperCase()+String(f.action).slice(1)):"", f.replaces?`replaces ${esc(f.replaces)}`:"", !blank(f.program)?`program ${esc(f.program)}`:""].filter(Boolean).join(", ");
+      return `<tr><td><b>${esc(f.number)}</b>${f.edition?`<div class="t2">Edition ${esc(f.edition)}</div>`:""}</td><td>${blank(f.title)?"n/d":esc(f.title)}${act?`<div class="t2">${act}</div>`:""}</td><td class="c-pg">${dgPageBtn(key, f.page)||"n/d"}</td></tr>`; }).join("")}</tbody></table>`:`<p class="t2">${none}</p>`}</section>`;
+  const money=v=>isNum(v)?usdM(v):"n/d", rates=[["Overall rate change", isNum(rate.overallPct)?pct(rate.overallPct):"n/d"],["Requested", isNum(rate.requestedPct)?pct(rate.requestedPct):"n/d"],["Approved", isNum(rate.approvedPct)?pct(rate.approvedPct):"n/d"],
+    ["Written premium affected", money(rate.premium)],["Policyholders affected", count(rate.policyholders)],["Effective, new business", fmtDay(rate.effectiveNew)],["Effective, renewals", fmtDay(rate.effectiveRenewal)]];
+  h+=`<section id="dgRate"><h3>Rate figures</h3>${isNum(rate.page)?`<div class="rate">${rates.map(([k,v])=>`<span>${k}</span><b>${esc(v)}</b>`).join("")}</div><p class="t2" style="margin-top:4px">From ${dgPageBtn(key, rate.page)}.</p>`:`<p class="t2">No rate figures were found on the pages read.</p>`}</section>`;
+  h+=`<section id="dgElig"><h3>Eligibility</h3>${dgListHTML(elig, key, none, e=>esc(e.text))}</section>`;
+  h+=`<section id="dgNotable"><h3>Notable points</h3>${dgListHTML(notable, key, none, n=>esc(n.text))}</section>`;
+  return h;
+}
+function dgDrawerHTML(){
+  const dr=dgOf().dr, d=dr.digest, r=dr.row||{}, key=dr.key;
+  const title = d ? dgName(d) : (filingNoText(r) || (key.startsWith("d:")?`document ${key.slice(2)}`:"this filing"));
+  const sub = d ? [d.company, d.state, d.typeOfInsurance, d.filingType].filter(x=>!blank(x)).join(", ") : [companiesOf(r)[0]&&companiesOf(r)[0].companyName, r.serffFilingStateId, r.typeOfInsurance, r.serffFilingType].filter(x=>!blank(x)).join(", ");
+  let body="", foot="";
+  if(dr.loading) body=`<p class="t2" id="dgLoading" role="status">Looking for a saved summary…</p>`;
+  else if(dr.making) body=`<div class="banner" id="dgMaking" role="status"><span><b>Claude is reading the filing.</b> This takes a minute or two. You can close this and come back: the summary is saved when it is ready.</span></div>`;
+  else {
+    if(dr.err){
+      const e=dr.err, setup = e.err==="not_deployed"||e.err==="no_tables"||e.err==="not_configured";
+      body+= setup ? `<div class="info" id="dgErr" role="status"><span><b>Summaries aren't set up yet.</b> ${esc(errText(e))}</span></div>` : `<div class="banner" id="dgErr" role="alert"><span><b>Couldn't make the summary.</b> ${esc(errText(e))}</span></div>`;
+    }
+    if(dr.made && dr.made.usage){ const u=dr.made.usage; body+=`<p class="t2" id="dgCost">Made just now. It cost ${costText(u.costUsd)} (${count(u.inputTokens)} tokens read, ${count(u.outputTokens)} written) and used ${plural(u.spRequests,"S&amp;P request")}.${dr.made.note?` ${esc(dr.made.note)}`:""}</p>`; }
+    if(d && !dr.confirm) body+=dgDigestHTML(d, key);
+    else if(!dr.err || dr.row){
+      if(!dr.row) body+=`<p class="t2">There is no saved summary of this filing yet.</p>`;
+      else body+=`<div id="dgOffer" style="display:flex;flex-direction:column;gap:10px">${d?`<p style="margin:0"><b>Summarise this filing again?</b> The new summary replaces the one made ${esc(fmtAt(d.madeAt))}.</p>`:`<p style="margin:0"><b>There is no saved summary of this filing yet.</b></p>`}<p class="t2" id="dgCostEst">${dgCost(r)}</p></div>`;
+    }
+    const offer = dr.row && (!d || dr.confirm);
+    foot = `${docButtonHTML(key, "Open document")}<span class="sp"></span>`
+      + (offer ? `${dr.confirm?`<button type="button" class="btn" data-act="dg-cancel">Cancel</button>`:""}<button type="button" class="btn primary" id="dgMake" data-act="dg-make">${d?"Summarise again":"Summarise this filing"}</button>`
+        : d && dr.row ? `<button type="button" class="btn" data-act="dg-again">Summarise again</button>` : "");
+  }
+  return `<div class="scrim" data-act="dg-close"></div><aside class="drawer dg" id="dgDrawer" role="dialog" aria-modal="true" aria-labelledby="dgTitle">
+    <div class="drawer-h"><div style="flex:1;min-width:0"><div class="kicker">Filing summary</div><h2 id="dgTitle">${esc(title)}</h2>${sub?`<div class="t2">${esc(sub)}</div>`:""}</div><button type="button" class="btn ghost" id="dgClose" data-act="dg-close" aria-label="Close">Close</button></div>
+    <div class="drawer-b" id="dgBody">${body}</div>${foot?`<div class="drawer-f">${foot}</div>`:""}</aside>`;
+}
+function renderDigest(){
+  let root=document.getElementById("dgRoot");
+  if(!root){ root=document.createElement("div"); root.id="dgRoot"; document.body.appendChild(root); }
+  const g=dgOf(), html = S.session && g.dr ? dgDrawerHTML() : "";
+  if(html===g.last) return;
+  const b=document.getElementById("dgBody"), top=b?b.scrollTop:0, focusId=document.activeElement&&root.contains(document.activeElement)?document.activeElement.id:"";
+  root.innerHTML=html; g.last=html;
+  const nb=document.getElementById("dgBody"); if(nb) nb.scrollTop=top;
+  if(focusId) document.getElementById(focusId)?.focus({preventScroll:true});
+}
+/* Search saved summaries: a small block on the Filings view, closed until it is opened. */
+function dgSearchHTML(){
+  const F=dgOf().find;
+  const head=`<div class="recent-h"><button type="button" class="recent-t" id="dgFindToggle" data-act="dg-find-toggle" aria-expanded="${F.open}" aria-controls="dgFindBody"><span class="ar" aria-hidden="true">${F.open?"▼":"▶"}</span>Search saved summaries</button>
+    <span class="t2">Filings Claude has already read: find a form number, a program or words. Searching costs nothing.</span></div>`;
+  if(!F.open) return `<section class="recent dgs" id="dgFind" aria-label="Search saved summaries">${head}</section>`;
+  let body=`<form id="dgFindForm" novalidate><label class="f">Form number, program or words<input type="search" id="dg_q" value="${esc(F.q)}" maxlength="200" placeholder="For example CHO 30 01, or private client" autocomplete="off"></label>
+    <label class="f" style="flex:0 1 180px">State<select id="dg_state"><option value="">All states</option>${stateOptions().map(s=>`<option value="${esc(s.id)}"${F.state===s.id?" selected":""}>${esc(s.name)}</option>`).join("")}</select></label>
+    <button type="submit" class="btn primary" ${F.busy?"disabled":""}>${F.busy?"Searching…":"Search"}</button></form>`;
+  if(F.err){ const e=F.err, setup=e.err==="not_deployed"||e.err==="no_tables"; body+= setup ? `<div class="info" id="dgFindErr" role="status"><span><b>Summaries aren't set up yet.</b> ${esc(errText(e))}</span></div>` : `<div class="banner" id="dgFindErr" role="alert"><span><b>Couldn't search the saved summaries.</b> ${esc(errText(e))}</span></div>`; }
+  const res=F.res;
+  if(res){
+    const m=Array.isArray(res.matches)?res.matches.filter(x=>x&&x.digest):[];
+    if(!m.length) body+=`<p class="t2" id="dgFindNone">No saved summary matches "${esc(F.asked&&F.asked.q)}"${F.asked&&F.asked.state?` in ${esc(F.asked.state)}`:""}. Only filings someone has summarised, or Claude has read for an answer, are searched; a filing without a summary may still match.</p>`;
+    else{
+      body+=`<p class="t2" id="dgFindCount">${plural(res.total,"saved summary matches","saved summaries match")}${isNum(res.total)&&+res.total>m.length?`; showing the newest ${count(m.length)}`:""}, newest first.</p>`;
+      body+=`<ul id="dgFindList" aria-label="Saved summaries that match">${m.map((x,i)=>{ const d=x.digest, key=dgKeyOfDigest(d);
+        const who=[dgName(d), d.company, d.state, !blank(d.published)?`published ${fmtDay(d.published)}`:""].filter(v=>!blank(v)).join(", ");
+        return `<li class="hit"><span class="t1">${esc(who)}</span><span class="t2"><b>${esc(DG_WHERE[x.where]||"Match")}:</b> ${esc(x.snippet)}</span>
+          <span class="inline"><button type="button" class="btn sm" data-act="dg-found" data-i="${i}" aria-haspopup="dialog">Summary</button>${docButtonHTML(key, "Open document")}</span></li>`; }).join("")}</ul>`;
+    }
+  }
+  return `<section class="recent dgs" id="dgFind" aria-label="Search saved summaries">${head}<div id="dgFindBody" style="display:flex;flex-direction:column;gap:8px;min-width:0">${body}</div></section>`;
+}
+async function dgSearch(){
+  const F=dgOf().find; if(F.busy) return;
+  F.q=(document.getElementById("dg_q")?.value||"").trim(); F.state=document.getElementById("dg_state")?.value||"";
+  if(!F.q){ F.err={err:"bad", msg:"Type a form number or some words to search for."}; render(); document.getElementById("dg_q")?.focus(); return; }
+  F.busy=true; F.err=null; render();
+  const asked={q:F.q, state:F.state};
+  const r=await callFn("snl-digest", {action:"search", q:F.q, ...(F.state?{state:F.state}:{})});
+  F.busy=false;
+  if(r.err){ if(r.err!=="signin"){ F.err=r; F.res=null; } }
+  else { F.res=r.data; F.asked=asked; }
+  render(); if(F.err) document.getElementById("dg_q")?.focus({preventScroll:true});
 }
 
 /* ---------- export: CSV built here, XLSX with SheetJS loaded on the first click ---------- */
@@ -3132,13 +3342,14 @@ function render(){
   else setMenu(false);
   document.body.classList.toggle("signed", on);
   const keep=keepUi("view");
-  if(!on){ v.innerHTML=loginHTML(); keep(); renderDrawer(); renderAsk(); renderConn(); renderLive(); return; }
+  if(!on){ v.innerHTML=loginHTML(); keep(); renderDrawer(); renderAsk(); renderConn(); renderLive(); renderDigest(); return; }
   document.querySelectorAll("nav.tabs a").forEach(a=>a.setAttribute("aria-current", a.dataset.view===S.view ? "page" : "false"));
   document.getElementById("stripIn").innerHTML=stripHTML();
   v.innerHTML = S.view==="statutory" ? renderStatutory() : S.view==="profile" ? renderProfile() : S.view==="snapshot" ? renderSnapshot() : renderFilings();
   keep(); renderDrawer(); renderAsk();
   renderConn();
   renderLive();
+  renderDigest(); if(S.view==="filings") dgPrefetch();
 }
 function renderDrawer(){
   const root=document.getElementById("drawerRoot"), dr=S.session?S.drawer:null;
@@ -3239,6 +3450,13 @@ document.addEventListener("click", e=>{
     case "desc-toggle": f.openDesc[t.dataset.key]=!f.openDesc[t.dataset.key]; render(); break;
     case "co-toggle": f.openCo[t.dataset.key]=!f.openCo[t.dataset.key]; render(); break;
     case "open-doc": openDoc(t.dataset.doc, t.dataset.page); break;
+    case "dg-open": dgOpen(t.dataset.doc, t); break;
+    case "dg-close": dgClose(); break;
+    case "dg-make": dgMake(); break;
+    case "dg-again": if(dgOf().dr){ dgOf().dr.confirm=true; dgOf().dr.err=null; render(); document.getElementById("dgMake")?.focus(); } break;
+    case "dg-cancel": if(dgOf().dr){ dgOf().dr.confirm=false; render(); } break;
+    case "dg-find-toggle": dgOf().find.open=!dgOf().find.open; render(); if(dgOf().find.open) document.getElementById("dg_q")?.focus(); break;
+    case "dg-found": { const x=(dgOf().find.res&&dgOf().find.res.matches||[])[+t.dataset.i]; if(x&&x.digest) dgOpen(dgKeyOfDigest(x.digest), t, x.digest); break; }
     case "export": exportTable(exportOf(t), t.dataset.fmt); break;
     case "recent-toggle": toggleRecent(); break;
     case "recent-open": reopenRecent(+t.dataset.i); break;
@@ -3327,6 +3545,7 @@ document.addEventListener("submit", e=>{
   else if(e.target.id==="pwForm") savePassword();
   else if(e.target.id==="searchForm") runSearch(false);
   else if(e.target.id==="statForm") runStat(false);
+  else if(e.target.id==="dgFindForm") dgSearch();
 });
 document.addEventListener("keydown", e=>{
   if(e.target.id==="f_q" && e.key==="Enter"){ e.preventDefault(); resolveCompany(); return; }
@@ -3338,6 +3557,7 @@ document.addEventListener("keydown", e=>{
   if(e.target.id==="ask_input" && e.key==="Enter" && !e.shiftKey && !e.isComposing){ e.preventDefault(); askQuestion(); return; }
   if(e.key==="Enter" && e.target.closest && e.target.closest("#pwForm")){ e.preventDefault(); savePassword(); return; }
   if(e.key==="Escape" && S.drawer){ closeDrawer(); return; }
+  if(e.key==="Escape" && S.dg && S.dg.dr){ dgClose(); return; }
   if(e.key==="Escape" && S.menuOpen){ setMenu(false); document.getElementById("whoDot").focus(); return; }
   // Esc closes the Ask Claude panel, unless the cursor is in a box on the page, where Esc belongs to that box
   if(e.key==="Escape" && S.ask.open){ const at=document.activeElement; if(!at || at===document.body || at.closest("#askRoot") || !/^(INPUT|TEXTAREA|SELECT)$/.test(at.tagName)) closeAsk(); }
@@ -3358,6 +3578,7 @@ function resetState(){
   S.w=freshWatch();
   S.pf=freshProfile();   // the template's bytes and any built file go with it
   S.snap=freshSnap();
+  S.dg=freshDigests();
 }
 async function onSignedIn(session){
   const {data, error}=await S.sb.from("profiles").select("username,display_name,role").eq("id", session.user.id).maybeSingle();
