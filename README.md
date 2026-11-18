@@ -69,7 +69,7 @@ The role is `corpdev` (can also set up the statutory mapping) or `reader` (can s
 S&P's filings search needs S&P's own company id or institution id for every company, and it has no search by name. Loading a list once lets everyone find a company, or a whole group, by name or NAIC code.
 
 1. Export the list from S&P Capital IQ Pro with these columns where you have them: company name, S&P company id, institution id, NAIC company code, NAIC group code and group name. It needs the name and at least one of: an S&P company id, an institution id, or a NAIC company code. A NAIC code alone is enough to be useful: on the Statutory view people can type part of a company or group name, pick from the matches and add a whole group at once, instead of remembering NAIC codes. Companies with an S&P id can also be found by name on the Filings view; companies with only a NAIC code show there but can't be searched for filings.
-2. Save it as a CSV (in Excel: **File > Save As > CSV UTF-8**). Keep the file out of this repository: it may be S&P's data, and `.csv` files are ignored by git here for that reason.
+2. Save it as a CSV (in Excel: **File > Save As > CSV UTF-8**). S&P's own export headings, such as "S&P Institution Key" and "S&P Statutory Entity Key", are recognised without any options. Keep the file out of this repository: it may be S&P's data, and `.csv` files are ignored by git here for that reason.
 3. See what would be loaded. This changes nothing and needs no key:
 
 ```bash
@@ -425,5 +425,7 @@ npm test
 - **Documents.** Usually PDFs. Claude can read PDFs and plain text of up to 100 pages each; anything else opens from the Filings view. When S&P gives no page count, the app counts the pages in the file itself, and refuses a file over 5 MB whose pages it can't count.
 - **Follow-up questions** in the same conversation carry the earlier questions and answers, not the documents. Claude re-reads a document if it needs it again (1 S&P request).
 - **Bulk download** (the "API Drive" delivery in S&P's API specification) needs separate credentials and is not used.
+- **Searching a whole group.** Type a group's name in the company finder and choose "Add all" on the group: one search takes up to 100 companies. S&P counts one request for each 10 companies for each 365 days of dates, and one search may use at most 60 (Claude: 40). A 69-company group costs about 7 requests a year: 12 months, 3 or 5 years run; 10 years is refused, with a message saying how many years or companies would fit.
+- **Keeping a search out of Recent searches.** Tick "Keep this search out of Recent searches" on the Filings form. The result is still saved, so the same search costs nothing again, but it isn't listed. Whoever last fetches a search from S&P decides whether it is listed; opening a saved result changes nothing. This hides a search from the list, not from the database: any login can still read saved results there.
 - **One answer at a time.** A login with an answer in progress is asked to wait before asking another. If its tab was closed, open the app again to pick it up, or a new question is accepted ten minutes later.
 - **Housekeeping.** Finished answers are removed after 30 days, and leftovers from abandoned answers are cleared whenever someone opens the app.
