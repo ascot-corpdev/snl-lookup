@@ -229,7 +229,7 @@ The free plan pauses a project after about a week with no activity. To prevent t
 
 ### 9. Watchlist (optional)
 
-Name the companies and states the team follows once; a daily check shows any new rate, rule or form filing on the Filings view, and can email it. It works before S&P is set up (it says "not set up yet" and asks S&P nothing) and starts checking when the S&P secrets are set.
+Name the companies and states the team follows once; a daily check shows any new rate, rule or form filing on the Filings view, and can email it. Until each step below is done, the watchlist card on the Filings view says which one is missing.
 
 The watchlist is visible to every login on the site and is kept in your Supabase project. It names companies the team follows, so decide whether a name belongs on it before adding it.
 
@@ -254,7 +254,7 @@ The watchlist is visible to every login on the site and is kept in your Supabase
    supabase secrets set SITE_URL=https://YOUR_GITHUB_USER.github.io/REPO_NAME/
    ```
 
-   Without `WATCH_FROM`, Resend only delivers to the Resend account's own address. Without `SITE_URL`, the email links to the first address in `ALLOWED_ORIGIN`.
+   `RESEND_API_KEY` is optional: without it the Filings view still shows everything. Without `WATCH_FROM`, Resend only delivers to the Resend account's own address. Without `SITE_URL`, the email links to the first address in `ALLOWED_ORIGIN`.
 3. Deploy the function. `--no-verify-jwt` is safe: it checks the login, or the secret, itself.
 
    ```bash
@@ -263,13 +263,17 @@ The watchlist is visible to every login on the site and is kept in your Supabase
 
 4. **SQL editor:** open `supabase/watch_schedule.sql`, replace `YOUR_PROJECT_REF` and `YOUR_WATCH_SECRET` (the same value as `WATCH_SECRET`), and run it. It checks every day at 06:23 UTC. Don't commit the file with your values in it.
 
-On the site, a Corp Dev login chooses companies and states in the search form and clicks **Manage**, then **Add the companies and states chosen below**. **Check now** runs a check straight away.
+On the site, a Corp Dev login chooses companies and states in the search form and clicks **Manage**, then **Add the companies and states chosen below**. Then click **Check now** once: this first check records what is already there as the starting point, so the next daily check shows only what is new. Run `supabase/watch_schedule.sql` only once; to change the secret later, use the line at the end of that file.
 
 **What a check costs.** Each check asks S&P for filings published in the last 14 days. It uses one S&P request for every 10 company ids, one for every 10 institution ids, and up to 2 more (the sign-in and S&P's list of filing statuses, often reused), plus one for each extra page of results. For example, 25 companies by company id and 3 by institution id cost 3 + 1 + 2 = 6 requests a day, about 180 a month. A check may use at most 30 requests, so it covers up to 280 companies. A bigger watchlist is refused before any request is spent, with how many companies to remove. Checks go through the same one-a-second throttle and hourly and daily counter as every other S&P call.
 
 **The first check only records a starting point.** A filing counts as new only if its company and state were already covered by the last complete check, so adding a company never floods the list.
 
-**Email and S&P's licence.** Emailing S&P's data out of the app is a licence question for the owner: check that your S&P agreement allows it before setting `RESEND_API_KEY`. The email is kept to the company, state, filing type, one line of description and the tracking number of each new filing, with a link to the app. Without email, the Filings view shows the same information.
+**Marks.** Some new filings carry a mark such as *New program*, *New to state*, *New form*, *Withdrawal* or *Large rate change* (10% or more either way). Marked filings are listed first, and a button shows only those. A mark is a hint worked out from the filing type, status, rate impact and description, never a fact: the page and the email say "may be" and show the words or figures that triggered it. A filing without a mark can still matter. Changing the rules re-marks every kept filing; no database change is needed.
+
+**After a gap.** If the last complete check was more than 3 days ago (switched off, failing, or Supabase paused), the next check looks back to 14 days before it, up to 60 days, so filings published in the gap are still found. This uses no extra S&P requests beyond extra pages of results.
+
+**Email.** The email gives each new filing's company, state, filing type, one line of description, tracking number and any mark, marked ones first, with a link to the app. Without email, the Filings view shows the same information.
 
 ### 10. Company profiles (optional)
 
@@ -374,6 +378,7 @@ Nothing in this list is guessed in the code: each item is either handled both wa
 | **Paging fields in search results** (`totalPages` and so on). They are in S&P's user guide but not the public specification. The app works with or without them. | `searchFilings` in `_shared/filings.ts` | First live call |
 | **How to find a company's S&P company id or institution id**, and which identifiers these are in Capital IQ Pro. The filings API has no company search and cannot search by NAIC code, so names are looked up in a list you load (step 2a) and in companies seen in earlier results. | `resolveEntity` in `_shared/filings.ts` | S&P |
 | **Which carriers Claude checks for a question about a market.** S&P's filings search has no "every company in a state" option, so for a market or segment question Claude chooses likely carriers itself, looks them up in the company list (several names and whole groups in one step) and says in its answer that the choice is its own and may miss carriers. | `resolveMany` in `_shared/filings.ts`; the system prompt in `_shared/chat.ts` | Read the answer: it names the carriers checked and those not in the list |
+| **The wording that marks a watchlist filing** as a new program, new form, new to a state or a withdrawal, and that S&P's rate impact is in percentage points. The rules were written before any real filing had been seen. | `flagFiling` and `rateChange` in `_shared/watch.ts` | The first live watchlist results |
 | **The column headings of a Capital IQ Pro export.** The import matches likely headings and shows what it matched before loading; any column can be named outright. | `matchColumns` in `scripts/companies-lib.mjs` | Your first export |
 | **Date and rate-impact formats** in results. The app shows what S&P sends and "n/d" when it is missing. | The Filings view | First live call |
 | **How S&P counts requests**: whether sign-ins count, and when its day starts. The app counts every call and uses UTC days, so it can only over-count. S&P's public API specification also limits document downloads to 500 an hour on a trial account (1,000 in production); the app does not count those separately. | `makeGate` in `_shared/spgmi.ts` | S&P |
