@@ -1,0 +1,24 @@
+{
+  "_about": "Made-up company-list rows for the snapshot page tests, in the shape the snl-filings function answers {action: \"resolve\"} with, as the loaded company list has them (institution ids and group names; no company ids, NAIC codes or group codes). byName answers a look-up of \"Calloway\"; byGroup answers the look-up of the group's name, which also finds a company in another group whose name contains it.",
+  "byName": {
+    "query": "Calloway",
+    "matches": [
+      { "companyId": null, "companyName": "Calloway Insurance Co", "naicCompanyCode": null, "institutionId": "5000001", "spStatEntityId": "C5000001", "naicGroupCode": null, "naicGroupName": "Calloway Group (SNL P&C Group)" },
+      { "companyId": null, "companyName": "Calloway Home Co", "naicCompanyCode": null, "institutionId": "5000002", "spStatEntityId": "C5000002", "naicGroupCode": null, "naicGroupName": "Calloway Group (SNL P&C Group)" },
+      { "companyId": null, "companyName": "Calloway Re Co", "naicCompanyCode": "90009", "institutionId": null, "spStatEntityId": null, "naicGroupCode": null, "naicGroupName": "Calloway Group (SNL P&C Group)" },
+      { "companyId": null, "companyName": "Calloway <script>window.__xss=1</script> Co", "naicCompanyCode": null, "institutionId": "5000009", "spStatEntityId": null, "naicGroupCode": null, "naicGroupName": "Nonesuch <b>Group</b>" }
+    ],
+    "note": null
+  },
+  "byGroup": {
+    "query": "Calloway Group",
+    "matches": [
+      { "companyId": null, "companyName": "Calloway Coastal Co", "naicCompanyCode": null, "institutionId": "5000003", "spStatEntityId": "C5000003", "naicGroupCode": null, "naicGroupName": "Calloway Group (SNL P&C Group)" },
+      { "companyId": null, "companyName": "Calloway Group Services Co", "naicCompanyCode": null, "institutionId": "5000020", "spStatEntityId": null, "naicGroupCode": null, "naicGroupName": "Tarrow Mutual Group" },
+      { "companyId": null, "companyName": "Calloway Home Co", "naicCompanyCode": null, "institutionId": "5000002", "spStatEntityId": "C5000002", "naicGroupCode": null, "naicGroupName": "Calloway Group (SNL P&C Group)" },
+      { "companyId": null, "companyName": "Calloway Insurance Co", "naicCompanyCode": null, "institutionId": "5000001", "spStatEntityId": "C5000001", "naicGroupCode": null, "naicGroupName": "Calloway Group (SNL P&C Group)" },
+      { "companyId": null, "companyName": "Calloway Re Co", "naicCompanyCode": "90009", "institutionId": null, "spStatEntityId": null, "naicGroupCode": null, "naicGroupName": "Calloway Group (SNL P&C Group)" }
+    ],
+    "note": null
+  }
+}
