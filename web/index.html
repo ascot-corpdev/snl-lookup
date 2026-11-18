@@ -621,6 +621,7 @@ const CFG = Object.assign({}, window.SNL_CONFIG || {});
 if(CFG.supabaseUrl) CFG.supabaseUrl = String(CFG.supabaseUrl).trim().replace(/\/+$/,"").replace(/\/(rest|auth)\/v1$/,"");
 // The company's name is a setting (orgName, from the ORG_NAME repository variable), so the public code stays neutral.
 const ORG = String(CFG.orgName ?? "").trim();
+const CF_SIGNON = CFG.signOn === "cloudflare";   // served by the Cloudflare Worker: Cloudflare signs people in (see "Cloudflare sign-on" below)
 document.title = ORG ? `${ORG} SNL lookup` : "SNL lookup";
 { const f = document.getElementById("footOrg"); if(f) f.innerHTML = ORG ? `2026 ${esc(ORG)}` : "2026"; }
 // How often the page checks a running answer, how old a heartbeat may get before the page asks the function to
@@ -791,11 +792,12 @@ function problemHTML(r, lead, retryAct){
 /* Returns {data} on success, {res} for a raw answer (documents), or {err, msg, status, requestId}. */
 async function callFn(fn, payload, opts){
   let session=null;
+  if(CF_SIGNON) session=await cfSessionNow(); else
   try{ ({data:{session}}=await S.sb.auth.getSession()); }catch{}
   if(!session){ sessionEnded("Your session ended. Sign in again."); return {err:"signin", msg:"Your session ended. Sign in again.", status:401}; }
   let res;
   try{
-    res=await fetch(CFG.supabaseUrl+"/functions/v1/"+fn, {method:"POST",
+    res=await (CF_SIGNON?cfFetch:fetch)(CFG.supabaseUrl+"/functions/v1/"+fn, {method:"POST",
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+session.access_token,"apikey":CFG.supabaseAnonKey}, body:JSON.stringify(payload)});
   }catch{ return {err:"network", msg:`Couldn't reach ${FN[fn]}. Check your connection and try again.`, status:0}; }
   if(res.ok && opts && opts.raw) return {res, status:res.status};
@@ -5499,6 +5501,7 @@ function render(){
   document.getElementById("tabs").hidden=!on;
   document.getElementById("signoutBtn").hidden=!on;
   document.getElementById("pwBtn").hidden=!on;
+  if(CF_SIGNON) cfHeader();   // no password to change: Cloudflare signs people in
   document.getElementById("strip").hidden=!on;
   const wn=document.getElementById("whoName"); wn.textContent=on?S.session.name:""; wn.title=on?`${S.session.username||""} · ${ROLES[S.session.role]||""}`:"";
   document.getElementById("whoMenuName").innerHTML=on?`<b>${esc(S.session.name)}</b><span>${esc(S.session.username||"")} · ${esc(ROLES[S.session.role]||"")}</span>`:"";
@@ -5859,6 +5862,8 @@ document.addEventListener("click", e=>{
   switch(a){
     case "who-menu": setMenu(!S.menuOpen); break;
     case "signout": signOut(); break;
+    case "cf-reload": location.reload(); break;
+    case "cf-retry": cfBoot(); break;
     case "change-pw": S.lastFocusEl=t.closest("#whoMenu")?document.getElementById("whoDot"):t; S.drawer={kind:"password"}; renderDrawer(); break;
     case "close": closeDrawer(); break;
     case "save-pw": savePassword(); break;
@@ -6152,17 +6157,20 @@ async function doLogin(){
   await onSignedIn(data.session);
 }
 async function signOut(){
+  if(CF_SIGNON){ cfSignOut(); return; }
   S.leaving=true; try{ await S.sb.auth.signOut(); }catch{} S.leaving=false;
   resetState(); S.loginErr=""; history.replaceState(null,"",location.pathname); render();
 }
 /* A function said the login is no longer good: back to the sign-in form, with its message. */
 async function sessionEnded(msg){
+  if(CF_SIGNON){ if(S.session) cfEnded("ended", CF_ENDED); return; }
   if(!S.session) return;
   resetState(); S.loginErr=msg||"Sign in again."; render();
   S.leaving=true; try{ await S.sb.auth.signOut(); }catch{} S.leaving=false;
 }
 function loginHTML(){
   const wrap = inner => `<div class="login" role="region" aria-label="Sign in">${inner}</div>`;
+  if(CF_SIGNON) return wrap(cfLoginHTML());
   if(S.configMissing) return wrap(`<h2>Not connected yet</h2>
     <p>This site doesn't know which Supabase project to use.</p>
     <p><b>On GitHub Pages:</b> add the repository variables <code>SUPABASE_URL</code> and <code>SUPABASE_PUBLISHABLE_KEY</code>, then run the deploy again.</p>
@@ -6177,8 +6185,126 @@ function loginHTML(){
       <div class="inline"><button class="btn primary" ${S.loginBusy?"disabled":""}>${S.loginBusy?"Signing in…":"Sign in"}</button></div>
     </form><p class="source">Forgot your password? Ask the site owner to reset it. Logins are created by the owner; there is no sign-up.</p>`);
 }
+/* ---------- Cloudflare sign-on ----------
+   When config.js says signOn "cloudflare", the site is served by the Cloudflare Worker (worker/index.js) behind
+   Cloudflare Access, and there is no username and password here: Cloudflare has already signed the person in. The
+   Worker's /auth/session turns that sign-in into a short Supabase session (the access token only, never a refresh
+   token). The Supabase client is given that token for every table read, storage call and function call; it is
+   renewed quietly a few minutes before it ends, and once when Supabase answers 401. Sign out goes through Access's
+   own logout. Without the marker, the username and password sign-in above is used as before. */
+const CF_TIMING = {before:300000, retry:30000, soon:60000};   // renew this long before the end; retry a failed renewal; renew first when the token ends sooner than this
+S.cf=null;        // {token, exp: when it ends on this computer's clock, timer, renewing}
+S.cfState=null;   // why no one is signed in: {kind:"loading"|"notset"|"unreachable"|"ended"|"leaving", msg}
+const CF_ENDED = "Cloudflare sign-ins last a set time, and the site owner may have changed who can use the site. Reload the page to sign in again through Cloudflare.";
+/* Asks the Worker for a session. {ok:true, data} or {kind, msg}. A redirect means Access wants a fresh sign-in. */
+async function cfAsk(){
+  let res;
+  try{ res=await fetch("/auth/session", {method:"POST", credentials:"same-origin", redirect:"manual", cache:"no-store", headers:{"Content-Type":"application/json"}, body:'{"action":"session"}'}); }
+  catch{ return {kind:"unreachable", msg:"The sign-in service can't be reached. Check your connection and try again."}; }
+  if(res.type==="opaqueredirect" || res.status===0) return {kind:"ended", msg:CF_ENDED};
+  let body=null; try{ body=await res.json(); }catch{}
+  if(res.ok && body && typeof body.accessToken==="string" && body.accessToken && body.profile && ROLES[body.profile.role]) return {ok:true, data:body};
+  const msg=body && typeof body.message==="string" && body.message ? body.message : "";
+  if(body && body.error==="not_configured") return {kind:"notset", msg:msg||"Cloudflare let you in, but the site isn't set up yet. Ask the site owner."};
+  if(res.status===401 || res.status===403) return {kind:"ended", msg:msg||CF_ENDED};
+  return {kind:"unreachable", msg:msg||"The sign-in service can't be reached. Try again in a minute."};
+}
+function cfTake(d){
+  const now=Date.now(), life=Number(d.expiresIn)>0 ? Number(d.expiresIn)*1000 : Math.max(0, Number(d.expiresAt)*1000-now);
+  if(S.cf) clearTimeout(S.cf.timer);
+  S.cf={token:d.accessToken, exp:now+life, timer:null, renewing:null};
+  const p=d.profile, name=String(p.displayName||p.username||p.email||"").trim()||"Signed in";
+  const next={username:String(p.email||p.username||""), name, role:p.role, uid:String(p.id||"")};
+  const changed=!S.session || S.session.role!==next.role || S.session.name!==next.name;
+  S.session=S.session ? Object.assign(S.session, next) : next;
+  cfSchedule();
+  return changed;
+}
+function cfSchedule(delay){
+  if(!S.cf) return;
+  clearTimeout(S.cf.timer);
+  const left=S.cf.exp-Date.now();
+  if(delay===undefined) delay=Math.max(left/2, left-CF_TIMING.before);   // a few minutes before the end (halfway for a short token)
+  S.cf.timer=setTimeout(()=>{ cfRenew(); }, Math.max(1000, delay));
+}
+/* Renews the token. One renewal at a time; everyone waiting gets the same answer. */
+function cfRenew(){
+  if(!S.cf) return Promise.resolve(false);
+  if(S.cf.renewing) return S.cf.renewing;
+  const mine=S.cf;
+  mine.renewing=(async()=>{
+    const r=await cfAsk();
+    if(S.cf!==mine) return false;   // signed out meanwhile
+    mine.renewing=null;
+    if(r.ok){ if(cfTake(r.data) && S.session) render(); return true; }
+    if(r.kind==="unreachable" && mine.exp-Date.now()>10000){ cfSchedule(CF_TIMING.retry); return false; }   // still good for now: try again shortly
+    cfEnded(r.kind, r.kind==="unreachable" ? "The sign-in service can't be reached, so your session couldn't be renewed. Check your connection and try again." : r.msg);
+    return false;
+  })();
+  return mine.renewing;
+}
+/* The token for the next request (supabase-js asks before each one), renewed first when it is about to end. */
+async function cfToken(){
+  if(S.cf && S.cf.exp-Date.now()<CF_TIMING.soon) await cfRenew();
+  return S.cf ? S.cf.token : null;
+}
+async function cfSessionNow(){ const t=await cfToken(); return t ? {access_token:t} : null; }
+/* fetch for everything sent to Supabase: on a 401, renew the token once and send the same request again. */
+async function cfFetch(input, init){
+  const res=await fetch(input, init);
+  const url=typeof input==="string" ? input : input instanceof URL ? input.href : (input && input.url) || "";
+  if(res.status!==401 || !S.cf || !CFG.supabaseUrl || !url.startsWith(CFG.supabaseUrl) || (init && init.body && typeof init.body.getReader==="function")) return res;
+  const h=new Headers((init && init.headers) || (input && input.headers) || {}), was=(h.get("Authorization")||"").replace(/^Bearer\s+/i,"");
+  if(S.cf.token===was && !(await cfRenew())) return res;
+  if(!S.cf || S.cf.token===was) return res;
+  h.set("Authorization", "Bearer "+S.cf.token);
+  return fetch(input, {...(init||{}), headers:h});
+}
+function cfEnded(kind, msg){
+  if(S.cf) clearTimeout(S.cf.timer);
+  S.cf=null;
+  if(S.session) resetState();
+  S.cfState={kind, msg}; S.authChecked=true; render();
+}
+async function cfSignOut(){
+  const t=S.cf && S.cf.token;
+  cfEnded("leaving", "");
+  // End this Supabase session too (best effort), then let Access sign the browser out.
+  if(t && CFG.supabaseUrl){ try{ await Promise.race([fetch(CFG.supabaseUrl+"/auth/v1/logout?scope=local", {method:"POST", headers:{"Authorization":"Bearer "+t, "apikey":CFG.supabaseAnonKey}}), new Promise(r=>setTimeout(r, 3000))]); }catch{} }
+  location.assign("/auth/signout");
+}
+function cfHeader(){
+  document.getElementById("pwBtn").hidden=true;
+  document.querySelectorAll('#whoMenu [data-act="change-pw"]').forEach(b=>{ b.hidden=true; });
+}
+function cfLoginHTML(){
+  const st=S.cfState||{kind:"loading"};
+  const box=(h, p, btn) => `<div class="kicker">Strategy and corporate development</div><h2>${esc(h)}</h2><p role="${st.kind==="loading"||st.kind==="leaving"?"status":"alert"}">${esc(p)}</p>${btn||""}`;
+  if(st.kind==="notset") return box("Not set up yet", st.msg)+`<p class="source">The README has the steps (Cloudflare sign-on).</p>`;
+  if(st.kind==="unreachable") return box("Can't reach the sign-in service", st.msg, `<div class="inline"><button class="btn primary" data-act="cf-retry">Try again</button></div>`);
+  if(st.kind==="ended") return box("Your sign-in has ended", st.msg, `<div class="inline"><button class="btn primary" data-act="cf-reload">Reload</button></div>`);
+  if(st.kind==="leaving") return box("Signing you out", "One moment…");
+  return box("SNL lookup", "Signing you in…");
+}
+async function cfBoot(){
+  S.cfState={kind:"loading"}; render();
+  if(!CFG.supabaseUrl || !CFG.supabaseAnonKey){
+    S.cfState={kind:"notset", msg: CFG.configProblem==="secret_key"
+      ? "Cloudflare let you in, but the site isn't set up yet: the Worker's SUPABASE_PUBLISHABLE_KEY setting holds a secret key, which is never sent to browsers. Ask the site owner to set the publishable key (sb_publishable_...) instead."
+      : "Cloudflare let you in, but the site isn't set up yet: the Worker doesn't know which Supabase project to use. Ask the site owner to set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY on the Worker."};
+    render(); return;
+  }
+  if(!window.supabase){ S.cfState={kind:"unreachable", msg:"Part of the page couldn't load. Check your connection and try again."}; render(); return; }
+  const r=await cfAsk();
+  if(!r.ok){ S.cfState={kind:r.kind, msg:r.msg}; render(); return; }
+  if(!S.sb) S.sb=window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, {accessToken:cfToken, global:{fetch:cfFetch}});
+  cfTake(r.data); S.cfState=null; S.authChecked=true; S.loginErr="";
+  route(); loadStatus(); loadPast(false);
+}
+
 async function boot(){
   S.f=freshFilings(); S.st=freshStat();
+  if(CF_SIGNON){ cfBoot(); return; }
   if(!CFG.supabaseUrl || !CFG.supabaseAnonKey || !window.supabase){ S.configMissing=true; render(); return; }
   S.sb=window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
   render();
