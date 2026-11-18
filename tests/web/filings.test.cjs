@@ -59,7 +59,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   ok("form and a hint, no results yet", await p.isVisible("#searchForm") && (await t.txt("#noSearch")).startsWith("Choose companies, states and dates, then search."));
   ok("reference lists asked once, without refresh", same(t.of("reference").map(c=>c.body),[{action:"reference"}]));
   ok("S&P's lists fill the three filters", (await p.$$("#chk_toi input")).length===14 && (await p.$$("#chk_ftype input")).length===4 && (await p.$$("#chk_fstatus input")).length===4);
-  ok("states come from S&P's list, with the name on hover", same(await t.all("#states button"),["CA","FL","GA","NY","SC","TX"]) && (await p.getAttribute('#states [data-s="FL"]',"title"))==="Florida");
+  ok("states come from S&P's list, each with its name", same(await t.all("#states button .stc"),["CA","FL","GA","NY","SC","TX"]) && (await t.txt('#states [data-s="FL"]'))==="Florida FL");
   ok("dates default to the last 12 months, one S&P request wide", (await p.inputValue("#f_from"))==="2025-11-14" && (await p.inputValue("#f_to"))==="2026-11-13");
 
   // ----- checks before anything is sent -----
@@ -124,7 +124,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   ok("Choose all picks every state", (await p.$$('#states [aria-pressed="true"]')).length===6);
   await p.click('button[data-act="state-none"]'); await p.waitForTimeout(80);
   await p.click('#states [data-s="GA"]'); await p.click('#states [data-s="FL"]'); await p.waitForTimeout(80);
-  ok("states toggle, and the count says so", same(await t.all('#states [aria-pressed="true"]'),["FL","GA"]) && (await t.txt("#searchForm")).includes("States 2 chosen"));
+  ok("states toggle, and the count says so", same(await t.all('#states [aria-pressed="true"] .stc'),["FL","GA"]) && (await t.txt("#searchForm")).includes("States 2 chosen"));
   ok("estimate: one year, a batch of companies and a batch of institutions", (await t.txt("#f_est"))==="About 2 S&P requests, more if there are many results. A search someone has already run costs none.", await t.txt("#f_est"));
   await p.click('button[data-act="range"][data-y="5"]'); await p.waitForTimeout(80);
   ok("quick range: last 5 years", (await p.inputValue("#f_from"))==="2021-11-13" && (await p.inputValue("#f_to"))==="2026-11-13" && (await t.txt("#f_est")).startsWith("About 12 S&P requests"), await t.txt("#f_est"));
@@ -340,7 +340,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   const noLists={lists:{typeOfInsurance:null,filingStatus:null,serffFilingState:null,serffFilingType:null}, missing:["typeOfInsurance","filingStatus","serffFilingState","serffFilingType"], message:NOT_SET_UP, used:{hour:0,day:0}, limits:{hour:500,day:12000}, account:"trial"};
   t=await open({}, {refs:noLists}); p=t.p;
   ok("no lists: each filter says so and the form still works", same(await t.all(".nolist"),Array(3).fill("S&P's lists aren't loaded yet, so this filter is left out of the search.")) && (await t.txt("#refsMsg"))===NOT_SET_UP && await p.isEnabled('button[data-act="search"]'));
-  const built=await t.all("#states button");
+  const built=await t.all("#states button .stc");
   ok("no lists: the built-in states, two letters each, with DC", built.length===51 && built.includes("DC") && built.includes("FL") && built.every(s=>/^[A-Z]{2}$/.test(s)), built.length);
   await p.setViewportSize({width:390,height:844}); await p.waitForTimeout(150);
   ok("phone: no sideways scroll with all 51 states", await t.noScroll());
