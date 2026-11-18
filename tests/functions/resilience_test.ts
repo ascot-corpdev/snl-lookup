@@ -40,7 +40,7 @@ const lookup = (id: string) => toolUse(id, "resolve_entity", { query: "calloway"
   const id = await w.ask();
   const steps = w.claude.calls.filter((c) => c.body.tools);
   ok("until the limit, Claude is free to look things up", steps.slice(0, LIMITS.rounds).every((c) => c.body.tool_choice === undefined));
-  ok("once the step limit is reached the next request allows no more lookups, so an answer must come back", forced.tool_choice?.type === "none" && forced.tools.length === 5, forced.tool_choice);
+  ok("once the step limit is reached the next request allows no more lookups, so an answer must come back", forced.tool_choice?.type === "none" && forced.tools.length === 7, forced.tool_choice);
   ok("the answer is kept, not thrown away", w.job(id).status === "done" && (w.job(id).result as any).answer[0].text === "An answer from what was found.", w.job(id).error);
   ok("and it says the limit was reached", (w.job(id).result as any).caps.some((c: string) => c === `Claude stopped at the limit of ${LIMITS.rounds} steps for one question. Ask a narrower question to go further.`), (w.job(id).result as any).caps);
   ok("no lookup ran after the limit", (w.job(id).result as any).lookups.length === LIMITS.rounds && steps.length === LIMITS.rounds + 1);
@@ -126,7 +126,7 @@ const lookup = (id: string) => toolUse(id, "resolve_entity", { query: "calloway"
   ], huge);
   const id = await w.ask();
   ok("a document over the size limit is refused from its stated length, without downloading it", read.isError === true && /too large to read here/.test(read.value.error) && pulled === 0 && cancelled && w.claude.uploads.length === 0, { read, pulled, cancelled });
-  ok("and the answer says so", (w.job(id).result as any).caps.some((c: string) => c === "Filing document 70000001 is too large for Claude to read here. Open it from the Filings view."), (w.job(id).result as any).caps);
+  ok("and the answer says so", (w.job(id).result as any).caps.some((c: string) => c === `Filing document 70000001 is ${Math.ceil((LIMITS.docBytes + 1) / 1e6)} MB, too large for Claude to read here (the limit is ${LIMITS.docBytes / 1e6} MB a document). Open it from the Filings view to read it yourself.`), (w.job(id).result as any).caps);
 }
 {
   // no length given: reading stops as soon as the limit is passed

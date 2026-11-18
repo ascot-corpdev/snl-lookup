@@ -6,6 +6,7 @@
 //   node scripts/companies.mjs check <file.csv>     show what would be loaded; changes nothing
 //   node scripts/companies.mjs load <file.csv>      load it (companies already there are updated, none removed)
 //   node scripts/companies.mjs count                how many companies the directory holds
+//   node scripts/companies.mjs tidy [--apply]       find companies saved twice and, with --apply, merge each into one row
 //
 // The file is a CSV (in Excel: File > Save As > CSV UTF-8). It needs a company name column and an S&P company
 // id, institution id or NAIC company code column; group names and codes are used when present. A company with
@@ -16,16 +17,18 @@
 // Needs for load and count: SUPABASE_URL and SUPABASE_SECRET_KEY (the sb_secret_... key), as for logins.mjs.
 
 import { readFileSync } from "node:fs";
-import { batches, describe, FLAGS, readCompanies, toStoreRows } from "./companies-lib.mjs";
+import { batches, describe, entityIdsOf, FLAGS, planEntityWrites, planRows, readCompanies, tidyPlan } from "./companies-lib.mjs";
 
-const USAGE = 'Usage: node scripts/companies.mjs check <file.csv> | load <file.csv> | count   (optional: --name "Heading" --company-id "Heading" --institution-id "Heading" --naic "Heading" --group-code "Heading" --group-name "Heading" --stat-id "Heading")';
+const USAGE = 'Usage: node scripts/companies.mjs check <file.csv> | load <file.csv> | count | tidy [--apply]   (optional: --name "Heading" --company-id "Heading" --institution-id "Heading" --naic "Heading" --group-code "Heading" --group-name "Heading" --stat-id "Heading")';
 
 const args = process.argv.slice(2);
 const cmd = args.shift();
 const named = {};
 const rest = [];
+let apply = false;
 for (let i = 0; i < args.length; i++) {
   if (args[i] in FLAGS) { named[FLAGS[args[i]]] = args[++i] ?? ""; }
+  else if (args[i] === "--apply" && cmd === "tidy") apply = true;
   else if (args[i].startsWith("--")) { console.error(`Unknown option ${args[i]}.\n${USAGE}`); process.exit(1); }
   else rest.push(args[i]);
 }
@@ -56,6 +59,30 @@ async function database() {
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
+/** Saved company rows whose company id, institution id or NAIC company code is one of these. */
+async function savedRows(sb, ids) {
+  const out = new Map();
+  for (const k of ["companyId", "institutionId", "naicCompanyCode"]) {
+    for (const part of batches(ids[k], 100)) {
+      const { data, error } = await sb.from("snl_store").select("id,doc").eq("kind", "entity").in(`doc->>${k}`, part).limit(1000);
+      if (error) throw new Error(`Couldn't read the companies already saved: ${error.message}. Nothing was loaded from this batch.`);
+      for (const r of data ?? []) out.set(r.id, r);
+    }
+  }
+  return [...out.values()];
+}
+
+/** Every saved company row (ids and fields, without labels), a thousand at a time. */
+async function allRows(sb) {
+  const out = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await sb.from("snl_store").select("id,doc").eq("kind", "entity").order("id").range(from, from + 999);
+    if (error) throw new Error(`Couldn't read the directory: ${error.message}`);
+    out.push(...(data ?? []));
+    if ((data ?? []).length < 1000) return out;
+  }
+}
+
 try {
   if (cmd === "check") {
     const r = read(rest[0]);
@@ -66,19 +93,46 @@ try {
     console.log(describe(r));
     if (!r.companies.length) { console.error("\nNothing to load."); process.exit(1); }
     const sb = await database();
-    const rows = toStoreRows(r.companies, new Date().toISOString());
-    let done = 0;
-    for (const batch of batches(rows)) {
-      const { error } = await sb.from("snl_store").upsert(batch, { onConflict: "id" });
+    // A company the app has already seen in search results has a row of its own: the list's row is merged into it
+    // (or it into the list's row), so each company stays one row with everything known about it.
+    const at = new Date().toISOString();
+    let done = 0, merged = 0, folded = 0;
+    for (const batch of batches(r.companies)) {
+      const plan = planEntityWrites(await savedRows(sb, entityIdsOf(batch)), batch);
+      const { error } = await sb.from("snl_store").upsert(planRows(plan, at), { onConflict: "id" });
       if (error) throw new Error(`The database refused the list after ${done.toLocaleString("en-US")} companies: ${error.message}`);
-      done += batch.length;
+      if (plan.drop.length) {
+        const { error: dropError } = await sb.from("snl_store").delete().eq("kind", "entity").in("id", plan.drop);
+        if (dropError) throw new Error(`The list was saved, but a second row of ${plan.drop.length.toLocaleString("en-US")} companies couldn't be removed: ${dropError.message}. Run node scripts/companies.mjs tidy --apply to finish.`);
+      }
+      done += batch.length; merged += plan.merged; folded += plan.drop.length;
     }
     console.log(`\nLoaded ${done.toLocaleString("en-US")} companies. They can be found by name or NAIC code on the Filings and Statutory views straight away.`);
+    if (merged) console.log(`${merged === 1 ? "One of them was" : `${merged.toLocaleString("en-US")} of them were`} already in the directory (loaded before, or seen in search results) and ${merged === 1 ? "was" : "were"} updated in place${folded ? `; ${folded.toLocaleString("en-US")} second ${folded === 1 ? "row" : "rows"} for the same companies merged in and removed` : ""}.`);
   } else if (cmd === "count") {
     const sb = await database();
-    const { count, error } = await sb.from("snl_store").select("id", { count: "exact", head: true }).eq("kind", "entity");
-    if (error) throw error;
-    console.log(`The directory holds ${(count ?? 0).toLocaleString("en-US")} companies.`);
+    const rows = await allRows(sb);
+    const t = tidyPlan(rows);
+    console.log(`The directory holds ${t.companies.toLocaleString("en-US")} companies${t.duplicates ? ` in ${rows.length.toLocaleString("en-US")} rows: ${t.duplicates.toLocaleString("en-US")} ${t.duplicates === 1 ? "company has" : "companies have"} a second row from before rows were merged. The app reads each as one company; node scripts/companies.mjs tidy --apply merges them` : ""}.`);
+  } else if (cmd === "tidy") {
+    const sb = await database();
+    const rows = await allRows(sb);
+    const t = tidyPlan(rows);
+    if (!t.duplicates) { console.log(`The directory holds ${t.companies.toLocaleString("en-US")} companies, one row each. Nothing to tidy.`); process.exit(0); }
+    console.log(`${t.duplicates.toLocaleString("en-US")} ${t.duplicates === 1 ? "company has" : "companies have"} more than one row. Each would become one row with every id and the group name either row had:`);
+    for (const r of t.rows.slice(0, 5)) console.log(`  ${r.doc.companyName || "(no name)"}  [kept: ${r.id}]`);
+    if (t.rows.length > 5) console.log(`  and ${(t.rows.length - 5).toLocaleString("en-US")} more`);
+    if (!apply) { console.log("\nNothing was changed. To merge them, run the same command with --apply."); process.exit(0); }
+    const at = new Date().toISOString();
+    for (const batch of batches(planRows(t, at))) {
+      const { error } = await sb.from("snl_store").upsert(batch, { onConflict: "id" });
+      if (error) throw new Error(`The database refused the merged rows: ${error.message}. Nothing was removed.`);
+    }
+    for (const ids of batches(t.drop, 200)) {
+      const { error } = await sb.from("snl_store").delete().eq("kind", "entity").in("id", ids);
+      if (error) throw new Error(`The merged rows were saved, but the second rows couldn't be removed: ${error.message}. Run the command again.`);
+    }
+    console.log(`\nMerged. The directory now holds ${t.companies.toLocaleString("en-US")} companies, one row each.`);
   } else {
     console.log(USAGE);
     process.exit(cmd ? 1 : 0);

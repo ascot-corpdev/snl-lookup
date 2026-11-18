@@ -3,7 +3,10 @@
 
 import type { Db, Entity, Job, JobPatch, JobStatus, StoreKind, StoreRow } from "../../../supabase/functions/_shared/db.ts";
 import type { FoundFiling, WatchRun, WatchRunPatch } from "../../../supabase/functions/_shared/db.ts";
-import { groupNamePattern, oneEach } from "../../../supabase/functions/_shared/db.ts";
+import type { DigestQuery, DigestRow } from "../../../supabase/functions/_shared/db.ts";
+import type { IndexCompany, IndexQueryParams, IndexQueryResult, IndexRow, IndexState, IndexSweep } from "../../../supabase/functions/_shared/db.ts";
+import { entityLabel, groupNamePattern, oneEach, planEntityWrites, withSameCompanies } from "../../../supabase/functions/_shared/db.ts";
+import { LIBRARY_MISSING, type LibraryRow } from "../../../supabase/functions/_shared/db.ts";
 
 export const read = (name: string) => JSON.parse(Deno.readTextFileSync(new URL(`../../fixtures/${name}`, import.meta.url)));
 export const J = (o: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", ...headers } });
@@ -22,6 +25,7 @@ export function memoryDb(clock: Clock) {
   const usage = new Map<string, number>();
   let nextAt = 0, jobSeq = 0;
   const iso = () => new Date(clock.now).toISOString();
+  const entityDocs = () => [...store.values()].filter((r) => r.kind === "entity").map((r) => r.doc as unknown as Entity);
   const hour = () => "hour:" + iso().slice(0, 13), day = () => "day:" + iso().slice(0, 10);
   const db: Db & { store: typeof store; settings: typeof settings; jobs: typeof jobs; states: typeof states; slots: number[]; stateWrites: number } = {
     store, settings, jobs, states, slots: [], stateWrites: 0,
@@ -44,18 +48,26 @@ export function memoryDb(clock: Clock) {
     },
     async findEntities(q, limit) {
       const t = q.trim().toLowerCase();
-      return [...store.values()].filter((r) => r.kind === "entity").map((r) => r.doc as unknown as Entity)
-        .filter((e) => /^\d+$/.test(t) ? [e.naicCompanyCode, e.companyId, e.institutionId].includes(t) : t.length >= 2 && e.companyName.toLowerCase().includes(t)).slice(0, limit);
+      const found = [...store.values()].filter((r) => r.kind === "entity").map((r) => r.doc as unknown as Entity)
+        .filter((e) => /^\d+$/.test(t) ? [e.naicCompanyCode, e.companyId, e.institutionId].includes(t) : t.length >= 2 && e.companyName.toLowerCase().includes(t))
+        .slice(0, limit);
+      // as the real one reads: a company saved twice is listed once, with what both rows know
+      return withSameCompanies(found, entityDocs()).slice(0, limit);
     },
-    async putEntities(entities) { for (const e of entities) { const key = e.companyId ? String(e.companyId) : e.institutionId ? `i.${e.institutionId}` : null; if (key) store.set(`entity:${key}`, { id: `entity:${key}`, kind: "entity", label: e.companyName, doc: e as unknown as Record<string, unknown>, fetched_at: iso() }); } },
-    async entitiesInGroup(groupCode, limit) { return [...store.values()].filter((r) => r.kind === "entity").map((r) => r.doc as unknown as Entity).filter((e) => e.naicGroupCode === groupCode).slice(0, limit); },
+    async putEntities(entities) {
+      // the same merge the real one makes: into the row already saved for the company, any second row folded in
+      const plan = planEntityWrites([...store.values()].filter((r) => r.kind === "entity").map((r) => ({ id: r.id, doc: r.doc as unknown as Entity })), entities);
+      for (const r of plan.rows) store.set(r.id, { id: r.id, kind: "entity", label: entityLabel(r.doc), doc: r.doc as unknown as Record<string, unknown>, fetched_at: iso() });
+      for (const id of plan.drop) store.delete(id);
+    },
+    async entitiesInGroup(groupCode, limit) { return withSameCompanies(entityDocs().filter((e) => e.naicGroupCode === groupCode).slice(0, limit), entityDocs()).slice(0, limit); },
     async entitiesInGroupName(groupName, limit) {
       // The same filter the real one sends (ilike '%text%'): the text anywhere in the group name, any letter case.
       const pattern = groupNamePattern(groupName);
       if (!pattern) return [];
       const re = new RegExp("^" + pattern.split("%").map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$", "is");
       const rows = [...store.values()].filter((r) => r.kind === "entity" && re.test(String((r.doc as Record<string, unknown>).naicGroupName ?? ""))).sort((a, b) => a.label.localeCompare(b.label));
-      return oneEach(rows.map((r) => r.doc as unknown as Entity)).slice(0, limit);
+      return withSameCompanies(oneEach(rows.map((r) => r.doc as unknown as Entity)).slice(0, limit), entityDocs()).slice(0, limit);
     },
     async getSetting(id) { return settings.get(id) ?? null; },
     // the Live check's two reads: the latest saved results of a kind, and the company list without names
@@ -67,6 +79,8 @@ export function memoryDb(clock: Clock) {
       });
     },
     ...watchTables(clock),
+    ...libraryTables(clock),
+    ...indexTables(clock, () => oneEach(entityDocs())),
     async createJob(owner, question) {
       const id = `00000000-0000-4000-8000-${String(++jobSeq).padStart(12, "0")}`;
       jobs.set(id, { id, owner, status: "queued", question, progress: [], partial: "", result: null, error: null, segments: 0, created_at: iso(), updated_at: iso(), heartbeat_at: iso() });
@@ -124,6 +138,141 @@ export function watchTables(clock: Clock) {
     async dropOldWatch(before) {
       for (const [k, r] of found) if (r.first_seen_at < before) found.delete(k);
       for (let i = runs.length - 1; i >= 0; i--) if (runs[i].status !== "running" && runs[i].started_at < before) runs.splice(i, 1);
+    },
+  };
+  return t;
+}
+
+/** The team library (migration 0007) in memory, with the same one-entry-per-answer rule, plus the logins' display
+    names. library and profiles are the rows, for tests to look at; libraryFlags.missing = true acts as if the
+    migration hadn't been run (every library call fails as the real one does). */
+export function libraryTables(clock: Clock) {
+  const library = new Map<string, LibraryRow>(), profiles = new Map<string, string>();
+  let seq = 0;
+  const iso = () => new Date(clock.now).toISOString();
+  const libraryFlags = { missing: false };
+  const gate = () => { if (libraryFlags.missing) throw new Error(LIBRARY_MISSING); };
+  const t: Required<Pick<Db, "profileName" | "libraryCount" | "libraryGet" | "libraryByJob" | "libraryAdd" | "libraryUpdate" | "libraryRemove">> & { library: typeof library; profiles: typeof profiles; libraryFlags: typeof libraryFlags } = {
+    library, profiles, libraryFlags,
+    async profileName(uid) { return profiles.get(uid) ?? null; },
+    async libraryCount() { gate(); return library.size; },
+    async libraryGet(id) { gate(); const r = library.get(id); return r ? structuredClone(r) : null; },
+    async libraryByJob(jobId) { gate(); const r = [...library.values()].find((x) => x.job_id === jobId); return r ? structuredClone(r) : null; },
+    async libraryAdd(row) {
+      gate();
+      if ([...library.values()].some((x) => x.job_id === row.job_id)) return null;
+      const id = `00000000-0000-4000-a000-${String(++seq).padStart(12, "0")}`;
+      library.set(id, { ...structuredClone(row), id, saved_at: iso(), updated_at: iso() });
+      return structuredClone(library.get(id)!);
+    },
+    async libraryUpdate(id, patch) { gate(); const r = library.get(id); if (!r) return null; Object.assign(r, structuredClone(patch), { updated_at: iso() }); return structuredClone(r); },
+    async libraryRemove(id) { gate(); return library.delete(id); },
+  };
+  return t;
+}
+
+// ---------- the market index (migration 0006) ----------
+
+/** The market index's three tables and its two database functions (snl_index_put, snl_index_query), in memory, with
+    the same rules: one open sweep at a time, claiming a waiting or stalled sweep, companies merged when a filing comes
+    back again, and the same filters, groups and order as the SQL. sweeps, filings and states are the rows, for tests;
+    failPut: the next n saves fail; queries: every question asked. */
+export function indexTables(clock: Clock, entities: () => Entity[]) {
+  const sweeps: IndexSweep[] = [], filings = new Map<string, IndexRow & { company_names: string }>(), states = new Map<string, IndexState>();
+  const queries: IndexQueryParams[] = [];
+  let seq = 0;
+  const iso = () => new Date(clock.now).toISOString();
+  const open = () => sweeps.find((s) => ["running", "waiting", "held"].includes(s.status)) ?? null;
+  // snl_index_merge and snl_index_names: each company once, sorted by name, company id, institution id (as text, in
+  // byte order, nulls last), at most 30; the names each once, sorted, joined with "; ".
+  const txt = (v: unknown) => (v === null || v === undefined ? null : String(v));
+  const cmp = (a: string | null, b: string | null) => (a === b ? 0 : a === null ? 1 : b === null ? -1 : a < b ? -1 : 1);
+  const merge = (a: IndexCompany[], b: IndexCompany[]) => {
+    const seen = new Map<string, IndexCompany>();
+    for (const e of [...a, ...b]) seen.set(JSON.stringify([e.n ?? null, e.c ?? null, e.i ?? null]), { n: e.n ?? null, c: e.c ?? null, i: e.i ?? null });
+    return [...seen.values()].sort((x, y) => cmp(x.n, y.n) || cmp(txt(x.c), txt(y.c)) || cmp(txt(x.i), txt(y.i))).slice(0, 30);
+  };
+  const names = (c: IndexCompany[]) => [...new Set(c.map((e) => e.n).filter((x): x is string => !!x))].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0)).join("; ").slice(0, 2000);
+  const has = (hay: string | null, needle: string | null) => !needle || (hay ?? "").toLowerCase().includes(needle.toLowerCase());
+  const isRate = (r: IndexRow) => (r.filing_type ?? "").toLowerCase().includes("rate");
+  const match = (p: IndexQueryParams) => [...filings.values()].filter((f) => f.state === p.state
+    && (!p.from || (f.publish_date !== null && f.publish_date >= p.from)) && (!p.to || (f.publish_date !== null && f.publish_date <= p.to))
+    && has(`${f.type_of_insurance ?? ""} / ${f.sub_type_of_insurance ?? ""}`, p.typeOfInsurance) && has(f.filing_type, p.filingType) && has(f.filing_status, p.status)
+    && (p.rateAbove === null || (f.rate_impact !== null && f.rate_impact > p.rateAbove)) && (p.rateBelow === null || (f.rate_impact !== null && f.rate_impact < p.rateBelow))
+    && p.words.every((w) => `${f.description ?? ""} ${f.company_names}`.toLowerCase().includes(w.toLowerCase())));
+  const t: Required<Pick<Db, "allEntities" | "openSweep" | "getSweep" | "createSweep" | "claimSweep" | "updateSweep" | "sweeps" | "putIndexRows" | "pruneIndex" | "indexCount" | "indexStates" | "putIndexState" | "queryIndex">>
+    & { sweepRows: IndexSweep[]; filingRows: typeof filings; stateRows: typeof states; queries: IndexQueryParams[]; failPut: number; puts: number } = {
+    sweepRows: sweeps, filingRows: filings, stateRows: states, queries, failPut: 0, puts: 0,
+    async allEntities(limit) { return structuredClone(entities().slice(0, limit)); },
+    async openSweep() { const s = open(); return s ? structuredClone(s) : null; },
+    async getSweep(id) { const s = sweeps.find((x) => x.id === id); return s ? structuredClone(s) : null; },
+    async createSweep(row) {
+      if (open() && ["running", "waiting", "held"].includes(row.status)) return null;   // the one-open-sweep index
+      const id = `00000000-0000-4000-a000-${String(++seq).padStart(12, "0")}`;
+      sweeps.push({ ...structuredClone(row), id, started_at: iso(), updated_at: iso() });
+      return id;
+    },
+    async claimSweep(id, staleMs) {
+      const s = sweeps.find((x) => x.id === id);
+      if (!s) return false;
+      const ok = (s.status === "waiting" && (!s.resume_after || s.resume_after <= iso())) || (s.status === "running" && Date.parse(s.updated_at) < clock.now - staleMs);
+      if (ok) Object.assign(s, { status: "running", updated_at: iso() });
+      return ok;
+    },
+    async updateSweep(id, patch) { const s = sweeps.find((x) => x.id === id); if (s) Object.assign(s, structuredClone(patch), { updated_at: iso() }); },
+    async sweeps(limit) { return structuredClone([...sweeps].sort((a, b) => b.started_at.localeCompare(a.started_at) || b.id.localeCompare(a.id)).slice(0, limit)); },
+    async putIndexRows(rows) {
+      if (t.failPut > 0) { t.failPut--; throw new Error("Couldn't save filings to the index: made-up database failure"); }
+      t.puts++;
+      const keys = rows.map((r) => r.state + "|" + r.filing_key);
+      if (new Set(keys).size !== keys.length) throw new Error("ON CONFLICT DO UPDATE command cannot affect row a second time");
+      for (const r of structuredClone(rows)) {
+        const k = r.state + "|" + r.filing_key, kept = filings.get(k);
+        const companies = merge(kept?.companies ?? [], r.companies);
+        filings.set(k, { ...r, companies, company_names: names(companies) });
+      }
+    },
+    async pruneIndex(state, from, to) { for (const [k, f] of filings) if (f.state === state && (!f.publish_date || f.publish_date < from || f.publish_date > to)) filings.delete(k); },
+    async indexCount(state) { return [...filings.values()].filter((f) => !state || f.state === state).length; },
+    async indexStates() { return structuredClone([...states.values()].sort((a, b) => a.state.localeCompare(b.state))); },
+    async putIndexState(s) { states.set(s.state, structuredClone(s)); },
+    async queryIndex(p) {
+      queries.push(structuredClone(p));
+      const m = match(p), limit = Math.min(Math.max(p.limit || 50, 1), 500), offset = Math.max(p.offset || 0, 0);
+      const inState = [...filings.values()].filter((f) => f.state === p.state);
+      const out: IndexQueryResult = { total: m.length, withRate: m.filter((f) => f.rate_impact !== null).length, rateFilings: m.filter(isRate).length, stateRows: inState.length, stateDescribed: inState.filter((f) => f.description !== null).length };
+      const sum = (list: IndexRow[]) => {
+        const rates = list.map((f) => f.rate_impact).filter((x): x is number => x !== null), days = list.map((f) => f.publish_date).filter((x): x is string => !!x).sort();
+        return { filings: list.length, rateFilings: list.filter(isRate).length, rateMin: rates.length ? Math.min(...rates) : null, rateMax: rates.length ? Math.max(...rates) : null, latest: days.at(-1) ?? null };
+      };
+      if (p.group === "rows") {
+        // newest first, no date last, then by filing key
+        const newest = (a: IndexRow, b: IndexRow) => (a.publish_date === b.publish_date ? 0 : a.publish_date === null ? 1 : b.publish_date === null ? -1 : a.publish_date > b.publish_date ? -1 : 1);
+        out.rows = m.sort((a, b) => newest(a, b) || cmp(a.filing_key, b.filing_key)).slice(offset, offset + limit).map(({ sweep_id: _s, seen_at: _a, ...r }) => structuredClone(r));
+      } else if (p.group === "company") {
+        // max() of each text, in byte order, as the SQL takes it
+        const most = (a: string | null, b: string | null) => (a === null ? b : b === null ? a : a > b ? a : b);
+        const by = new Map<string, { name: string | null; c: string | null; i: string | null; rows: IndexRow[] }>();
+        for (const f of m) for (const c of f.companies) {
+          const k = c.c !== null ? "c" + c.c : c.i !== null ? "i" + c.i : c.n !== null ? "n" + c.n.toLowerCase() : "none";
+          const g = by.get(k) ?? { name: null, c: null, i: null, rows: [] };
+          g.name = most(g.name, c.n); g.c = most(g.c, txt(c.c)); g.i = most(g.i, txt(c.i));
+          if (!g.rows.includes(f)) g.rows.push(f);
+          by.set(k, g);
+        }
+        const groups = [...by.entries()].map(([k, g]) => ({ k, name: g.name ?? "", companyId: g.c, institutionId: g.i, ...sum(g.rows) }))
+          .sort((a, b) => b.filings - a.filings || cmp(a.name, b.name) || cmp(a.k, b.k));
+        out.groupTotal = groups.length;
+        out.groups = groups.slice(offset, offset + limit).map(({ k: _k, ...g }) => g);
+      } else {
+        const by = new Map<string, IndexRow[]>();
+        for (const f of m) { const k = p.group === "type" ? f.type_of_insurance ?? "n/d" : f.publish_date ? f.publish_date.slice(0, 7) : "n/d"; by.set(k, [...(by.get(k) ?? []), f]); }
+        const groups = [...by.entries()].map(([name, rows]) => ({ name, ...sum(rows) }))
+          .sort((a, b) => (p.group === "type" ? b.filings - a.filings : 0) || (a.name === "n/d" ? 1 : 0) - (b.name === "n/d" ? 1 : 0) || cmp(a.name, b.name));
+        out.groupTotal = groups.length;
+        out.groups = groups.slice(offset, offset + limit);
+      }
+      return structuredClone(out);
     },
   };
   return t;
@@ -401,4 +550,42 @@ export function promptCache(claude: { uploads: { id: string; bytes?: Uint8Array 
     const read = sum(0, hit), write = lastBp > hit ? sum(hit + 1, lastBp) : 0, rest = sum(Math.max(hit, lastBp) + 1, units.length - 1);
     return { input_tokens: rest, cache_creation_input_tokens: write, cache_read_input_tokens: read, output_tokens: 200 };
   };
+}
+
+// ---------- saved filing summaries (migration 0005) ----------
+
+/** The summaries table in memory, with the same rules as migration 0005's checks on a row. Not part of memoryDb: a test
+    that wants summaries adds it, Object.assign(memoryDb(clock), digestTables(clock)), so the other suites run as before.
+    rows: the saved rows; fail: a message, and every call fails with it (as a missing table would: "relation
+    public.snl_digests does not exist"); gets, searches: what was asked. The search filters as the real one does: a
+    form number anywhere in form_keys, or any of the words in search_body (word endings "s" and "es" ignored, as
+    Postgres's English word search would). */
+export function digestTables(_clock: Clock) {
+  const rows = new Map<string, DigestRow>();
+  const t = {
+    rows, fail: "", gets: [] as { documentIds: number[]; versionIds: string[] }[], searches: [] as DigestQuery[], puts: 0,
+    async getDigests(ids: { documentIds: number[]; versionIds: string[] }): Promise<DigestRow[]> {
+      t.gets.push(structuredClone(ids));
+      if (t.fail) throw new Error(t.fail);
+      return [...rows.values()].filter((r) => (r.document_id !== null && ids.documentIds.includes(r.document_id)) || (r.filing_version_id !== null && ids.versionIds.includes(r.filing_version_id))).map((r) => structuredClone(r));
+    },
+    async putDigest(row: DigestRow): Promise<void> {
+      if (t.fail) throw new Error(t.fail);
+      const bad = !/^(v:[A-Za-z0-9._-]{8,64}|d:[0-9]{1,15})$/.test(row.id) || (row.state !== null && !/^[A-Z]{2}$/.test(row.state)) || (row.company !== null && row.company.length > 200)
+        || row.form_keys.length > 4000 || row.search_body.length > 20000 || (row.filing_version_id === null && row.document_id === null) || JSON.stringify(row.doc).length >= 262144;
+      if (bad) throw new Error("new row for relation \"snl_digests\" violates check constraint");
+      t.puts++;
+      rows.set(row.id, structuredClone(row));
+    },
+    async searchDigests(q: DigestQuery): Promise<DigestRow[]> {
+      t.searches.push(structuredClone(q));
+      if (t.fail) throw new Error(t.fail);
+      const stem = (w: string) => w.toLowerCase().replace(/(es|s)$/, "");
+      return [...rows.values()].filter((r) => !q.state || r.state === q.state)
+        .filter((r) => (q.formKey && r.form_keys.includes(q.formKey)) || (q.words.length && q.words.some((w) => r.search_body.toLowerCase().split(/[^\p{L}\p{N}]+/u).some((x) => stem(x) === stem(w)))))
+        .sort((a, b) => b.made_at.localeCompare(a.made_at)).slice(0, q.limit).map((r) => structuredClone(r));
+    },
+    async countDigests(): Promise<number> { if (t.fail) throw new Error(t.fail); return rows.size; },
+  };
+  return t;
 }

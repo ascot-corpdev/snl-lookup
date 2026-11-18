@@ -77,7 +77,7 @@ function world(script: Parameters<typeof fakeAnthropic>[0], opts: Opts = {}) {
   ok("the model is claude-opus-5-5 unless CLAUDE_MODEL is set", body.model === "claude-opus-5-5" && w.claude.calls[1].body.model === "claude-opus-5-5");
   ok("the answer request streams, with adaptive thinking and high effort", first.stream === true && same(body.thinking, { type: "adaptive" }) && body.output_config?.effort === "high" && body.max_tokens > 0, body.output_config);
   ok("server-side fallback is on, with its beta header", body.fallbacks === "default" && (first.betas ?? "").split(",").map((s) => s.trim()).includes("server-side-fallback-2026-07-01"), first.betas);
-  ok("the five strict tools are sent", same(body.tools.map((t: any) => [t.name, t.strict]), [["resolve_entity", true], ["resolve_entities", true], ["search_filings", true], ["read_filing_document", true], ["query_statutory", true]]));
+  ok("the seven strict tools are sent", same(body.tools.map((t: any) => [t.name, t.strict]), [["resolve_entity", true], ["resolve_entities", true], ["search_filings", true], ["query_market_index", true], ["read_filing_document", true], ["get_filing_summaries", true], ["query_statutory", true]]));
   ok("the system prompt is the app's own text plus S&P's reference ids", body.system.length === 2 && body.system[0].text === SYSTEM && body.system[1].text.startsWith("S&P's reference ids for search filters."), body.system[1].text);
   ok("Claude is sent only the question and today's date", same(body.messages, [{ role: "user", content: [{ type: "text", text: "What did Calloway file?" }, { type: "text", text: "Today is 2026-11-13." }] }]), body.messages);
   const sent = JSON.stringify(w.claude.calls.map((c) => c.body)), heads = JSON.stringify(w.claudeHeaders);
@@ -279,8 +279,8 @@ function world(script: Parameters<typeof fakeAnthropic>[0], opts: Opts = {}) {
   try {
     const w = world([{ content: [READ("r1", 70000001)] }, (body) => { seen.r = toolResults(body); seen.docs = documentsIn(body); return { content: [say("Too large to read.")] }; }, NO_TABLE]);
     const a = await w.ask();
-    ok("a document over the size limit is refused after download: Claude is told, nothing is uploaded, and the answer says so", seen.r.r1.isError && seen.r.r1.value.error === "This document is too large to read here. Tell the user to open it from the Filings view." && seen.docs.length === 0 && w.claude.uploads.length === 0
-      && same(a.result.caps, ["Filing document 70000001 is too large for Claude to read here. Open it from the Filings view."]), { r: seen.r.r1, caps: a.result.caps });
+    ok("a document over the size limit is refused after download: Claude is told, nothing is uploaded, and the answer says so", seen.r.r1.isError && seen.r.r1.value.error.startsWith("This document is too large to read here: ") && seen.r.r1.value.error.endsWith(" Tell the user to open it from the Filings view, and answer from the search results.") && seen.docs.length === 0 && w.claude.uploads.length === 0
+      && a.result.caps.length === 1 && /^Filing document 70000001 is .*, too large for Claude to read here \(the limit is .* a document\)\. Open it from the Filings view to read it yourself\.$/.test(a.result.caps[0]), { r: seen.r.r1, caps: a.result.caps });
   } finally { LIMITS.docBytes = keep; }
 }
 

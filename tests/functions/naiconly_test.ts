@@ -21,7 +21,7 @@ function storeSb() {
   const rows = new Map<string, { id: string; kind: string; label: string; doc: Record<string, unknown> }>();
   const client = {
     from: (_table: string) => {
-      const q: { filters: ((r: any) => boolean)[]; limit: number; order: boolean; upsert?: any[] } = { filters: [], limit: 1000, order: false };
+      const q: { filters: ((r: any) => boolean)[]; limit: number; order: boolean; upsert?: any[]; del?: boolean } = { filters: [], limit: 1000, order: false };
       const chain: any = {
         select: () => chain,
         eq: (col: string, v: string) => { q.filters.push((r) => r[col] === v); return chain; },
@@ -30,15 +30,19 @@ function storeSb() {
           q.filters.push((r) => parts.some((m) => String(r.doc?.[m[1]] ?? "") === m[2]));
           return chain;
         },
+        // in: a list of exact values, on a column or a doc field; delete: remove what the filters match
+        in: (col: string, vs: string[]) => { const f = col.startsWith("doc->>") ? (r: any) => vs.includes(String(r.doc?.[col.slice(6)] ?? "")) : (r: any) => vs.includes(r[col]); q.filters.push(f); return chain; },
+        delete: () => { q.del = true; return chain; },
         ilike: (col: string, pat: string) => { const t = pat.replace(/^%|%$/g, "").toLowerCase(); q.filters.push((r) => String(r[col]).toLowerCase().includes(t)); return chain; },
         order: () => { q.order = true; return chain; },
         limit: (n: number) => { q.limit = n; return chain; },
         upsert: (list: any[]) => { q.upsert = list; return chain; },
         then: (res: (v: unknown) => unknown, rej: (e: unknown) => unknown) => Promise.resolve().then(() => {
           if (q.upsert) { for (const r of q.upsert) { if (!ROW_ID.test(r.id)) return { data: null, error: { message: "violates check constraint" } }; rows.set(r.id, structuredClone(r)); } return { data: null, error: null }; }
+          if (q.del) { for (const r of [...rows.values()]) if (q.filters.every((f) => f(r))) rows.delete(r.id); return { data: null, error: null }; }
           let out = [...rows.values()].filter((r) => q.filters.every((f) => f(r)));
           if (q.order) out = out.sort((a, b) => a.label.localeCompare(b.label));
-          return { data: out.slice(0, q.limit).map((r) => ({ doc: structuredClone(r.doc) })), error: null };
+          return { data: out.slice(0, q.limit).map((r) => ({ id: r.id, doc: structuredClone(r.doc) })), error: null };
         }).then(res, rej),
       };
       return chain;
@@ -74,7 +78,7 @@ function storeSb() {
 
   // Later a filing search names the same company with its S&P company id.
   await db.putEntities(entitiesFrom([{ companyId: 4000555, companyName: "Nonesuch Specialty Co", naicCompanyCode: "90555", institutionId: null, spStatEntityId: null } as any]));
-  ok("both rows are kept in the directory (the import never deletes)", sb.rows.has("entity:n.90555") && sb.rows.has("entity:4000555"), [...sb.rows.keys()]);
+  ok("the company stays one row in the directory, which now carries its S&P id too", sb.rows.has("entity:n.90555") && !sb.rows.has("entity:4000555") && sb.rows.get("entity:n.90555")!.doc.companyId === "4000555", [...sb.rows.keys()]);
   const again = await db.findEntities("90555", 50), againName = await db.findEntities("Nonesuch", 50);
   ok("by NAIC code the company is listed once, with its S&P id", same(again.map((e) => entityKey(e)), ["4000555"]), again);
   ok("by name the company is listed once, with its S&P id", same(againName.map((e) => entityKey(e)), ["4000555"]), againName);

@@ -488,6 +488,243 @@
 
   function slug(s) { return flat(s).replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60).replace(/-+$/, ""); }
 
+  // =================================================================================================================
+  // ---------- the filings profile: a deck from S&P filings alone (facts from filingsFactsFrom in profile.ts) ----------
+  // =================================================================================================================
+  //   SNLProfile.filingsPlan(facts)        -> [{id, label, included, reason}] in deck order
+  //   SNLProfile.filingsSpec(facts, text)  -> {fileName, slides} for SNLDeck.build
+  // Every figure is the function's; nothing here adds or averages rate impacts. Columns that would be empty on every
+  // row are left out, and a filing's description is never used (real rows often have none).
+  var TEAL = "00857C", PURPLE = "944599";
+  var FP_SLIDES = [
+    ["cover", "Cover"], ["summary", "Summary"], ["rates", "Rate changes"], ["states", "Where it files"], ["years", "Filings by year and type"],
+    ["forms", "Latest form and rule filings"], ["regulator", "Time with the regulator"], ["questions", "Key diligence questions"]
+  ];
+  var LX2 = 8.42, LW = 7.4, RW = R - LX2;                 // two columns: left x 0.52 w 7.4, right x 8.42 w 4.38
+  var FP_CHART_COLS = 20;                                 // the most filings drawn as columns on the rate chart
+  var NOTHING = "S&P returned nothing for this search, so there are no filings to show. That doesn't prove nothing was filed.";
+
+  function arr(a) { return Array.isArray(a) ? a : []; }
+  function cnt(n) { return num(n) ? commas(String(Math.round(n))) : "n/d"; }
+  function fpRows(f, k) { return arr(f[k] && f[k].rows).filter(function (r) { return r && typeof r === "object"; }); }
+  function fpPlan(facts) {
+    var f = facts || {}, T = f.totals || {}, R = f.rates || {}, Y = f.years || {};
+    var rows = FP_SLIDES.map(function (s) { return { id: s[0], label: s[1], included: true, reason: "" }; });
+    var out = function (id, reason) { rows.forEach(function (r) { if (r.id === id) { r.included = false; r.reason = reason; } }); };
+    if (!num(T.filings) || T.filings <= 0) { ["rates", "states", "years", "forms", "regulator"].forEach(function (id) { out(id, NOTHING); }); return rows; }
+    if (!R.filings) out("rates", "S&P returned no rate filings for this search, so there are no rate changes to show.");
+    else if (!R.withImpact) out("rates", "No filing carried an overall rate impact in S&P's data, so there are no rate changes to chart.");
+    else if (!arr(R.points).length) out("rates", "None of the filings with a rate impact has a publish date, so they can't be put in date order.");
+    if (!fpRows(f, "states").length) out("states", "None of the filings names a state in S&P's data.");
+    if (!arr(Y.totals).some(function (n) { return n > 0; })) out("years", "None of the filings has a publish date in S&P's data.");
+    if (!(f.latest && f.latest.total > 0 && fpRows(f, "latest").length)) out("forms", "S&P returned no form or rule filings for this search.");
+    if (!(f.regulator && f.regulator.all)) out("regulator", "None of the filings has both a submitted date and a publish date in S&P's data, so the time with the regulator can't be worked out.");
+    return rows;
+  }
+
+  function fpName(f) { var e = f.entity || {}; return flat(e.name) || flat(e.groupName) || (e.kind === "group" ? "The group" : "The company"); }
+  function fpThisYear(f) { return (ymd(f.asOf) || {}).y; }
+  function fpDate(f, s) { return shortDate(s, fpThisYear(f)); }
+  // a status as S&P gives it, lower case inside a sentence or label when it is a plain word or two
+  function statusWord(s) { s = flat(s); return !s ? "status n/d" : /^[A-Za-z][A-Za-z -]*$/.test(s) ? s.toLowerCase() : s; }
+  // the source line: S&P, the filings product and the period, then notes, made shorter until it fits on one line
+  // claude: say the text was drafted by Claude (the summary and the questions, as on the full profile)
+  function fpSource(f, t, notes, claudeNote) {
+    var P = f.period || {}, long = longDate(P.from) + " to " + longDate(P.to), short = monthYear(P.from).replace(/^(\w{3})\w*/, "$1") + " to " + monthYear(P.to).replace(/^(\w{3})\w*/, "$1");
+    notes = (notes || []).filter(Boolean);
+    var claude = claudeNote && t && t.by === "claude", capped = f.search && f.search.capped;
+    var tries = [[long, 0], [long, 1], [long, 2], [short, 2], [short, 3]];
+    for (var i = 0; i < tries.length; i++) {
+      var lv = tries[i][1], parts = ["Source: " + FILINGS_SOURCE + ", " + tries[i][0] + "."];
+      if (capped) parts.push(lv > 2 ? "Incomplete." : lv ? "Search incomplete." : "The search stopped early, so figures may be incomplete.");
+      notes.forEach(function (n) { parts.push(typeof n === "string" ? n : n[Math.min(lv, n.length - 1)]); });
+      if (claude) parts.push(lv > 2 ? "Claude's text: check it." : lv ? "Text drafted by Claude: check it." : "Text drafted by Claude from these figures: check it before use.");
+      if (f.sample) parts.push(lv > 2 ? "Made-up." : lv > 1 ? "Made-up figures." : "Sample: made-up figures.");
+      var s = parts.join(" ");
+      if (textWidth(s, 10, false) <= 11.7 || i === tries.length - 1) return { type: "source", text: s };
+    }
+  }
+  var RATE_NOTE = ["Rate impacts are S&P's overall figure for each filing, not weighted by premium; for one not approved it may be the change asked for.",
+    "Rate impacts: overall, not by premium; if not approved, may be the change asked for.", "Rate impacts unweighted; if not approved, may be as asked.", "Unweighted; unapproved may be as asked."];
+  var DAYS_NOTE = ["Days: from submitted to published by S&P, so approximate.", "Days: submitted to published, approximate."];
+  // a table with any column that is empty ("n/d") on every row left out, its width shared among the others
+  function fpTable(name, x, y, w, head, rows, widths, aligns, keep, opts) {
+    var use = head.map(function (_, j) { return keep.indexOf(j) >= 0 || rows.some(function (r) { var c = r[j], s = c && typeof c === "object" ? c.text : c; return flat(s) && flat(s) !== "n/d"; }); });
+    var wsum = widths.reduce(function (a, b, j) { return a + (use[j] ? b : 0); }, 0);
+    var cols = widths.map(function (c, j) { return c * w / wsum; });
+    var pick = function (r) { return r.filter(function (_, j) { return use[j]; }); };
+    var fitRow = function (r) { return r.map(function (c, j) { if (c && typeof c === "object") return c; return (opts && opts.fit && opts.fit.indexOf(j) >= 0) ? cellText(c, cols[j]) : c; }); };
+    return Object.assign({ type: "table", x: x, y: y, colW: pick(cols), rowH: 0.25, size: 11, name: name, aligns: pick(aligns),
+      rows: [pick(head)].concat(rows.map(function (r) { return pick(fitRow(r)); })) }, opts && opts.extra || {});
+  }
+
+  function fpCover(f, t) {
+    var title = fitText(fpName(f), 40, 15, true) + ": filings profile" + (f.sample ? " (sample)" : "");
+    return { kind: "cover", kicker: "Corporate development | " + monthYear(f.asOf), title: title, subtitle: flat(t.cover && t.cover.subtitle) };
+  }
+  function fpNothingBox(f, x, y, w) {
+    var P = f.period || {};
+    return { type: "box", x: x, y: y, w: w, h: 1.6, fill: "EEEEF5", margins: [0.2, 0.2, 0.15, 0.15], anchor: "ctr", name: "Nothing returned",
+      paras: [{ after: 4, runs: [{ text: "S&P returned nothing for this search", size: 16, bold: true, color: NAVY }] },
+              { runs: [{ text: "Filings published " + longDate(P.from) + " to " + longDate(P.to) + " were searched in every state in S&P's list. That doesn't prove nothing was filed.", size: 12, color: NAVY }] }] };
+  }
+
+  function fpSummary(f, t) {
+    var T = f.totals || {}, big = f.largest, A = f.approval || {}, items = [], lw = 5.6;
+    var rx = L + lw + 0.3, rw = R - rx;
+    if (!T.filings) {
+      items.push(header("Filings", L, TOP, lw), fpNothingBox(f, L, TOP + HDR, lw));
+    } else {
+      items.push(header("Key figures", L, TOP, lw));
+      var tiles = [
+        [cnt(T.filings), "Filings published in the period"], [cnt(T.rate), "Rate filings"], [cnt(T.rule), "Rule filings"], [cnt(T.form), "Form filings"],
+        [cnt(T.states), "States with filings, of " + cnt(f.search && f.search.statesSearched) + " searched"],
+        [T.latest ? fpDate(f, T.latest) : "n/d", "Latest filing published"],
+        big ? [pct(big.rate), "Largest overall rate change: " + (flat(big.state) || "state n/d") + ", " + fpDate(f, big.date) + ", " + statusWord(big.status) + (big.approved ? "" : " (may be as asked)"), big.approved ? NAVY : PURPLE]
+          : ["n/d", "Largest overall rate change (no filing carried one)"],
+        A.rateFilings ? [pct(A.share), "Rate filings approved, " + cnt(A.approved) + " of " + cnt(A.rateFilings) + " (derived)"] : ["n/d", "Rate filings approved (no rate filings)"]
+      ];
+      var tw = (lw - 0.15) / 2, th = (BOTTOM - 0.1 - TOP - HDR - 3 * 0.12) / 4;
+      tiles.forEach(function (c, i) {
+        var tl = tile(L + (i % 2) * (tw + 0.15), TOP + HDR + Math.floor(i / 2) * (th + 0.12), tw, th, c[0], c[1], c[2]);
+        tl.labelSize = 11; items.push(tl);
+      });
+    }
+    items = items.concat(takeaways(pointsOf(t, "summary"), rx, TOP, rw, BOTTOM - TOP));
+    items.push(fpSource(f, t, [big ? RATE_NOTE : ""], true));
+    return content(t, "summary", T.filings ? cnt(T.filings) + " filings" : "S&P returned nothing for this search", items);
+  }
+
+  function fpRates(f, t) {
+    var R = f.rates || {}, items = [], pts = arr(R.points).filter(function (p) { return p && num(p.rate); });
+    var shown = pts.slice(-FP_CHART_COLS), cats = shown.map(function (p) { var d = ymd(p.date); return (flat(p.state) || "n/d") + " " + (d ? MONTHS[d.m - 1].slice(0, 3) + " " + d.y : "n/d"); });
+    // one series for each kind of change, so the legend explains the colours; each filing has a value in one of them
+    var kinds = [
+      { name: "Increase, approved", color: MAG, has: function (p) { return p.approved && p.rate > 0; } },
+      { name: "Decrease, approved", color: TEAL, has: function (p) { return p.approved && p.rate < 0; } },
+      { name: "No change, approved", color: NAVY, has: function (p) { return p.approved && p.rate === 0; } },
+      { name: "Not approved (may be as asked)", color: PURPLE, has: function (p) { return !p.approved; } }
+    ];
+    var series = kinds.filter(function (k) { return shown.some(k.has); }).map(function (k) {
+      return ser(k.name, shown.map(function (p) { return k.has(p) ? p.rate : null; }), k.color);
+    });
+    var many = pts.length > shown.length || R.pointsTotal > pts.length;
+    items.push(header("Overall rate impact of each filing, in date order (%)" + (many ? ", latest " + shown.length + " of " + cnt(R.pointsTotal) : ""), L, TOP, W));
+    items.push({ type: "chart", kind: "column", x: L, y: TOP + HDR, w: W, h: 2.15, categories: cats, series: series, legend: "top", gap: 40, overlap: 100,
+      labels: { format: "0.0;(0.0);0.0", size: 10 }, catSize: 10, catLabels: "low", name: "Chart rate changes" });
+    // the table: state and type of insurance, the most rate filings first
+    var y2 = TOP + HDR + 2.15 + 0.2, maxRows = Math.max(1, Math.floor((BOTTOM - y2 - HDR) / 0.25) - 1);
+    var rows = fpRows(f, "rates").slice(0, maxRows).sort(function (a, b) { return (a.state || "~").localeCompare(b.state || "~") || (a.toi || "~").localeCompare(b.toi || "~"); });
+    var tr = rows.map(function (r) {
+      var range = !num(r.lo) ? "n/d" : r.lo === r.hi ? pctCell(r.lo) : pctCell(r.lo) + " to " + pctCell(r.hi), l = r.latest;
+      return [flat(r.state) || "n/d", flat(r.toi) || "n/d", cnt(r.n), range, l ? pctCell(l.rate) : "n/d", l ? fpDate(f, l.date) : "n/d", l ? flat(l.status) || "n/d" : "n/d"];
+    });
+    var total = num(R.rowsTotal) ? R.rowsTotal : rows.length;
+    items.push(header("Rate filings by state and type of insurance" + (total > rows.length ? " (" + rows.length + " of " + total + ")" : ""), L, y2, LW));
+    items.push(fpTable("Table rate filings", L, y2 + HDR, LW, ["State", "Type of insurance", "Filings", "Range (%)", "Latest (%)", "Published", "Status"], tr,
+      [0.55, 1.85, 0.65, 1.2, 0.95, 1.0, 1.2], ["l", "l", "r", "r", "r", "r", "l"], [0, 2], { fit: [1, 6] }));
+    items = items.concat(takeaways(pointsOf(t, "rates"), LX2, y2, RW, BOTTOM - y2));
+    items.push(fpSource(f, t, [RATE_NOTE]));
+    return content(t, "rates", "Rate changes", items);
+  }
+
+  function fpStates(f, t) {
+    var rows = fpRows(f, "states"), T = f.totals || {}, items = [];
+    var tableRows = rows.slice(0, Math.floor((BOTTOM - TOP - HDR) / 0.25) - 1), bars = rows.slice(0, 12), star = false;
+    items.push(header("Filings by state" + (rows.length > bars.length ? " (top " + bars.length + " of " + rows.length + ")" : ""), L, TOP, LW));
+    var ch = Math.min(BOTTOM - TOP - HDR, 0.45 + bars.length * 0.3);
+    items.push({ type: "chart", kind: "bar", x: L, y: TOP + HDR, w: LW, h: ch, legend: "none", gap: 50, categories: bars.map(function (r) { return r.state; }),
+      series: [ser("Filings", bars.map(function (r) { return r.n; }), NAVY, { pointColors: { 0: MAG } })], labels: { format: "#,##0" }, catSize: 11, name: "Chart states" });
+    var y2 = TOP + HDR + ch + 0.25;
+    if (BOTTOM - y2 >= 1.3) items = items.concat(takeaways(pointsOf(t, "states"), L, y2, LW, BOTTOM - y2));
+    var tr = tableRows.map(function (r) {
+      var l = r.latest; if (l && !l.approved) star = true;
+      return [r.state, cnt(r.n), cnt(r.rate), l ? pctCell(l.rate) + (l.approved ? "" : "*") : "n/d"];
+    });
+    items.push(header("By state" + (rows.length > tableRows.length ? " (" + tableRows.length + " of " + rows.length + ")" : ""), LX2, TOP, RW));
+    items.push({ type: "table", x: LX2, y: TOP + HDR, colW: [0.7, 0.9, 1.15, 1.63], rowH: 0.25, size: 11, name: "Table states", aligns: ["l", "r", "r", "r"],
+      rows: [["State", "Filings", "Rate filings", "Latest rate (%)"]].concat(tr) });
+    items.push(fpSource(f, t, [star ? ["* Not approved: the figure may be the change asked for. Rate impacts are S&P's overall figure, not weighted by premium.", "* Not approved: may be the change asked for. Rate impacts unweighted.", "* Not approved: may be as asked."]
+      : ["Latest rate: S&P's overall figure for the newest filing with one, not weighted by premium.", "Latest rate: overall, not premium-weighted."], f.states && f.states.noState ? cnt(f.states.noState) + " with no state left out." : ""]));
+    return content(t, "states", T.states ? "Where it files" : "Where it files", items);
+  }
+
+  function fpYears(f, t) {
+    var Y = f.years || {}, years = arr(Y.years), types = arr(Y.types), counts = arr(Y.counts), totals = arr(Y.totals), items = [];
+    var colors = [NAVY, MAG, BLUE, TEAL, PURPLE, "0081C3"];
+    var series = types.map(function (ty, i) { return ser(flat(ty) || "Type n/d", years.map(function (_, yi) { var v = arr(counts[yi])[i]; return num(v) ? v : 0; }), colors[i % colors.length]); });
+    items.push(header("Filings by year published and filing type", L, TOP, LW));
+    var rowsN = years.length + 1, th = rowsN * 0.25, ch = BOTTOM - TOP - HDR - 0.2 - th;
+    items.push({ type: "chart", kind: "stackedColumn", x: L, y: TOP + HDR, w: LW, h: ch, categories: years.map(String), series: series, legend: "top", gap: 60, overlap: 100,
+      labels: { format: "0;;;", position: "ctr", color: "FFFFFF", size: 10 }, catSize: 11, name: "Chart years" });
+    var head = ["Year"].concat(types.map(function (ty) { return flat(ty) || "Type n/d"; })).concat(["All"]);
+    var cw = (LW - 0.9) / (types.length + 1);
+    items.push({ type: "table", x: L, y: TOP + HDR + ch + 0.2, colW: [0.9].concat(types.map(function () { return cw; })).concat([cw]), rowH: 0.25, size: 11, name: "Table years",
+      rows: [head.map(function (h, j) { return j ? fitText(h, 11, cw - 0.26, true) : h; })].concat(years.map(function (y, yi) { return [String(y)].concat(types.map(function (_, i) { return cnt(arr(counts[yi])[i] || 0); })).concat([{ text: cnt(totals[yi] || 0), bold: true }]); })) });
+    items = items.concat(takeaways(pointsOf(t, "years"), LX2, TOP, RW, BOTTOM - TOP));
+    var und = f.totals && f.totals.undated;
+    items.push(fpSource(f, t, [["By the year S&P published each filing; the first and last years are part years.", "By year published; first and last are part years."], und ? cnt(und) + " undated left out." : ""]));
+    return content(t, "years", "Filings by year and type", items);
+  }
+
+  function fpForms(f, t) {
+    var all = fpRows(f, "latest"), total = f.latest && num(f.latest.total) ? f.latest.total : all.length, items = [];
+    var pts = points(pointsOf(t, "forms")), room = pts.length ? 10 : 14, rows = all.slice(0, room);
+    items.push(header("Latest form and rule filings, newest first" + (total > rows.length ? " (" + rows.length + " of " + cnt(total) + ")" : ""), L, TOP, W));
+    var tr = rows.map(function (r) { return [flat(r.company) || "n/d", flat(r.state) || "n/d", flat(r.toi) || "n/d", flat(r.type) || "n/d", flat(r.status) || "n/d", fpDate(f, r.published), flat(r.filingNo) || "n/d"]; });
+    var tbl = fpTable("Table latest filings", L, TOP + HDR, W, ["Company", "State", "Type of insurance", "Filing type", "Status", "Published", "Filing number"], tr,
+      [3.0, 0.65, 2.45, 1.3, 1.35, 1.2, 2.33], ["l", "l", "l", "l", "l", "r", "l"], [0, 5], { fit: [0, 2, 3, 4, 6] });
+    items.push(tbl);
+    var y2 = TOP + HDR + (rows.length + 1) * 0.25 + 0.3;
+    if (pts.length && BOTTOM - y2 >= 0.9) items = items.concat(takeaways(pointsOf(t, "forms"), L, y2, W, BOTTOM - y2));
+    items.push(fpSource(f, t, [["Filing number: the tracking number, or S&P's own number (S&P no.) when there is none.", "Filing number: tracking or S&P no."]]));
+    return content(t, "forms", "Latest form and rule filings", items);
+  }
+
+  function fpRegulator(f, t) {
+    var G = f.regulator || {}, rows = fpRows(f, "regulator").filter(function (r) { return r.state; }), items = [];
+    var bars = rows.slice(0, 12), maxI = -1;
+    bars.forEach(function (r, i) { if (maxI < 0 || r.median > bars[maxI].median) maxI = i; });
+    items.push(header("Median days from submitted to published, by state", L, TOP, LW));
+    var ch = Math.min(BOTTOM - TOP - HDR, 0.45 + bars.length * 0.3), pc = {}; if (maxI >= 0) pc[maxI] = MAG;
+    items.push({ type: "chart", kind: "bar", x: L, y: TOP + HDR, w: LW, h: ch, legend: "none", gap: 50, categories: bars.map(function (r) { return r.state; }),
+      series: [ser("Median days", bars.map(function (r) { return r.median; }), NAVY, { pointColors: pc })], labels: { format: "#,##0" }, catSize: 11, name: "Chart days" });
+    var y2 = TOP + HDR + ch + 0.25;
+    if (BOTTOM - y2 >= 1.3) items = items.concat(takeaways(pointsOf(t, "regulator"), L, y2, LW, BOTTOM - y2));
+    var maxRows = Math.floor((BOTTOM - TOP - HDR) / 0.25) - 2, shown = rows.slice(0, maxRows);
+    var range = function (r) { return r.lo === r.hi ? cnt(r.lo) : cnt(r.lo) + " to " + cnt(r.hi); };
+    var tr = shown.map(function (r) { return [r.state, cnt(r.n), cnt(r.median), range(r)]; });
+    if (G.all && rows.length > 1) { tr.push([{ text: "All states", bold: true }, { text: cnt(G.all.n), bold: true }, { text: cnt(G.all.median), bold: true, color: MAG }, { text: range(G.all), bold: true }]); }
+    items.push(header("By state, approximate" + (rows.length > shown.length ? " (" + shown.length + " of " + rows.length + ")" : ""), LX2, TOP, RW));
+    items.push({ type: "table", x: LX2, y: TOP + HDR, colW: [1.0, 0.9, 1.15, 1.33], rowH: 0.25, size: 11, name: "Table days", aligns: ["l", "r", "r", "r"],
+      rows: [["State", "Filings", "Median days", "Range of days"]].concat(tr) });
+    items.push(fpSource(f, t, [DAYS_NOTE, G.left ? cnt(G.left) + " without both dates left out." : ""]));
+    return content(t, "regulator", "Time with the regulator, approximately", items);
+  }
+
+  function fpQuestions(f, t) {
+    var qs = ((t.questions && t.questions.items) || []).filter(function (q) { return q && (flat(q.title) || flat(q.text)); }).slice(0, 4), items = [];
+    qs.forEach(function (q, i) {
+      var x = i % 2 ? QX2 : L, y = i < 2 ? 1.35 : 3.8, inner = QW - 1.05 - 0.2;
+      var title = flat(q.title), text = flat(q.text);
+      if (lineCount([{ text: title, bold: true }], 14, inner) > 2) title = fitText(title, 14, inner * 2 - 0.3, true);
+      while (lineCount([{ text: text }], 12, inner) > 6) text = fitText(text, 12, (lineCount([{ text: text }], 12, inner) - 1) * inner - 0.4, false);
+      items.push({ type: "numbered", x: x, y: y, w: QW, h: 2.2, n: i + 1, title: title, text: text, inset: 1.05, badge: 0.6, name: "Question " + (i + 1) });
+    });
+    items.push(fpSource(f, t, [t.by === "claude" ? "" : ["Questions follow from the filings in this profile (inferred).", "Questions inferred from the filings."]], true));
+    return { kind: "content", id: "questions", title: trimTitle(flat(t.questions && t.questions.title) || "Key diligence questions"), items: items };
+  }
+
+  function fpSpec(facts, text) {
+    var f = facts || {}, t = text || {};
+    var included = {}; fpPlan(f).forEach(function (r) { included[r.id] = r.included; });
+    var make = { summary: fpSummary, rates: fpRates, states: fpStates, years: fpYears, forms: fpForms, regulator: fpRegulator, questions: fpQuestions };
+    var slides = [fpCover(f, t)];
+    FP_SLIDES.slice(1).forEach(function (s) { if (included[s[0]]) slides.push(make[s[0]](f, t)); });
+    var day = ymd(f.asOf) ? String(f.asOf).slice(0, 10) : "";
+    return { fileName: (slug(fpName(f)) || "filings") + "-filings-profile" + (f.sample ? "-sample" : "") + (day ? "-" + day : "") + ".pptx", slides: slides };
+  }
+
   function spec(facts, text) {
     var f = facts || {}, t = text || {};
     var included = {}; plan(f).forEach(function (r) { included[r.id] = r.included; });
@@ -500,6 +737,6 @@
     return { fileName: name + "-profile" + (f.sample ? "-sample" : "") + (day ? "-" + day : "") + ".pptx", slides: slides };
   }
 
-  window.SNLProfile = { plan: plan, spec: spec,
+  window.SNLProfile = { plan: plan, spec: spec, filingsPlan: fpPlan, filingsSpec: fpSpec,
     format: { money: money, millions: millions, pct: pct, pctCell: pctCell, mult: mult, shortDate: shortDate, monthYear: monthYear, trimTitle: trimTitle } };
 })();

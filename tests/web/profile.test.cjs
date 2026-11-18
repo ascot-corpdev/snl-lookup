@@ -87,7 +87,7 @@ const TPL={text:"PK made-up template", updated_at:"2026-11-05T09:30:00Z"};
 
   // ----- Corp Dev, everything set up, a template uploaded: the whole way through -----
   let t=await open({template:TPL}); let p=t.p;
-  ok("a view of its own in the nav, and it is the one open", same(await t.list("nav.tabs a"),["Filings","Snapshot","Statutory","Profile"]) && (await p.getAttribute('nav.tabs a[data-view="profile"]',"aria-current"))==="page" && (await t.txt(".action-title"))==="Company profile as a PowerPoint file");
+  ok("a view of its own in the nav, and it is the one open", same(await t.list("nav.tabs a"),["Filings","Snapshot","Compare","Market","Statutory","Profile"]) && (await p.getAttribute('nav.tabs a[data-view="profile"]',"aria-current"))==="page" && (await t.txt(".action-title"))==="Company profile as a PowerPoint file");
   ok("the status strip and the Ask Claude button stay over it", await p.isVisible("#s_usage") && await p.isVisible("#askFab"));
   ok("the profile function is asked for its status once", same(t.of("status").map(c=>c.body),[{action:"status"}]));
   ok("the template is looked for once, by listing, not downloaded yet", same(await p.evaluate(()=>__mock.storage.calls),[{op:"list",bucket:"snl-template",path:"",opts:{limit:100,search:"template.pptx"}}]));
@@ -293,6 +293,7 @@ const TPL={text:"PK made-up template", updated_at:"2026-11-05T09:30:00Z"};
 
   // ----- statutory data not set up: only the sample -----
   t=await open({template:TPL}, {pstatus:()=>PSTATUS({statutory:{configured:false, mapped:false, fields:[]}})}); p=t.p;
+  await p.click('[data-act="pf-mode"][data-m="full"]'); await p.waitForTimeout(100);   // the filings profile shows first when statutory data isn't ready
   ok("statutory not set up: calm, and points to the sample", (await t.txt("#pfOff"))==="Statutory data isn't set up yet, so profiles of real companies can't be built. It needs a Snowflake reader account from S&P. Until then, build a sample profile below to check how your template comes out." && (await p.getAttribute("#pfOff","role"))==="status" && !(await p.$("#pfForm")));
   await p.screenshot({path:OUTDIR+"/profile-off-1440.png",fullPage:true});
   dl=await t.download(()=>p.click('[data-act="pf-sample"]')); await p.waitForTimeout(200);
@@ -312,9 +313,11 @@ const TPL={text:"PK made-up template", updated_at:"2026-11-05T09:30:00Z"};
 
   // ----- set up but not mapped -----
   t=await open({template:TPL}, {pstatus:()=>PSTATUS({statutory:{configured:true, mapped:false, fields:[]}})}); p=t.p;
+  await p.click('[data-act="pf-mode"][data-m="full"]'); await p.waitForTimeout(100);   // the filings profile shows first when statutory data isn't ready
   ok("not mapped, Corp Dev: points to the field set-up", (await t.txt("#pfOff"))==="Snowflake is connected, but the statutory fields aren't mapped yet, so profiles can't be built. Map them in the field set-up on the Statutory view. You can build a sample profile below meanwhile." && (await p.getAttribute("#pfOff a","href"))==="#statutory" && !(await p.$("#pfForm")));
   await t.ctx.close();
   t=await open({role:"reader", template:TPL}, {pstatus:()=>PSTATUS({statutory:{configured:true, mapped:false, fields:[]}})}); p=t.p;
+  await p.click('[data-act="pf-mode"][data-m="full"]'); await p.waitForTimeout(100);   // the filings profile shows first when statutory data isn't ready
   ok("not mapped, reader: ask Corp Dev", (await t.txt("#pfOff"))==="Snowflake is connected, but the statutory fields aren't mapped yet, so profiles can't be built. Ask Corp Dev to finish the set-up. You can build a sample profile below meanwhile." && !(await p.$("#pfOff a")));
   await t.ctx.close();
 

@@ -103,6 +103,13 @@ const server = createServer((req, res) => {
       for (const row of JSON.parse(raw)) saved.set(row.id, row);
       res.writeHead(201, { "content-type": "application/json" }); return res.end("[]");
     }
+    if (url.pathname === "/rest/v1/snl_store" && req.method === "GET") {
+      // the rows already saved for some ids (doc->>field=in.(...)), or every row a page at a time (offset, limit)
+      const ins = [...url.searchParams].filter(([k, v]) => k.startsWith("doc->>") && v.startsWith("in.(")).map(([k, v]) => [k.slice(6), v.slice(4, -1).split(",")]);
+      const all = [...saved.values()].filter((r) => ins.every(([f, vs]) => vs.includes(String(r.doc?.[f] ?? ""))));
+      const from = Number(url.searchParams.get("offset") ?? 0), n = Number(url.searchParams.get("limit") ?? 1000);
+      res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify(all.slice(from, from + n).map((r) => ({ id: r.id, doc: r.doc }))));
+    }
     if (url.pathname === "/rest/v1/snl_store" && req.method === "HEAD") { res.writeHead(200, { "content-range": `0-0/${saved.size}`, "content-type": "application/json" }); return res.end(); }
     res.writeHead(404, { "content-type": "application/json" }); res.end(JSON.stringify({ message: "no stand-in for " + req.method + " " + url.pathname }));
   });
@@ -134,7 +141,8 @@ ok("load without the address and secret key stops and says what to set", noKey.s
 
 const load = await run(["load", file]);
 ok("load saves every company and says how many", load.status === 0 && /Loaded 5 companies\./.test(load.out) && saved.size === 5, load.out);
-ok("it upserts by id with the secret key, so loading again updates and never duplicates", log.length === 1 && log[0].method === "POST" && log[0].query.on_conflict === "id" && /resolution=merge-duplicates/.test(log[0].prefer) && log[0].key === "test-secret-key" && log[0].rows === 5, log);
+const posts = log.filter((l) => l.method === "POST");
+ok("it upserts by id with the secret key, so loading again updates and never duplicates", posts.length === 1 && posts[0].query.on_conflict === "id" && /resolution=merge-duplicates/.test(posts[0].prefer) && posts[0].key === "test-secret-key" && posts[0].rows === 5 && log.every((l) => l.method === "POST" || l.method === "GET"), log);
 ok("what is saved is exactly the directory's row shape", same(saved.get("entity:4000001").doc, r.companies[0]) && saved.get("entity:4000001").kind === "entity" && saved.get("entity:i.5000003").label === "Calloway Coastal Co | NAIC 90003 | Calloway Group");
 await run(["load", file]);
 ok("loading the same list twice leaves the same companies", saved.size === 5);

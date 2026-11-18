@@ -21,6 +21,15 @@ verify_jwt = false
 [functions.snl-profile]
 verify_jwt = false
 
+# Filing summaries: a filing's facts read once by Claude and saved, and search over them. Uses the S&P and Anthropic secrets above.
+[functions.snl-digest]
+verify_jwt = false
+
+# The market index: sweeps chosen states for every company in the list, and answers questions from what it kept.
+# Called by logins, or by Supabase Cron with its own shared secret header (no login).
+[functions.snl-index]
+verify_jwt = false
+
 # Lets background tasks run under `supabase functions serve` on your own machine.
 [edge_runtime]
 policy = "per_worker"

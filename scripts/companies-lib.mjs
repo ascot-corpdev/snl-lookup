@@ -176,3 +176,110 @@ export function describe(r) {
   }
   return lines.join("\n");
 }
+
+// ---------- one company, one row ----------
+// The same merge the functions make when they save companies from search results (supabase/functions/_shared/db.ts:
+// sameCompany, mergeEntity, planEntityWrites), so a list loaded after search results, or loaded again, lands on the
+// row already there instead of making a second row for the same company. Kept in step by a test.
+
+const ID_FIELDS = ["companyId", "institutionId", "naicCompanyCode"];
+const FIELD_ORDER = ["companyId", "companyName", "naicCompanyCode", "institutionId", "spStatEntityId", "naicGroupCode", "naicGroupName"];
+const filled = (v) => (v === null || v === undefined || typeof v === "object" || typeof v === "boolean" ? null : String(v).trim() || null);
+const clash = (a, b) => ID_FIELDS.some((k) => { const x = filled(a?.[k]), y = filled(b?.[k]); return !!x && !!y && x !== y; });
+
+/** Whether two rows are the same company: they share a company id, an institution id or a NAIC company code, and no
+    id that both have differs. */
+export function sameCompany(a, b) {
+  if (!a || !b) return false;
+  let shared = false;
+  for (const k of ID_FIELDS) { const x = filled(a[k]), y = filled(b[k]); if (x && y) { if (x !== y) return false; shared = true; } }
+  return shared;
+}
+
+/** One row from two rows of the same company: newer's filled-in values win, older's fill the gaps; keepGroup keeps
+    older's group code and name. */
+export function mergeEntity(older, newer, opts = {}) {
+  const pick = (k, first, second) => (filled(first?.[k]) ? String(first[k]).trim() : filled(second?.[k]) ? String(second[k]).trim() : null);
+  const out = {};
+  for (const k of FIELD_ORDER) out[k] = pick(k, newer, older);
+  if (opts.keepGroup) for (const k of ["naicGroupCode", "naicGroupName"]) out[k] = pick(k, older, newer);
+  out.companyName = out.companyName ?? "";
+  return out;
+}
+
+const fullness = (e) => FIELD_ORDER.filter((k) => filled(e[k])).length + (filled(e.companyId) ? 10 : 0);
+const mergeGroup = (g) => { const [lead, ...rest] = [...g].sort((a, b) => fullness(b) - fullness(a)); return rest.reduce((acc, e) => mergeEntity(e, acc), mergeEntity(lead, lead)); };
+const homeRank = (id) => (id.startsWith("entity:i.") ? 0 : /^entity:\d/.test(id) ? 1 : id.startsWith("entity:n.") ? 2 : 3);
+
+/** Rows grouped by company, in the order each company first appears (rows: {id, doc}). */
+function companyGroups(rows) {
+  const groups = [], byId = new Map();
+  const keys = (r) => ID_FIELDS.map((k) => (filled(r.doc[k]) ? `${k}:${filled(r.doc[k])}` : null)).filter(Boolean);
+  const fits = (a, b) => a.every((x) => b.every((y) => !clash(x.doc, y.doc)));
+  for (const r of rows) {
+    const linked = [...new Set(keys(r).map((k) => byId.get(k)).filter(Boolean))].filter((g) => fits(g.rows, [r])).sort((a, b) => a.at - b.at);
+    let home = linked[0];
+    if (home) home.rows.push(r); else groups.push(home = { at: groups.length, rows: [r] });
+    for (const g of linked.slice(1)) if (fits(home.rows, g.rows)) { home.rows.push(...g.rows); g.rows = []; }
+    for (const x of home.rows) for (const k of keys(x)) { const g = byId.get(k); if (!g || !g.rows.length) byId.set(k, home); }
+  }
+  return groups.filter((g) => g.rows.length).map((g) => g.rows);
+}
+
+/** The ids to look for saved rows of the same companies by, digits only. */
+export function entityIdsOf(list) {
+  const pick = (k, re) => [...new Set(list.map((e) => filled(e?.[k])).filter((v) => v && re.test(v)))];
+  return { companyId: pick("companyId", /^\d{1,12}$/), institutionId: pick("institutionId", /^\d{1,12}$/), naicCompanyCode: pick("naicCompanyCode", /^\d{1,6}$/) };
+}
+
+/** What loading companies does to the rows already saved (existing: [{id, doc}] that may be the same companies):
+    each company is merged into the row already there for it, or gets a new row; any other row of that company is
+    merged in and removed. fromList (the default here): the list's group name wins over one already saved.
+    merged: how many companies landed on a row that was already there. */
+export function planEntityWrites(existing, incoming, opts = { fromList: true }) {
+  let saved = existing.filter((r) => r && typeof r.id === "string" && r.doc && typeof r.doc === "object");
+  const rows = new Map(), drop = new Set();
+  let merged = 0;
+  const own = companyGroups(incoming.filter((e) => e && entityKey(e)).map((doc, i) => ({ id: `#${i}`, doc }))).map((g) => (g.length === 1 ? g[0].doc : mergeGroup(g.map((r) => r.doc))));
+  for (const e of own) {
+    const same = [], order = [...saved].sort((a, b) => homeRank(a.id) - homeRank(b.id) || a.id.localeCompare(b.id));
+    for (let grew = true, cur = e; grew;) {
+      grew = false;
+      for (const r of order) {
+        if (same.includes(r) || !sameCompany(r.doc, cur) || clash(r.doc, e) || same.some((x) => clash(x.doc, r.doc))) continue;
+        same.push(r); cur = mergeGroup([e, ...same.map((x) => x.doc)]); grew = true;
+      }
+    }
+    const known = same.length ? mergeGroup(same.map((r) => r.doc)) : null;
+    const doc = known ? mergeEntity(known, e, { keepGroup: !opts.fromList }) : mergeEntity(e, e);
+    const ids = [...new Set(same.map((r) => r.id))].sort((a, b) => homeRank(a) - homeRank(b) || a.localeCompare(b));
+    const home = ids[0] ?? `entity:${entityKey(doc)}`;
+    if (ids.length) merged++;
+    rows.set(home, doc);
+    for (const id of ids.slice(1)) { drop.add(id); rows.delete(id); }
+    drop.delete(home);
+    saved = [...saved.filter((r) => !ids.includes(r.id)), { id: home, doc }];
+  }
+  return { rows: [...rows].map(([id, doc]) => ({ id, doc })), drop: [...drop], merged };
+}
+
+/** The company list as saved, checked for companies with more than one row (saved before saving merged them):
+    each such company becomes one row, the loaded list's row where there is one, with every field either row had
+    and the loaded list's group name; the other rows are removed. rows: every saved company row, [{id, doc}]. */
+export function tidyPlan(rows) {
+  const list = rows.filter((r) => r && typeof r.id === "string" && r.doc && typeof r.doc === "object");
+  const keep = [], drop = [];
+  for (const g of companyGroups(list)) {
+    if (g.length < 2) continue;
+    const sorted = [...g].sort((a, b) => homeRank(a.id) - homeRank(b.id) || a.id.localeCompare(b.id)), home = sorted[0];
+    // every field either row had; the home row's group (the loaded list's, where there is one) wins
+    const all = mergeGroup(g.map((r) => r.doc));
+    const doc = mergeEntity(all, { ...all, naicGroupCode: home.doc.naicGroupCode ?? null, naicGroupName: home.doc.naicGroupName ?? null });
+    keep.push({ id: home.id, doc });
+    drop.push(...sorted.slice(1).map((r) => r.id));
+  }
+  return { rows: keep, drop, companies: list.length - drop.length, duplicates: keep.length };
+}
+
+/** The rows of a plan as the snl_store table holds them. */
+export const planRows = (plan, fetchedAt) => plan.rows.map((r) => ({ id: r.id, kind: "entity", label: entityLabel(r.doc), doc: r.doc, fetched_at: fetchedAt }));

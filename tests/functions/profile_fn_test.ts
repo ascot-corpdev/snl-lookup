@@ -270,7 +270,8 @@ const claudeText = (edit: (t: any) => void = () => {}) => (body: any): Reply => 
   const sb = { from: (table: string) => { const op = { table, calls: [] as unknown[][] }; ops.push(op); return chain(op); } } as unknown as SupabaseClient;
   const found = await supabaseDb(sb).entitiesInGroup("9100", 200);
   ok("a group's companies are read from saved companies by their group code", same(found, [ENT]) && ops[0].table === "snl_store" && ops[0].calls.some((c) => same(c, ["eq", "kind", "entity"])) && ops[0].calls.some((c) => same(c, ["eq", "doc->>naicGroupCode", "9100"])) && ops[0].calls.some((c) => same(c, ["limit", 200])), ops[0].calls);
-  ok("a group code that isn't a code asks nothing", same(await supabaseDb(sb).entitiesInGroup("9100' or 1=1", 5), []) && ops.length === 1);
+  const asked = ops.length;
+  ok("a group code that isn't a code asks nothing", same(await supabaseDb(sb).entitiesInGroup("9100' or 1=1", 5), []) && ops.length === asked);
 }
 
 done();

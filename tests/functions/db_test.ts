@@ -81,14 +81,14 @@ const ENT = (id: string, name: string, over: Partial<Entity> = {}): Entity => ({
   const rows = [{ doc: ENT("9100001", "Calloway Insurance Co", { naicCompanyCode: "91001" }) }, { doc: ENT("9100002", "Calloway Home Co") }];
   let sb = fakeSb(() => ({ data: rows }));
   let found = await supabaseDb(sb.client).findEntities("  Calloway ", 20);
-  ok("a name is looked for in the label, any case, with the limit applied", found.length === 2 && sb.ops.length === 1 && same(sb.has(sb.ops[0], "ilike"), ["ilike", "label", "%Calloway%"]) && same(sb.has(sb.ops[0], "eq"), ["eq", "kind", "entity"]) && same(sb.has(sb.ops[0], "limit"), ["limit", 20]), sb.ops[0]);
+  ok("a name is looked for in the label, any case, with the limit applied", found.length === 2 && sb.ops.filter((o) => sb.has(o, "ilike")).length === 1 && same(sb.has(sb.ops[0], "ilike"), ["ilike", "label", "%Calloway%"]) && same(sb.has(sb.ops[0], "eq"), ["eq", "kind", "entity"]) && same(sb.has(sb.ops[0], "limit"), ["limit", 20]), sb.ops[0]);
   ok("a name search never builds an or-filter", !sb.ops.some((o) => sb.has(o, "or")));
 
   sb = fakeSb(() => ({ data: rows }));
   found = await supabaseDb(sb.client).findEntities("91001", 20);
   const or = sb.ops.map((o) => sb.has(o, "or")).find(Boolean);
   ok("a number is matched exactly against the NAIC code, the company id and the institution id", same(or, ["or", "doc->>naicCompanyCode.eq.91001,doc->>companyId.eq.91001,doc->>institutionId.eq.91001"]), or);
-  ok("the same company found both ways is listed once", found.length === 2 && sb.ops.length === 2, found.map((e) => e.companyId));
+  ok("the same company found both ways is listed once", found.length === 2 && sb.ops.filter((o) => sb.has(o, "or") || sb.has(o, "ilike")).length === 2, found.map((e) => e.companyId));
 
   const hostile = ["1,kind.eq.search", "91001)", "1 or 1=1", "doc->>companyId.eq.1", "9100001,doc->>companyName.neq.x", "1;drop table snl_store", "９１００１", "1e5", "-1", "1.5", "1234567890123", "0x1F", "91001\n,kind.neq.entity"];
   const leaked: string[] = [];
@@ -110,7 +110,7 @@ const ENT = (id: string, name: string, over: Partial<Entity> = {}): Entity => ({
 
   sb = fakeSb();
   await supabaseDb(sb.client, () => NOW).putEntities([ENT("9100001", "Calloway Insurance Co", { naicCompanyCode: "91001", naicGroupName: "Calloway Financial Grp" }), ENT("9200001", "Tarrow Mutual Insurance Co")]);
-  const up = sb.has(sb.ops[0], "upsert")!;
+  const up = sb.ops.map((o) => sb.has(o, "upsert")).find(Boolean)!;
   ok("companies are saved one row each under entity:<companyId>, labelled with name, NAIC code and group", same((up[1] as any[]).map((r) => [r.id, r.kind, r.label]), [["entity:9100001", "entity", "Calloway Insurance Co | NAIC 91001 | Calloway Financial Grp"], ["entity:9200001", "entity", "Tarrow Mutual Insurance Co"]]) && same(up[2], { onConflict: "id" }), up[1]);
   ok("a label is never longer than the 400 characters the table allows", entityLabel(ENT("1", "N".repeat(500), { naicGroupName: "G".repeat(500) })).length === 400);
   sb = fakeSb();
@@ -194,7 +194,7 @@ const ENT = (id: string, name: string, over: Partial<Entity> = {}): Entity => ({
   ok("a company is keyed by its company id, or by i.<institution id> when it has none", entityKey(ENT("9100001", "A", { institutionId: "810001" })) === "9100001" && entityKey(INST) === "i.5000003" && entityKey(ENT("x", "A", { companyId: null })) === null);
   let sb = fakeSb();
   await supabaseDb(sb.client, () => NOW).putEntities([INST, ENT("x", "No ids at all", { companyId: null })]);
-  const up = sb.has(sb.ops[0], "upsert")!;
+  const up = sb.ops.map((o) => sb.has(o, "upsert")).find(Boolean)!;
   ok("an institution-only company is saved under entity:i.<institution id>, and one with no id at all is not saved", same((up[1] as any[]).map((r) => [r.id, r.label]), [["entity:i.5000003", "Calloway Coastal Co | NAIC 90003 | Calloway Group"]]), up[1]);
   sb = fakeSb();
   await supabaseDb(sb.client, () => NOW).putEntities([ENT("x", "No ids at all", { companyId: null })]);
