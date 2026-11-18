@@ -3,6 +3,7 @@
 
 import type { Db, Entity, Job, JobPatch, JobStatus, StoreKind, StoreRow } from "../../../supabase/functions/_shared/db.ts";
 import type { FoundFiling, WatchRun, WatchRunPatch } from "../../../supabase/functions/_shared/db.ts";
+import type { DigestQuery, DigestRow } from "../../../supabase/functions/_shared/db.ts";
 import { entityLabel, groupNamePattern, oneEach, planEntityWrites, withSameCompanies } from "../../../supabase/functions/_shared/db.ts";
 import { LIBRARY_MISSING, type LibraryRow } from "../../../supabase/functions/_shared/db.ts";
 
@@ -440,4 +441,42 @@ export function promptCache(claude: { uploads: { id: string; bytes?: Uint8Array 
     const read = sum(0, hit), write = lastBp > hit ? sum(hit + 1, lastBp) : 0, rest = sum(Math.max(hit, lastBp) + 1, units.length - 1);
     return { input_tokens: rest, cache_creation_input_tokens: write, cache_read_input_tokens: read, output_tokens: 200 };
   };
+}
+
+// ---------- saved filing summaries (migration 0005) ----------
+
+/** The summaries table in memory, with the same rules as migration 0005's checks on a row. Not part of memoryDb: a test
+    that wants summaries adds it, Object.assign(memoryDb(clock), digestTables(clock)), so the other suites run as before.
+    rows: the saved rows; fail: a message, and every call fails with it (as a missing table would: "relation
+    public.snl_digests does not exist"); gets, searches: what was asked. The search filters as the real one does: a
+    form number anywhere in form_keys, or any of the words in search_body (word endings "s" and "es" ignored, as
+    Postgres's English word search would). */
+export function digestTables(_clock: Clock) {
+  const rows = new Map<string, DigestRow>();
+  const t = {
+    rows, fail: "", gets: [] as { documentIds: number[]; versionIds: string[] }[], searches: [] as DigestQuery[], puts: 0,
+    async getDigests(ids: { documentIds: number[]; versionIds: string[] }): Promise<DigestRow[]> {
+      t.gets.push(structuredClone(ids));
+      if (t.fail) throw new Error(t.fail);
+      return [...rows.values()].filter((r) => (r.document_id !== null && ids.documentIds.includes(r.document_id)) || (r.filing_version_id !== null && ids.versionIds.includes(r.filing_version_id))).map((r) => structuredClone(r));
+    },
+    async putDigest(row: DigestRow): Promise<void> {
+      if (t.fail) throw new Error(t.fail);
+      const bad = !/^(v:[A-Za-z0-9._-]{8,64}|d:[0-9]{1,15})$/.test(row.id) || (row.state !== null && !/^[A-Z]{2}$/.test(row.state)) || (row.company !== null && row.company.length > 200)
+        || row.form_keys.length > 4000 || row.search_body.length > 20000 || (row.filing_version_id === null && row.document_id === null) || JSON.stringify(row.doc).length >= 262144;
+      if (bad) throw new Error("new row for relation \"snl_digests\" violates check constraint");
+      t.puts++;
+      rows.set(row.id, structuredClone(row));
+    },
+    async searchDigests(q: DigestQuery): Promise<DigestRow[]> {
+      t.searches.push(structuredClone(q));
+      if (t.fail) throw new Error(t.fail);
+      const stem = (w: string) => w.toLowerCase().replace(/(es|s)$/, "");
+      return [...rows.values()].filter((r) => !q.state || r.state === q.state)
+        .filter((r) => (q.formKey && r.form_keys.includes(q.formKey)) || (q.words.length && q.words.some((w) => r.search_body.toLowerCase().split(/[^\p{L}\p{N}]+/u).some((x) => stem(x) === stem(w)))))
+        .sort((a, b) => b.made_at.localeCompare(a.made_at)).slice(0, q.limit).map((r) => structuredClone(r));
+    },
+    async countDigests(): Promise<number> { if (t.fail) throw new Error(t.fail); return rows.size; },
+  };
+  return t;
 }

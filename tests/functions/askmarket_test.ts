@@ -57,7 +57,7 @@ function ownerList(db: MemoryDb) {
   const t = tool("resolve_entities");
   ok("resolve_entities is offered, strict, with names, groups and saved sets as required lists of text and nothing else", !!t && t.strict === true && same(t.input_schema.required, ["names", "groups", "sets"]) && t.input_schema.additionalProperties === false
     && t.input_schema.properties.names.type === "array" && t.input_schema.properties.names.items.type === "string" && t.input_schema.properties.groups.type === "array" && t.input_schema.properties.groups.items.type === "string", t);
-  ok("it comes straight after resolve_entity, and the other tools keep their place", same(TOOLS.map((x: any) => x.name), ["resolve_entity", "resolve_entities", "search_filings", "read_filing_document", "query_statutory"]));
+  ok("it comes straight after resolve_entity, and the other tools keep their place", same(TOOLS.map((x: any) => x.name), ["resolve_entity", "resolve_entities", "search_filings", "read_filing_document", "get_filing_summaries", "query_statutory"]));
   ok("its description says it never calls S&P, names notFound and searchBatches, and gives the caps", /never calls S&P/.test(t.description) && t.description.includes("notFound") && t.description.includes("searchBatches") && t.description.includes(`At most ${F.MAX_LOOKUP_NAMES} names and groups, and ${F.MAX_MEMBERS} group members`) && t.description.includes("notLookedUp"), t.description);
   ok("resolve_entity's description points to resolve_entities for several companies or a group", /use resolve_entities/.test(tool("resolve_entity").description));
   ok("the caps are sensible: room for a 15-carrier sweep, one search of members", F.MAX_LOOKUP_NAMES >= 15 && F.MAX_MEMBERS === F.MAX_IDS && F.MATCHES_PER_NAME >= 5);

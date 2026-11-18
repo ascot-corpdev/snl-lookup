@@ -181,7 +181,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   ok("many companies: the first three, then the rest on request", R[4][0]==="Calloway Insurance Co NAIC 90001 Calloway Home Co NAIC 90002 Calloway Coastal Co NAIC 90003 and 2 more", R[4][0]);
   await p.click('#resTable tbody tr >> nth=4 >> button[data-act="co-toggle"]'); await p.waitForTimeout(80);
   ok("the rest of the companies open up", (await rows())[4][0].endsWith("Calloway Specialty Co NAIC 90004 Calloway Lloyds NAIC 90005 Show fewer"));
-  ok("document column: a button and the page count", R[0][9]==="Open document 42 pages" && R[2][9]==="Open document 1 page", [R[0][9],R[2][9]]);
+  ok("document column: a button, the page count and the Summary control", R[0][9]==="Open document 42 pages Summary" && R[2][9]==="Open document 1 page Summary", [R[0][9],R[2][9]]);
   ok("count and source line", (await t.txt("#resCount"))==="Showing 6 of 6" && (await t.txt("#results .source")).startsWith("Source: S&P Global Market Intelligence, SNL Insurance Product Filings, fetched 13 Nov."));
   ok("no dashes or shouting in the view", !(await p.evaluate(()=>document.body.innerText)).includes("—"));
   await p.screenshot({path:OUTDIR+"/filings-results-1440.png",fullPage:true});
