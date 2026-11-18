@@ -1306,14 +1306,15 @@ function bsProgText(p){
   return `${count(p.done)} of ${p.exact?"":"about "}${count(p.of)} parts, ${plural(p.filings,"filing")} so far.`;
 }
 function bsProgHTML(p){ const t=bsProgText(p); return t?` <span class="bsprog" id="bsProg">${esc(t)}</span>`:""; }
-function bsResult(st){ return {...st.last, rows:st.acc.rows.slice().sort(bsNewest), more:false, cursor:null}; }
+// one part is the function's own answer, kept exactly as sent; several are put together
+function bsResult(st){ return {...st.last, rows:st.n>1 ? st.acc.rows.slice().sort(bsNewest) : st.last.rows, more:false, cursor:null}; }
 /* Runs a search, in as many parts as it comes in. Returns what callFn returns for one search ({data} or {err, msg,
    ...}), with data holding every part. When it can't finish (stopped, or a part failed twice) data is what arrived,
    marked capped and incomplete (incomplete.text says why, also first in its notes), and resume carries on from there.
    o.ctl: from bsControl, to stop; o.onPart(progress) after each part; o.resume: a resume from an earlier answer. */
 async function searchParts(payload, o={}){
   const ctl=o.ctl||{}, base={...payload}; delete base.cursor;
-  const st=o.resume ? {acc:o.resume.acc, last:o.resume.last, cursor:o.resume.cursor} : {acc:{by:new Map(), rows:[]}, last:null, cursor:null};
+  const st=o.resume ? {acc:o.resume.acc, last:o.resume.last, cursor:o.resume.cursor, n:o.resume.n} : {acc:{by:new Map(), rows:[]}, last:null, cursor:null, n:0};
   let tries=0;
   for(;;){
     if(ctl.stopped) return bsIncomplete(st, {why:"stopped"});
@@ -1323,7 +1324,7 @@ async function searchParts(payload, o={}){
     if(ctl.stopped) return bsIncomplete(st, {why:"stopped"});
     if(r.data && Array.isArray(r.data.rows)){
       tries=0; takeUsage(r.data);
-      bsMerge(st.acc, r.data.rows); st.last=r.data; st.cursor=r.data.more && r.data.cursor ? r.data.cursor : null;
+      bsMerge(st.acc, r.data.rows); st.last=r.data; st.n=(st.n||0)+1; st.cursor=r.data.more && r.data.cursor ? r.data.cursor : null;
       if(st.cursor && !r.data.more) st.cursor=null;
       if(o.onPart) o.onPart(bsProgress(st));
       if(!st.cursor) return {data:bsResult(st), status:200};
@@ -1345,7 +1346,7 @@ function bsIncomplete(st, inc){
   const d=bsResult(st);
   // a part before the last carries only a note for pages older than this one: left out
   return {data:{...d, capped:true, saved:false, incomplete:{why:inc.why, text}, notes:[text, ...(!st.last.more && Array.isArray(d.notes)?d.notes:[])]}, status:200,
-    resume:{acc:st.acc, last:st.last, cursor:st.cursor}};
+    resume:{acc:st.acc, last:st.last, cursor:st.cursor, n:st.n}};
 }
 function stopSearch(){ const f=S.f; if(f.busy && f.ctl) f.ctl.stop(); }
 function bsStopHTML(){ const f=S.f; return f.ctl ? `<button type="button" class="btn sm" id="searchStop" data-act="search-stop" title="Stops asking for more parts. What has arrived is shown, marked incomplete.">Stop</button>` : ""; }
