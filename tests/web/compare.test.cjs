@@ -402,11 +402,12 @@ const PART2={...copy(SEARCH), rows:[row(3,5000001,"Calloway Insurance Co","TX","
   ok("not set up: the function's answer is a calm note", (await t.txt("#cmErr"))===NOT_SET_UP && !(await p.$("#cmErr .banner")));
   await t.ctx.close();
   let k=0;
-  t=await open({}, {search:()=>(++k===1 ? {status:500, body:{error:"server", message:"The filings function failed: made-up fault"}} : {status:200, body:copy(SEARCH)})}); p=t.p;
-  await t.four(); await t.run();
-  ok("the only search failed: says so with Try again", (await t.txt("#cmErr"))==="Couldn't run the comparison. The filings function failed: made-up faultTry again");
+  // (big-searches) a search that fails on the far side is asked once more before it counts as failed
+  t=await open({}, {search:()=>(++k<=2 ? {status:500, body:{error:"server", message:"The filings function failed: made-up fault"}} : {status:200, body:copy(SEARCH)})}); p=t.p;
+  await t.four(); await t.run(); await p.waitForTimeout(1800);
+  ok("the only search failed twice: says so with Try again", (await t.txt("#cmErr"))==="Couldn't run the comparison. The filings function failed: made-up faultTry again" && t.of("search").length===2);
   await p.click('[data-act="cmp-retry"]'); await p.waitForTimeout(450);
-  ok("Try again: the same search, and the comparison shows", same(t.of("search").map(c=>c.body),[MAIN,MAIN]) && (await t.cells("#cmSumTable"))[1][1]==="7");
+  ok("Try again: the same search, and the comparison shows", same(t.of("search").map(c=>c.body),[MAIN,MAIN,MAIN]) && (await t.cells("#cmSumTable"))[1][1]==="7");
   await t.ctx.close();
 
   // ----- the Filings form's "keep out of Recent searches" is respected -----

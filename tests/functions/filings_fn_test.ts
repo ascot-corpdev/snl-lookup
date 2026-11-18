@@ -169,7 +169,8 @@ function world(secrets: Record<string, string> = SECRETS, documents: Parameters<
   const slowWorld = world();
   const slow = spStub(slowWorld.clock, (call, n) => { slowWorld.clock.now += 6000; return call.path === "/api/v1/reference" ? J(STATES) : J(spPage([filing(n)], { totalPages: 999 })); });
   const cut = await slowWorld.call(narrow, { fetch: slow.fetch });
-  ok("when S&P is slow the search stops inside the time limit, says so, and isn't saved", cut.status === 200 && cut.body.capped === true && cut.body.saved === false && cut.body.requests < 25 && cut.body.notes[0].startsWith("S&P was answering slowly, so the search stopped after") && slowWorld.clock.now - Date.parse("2026-11-13T12:00:00Z") < 140_000, { requests: cut.body.requests, notes: cut.body.notes, ms: slowWorld.clock.now - Date.parse("2026-11-13T12:00:00Z") });
+  // (big-searches) a search now comes in parts, so a slow S&P ends this part in time and the next call carries on
+  ok("when S&P is slow the call answers inside the time limit with what came back and a place to carry on from, unsaved", cut.status === 200 && cut.body.more === true && !!cut.body.cursor && cut.body.capped === true && cut.body.saved === false && cut.body.requests < 25 && slowWorld.clock.now - Date.parse("2026-11-13T12:00:00Z") < 140_000, { requests: cut.body.requests, notes: cut.body.notes, ms: slowWorld.clock.now - Date.parse("2026-11-13T12:00:00Z") });
 }
 
 // ---------- before S&P is set up ----------

@@ -11,6 +11,7 @@
 
 import type { Db, FoundFiling, WatchRun, WatchScope } from "./db.ts";
 import { batches, type Cell, entitiesFrom, type Filing, filingNumberText, getReference, SP_NUMBER_MARK, MAX_IDS, MAX_IDS_PER_REQUEST, searchFilings, type SearchParams } from "./filings.ts";
+import { STEP_ROWS } from "./filings.ts";
 import { type Env } from "./http.ts";
 import { NOT_CONFIGURED, Spgmi, SpgmiError } from "./spgmi.ts";
 
@@ -464,13 +465,15 @@ export async function runWatch(ctx: RunCtx): Promise<RunOutcome> {
     ];
     const first = (p: SearchParams) => Math.ceil(p.companyIds.length / MAX_IDS_PER_REQUEST) + Math.ceil(p.institutionIds.length / MAX_IDS_PER_REQUEST);
     const byVersion = new Map<string, Filing>();
-    let capped = false, noVersion = 0;
+    let capped = false, noVersion = 0, atBound = false;
     for (let k = 0; k < searches.length; k++) {
       // Each search may use what is left of the budget, less one request for each search still to come.
       const later = searches.slice(k + 1).reduce((n, p) => n + first(p), 0);
       const allowed = Math.max(first(searches[k]), WATCH_MAX_REQUESTS - ctx.used() - later);
-      const r = await searchFilings(ctx.api, searches[k], { maxRequests: allowed, deadline: start + WATCH_TIME_MS, now: ctx.now });
+      // One check holds at most STEP_ROWS filings (filings.ts): each search may hold what the earlier ones left room for.
+      const r = await searchFilings(ctx.api, searches[k], { maxRequests: allowed, deadline: start + WATCH_TIME_MS, now: ctx.now, maxRows: STEP_ROWS - byVersion.size });
       capped ||= r.capped;
+      atBound ||= r.atBound === true;
       for (const f of r.rows) {
         const v = f.filingVersionId;
         if (v === null || v === undefined || v === "") { noVersion++; continue; }
@@ -498,7 +501,8 @@ export async function runWatch(ctx: RunCtx): Promise<RunOutcome> {
       if (startPoint) parts.push(`${plural(startPoint, "filing")} for newly added companies, states or filters ${startPoint === 1 ? "was" : "were"} recorded as the starting point, not as new.`);
       if (win.days > WATCH_WINDOW_DAYS) parts.push(`The last complete check was ${win.since ? `on ${shortDay(Date.parse(win.since))}` : "a while ago"}, so this check looked back ${win.days} days instead of ${WATCH_WINDOW_DAYS}, to catch filings published in between.`);
     }
-    if (capped) parts.push("The check stopped before S&P had returned everything, so it may have missed some filings. Remove companies or states from the watchlist.");
+    if (capped && atBound) parts.push(`The check found more filings than it can hold at once (${STEP_ROWS.toLocaleString("en-US")}), so it stopped before S&P had returned everything and may have missed some filings. Remove companies or states from the watchlist.`);
+    else if (capped) parts.push("The check stopped before S&P had returned everything, so it may have missed some filings. Remove companies or states from the watchlist.");
     if (noVersion) parts.push(`${plural(noVersion, "filing")} came back without a filing version id, so ${noVersion === 1 ? "it" : "they"} can't be tracked.`);
 
     let emailed = 0;
