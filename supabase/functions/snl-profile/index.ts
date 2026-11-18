@@ -15,6 +15,12 @@
 //   draft {kind, code, toYear?}  -> {facts, text, usage, jobId}: Claude's text, or the plain text with a note
 //     A draft counts as one of the login's questions for the day and is kept as a finished answer in snl_jobs, so the
 //     day's count and cost, "Past answers" and the 30-day clean-up all include it.
+// The filings profile, from S&P filings alone (no statutory data). who is {kind:"company", companyId | institutionId}
+// or {kind:"group", group: the group's name in the company list}; years is 1, 3 or 5:
+//   filings_sample                     -> {facts, text}: a made-up group, no S&P or Claude call
+//   filings_facts {who..., years}      -> {facts, text, spRequests, search}: refused (400 too_big, 404 not_found) before any
+//                                         S&P request when it can't be built; at most FP_MAX_SP_REQUESTS S&P requests
+//   filings_draft {who..., years}      -> {facts, text, usage, jobId, spRequests, search}: as draft, counted and saved the same way
 
 import { adminClient, type Env, type Json, readBody, sleep, type WhoIs, whoIs, withCors } from "../_shared/http.ts";
 import { type Db, supabaseDb } from "../_shared/db.ts";
@@ -22,6 +28,7 @@ import { credsReady, Snowflake, snowflakeCreds, SnowflakeError } from "../_share
 import { fieldStatus, getMapping } from "../_shared/statutory.ts";
 import { type Gate, makeGate, planLimits, Spgmi, SpgmiError } from "../_shared/spgmi.ts";
 import { answerLines, buildFacts, clean, DRAFT_TIME_MS, draftText, plainText, PROFILE_CALL_MS, PROFILE_MAX_SP_REQUESTS, PROFILE_QUERY_YEARS, sampleFacts } from "../_shared/profile.ts";
+import { buildFilingsFacts, draftFilingsText, filingsAnswerLines, filingsPlainText, filingsSampleFacts, FP_DRAFT_SEARCH_MS, FP_MAX_SP_REQUESTS, FP_SEARCH_MS, FpRefused, parseFilingsProfile } from "../_shared/profile.ts";
 
 export type Deps = {
   env: Env; fetch: typeof fetch; anthropicFetch?: typeof fetch; now?: () => number; whoIs?: WhoIs; db?: Db; gate?: Gate;
@@ -84,6 +91,10 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
     const facts = sampleFacts(new Date(start).toISOString().slice(0, 10));
     return json(200, { facts, text: plainText(facts) });
   }
+  if (body.action === "filings_sample") {
+    const facts = filingsSampleFacts(new Date(start).toISOString().slice(0, 10));
+    return json(200, { facts, text: filingsPlainText(facts) });
+  }
 
   const admin = deps.db ? null : adminClient(deps.env);
   const db = deps.db ?? (admin ? supabaseDb(admin, clock) : null);
@@ -97,7 +108,8 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
     const fields = fieldStatus(mapping);
     return json(200, { statutory: { configured: sfConfigured, mapped: fields.some((f) => f.mapped), fields: fields.map((f) => ({ id: f.id, label: f.label, mapped: f.mapped })) }, claude: { configured: claude }, filings: { configured: spConfigured } });
   }
-  if (body.action !== "facts" && body.action !== "draft") return json(400, { error: "bad", message: "Unknown action. Use status, sample, facts or draft." });
+  if (body.action === "filings_facts" || body.action === "filings_draft") return await serveFilings(body, { deps, json, db, who, clock, start, claude, spCreds, spConfigured });
+  if (body.action !== "facts" && body.action !== "draft") return json(400, { error: "bad", message: "Unknown action. Use status, sample, facts or draft, or for a filings profile filings_sample, filings_facts or filings_draft." });
 
   const drafting = body.action === "draft";
   if (drafting && !claude) return json(503, { error: "not_configured", message: CLAUDE_NOT_CONFIGURED });
@@ -162,6 +174,79 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
   catch (e) { console.error("couldn't record the profile text", (e as Error)?.message); }
   try { await db.dropOldJobs(new Date(clock() - KEEP_DAYS * 86_400_000).toISOString()); } catch { /* housekeeping: tried again next time */ }
   return json(200, { facts, text: out.text, usage: out.usage, jobId });
+}
+
+/** S&P failures as snl-filings answers them (spgmiAnswer there). */
+function spAnswer(e: unknown): { status: number; body: Record<string, unknown> } | null {
+  if (!(e instanceof SpgmiError)) return null;
+  const status = e.code === "not_configured" ? 503 : e.code === "limit" || e.code === "rate_limited" ? 429 : e.code === "bad_request" ? 400 : e.code === "not_found" ? 404 : 502;
+  return { status, body: { error: e.code === "not_configured" ? "not_configured" : `spgmi_${e.code}`, message: e.message, requestId: e.requestId } };
+}
+
+type FilingsCtx = { deps: Deps; json: Json; db: Db; who: { id: string }; clock: () => number; start: number; claude: boolean; spCreds: ReturnType<typeof Spgmi.creds>; spConfigured: boolean };
+/** The filings profile: facts from S&P filings alone (filings_facts), or with Claude's text (filings_draft). The page
+    sends who (a company's S&P id or a group's name from the company list) and the period, never figures. */
+async function serveFilings(body: Record<string, unknown>, c: FilingsCtx): Promise<Response> {
+  const { deps, json, db, who, clock, start } = c;
+  const drafting = body.action === "filings_draft";
+  if (drafting && !c.claude) return json(503, { error: "not_configured", message: CLAUDE_NOT_CONFIGURED });
+  const parsed = parseFilingsProfile(body);
+  if (!parsed.ok) return json(400, { error: "bad", message: parsed.message });
+  const ask = parsed.ask;
+
+  // As the full profile: one answer at a time and the daily limit, checked before any work.
+  const busy = async () => {
+    const going = await db.activeJob(who.id, new Date(clock() - BUSY_MS).toISOString());
+    return going ? json(409, { error: "busy", message: "You already have an answer in progress. Wait for it to finish, then try again. If you closed its tab, you can try again in ten minutes.", jobId: going }) : null;
+  };
+  if (drafting) {
+    const b = await busy();
+    if (b) return b;
+    const limit = dailyLimit(deps.env);
+    if (limit !== null) {
+      const day = utcDay(clock()), asked = await db.countJobsSince(who.id, day.start);
+      if (asked >= limit) return json(429, { error: "limit", message: limitMessage(asked, limit, clock()), askedToday: asked, dailyLimit: limit, resetsAt: day.resetsAt });
+    }
+  }
+
+  // Every S&P call goes through the shared throttle and counter, and through this profile's hard cap.
+  const wait = deps.sleep ?? sleep, inner = deps.gate ?? makeGate(db, planLimits(deps.env), wait);
+  let used = 0;
+  const gate: Gate = async () => {
+    if (used >= FP_MAX_SP_REQUESTS) throw new SpgmiError("limit", `The filings profile stopped after the ${FP_MAX_SP_REQUESTS} S&P requests one profile may use. Choose a shorter period or one company, and try again.`);
+    await inner();
+    used++;
+  };
+  const api = c.spConfigured ? new Spgmi(c.spCreds, { fetch: deps.fetch, gate, sleep: wait, now: clock }) : null;
+
+  let facts, search;
+  try {
+    ({ facts, search } = await buildFilingsFacts({ db, api, now: clock, start, deadline: start + (drafting ? FP_DRAFT_SEARCH_MS : FP_SEARCH_MS) }, ask));
+  } catch (e) {
+    if (e instanceof FpRefused) return json(e.code === "not_found" ? 404 : 400, { error: e.code, message: e.message });
+    const answer = spAnswer(e);
+    if (answer) return json(answer.status, answer.body);
+    throw e;
+  }
+  if (!drafting) return json(200, { facts, text: filingsPlainText(facts), spRequests: used, search });
+
+  const b = await busy();
+  if (b) return b;
+  const jobId = await db.createJob(who.id, `Filings profile text for ${clean(facts.entity.name, 200)}`);
+  if (!jobId) return json(500, { error: "server", message: "The profile text couldn't be started. Try again." });
+  await db.claimJob(jobId, ["queued"]);
+  const left = start + PROFILE_CALL_MS - clock();
+  const out = await draftFilingsText(facts, { env: deps.env, anthropicFetch: deps.anthropicFetch, timeMs: Math.max(1_000, Math.min(deps.draftMs ?? DRAFT_TIME_MS, left)), spRequests: used });
+  const result = {
+    answer: filingsAnswerLines(facts, out.text), sources: [], table: null,
+    lookups: [{ tool: "profile", detail: `Filings profile, ${facts.entity.kind === "group" ? "group" : "company"}, ${facts.period.from} to ${facts.period.to}` }],
+    caps: out.text.note ? [out.text.note] : [], model: out.model, usage: out.usage,
+    profile: { kind: facts.entity.kind, filings: true, by: out.text.by },
+  };
+  try { await db.updateJob(jobId, { status: "done", partial: "", result }); }
+  catch (e) { console.error("couldn't record the profile text", (e as Error)?.message); }
+  try { await db.dropOldJobs(new Date(clock() - KEEP_DAYS * 86_400_000).toISOString()); } catch { /* housekeeping: tried again next time */ }
+  return json(200, { facts, text: out.text, usage: out.usage, jobId, spRequests: used, search });
 }
 
 // Tests import handle() with this flag set; in Supabase the server always starts.

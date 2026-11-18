@@ -24,7 +24,8 @@
 //        rowStyles:{rowIndex:{bold,color}}, name}       cell = string | {text, bold, color}
 //   {type:"chart", kind:"column"|"stackedColumn"|"bar"|"stackedBar", x,y,w,h, categories:[], series:[{name, values,
 //        color, pointColors:{i:color}, labelColor}], labels:{format, position, color, size} | false, legend:"top"|"none",
-//        valueAxis:{max, min, major, format} | null, gap, overlap, catSize, name}
+//        valueAxis:{max, min, major, format} | null, gap, overlap, catSize, catLabels:"low"|"nextTo", name}
+//        (catLabels "low" puts the category labels at the bottom, clear of columns below zero)
 (function () {
   "use strict";
   var NS = {
@@ -525,7 +526,7 @@
     var va = it.valueAxis || null, catSize = num(it.catSize) ? it.catSize : 11;
     var scaling = '<c:scaling><c:orientation val="minMax"/>' + (va && num(va.max) ? '<c:max val="' + va.max + '"/>' : "") + (va && num(va.min) ? '<c:min val="' + va.min + '"/>' : "") + "</c:scaling>";
     var catAx = '<c:catAx><c:axId val="500000001"/><c:scaling><c:orientation val="' + (dir === "bar" ? "maxMin" : "minMax") + '"/></c:scaling><c:delete val="0"/>' +
-      '<c:axPos val="' + (dir === "bar" ? "l" : "b") + '"/><c:numFmt formatCode="General" sourceLinked="1"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/>' +
+      '<c:axPos val="' + (dir === "bar" ? "l" : "b") + '"/><c:numFmt formatCode="General" sourceLinked="1"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="' + (it.catLabels === "low" ? "low" : "nextTo") + '"/>' +
       '<c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="BFBFBF"/></a:solidFill></a:ln></c:spPr>' + txPr(catSize, "333333") +
       '<c:crossAx val="500000002"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/><c:noMultiLvlLbl val="0"/></c:catAx>';
     var valAx = '<c:valAx><c:axId val="500000002"/>' + scaling + '<c:delete val="' + (va ? 0 : 1) + '"/><c:axPos val="' + (dir === "bar" ? "b" : "l") + '"/>' +
