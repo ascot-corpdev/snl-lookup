@@ -17,7 +17,7 @@
 import Anthropic from "npm:@anthropic-ai/sdk@1.8.0";
 import type { Db, Entity } from "./db.ts";
 import { canSearchFilings } from "./db.ts";
-import { type Filing, getReference, MAX_WINDOW_DAYS, savedOrFreshSearch, type SearchAnswer, type SearchParams } from "./filings.ts";
+import { type Filing, filingNumberText, getReference, MAX_WINDOW_DAYS, savedOrFreshSearch, type SearchAnswer, type SearchParams } from "./filings.ts";
 import type { Env } from "./http.ts";
 import type { Snowflake } from "./snowflake.ts";
 import { type Spgmi, SpgmiError } from "./spgmi.ts";
@@ -316,8 +316,10 @@ export function filingWindow(asOf: string): { from: string; to: string } {
   return { from: ymd(today - PROFILE_FILING_DAYS * DAY), to: ymd(today - DAY) };
 }
 
-/** UNCONFIRMED: the unit of S&P's rate impact. The display value ("4.5%") is read as percentage points; without
-    it, overallRateImpact is taken as percentage points too (README, "The unit of overallRateImpact"). */
+/** The unit of S&P's rate impact: percentage points. The display value ("4.5%") is read as percentage points; without
+    it, overallRateImpact is taken as percentage points too. Seen in the Live check on 18 Nov 2026 (10 rows from one
+    company in Florida): dispOverallRateImpact was empty on every row, and overallRateImpact was filled on 6 of the 10
+    with values from -11 to -0.8, which can only be percentage points. A small sample: a row with both filled wasn't seen. */
 export function rateImpactOf(f: Filing): number | null {
   const disp = f.dispOverallRateImpact;
   if (typeof disp === "string" && /^\s*[-+]?\d+(\.\d+)?\s*%?\s*$/.test(disp)) return Number(disp.replace(/[%\s+]/g, ""));
@@ -337,7 +339,8 @@ export function filingsFacts(a: Pick<SearchAnswer, "rows" | "total" | "capped">,
   const rows = [...a.rows].sort((x, y) => String(y.publishDate ?? "").localeCompare(String(x.publishDate ?? ""))).slice(0, 8).map((f): FilingRow => ({
     state: clean(f.serffFilingStateId, 2)?.toUpperCase() ?? null, type: clean(f.serffFilingType, 80), toi: clean(f.typeOfInsurance, 120), status: clean(f.filingStatus, 80),
     published: dateOf(f.publishDate), effective: dateOf(f.newBusReqEffDate) ?? dateOf(f.renewBusReqEffDate), rateImpact: rateImpactOf(f),
-    description: clean(f.filingDescription, 300), tracking: clean(f.trackingNumber, 60),
+    // the tracking number, or "S&P no." and S&P's own filing number when it has none
+    description: clean(f.filingDescription, 300), tracking: filingNumberText(f),
   }));
   return {
     from, to, total: a.total, capped: a.capped,

@@ -6,16 +6,17 @@
 // Rows are always read by header name, never by position.
 //
 // NOT confirmed (each kept in one marked function below, and listed in the README):
-//   referenceOptions  which column of a reference list is the id and which is the name
 //   resolveEntity     S&P's filings API has no company search, so names resolve only against the company list
 //                     loaded into the app and companies it has already seen in results
 //   resolveMany       the same, for several names and groups at once (Claude's market questions)
 //   groupChoices      the same, for whole groups in the Filings view's company finder
-//   parseSearch       ids are whole numbers and filters are lists (taken from the examples in S&P's public
-//                     specification, which gives no types)
-//   searchFilings     pages are numbered from 1 (S&P's example sends pageNumber 1)
 //   dedupe            one filing version has one document, state and set of dates
-//   parseDocRef       what a filingVersionId looks like (S&P's example is a 36-character id)
+// Seen in the Live check on 18 Nov 2026, on a small sample (the reference lists, one live search of one company in
+// Florida that returned 10 rows, and one 17-page document), so true for that sample, and the code still copes
+// either way: which reference list column is the id and which the name (referenceOptions); ids are whole numbers
+// and filters are lists (parseSearch); paging fields in the answer and pages numbered from 1 (searchFilings); dates
+// like 2026-01-31; what a filingVersionId and a documentId look like (parseDocRef); trackingNumber empty and
+// sfcNumber filled on every row (filingNumber).
 
 import { type Db, type Entity, isNaicCode, oneEach, type StoreRow } from "./db.ts";
 import { shortHash } from "./http.ts";
@@ -55,14 +56,50 @@ export function mapRows(resp: unknown): Record<string, Cell>[] {
   });
 }
 
+// ---------- a filing's number ----------
+// Live results (18 Nov 2026, 10 rows from one company in Florida) had trackingNumber empty on every row and sfcNumber,
+// S&P's own number for the filing (three letters and seven digits), on every row. So a filing is named by its
+// tracking number when it has one and by S&P's number otherwise, marked so the reader can tell which it is. The
+// S&P number is never sent to S&P as a tracking number.
+
+/** The mark put before S&P's own filing number wherever a filing is named by it. */
+export const SP_NUMBER_MARK = "S&P no.";
+/** A filing's number as people see and quote it: its tracking number, or S&P's filing number (sfcNumber) when it
+    has none. null when it has neither. Control characters and extra spaces are taken out; at most 50 characters. */
+export function filingNumber(row: unknown): { kind: "tracking" | "sp"; value: string } | null {
+  const r = row && typeof row === "object" ? row as { trackingNumber?: unknown; sfcNumber?: unknown } : null;
+  const clean = (v: unknown) => (v === null || v === undefined || typeof v === "object" || typeof v === "boolean" ? "" : String(v).replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, " ").replace(/\s+/g, " ").trim().slice(0, 50).trim());
+  const tracking = clean(r?.trackingNumber), sp = clean(r?.sfcNumber);
+  return tracking ? { kind: "tracking", value: tracking } : sp ? { kind: "sp", value: sp } : null;
+}
+/** The same as one piece of text: "CALL-123456" or "S&P no. ABC1234567"; null when the filing has neither number. */
+export function filingNumberText(row: unknown): string | null {
+  const n = filingNumber(row);
+  return !n ? null : n.kind === "sp" ? `${SP_NUMBER_MARK} ${n.value}` : n.value;
+}
+
+/** Whether two ids are the same id, whichever came as text and whichever as a number: "1" and 1 match (live result
+    rows sent serffFilingTypeId as text while the reference list sends it as a number), and so do "fl" and "FL" for a
+    state. Missing or empty ids never match. */
+export function sameId(a: unknown, b: unknown): boolean {
+  const x = idText(a), y = idText(b);
+  return x !== null && x === y;
+}
+const idText = (v: unknown): string | null => {
+  if (v === null || v === undefined || typeof v === "object" || typeof v === "boolean") return null;
+  const s = String(v).trim();
+  return !s ? null : /^[+-]?\d{1,15}(\.0+)?$/.test(s) ? String(Number(s)) : s.toUpperCase();
+};
+
 // ---------- reference lists ----------
 
 export type RefOption = { id: string | number; name: string };
 export type Reference = { field: ReferenceField; options: RefOption[]; headers: string[]; rows: Record<string, Cell>[]; fetchedAt: string; fromStore: boolean };
 
-/** UNCONFIRMED: S&P's documents don't give the columns of a reference list. This picks the id column as the first
-    header ending in "Id" (or "Code"), and the name as the first other column. The raw rows are kept alongside so
-    nothing is lost if the guess is wrong; fix this one function after the first live call. */
+/** S&P's documents don't give the columns of a reference list. This picks the id column as the first header ending
+    in "Id" (or "Code"), and the name as the first other column. The raw rows are kept alongside so nothing is lost
+    if the guess is wrong. Seen in the Live check on 18 Nov 2026: the guess held for all four lists (one fetch of
+    each). */
 export function referenceOptions(headers: string[], rows: Record<string, Cell>[]): RefOption[] {
   if (!headers.length) return [];
   const idCol = headers.find((h) => /id$/i.test(h)) ?? headers.find((h) => /code$/i.test(h)) ?? headers[0];
@@ -148,8 +185,11 @@ const strs = (v: unknown, max: number, re: RegExp): string[] | null => {
 };
 
 /** Checks a search the page or Claude sent. Returns the cleaned search, or the reason it can't run.
-    UNCONFIRMED: that every id is a whole number and every filter a list. S&P's specification gives no types;
-    this follows its examples. If a live reference list shows text ids, this is the function to change. */
+    Every id is a whole number and every filter a list: S&P's specification gives no types, so this follows its
+    examples. Seen in the Live check on 18 Nov 2026 (the four reference lists and 10 result rows): the reference
+    lists' ids are whole numbers and the states two-letter codes. In result rows serffFilingTypeId came back as
+    digits in text ("1") while every other id was a number, so wherever a row's id is matched with a list's id or
+    the user's choice, "1" and 1 are the same id (sameId). Ids sent to S&P stay whole numbers. */
 export function parseSearch(b: Record<string, unknown>, today: string): { ok: true; params: SearchParams } | { ok: false; message: string } {
   const bad = (message: string) => ({ ok: false as const, message });
   const tooMany = `Search at most ${MAX_IDS} companies at a time. Remove some companies, or split them into two searches.`;
@@ -242,7 +282,9 @@ export const emptyStateNote = (state: string) =>
   `S&P returned no filings for ${state} in this search. That means none are in S&P's data for these companies, dates and filters. It doesn't prove that none were filed.`;
 
 /** Runs a search: every batch and window, every page, one S&P request a second (the api's gate), duplicates
-    removed. Stops at maxRequests and says so. knownStates is S&P's own list of filing states, when the app has it. */
+    removed. Stops at maxRequests and says so. knownStates is S&P's own list of filing states, when the app has it.
+    Pages are numbered from 1 and the answer carries totalPages: seen in the Live check on 18 Nov 2026, on one live
+    search of one company; without totalPages a full page still means there may be another. */
 export async function searchFilings(api: Spgmi, p: SearchParams, opts: { maxRequests?: number; pageSize?: number; knownStates?: string[]; deadline?: number; now?: () => number } = {}): Promise<SearchResult> {
   const maxRequests = opts.maxRequests ?? MAX_SEARCH_REQUESTS, pageSize = opts.pageSize ?? PAGE_SIZE;
   const raw: Record<string, Cell>[] = [];
@@ -263,15 +305,15 @@ export async function searchFilings(api: Spgmi, p: SearchParams, opts: { maxRequ
   }
   const rows = dedupe(raw).sort((a, b) => String(b.publishDate ?? "").localeCompare(String(a.publishDate ?? "")));
 
-  const byState = p.states.map((state) => ({ state, rows: rows.filter((r) => String(r.serffFilingStateId ?? "").toUpperCase() === state).length }));
+  const byState = p.states.map((state) => ({ state, rows: rows.filter((r) => sameId(r.serffFilingStateId, state)).length }));
   const named = (kind: "companyId" | "institutionId", id: number) =>
-    rows.filter((r) => r.companies!.some((c) => String(c[kind]) === String(id)));
+    rows.filter((r) => r.companies!.some((c) => sameId(c[kind], id)));
   const byCompany = [
     ...p.companyIds.map((id) => ({ kind: "companyId" as const, id })),
     ...p.institutionIds.map((id) => ({ kind: "institutionId" as const, id })),
   ].map(({ kind, id }) => {
     const hits = named(kind, id);
-    const name = hits[0]?.companies!.find((c) => String(c[kind]) === String(id))?.companyName;
+    const name = hits[0]?.companies!.find((c) => sameId(c[kind], id))?.companyName;
     return { kind, id, name: name === null || name === undefined ? null : String(name), rows: hits.length };
   });
 
@@ -499,8 +541,9 @@ export type DocRef = { documentId?: number; filingVersionId?: string };
 export function parseDocRef(b: Record<string, unknown>): DocRef | null {
   const id = typeof b.documentId === "string" && /^\d{1,15}$/.test(b.documentId) ? Number(b.documentId) : b.documentId;
   if (typeof id === "number" && Number.isInteger(id) && id > 0) return { documentId: id };
-  // UNCONFIRMED: the shape of a filingVersionId. S&P's example is a 36-character id; anything of 8 to 64
-  // letters, digits, dots, underscores and dashes is passed on as it is.
+  // The shape of a filingVersionId: S&P's example is a 36-character id; anything of 8 to 64 letters, digits, dots,
+  // underscores and dashes is passed on as it is. Seen in the Live check on 18 Nov 2026 (10 rows): filingVersionId
+  // and documentId fitted these shapes (documentId a whole number).
   if (typeof b.filingVersionId === "string" && /^[A-Za-z0-9._-]{8,64}$/.test(b.filingVersionId)) return { filingVersionId: b.filingVersionId };
   return null;
 }

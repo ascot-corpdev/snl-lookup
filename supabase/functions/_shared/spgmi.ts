@@ -11,6 +11,8 @@
 // token "is valid for up to 7 days and expires following 24 hours of inactivity"; the sign-in answers 401 "User
 // unauthorized", 405, 423 "Account Locked", 429 "Too many requests" and 500; the refresh answers 401, 405 and 500.
 // The error body there is {error, message}.
+// Seen in the Live check on 18 Nov 2026 (one sign-in): expires_in_seconds came back as seconds, and a refresh token
+// came back with the sign-in, as text. How long the refresh token stays usable in practice was not tested.
 
 import type { Db, Usage } from "./db.ts";
 import type { Env } from "./http.ts";
@@ -82,7 +84,13 @@ async function errorFrom(res: Response): Promise<SpgmiError> {
 export type Gate = () => Promise<void>;
 
 /** The gate every S&P call passes through. The slot and the count live in Postgres (snl_take_slot), so the
-    1-a-second spacing holds across function calls that run at the same time. */
+    1-a-second spacing holds across function calls that run at the same time.
+    What S&P sends with each answer (seen in the Live check on 18 Nov 2026): x-ratelimit-burst-capacity 2,
+    x-ratelimit-replenish-rate 1, x-ratelimit-requested-tokens 1 and x-ratelimit-remaining. That reads as a token
+    bucket holding at most 2 requests and refilling 1 a second, each request taking 1. The app spaces requests 1.1
+    seconds apart (GAP_MS in db.ts), slower than the refill, so the bucket never empties and S&P's limit is never
+    the one that stops a request; the burst of 2 is simply not used. The hourly and daily counts are the app's own
+    (planLimits) and are not read from these headers. */
 export function makeGate(db: Db, limits: Usage, sleep: (ms: number) => Promise<void>): Gate {
   return async () => {
     const slot = await db.takeSlot(limits);

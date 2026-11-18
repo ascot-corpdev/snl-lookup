@@ -136,7 +136,7 @@ function ownerList(db: MemoryDb) {
   const found = await supabaseDb(sb).entitiesInGroupName("Calloway Group", 101);
   ok("a group's companies are read from saved companies by their group name, once each", same(found, [ENT]) && ops[0].table === "snl_store" && ops[0].calls.some((c) => same(c, ["eq", "kind", "entity"])) && ops[0].calls.some((c) => same(c, ["ilike", "doc->>naicGroupName", "%Calloway Group%"])) && ops[0].calls.some((c) => same(c, ["limit", 101])), ops[0].calls);
   const q = await supabaseDb(sb).entitiesInGroupName("100%_sure, (Calloway)", 5);
-  ok("characters that could change the filter are taken out", same(q, [ENT]) && ops[1].calls.some((c) => same(c, ["ilike", "doc->>naicGroupName", "%100 sure Calloway%"])), ops[1]?.calls);
+  ok("characters that could change the filter are taken out", same(q, [ENT]) && ops.some((o) => o.calls.some((c) => same(c, ["ilike", "doc->>naicGroupName", "%100 sure Calloway%"]))), ops.map((o) => o.calls));
   ops.length = 0;
   ok("a group name too short to be useful asks nothing", same(await supabaseDb(sb).entitiesInGroupName("%", 5), []) && ops.length === 0);
 }

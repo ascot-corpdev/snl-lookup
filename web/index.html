@@ -218,6 +218,8 @@ th .sorth .ar{font-size:9px}
 .filings td{overflow-wrap:break-word}
 .filings .c-co,.filings .c-desc{overflow-wrap:anywhere}
 @media (min-width:701px){.filings .c-co{min-width:170px}.filings .c-desc{min-width:240px}.filings .c-dates,.filings .c-tn{white-space:nowrap}}
+.filings .c-tn .tn-long{white-space:normal;overflow-wrap:anywhere}
+.filings .c-tn .spno{display:block}
 .filings .dl{display:grid;grid-template-columns:auto auto;gap:1px 8px;justify-content:start;font-size:12px}
 .filings .dl span{color:var(--muted)}
 .counts{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;min-width:0}
@@ -582,7 +584,8 @@ function usdM(v){
   return m<0 && s!=="0.0" ? `($${s}M)` : `$${s}M`;
 }
 function pct(v){ if(!isNum(v)) return "n/d"; const s=Math.abs(+v).toFixed(1); return +v<0 && s!=="0.0" ? `(${s}%)` : `${s}%`; }
-/* A day as S&P sends it (2026-11-05, 2026-11-05T00:00:00 or 11/05/2026). Null when it can't be read. */
+/* A day as S&P sends it (2026-11-05, 2026-11-05T00:00:00 or 11/05/2026). Null when it can't be read. The Live check
+   on 18 Nov 2026 saw every date start 2026-11-05 style (10 rows from one search); the other shapes are still read. */
 function parseDay(s){
   if(blank(s)) return null;
   const t=String(s).trim(); let y, m, d;
@@ -1088,9 +1091,24 @@ async function runSearch(refresh, given){
 /* ---------- Filings: results ---------- */
 const rowKey = (r,i) => String(!blank(r.filingVersionId) ? "v"+r.filingVersionId : !blank(r.serffFilingEntityEventId) ? "e"+r.serffFilingEntityEventId : "i"+i);
 const companiesOf = r => Array.isArray(r.companies)&&r.companies.length ? r.companies : [{companyId:r.companyId, companyName:r.companyName, naicCompanyCode:r.naicCompanyCode}];
-/* S&P's own wording first, then the number as a percentage, then "n/d". */
+/* S&P's own wording first, then the number as a percentage, then "n/d". overallRateImpact is in percentage points:
+   the Live check on 18 Nov 2026 saw it on 6 of 10 rows, from -11 to -0.8, with no display value on any row. */
 function rateImpact(r){ return !blank(r.dispOverallRateImpact) ? String(r.dispOverallRateImpact) : isNum(r.overallRateImpact) ? pct(r.overallRateImpact) : "n/d"; }
 const docKeyOf = r => !blank(r.documentId) ? "d:"+r.documentId : !blank(r.filingVersionId) ? "v:"+r.filingVersionId : "";
+/* A filing's number for people to see and quote: its tracking number, or S&P's own filing number (sfcNumber) when it
+   has none, marked "S&P no." (filingNumber in _shared/filings.ts does the same for the functions). The watchlist keeps
+   S&P's number with the mark in front, so a saved "S&P no. ..." reads back as S&P's number. */
+const SP_NO = "S&P no.";
+function filingNo(r){
+  const clean=v=>(v===null||v===undefined||typeof v==="object"||typeof v==="boolean") ? "" : String(v).replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g," ").replace(/\s+/g," ").trim().slice(0,60).trim();
+  const tn=clean(r&&r.trackingNumber), sp=clean(r&&r.sfcNumber);
+  if(tn.startsWith(SP_NO+" ")) return {kind:"sp", value:tn.slice(SP_NO.length+1).trim()};
+  return tn ? {kind:"tracking", value:tn} : sp ? {kind:"sp", value:sp} : null;
+}
+const filingNoText = r => { const n=filingNo(r); return !n ? "" : n.kind==="sp" ? `${SP_NO} ${n.value}` : n.value; };
+const filingNoHTML = r => { const n=filingNo(r); if(!n) return "n/d";
+  const v=n.value.length>24 ? `<span class="tn-long">${esc(n.value)}</span>` : esc(n.value);   // an odd, long value may wrap; a real number stays on one line
+  return n.kind==="sp" ? `<span class="t2 spno" title="S&amp;P's own number for this filing, which has no tracking number">S&amp;P no.</span> ${v}` : v; };
 const FSORT = {
   company:r=>String(companiesOf(r)[0].companyName||"").toLowerCase(), state:r=>r.serffFilingStateId||r.serffFilingState,
   publishDate:r=>{ const d=parseDay(r.publishDate); return d?d.getTime():null; }, rate:r=>isNum(r.overallRateImpact)?+r.overallRateImpact:null
@@ -1098,7 +1116,7 @@ const FSORT = {
 function visibleRows(){
   const f=S.f, all=(f.res&&Array.isArray(f.res.rows)?f.res.rows:[]).map((r,i)=>({r, key:rowKey(r,i)}));
   const q=f.filter.trim().toLowerCase();
-  const hit = !q ? all : all.filter(({r})=>[companiesOf(r).map(c=>`${c.companyName} ${c.naicCompanyCode}`).join(" "), r.serffFilingStateId, r.serffFilingState, r.serffFilingType, r.typeOfInsurance, r.subTypeOfInsurance, r.filingStatus, r.filingDescription, r.trackingNumber].join(" ").toLowerCase().includes(q));
+  const hit = !q ? all : all.filter(({r})=>[companiesOf(r).map(c=>`${c.companyName} ${c.naicCompanyCode}`).join(" "), r.serffFilingStateId, r.serffFilingState, r.serffFilingType, r.typeOfInsurance, r.subTypeOfInsurance, r.filingStatus, r.filingDescription, filingNoText(r)].join(" ").toLowerCase().includes(q));
   return sortRows(hit, x=>FSORT[f.sort.k](x.r), f.sort.dir);
 }
 function sortTh(label, k, cls){
@@ -1127,7 +1145,7 @@ function filingRowHTML({r,key}){
     <td class="c-dates c-late" data-label="Dates"><div class="dl"><span>Submitted</span><b>${fmtDay(r.dateSubmitted)}</b><span>Published</span><b>${fmtDay(r.publishDate)}</b><span>Effective, new</span><b>${fmtDay(r.newBusReqEffDate)}</b><span>Effective, renewal</span><b>${fmtDay(r.renewBusReqEffDate)}</b></div></td>
     <td class="num c-rate c-half" data-label="Rate impact">${esc(rateImpact(r))}</td>
     <td class="c-desc c-late" data-label="Description">${descH}</td>
-    <td class="c-tn c-late" data-label="Tracking number">${t(r.trackingNumber)}</td>
+    <td class="c-tn c-late" data-label="Tracking number">${filingNoHTML(r)}</td>
     <td class="c-doc c-late">${docButtonHTML(docKeyOf(r), "Open document")}${isNum(r.pages)?`<div class="t2">${plural(r.pages,"page")}</div>`:""}</td></tr>`;
 }
 function filingsResultsHTML(){
@@ -1170,7 +1188,7 @@ function filingsExport(){
   const cols=["Company","NAIC company code","S&P company id","All companies on the filing","NAIC group","State","Filing type","Type of insurance","Sub-type of insurance","Status","Date submitted","Date published","Effective date, new business","Effective date, renewals","Rate impact","Rate impact (number)","Description","Tracking number","SFC number","Document id","Filing version id","Pages"];
   const rows=visibleRows().map(({r})=>{ const cos=companiesOf(r), c=cos[0];
     return [c.companyName, c.naicCompanyCode, c.companyId, cos.map(x=>x.companyName).filter(x=>!blank(x)).join("; "), r.naicGroupName, r.serffFilingStateId||r.serffFilingState, r.serffFilingType, r.typeOfInsurance, r.subTypeOfInsurance, r.filingStatus,
-      dayOut(r.dateSubmitted), dayOut(r.publishDate), dayOut(r.newBusReqEffDate), dayOut(r.renewBusReqEffDate), rateImpact(r), isNum(r.overallRateImpact)?+r.overallRateImpact:null, r.filingDescription, r.trackingNumber, r.sfcNumber, r.documentId, r.filingVersionId, isNum(r.pages)?+r.pages:null]; });
+      dayOut(r.dateSubmitted), dayOut(r.publishDate), dayOut(r.newBusReqEffDate), dayOut(r.renewBusReqEffDate), rateImpact(r), isNum(r.overallRateImpact)?+r.overallRateImpact:null, r.filingDescription, filingNoText(r), r.sfcNumber, r.documentId, r.filingVersionId, isNum(r.pages)?+r.pages:null]; });
   return {name:`snl-filings-${TODAY()}`, sheet:"Filings", cols, rows};
 }
 
@@ -1379,7 +1397,9 @@ const whenAt = s => blank(s) ? "n/d" : `${fmtAt(s)}${fmtTime(s)?` at ${fmtTime(s
 /* A found filing in the shape the results table reads, so it shows and opens the same way. */
 const watchRow = r => ({companies:(Array.isArray(r.companies)?r.companies:[]).map(n=>({companyName:n})), serffFilingStateId:r.state, serffFilingState:r.state_name, serffFilingType:r.filing_type,
   typeOfInsurance:r.type_of_insurance, subTypeOfInsurance:r.sub_type_of_insurance, filingStatus:r.filing_status, dateSubmitted:r.date_submitted, publishDate:r.publish_date,
-  newBusReqEffDate:r.effective_new, renewBusReqEffDate:r.effective_renewal, dispOverallRateImpact:r.rate_impact, filingDescription:r.description, trackingNumber:r.tracking_number,
+  newBusReqEffDate:r.effective_new, renewBusReqEffDate:r.effective_renewal,
+  // a bare number is S&P's overallRateImpact in percentage points (live rows carry no display value): shown as "(11.0%)"
+  ...(isNum(r.rate_impact) ? {overallRateImpact:+r.rate_impact} : {dispOverallRateImpact:r.rate_impact}), filingDescription:r.description, trackingNumber:r.tracking_number,   // "S&P no. ..." when the filing had no tracking number (filingNo reads it)
   documentId:r.document_id, filingVersionId:r.filing_version_id});
 /* Marks come from the function (flagFiling in watch.ts): hints, never facts, each with the words that triggered it. */
 const watchFlags = r => (Array.isArray(r&&r.flags)?r.flags:[]).filter(f=>f&&!blank(f.label)).slice(0,5);
@@ -1401,7 +1421,7 @@ function watchFoundHTML(st){
   const shown=w.showAll?found:found.slice(0,WATCH_SHOWN);
   if(listed.some(r=>Array.isArray(r.flags))) h+=`<div class="wmarked" id="wMarked"><span>${marked.length?`<b>${count(marked.length)} of ${count(listed.length)}</b> may be worth a closer look: a new program or form, a company new to a state, a withdrawal or a large rate change.`:`${listed.length===1?"The new filing isn't":`None of the ${count(listed.length)} new filings is`} marked as a new program, new form, withdrawal or large rate change.`}</span>
     ${marked.length?`<button type="button" class="btn sm" data-act="w-marked" aria-pressed="${only}">${only?`Show all ${count(listed.length)} new filings`:`Show only the ${count(marked.length)} marked`}</button>`:""}</div>
-    <p class="t2" id="wMarkNote" style="margin:0">A mark is a hint from the filing type, status, rate impact and description, not a fact: it says which words or figures triggered it, so check the filing. A filing without a mark can still matter.</p>`;
+    <p class="t2" id="wMarkNote" style="margin:0">A mark is a hint from the filing type, status, rate impact and description, not a fact: it says which words or figures triggered it, so check the filing. A filing without a mark can still matter.${listed.every(r=>blank(r.description))?` <span id="wNoDesc">S&amp;P sent no description with ${listed.length===1?"this filing":"these filings"}, so only the filing type, type of insurance, status and rate impact could mark ${listed.length===1?"it":"them"}: a new form, or a company new to a state, can't be spotted.</span>`:""}</p>`;
   h+=`<div class="t2">${only?`Showing ${plural(marked.length,"marked new filing")}, the latest found first:`:`New filings found in the last ${count(st.keepDays||90)} days, ${marked.length?"marked ones first, then ":""}the latest found first:`}</div>
     <div class="tbl-wrap cardwrap" id="watchWrap" data-keep><table class="cards filings" id="watchTable"><thead><tr><th>Company</th><th>State</th><th>Filing type</th><th>Type of insurance</th><th>Status</th><th>Dates</th><th class="num">Rate impact</th><th>Description</th><th>Tracking number</th><th>Document</th></tr></thead>
     <tbody>${shown.map(r=>filingRowHTML({r:watchRow(r), key:"w"+r.filing_version_id}).replace('<td class="c-co">', ()=>`<td class="c-co">${watchMarksHTML(r)}`)).join("")}</tbody></table></div>`;
@@ -1662,7 +1682,7 @@ function answerHTML(t, ti){
     <div class="tbl-wrap" id="anstw-${ti}" data-keep><table><thead><tr>${tb.cols.map(c=>`<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${tb.rows.map(row=>`<tr>${row.map(c=>`<td>${c===""?"n/d":esc(c)}</td>`).join("")}</tr>`).join("") || `<tr><td colspan="${tb.cols.length||1}">No rows.</td></tr>`}</tbody></table></div>
     ${tb.notes.map(n=>`<p class="source">${esc(n)}</p>`).join("")}</div>`;
   if(sources.length) h+=`<div class="blk"><h3>Sources</h3><ol class="srcs">${sources.map(s=>{ const key=sourceDocKey(s), pl=pagesLabel(s);
-      const meta=[s.company, s.state, s.trackingNumber, pl].filter(x=>!blank(x)).map(esc).join(" · ");
+      const meta=[s.company, s.state, filingNoText(s), pl].filter(x=>!blank(x)).map(esc).join(" · ");
       return `<li value="${esc(s.n)}" id="src-${ti}-${esc(s.n)}"><div class="t1">${blank(s.title)?"Filing document":esc(s.title)}</div>${meta?`<div class="t2">${meta}</div>`:""}
         ${!blank(s.quote)?`<blockquote class="quote">“${esc(s.quote)}”</blockquote>`:""}
         ${key?docButtonHTML(key, isNum(s.startPage)&&+s.startPage>0?`Open at page ${count(s.startPage)}`:"Open document", isNum(s.startPage)?s.startPage:""):""}</li>`; }).join("")}</ol></div>`;
@@ -1732,7 +1752,7 @@ function answerDoc(t){
       else if(l.trim() || tail) lines.push({bullet:false, runs:boldRuns(l), cites:tail}); });
   }
   const sources=(Array.isArray(r.sources)?r.sources:[]).filter(s=>s&&!blank(s.n)).map(s=>({n:oneLine(s.n), title:blank(s.title)?"Filing document":oneLine(s.title),
-    meta:[s.company, s.state, s.trackingNumber, pagesLabel(s)].filter(x=>!blank(x)).map(oneLine).join(" · "), quote:blank(s.quote)?"":oneLine(s.quote)}));
+    meta:[s.company, s.state, filingNoText(s), pagesLabel(s)].filter(x=>!blank(x)).map(oneLine).join(" · "), quote:blank(s.quote)?"":oneLine(s.quote)}));
   return {question:keepText(t.question).trim(), asked:askedLabel(t.asked), lines,
     table: tb ? {title:oneLine(tb.title), cols:tb.cols.map(oneLine), rows:tb.rows.map(row=>row.map(c=>c===""?"n/d":oneLine(c))), notes:tb.notes.map(oneLine)} : null,
     caps:(Array.isArray(r.caps)?r.caps:[]).filter(c=>!blank(c)).map(oneLine), sources};
@@ -3063,14 +3083,14 @@ function snapExport(tbl){
   const day=d=>d?iso(d):"", n=v=>v===null||v===undefined?null:+v;
   if(tbl==="filings") return out("filings","Filings",["Company","S&P company id","S&P institution id","All companies on the filing","State","Filing type","Type of insurance","Sub-type of insurance","Status","Date submitted","Date published","Effective date, new business","Effective date, renewals","Rate impact","Rate impact (number)","Description","Tracking number","Document id","Filing version id"],
     c.fs.slice().sort(snapByDate).map(f=>{ const r0=f.r, c0=r0.companies[0]||{}; return [c0.companyName, c0.companyId, c0.institutionId??r0.institutionId, r0.companies.map(x=>x.companyName).filter(x=>!blank(x)).join("; "), f.st||r0.serffFilingState, r0.serffFilingType, r0.typeOfInsurance, r0.subTypeOfInsurance, r0.filingStatus,
-      dayOut(r0.dateSubmitted), dayOut(r0.publishDate), dayOut(r0.newBusReqEffDate), dayOut(r0.renewBusReqEffDate), rateImpact(r0), f.rate, r0.filingDescription, r0.trackingNumber, r0.documentId, r0.filingVersionId]; }));
+      dayOut(r0.dateSubmitted), dayOut(r0.publishDate), dayOut(r0.newBusReqEffDate), dayOut(r0.renewBusReqEffDate), rateImpact(r0), f.rate, r0.filingDescription, filingNoText(r0), r0.documentId, r0.filingVersionId]; }));
   if(tbl==="states") return out("states","By state",["State","State name","Filings","Rate filings","Latest rate impact (%)","Latest rate impact, date published","Latest rate impact, status","Note"],
     c.byState.slice().sort((a,b)=>a.st.localeCompare(b.st)).map(s=>[s.st, s.name, s.n, s.rates, s.latest?s.latest.rate:null, s.latest?day(s.latest.pub):"", s.latest?snapStatus(s.latest):"", s.n?"":"S&P returned nothing for this search"]));
   if(tbl==="rates") return out("rate-changes","Rate changes",["State","Type of insurance","Rate filings","With a rate impact","Lowest rate impact (%)","Highest rate impact (%)","Latest rate impact (%)","Latest, date published","Latest, status"],
     c.rateRows.map(g=>[g.st, g.toi, g.n, g.withRate, n(g.lo), n(g.hi), g.latest?g.latest.rate:null, g.latest?day(g.latest.pub):"", g.latest?snapStatus(g.latest):""]));
   if(tbl==="years") return out("by-year","By year and type",["Year", ...c.types.map(snapTypeName), "All"], c.years.map(y=>[y.year, ...y.by, y.total]));
   if(tbl==="forms") return out("latest-forms-rules","Latest forms and rules",["Company","State","Type of insurance","Filing type","Description","Status","Date submitted","Date published","Tracking number","Document id","Filing version id"],
-    c.latestFR.slice(0, SNAP_LATEST).map(f=>[f.r.companies.map(x=>x.companyName).filter(x=>!blank(x)).join("; "), f.st, f.toi, f.type, f.r.filingDescription, f.r.filingStatus, dayOut(f.r.dateSubmitted), dayOut(f.r.publishDate), f.r.trackingNumber, f.r.documentId, f.r.filingVersionId]));
+    c.latestFR.slice(0, SNAP_LATEST).map(f=>[f.r.companies.map(x=>x.companyName).filter(x=>!blank(x)).join("; "), f.st, f.toi, f.type, f.r.filingDescription, f.r.filingStatus, dayOut(f.r.dateSubmitted), dayOut(f.r.publishDate), filingNoText(f.r), f.r.documentId, f.r.filingVersionId]));
   if(tbl==="days") return out("time-with-regulator","Time with regulator",["State","Filings with both dates","Median days, submitted to published (approximate)","Fewest days","Most days"],
     c.dayRows.concat(c.dayRows.length>1?[{...c.dayAll, st:"All states"}]:[]).map(g=>[g.st, g.n, g.median, g.lo, g.hi]));
   return null;

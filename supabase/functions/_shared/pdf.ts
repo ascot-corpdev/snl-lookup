@@ -6,9 +6,33 @@
 // a 120-page cut 70 to 280 ms in all, well inside an Edge Function's 2 seconds. Memory is the tighter limit: a
 // cut holds the file about twice over (a 52 MB file peaked at about 200 MB), so the chat function only downloads
 // files up to LIMITS.docBytes. A function call stops cutting after LIMITS.cutMs of work and puts further reads off
-// to its next call.
+// to its next call. Since 18 Nov 2026 pdf-lib reads the file in place (readInPlace below), so a cut holds the file
+// about once over plus what it cuts out, and the download limit rose from 40 to 60 MB.
 
-import { PDFDocument } from "npm:pdf-lib@1.17.1";
+import { PDFDocument, PDFParser } from "npm:pdf-lib@1.17.1";
+
+/** pdf-lib copies the bytes of every object out of the file as it reads it (ByteStream.slice), so an open PDF holds
+    the file twice. This makes it take a view into the file instead, which holds those bytes once. Measured in Deno on
+    made-up filings of 900 pages (47 and 57 MB, half or all of the pages scanned) and 600 and 1,000 pages (52 and 87
+    MB), opening the file and cutting out pages 1 to 150: the peak of V8's heap plus its buffers fell from 127 to 91
+    MB (47 MB file) and from 153 to 105 MB (57 MB file), and the whole process's peak from 193 to 165 MB and 217 to
+    177 MB; the 87 MB file peaked at 141 MB and 228 MB. CPU time didn't change (150 to 190 ms to open, 60 to 120 ms
+    to cut). Safe because nothing in pdf-lib 1.17.1 writes into those bytes: it only reads them, and copies them out
+    when it saves or copies a page; and the app never changes a file after opening it. If the pinned version of
+    pdf-lib changes, check ByteStream.slice again. Returns whether it took effect; if not, everything still works,
+    with the old memory use. */
+function readInPlace(): boolean {
+  try {
+    const stream = (PDFParser.forBytesWithOptions(new Uint8Array(1)) as unknown as { bytes?: { constructor?: { prototype?: Record<string, unknown> } } }).bytes;
+    const proto = stream?.constructor?.prototype;
+    if (!proto || typeof proto.slice !== "function") return false;
+    proto.slice = function (this: { bytes: Uint8Array }, start: number, end: number) { return this.bytes.subarray(start, end); };
+    return true;
+  } catch {
+    return false;
+  }
+}
+export const READS_IN_PLACE = readInPlace();
 
 export type OpenPdf = { ok: true; doc: PDFDocument; pages: number } | { ok: false; reason: "encrypted" | "damaged" };
 

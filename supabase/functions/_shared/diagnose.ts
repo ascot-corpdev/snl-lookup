@@ -18,7 +18,8 @@
 // put into a sentence passes through say(), which drops anything equal to a value S&P sent. Numbers in the report
 // are counts, shares, page counts and rate impacts worked out here, never ids.
 
-import type { Db, EntityFields, StoreRow, Usage } from "./db.ts";
+import type { Db, Entity, EntityFields, StoreRow, Usage } from "./db.ts";
+import { collapseEntities } from "./db.ts";
 import { countPdfPages } from "./chat.ts";
 import { type Cell, downloadDocument, type DocRef, getReference, mapRows, parseDocRef, type Reference, REFERENCE_FIELDS, type ReferenceField, SEARCH_COLUMNS } from "./filings.ts";
 import { type Gate, type Plan, Spgmi, type SpgmiCreds, SpgmiError, TOKEN_URL } from "./spgmi.ts";
@@ -704,14 +705,18 @@ export async function diagnose(o: {
 
   // ----- the company list -----
   {
-    const n = directory.length;
-    const c = (k: keyof EntityFields) => directory.filter((d) => filled(d[k])).length;
+    // Counted by company, as look-ups read it: a company saved twice (from the loaded list and from search results,
+    // before saving merged the two) counts once, with what both rows know.
+    const rowCount = directory.length;
+    const companies = collapseEntities(directory.map((d) => ({ companyName: "", ...d }) as Entity)) as EntityFields[];
+    const n = companies.length, twice = rowCount - n;
+    const c = (k: keyof EntityFields) => companies.filter((d) => filled(d[k])).length;
     const groups = new Map<string, number>();
-    for (const d of directory) { const g = d.naicGroupName ?? d.naicGroupCode; if (filled(g)) groups.set(String(g).trim().toLowerCase(), (groups.get(String(g).trim().toLowerCase()) ?? 0) + 1); }
+    for (const d of companies) { const g = d.naicGroupName ?? d.naicGroupCode; if (filled(g)) groups.set(String(g).trim().toLowerCase(), (groups.get(String(g).trim().toLowerCase()) ?? 0) + 1); }
     const sizes = [...groups.values()].sort((a, b) => b - a);
-    const searchable = directory.filter((d) => filled(d.companyId) || filled(d.institutionId)).length;
+    const searchable = companies.filter((d) => filled(d.companyId) || filled(d.institutionId)).length;
     add({ id: "dir.counts", group: "directory", title: "What the company list holds", where: "scripts/companies-lib.mjs; resolveEntity and resolveMany in _shared/filings.ts", outcome: n ? "info" : "unknown",
-      found: n ? `${plural(n, "company", "companies")}. With a company id ${fmt(c("companyId"))}, an institution id ${fmt(c("institutionId"))}, a statutory key ${fmt(c("spStatEntityId"))}, a NAIC company code ${fmt(c("naicCompanyCode"))}, a group code ${fmt(c("naicGroupCode"))}, a group name ${fmt(c("naicGroupName"))}. ${fmt(searchable)} can be searched for filings. ${plural(sizes.length, "group")}; the largest have ${list(sizes.slice(0, 5).map(fmt))} companies; ${fmt(sizes.filter((x) => x > 50).length)} have more than 50.` : "The company list is empty, or this database can't list it.",
+      found: n ? `${plural(n, "company", "companies")}. With a company id ${fmt(c("companyId"))}, an institution id ${fmt(c("institutionId"))}, a statutory key ${fmt(c("spStatEntityId"))}, a NAIC company code ${fmt(c("naicCompanyCode"))}, a group code ${fmt(c("naicGroupCode"))}, a group name ${fmt(c("naicGroupName"))}. ${fmt(searchable)} can be searched for filings. ${plural(sizes.length, "group")}; the largest have ${list(sizes.slice(0, 5).map(fmt))} companies; ${fmt(sizes.filter((x) => x > 50).length)} have more than 50.${twice > 0 ? ` These are in ${fmt(rowCount)} rows: ${twice === 1 ? "1 company has a second row" : `${fmt(twice)} rows are second rows of companies`} from before saving merged them. Look-ups read each company as one; node scripts/companies.mjs tidy --apply merges the rows.` : ""}` : "The company list is empty, or this database can't list it.",
       verdict: n ? "For the record." : "Couldn't tell: no company list." });
   }
 
