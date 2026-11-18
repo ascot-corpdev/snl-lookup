@@ -3,6 +3,7 @@
 
 import type { Db, Entity, Job, JobPatch, JobStatus, StoreKind, StoreRow } from "../../../supabase/functions/_shared/db.ts";
 import type { FoundFiling, WatchRun, WatchRunPatch } from "../../../supabase/functions/_shared/db.ts";
+import { groupNamePattern, oneEach } from "../../../supabase/functions/_shared/db.ts";
 
 export const read = (name: string) => JSON.parse(Deno.readTextFileSync(new URL(`../../fixtures/${name}`, import.meta.url)));
 export const J = (o: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", ...headers } });
@@ -48,6 +49,14 @@ export function memoryDb(clock: Clock) {
     },
     async putEntities(entities) { for (const e of entities) { const key = e.companyId ? String(e.companyId) : e.institutionId ? `i.${e.institutionId}` : null; if (key) store.set(`entity:${key}`, { id: `entity:${key}`, kind: "entity", label: e.companyName, doc: e as unknown as Record<string, unknown>, fetched_at: iso() }); } },
     async entitiesInGroup(groupCode, limit) { return [...store.values()].filter((r) => r.kind === "entity").map((r) => r.doc as unknown as Entity).filter((e) => e.naicGroupCode === groupCode).slice(0, limit); },
+    async entitiesInGroupName(groupName, limit) {
+      // The same filter the real one sends (ilike '%text%'): the text anywhere in the group name, any letter case.
+      const pattern = groupNamePattern(groupName);
+      if (!pattern) return [];
+      const re = new RegExp("^" + pattern.split("%").map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$", "is");
+      const rows = [...store.values()].filter((r) => r.kind === "entity" && re.test(String((r.doc as Record<string, unknown>).naicGroupName ?? ""))).sort((a, b) => a.label.localeCompare(b.label));
+      return oneEach(rows.map((r) => r.doc as unknown as Entity)).slice(0, limit);
+    },
     async getSetting(id) { return settings.get(id) ?? null; },
     ...watchTables(clock),
     async createJob(owner, question) {

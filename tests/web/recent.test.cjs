@@ -112,7 +112,7 @@ const SEED=[
   await p.waitForTimeout(400); t.delay=0;
   const sent=t.of("search").pop().body;
   ok("reopening sends the saved search, with no refresh and no status ids when every status was used", same(sent,{action:"search",companyIds:[4000001,4000002,4000107],institutionIds:[],states:["FL","GA"],from:"2021-01-01",to:"2026-11-13",typeOfInsuranceIds:[101]}), sent);
-  ok("the form is filled: states, dates and the ticked filter", same(await t.all('#states [aria-pressed="true"]'),["FL","GA"]) && (await p.inputValue("#f_from"))==="2021-01-01" && (await p.inputValue("#f_to"))==="2026-11-13"
+  ok("the form is filled: states, dates and the ticked filter", same(await t.all('#states [aria-pressed="true"] .stc'),["FL","GA"]) && (await p.inputValue("#f_from"))==="2021-01-01" && (await p.inputValue("#f_to"))==="2026-11-13"
     && await p.isChecked('#chk_toi input[data-id="101"]') && (await p.$$("#chk_toi input:checked")).length===1 && (await p.$$("#chk_fstatus input:checked")).length===0 && (await p.$$("#chk_ftype input:checked")).length===0 && (await p.inputValue("#f_tracking"))==="");
   ok("the saved result opens with the usual line and its Refresh button", (await t.txt("#fromStore"))==="From the last fetch on 12 Nov.Refresh" && (await p.$$("#resTable tbody tr")).length===6);
   ok("opening a saved result doesn't reload the list", (await t.reads()).length===readsBefore);
@@ -129,7 +129,7 @@ const SEED=[
   ok("chosen statuses, filing types, tracking numbers and an institution id are sent as saved", same(sentF,{action:"search",companyIds:[4000001],institutionIds:[5000009],states:["GA"],from:"2026-01-01",to:"2026-06-30",filingStatusIds:[1],filingTypeIds:[11,12],trackingNumbers:["CALL-134000001"]}), sentF);
   ok("the form shows them: chips by kind, ticked statuses and filing types, the tracking number", same(await p.evaluate(()=>S.f.chips.map(c=>c.kind+":"+c.id)),["companyId:4000001","institutionId:5000009"])
     && same(await t.all("#chips .cchip b"),["Calloway Insurance Co","Institution 5000009"]) && await p.isChecked('#chk_fstatus input[data-id="1"]') && (await p.$$("#chk_fstatus input:checked")).length===1
-    && await p.isChecked('#chk_ftype input[data-id="11"]') && await p.isChecked('#chk_ftype input[data-id="12"]') && (await p.inputValue("#f_tracking"))==="CALL-134000001" && same(await t.all('#states [aria-pressed="true"]'),["GA"]), await t.all("#chips .cchip b"));
+    && await p.isChecked('#chk_ftype input[data-id="11"]') && await p.isChecked('#chk_ftype input[data-id="12"]') && (await p.inputValue("#f_tracking"))==="CALL-134000001" && same(await t.all('#states [aria-pressed="true"] .stc'),["GA"]), await t.all("#chips .cchip b"));
   ok("the chosen companies' count and the estimate follow the form", (await t.txt("#f_est")).startsWith("About 2 S&P requests"), await t.txt("#f_est"));
 
   // ----- a new search: the list is read again and shows it first -----

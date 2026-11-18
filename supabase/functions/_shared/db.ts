@@ -55,6 +55,10 @@ export interface Db {
   putEntities(entities: Entity[]): Promise<void>;
   /** Companies in the company list (or seen before) whose NAIC group code equals the code, for company profiles. */
   entitiesInGroup(groupCode: string, limit: number): Promise<Entity[]>;
+  /** Companies in the company list (or seen before) whose group name contains the text, in any letter case
+      ("Calloway Group" finds "Calloway Group (SNL P&C Group)"), for Claude's market questions. A list loaded
+      without NAIC group codes still has group names. */
+  entitiesInGroupName(groupName: string, limit: number): Promise<Entity[]>;
   getSetting(id: string): Promise<Record<string, unknown> | null>;
   // ---------- the watchlist (migration 0003) ----------
   /** Starts a check, first closing any check still "running" after staleMs (with staleMessage). Returns its id, or
@@ -118,6 +122,26 @@ export const canSearchFilings = (e: Pick<Entity, "companyId" | "institutionId">)
 
 export function entityLabel(e: Entity): string {
   return [e.companyName, e.naicCompanyCode ? `NAIC ${e.naicCompanyCode}` : "", e.naicGroupName ?? ""].filter(Boolean).join(" | ").slice(0, 400);
+}
+
+/** A group name as a filter: the name anywhere in the group name ("%Calloway Group%" finds "Calloway Group (SNL
+    P&C Group)"). Letters, digits, spaces and a few name characters only, so the text can't change the filter. null
+    when fewer than 3 letters or digits are left, which would match too much. */
+export function groupNamePattern(name: string): string | null {
+  const safe = name.replace(/[^\p{L}\p{N} .&'-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 100);
+  return safe.replace(/[^\p{L}\p{N}]/gu, "").length >= 3 ? `%${safe}%` : null;
+}
+
+/** One entry for each company: repeats dropped, and a company saved by institution id alone is left out when the
+    same company is also there with its company id (as findEntities does). */
+export function oneEach(entities: Entity[]): Entity[] {
+  const seen = new Set<string>(), found: Entity[] = [];
+  for (const e of entities) {
+    const key = e ? entityKey(e) : null;
+    if (key && !seen.has(key)) { seen.add(key); found.push(e); }
+  }
+  const withCompanyId = new Set(found.filter((e) => e.companyId && e.institutionId).map((e) => String(e.institutionId)));
+  return found.filter((e) => e.companyId || !withCompanyId.has(String(e.institutionId)));
 }
 
 // A little over S&P's one second, because the wait is measured in the database and slept in the function.
@@ -192,6 +216,12 @@ export function supabaseDb(sb: SupabaseClient, now: () => number = Date.now): Db
       if (!isNaicCode(groupCode)) return [];
       const { data } = await sb.from("snl_store").select("doc").eq("kind", "entity").eq("doc->>naicGroupCode", groupCode).order("label").limit(limit);
       return (data ?? []).map((r) => r.doc as Entity).filter((e) => e && entityKey(e));
+    },
+    async entitiesInGroupName(groupName, limit) {
+      const pattern = groupNamePattern(groupName);
+      if (!pattern) return [];
+      const { data } = await sb.from("snl_store").select("doc").eq("kind", "entity").ilike("doc->>naicGroupName", pattern).order("label").limit(limit);
+      return oneEach((data ?? []).map((r) => r.doc as Entity)).slice(0, limit);
     },
     async getSetting(id) {
       const { data } = await sb.from("snl_settings").select("doc").eq("id", id).maybeSingle();
