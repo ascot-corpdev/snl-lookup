@@ -358,7 +358,8 @@ export async function profileFilings(api: Spgmi | null, db: Db, dir: Directory, 
     const ref = await getReference(api, db, "serffFilingState", { now: t.now() });
     const listed = [...new Set((ref?.options ?? []).map((o) => String(o.id).trim().toUpperCase()).filter((s) => /^[A-Z]{2}$/.test(s)))].slice(0, 60);
     const params: SearchParams = { companyIds: dir.companyIds, institutionIds: dir.institutionIds, states: listed.length ? listed : US_STATES, filingStatusIds: [], typeOfInsuranceIds: [], filingTypeIds: [], spStatEntityIds: [], trackingNumbers: [], from, to };
-    const found = await savedOrFreshSearch(api, db, params, { now: t.now(), maxRequests: PROFILE_SEARCH_PAGES, deadline: t.deadline, clock: t.now });
+    // unlisted: a profile's search is saved but kept out of the shared Recent searches list (it names who was profiled)
+    const found = await savedOrFreshSearch(api, db, params, { now: t.now(), maxRequests: PROFILE_SEARCH_PAGES, deadline: t.deadline, clock: t.now, unlisted: true });
     return filingsFacts(found, from, to);
   } catch (e) {
     if (!(e instanceof SpgmiError)) throw e;
