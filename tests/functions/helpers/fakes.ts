@@ -3,7 +3,7 @@
 
 import type { Db, Entity, Job, JobPatch, JobStatus, StoreKind, StoreRow } from "../../../supabase/functions/_shared/db.ts";
 import type { FoundFiling, WatchRun, WatchRunPatch } from "../../../supabase/functions/_shared/db.ts";
-import { groupNamePattern, oneEach } from "../../../supabase/functions/_shared/db.ts";
+import { entityLabel, groupNamePattern, oneEach, planEntityWrites, withSameCompanies } from "../../../supabase/functions/_shared/db.ts";
 
 export const read = (name: string) => JSON.parse(Deno.readTextFileSync(new URL(`../../fixtures/${name}`, import.meta.url)));
 export const J = (o: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", ...headers } });
@@ -22,6 +22,7 @@ export function memoryDb(clock: Clock) {
   const usage = new Map<string, number>();
   let nextAt = 0, jobSeq = 0;
   const iso = () => new Date(clock.now).toISOString();
+  const entityDocs = () => [...store.values()].filter((r) => r.kind === "entity").map((r) => r.doc as unknown as Entity);
   const hour = () => "hour:" + iso().slice(0, 13), day = () => "day:" + iso().slice(0, 10);
   const db: Db & { store: typeof store; settings: typeof settings; jobs: typeof jobs; states: typeof states; slots: number[]; stateWrites: number } = {
     store, settings, jobs, states, slots: [], stateWrites: 0,
@@ -44,18 +45,26 @@ export function memoryDb(clock: Clock) {
     },
     async findEntities(q, limit) {
       const t = q.trim().toLowerCase();
-      return [...store.values()].filter((r) => r.kind === "entity").map((r) => r.doc as unknown as Entity)
-        .filter((e) => /^\d+$/.test(t) ? [e.naicCompanyCode, e.companyId, e.institutionId].includes(t) : t.length >= 2 && e.companyName.toLowerCase().includes(t)).slice(0, limit);
+      const found = [...store.values()].filter((r) => r.kind === "entity").map((r) => r.doc as unknown as Entity)
+        .filter((e) => /^\d+$/.test(t) ? [e.naicCompanyCode, e.companyId, e.institutionId].includes(t) : t.length >= 2 && e.companyName.toLowerCase().includes(t))
+        .slice(0, limit);
+      // as the real one reads: a company saved twice is listed once, with what both rows know
+      return withSameCompanies(found, entityDocs()).slice(0, limit);
     },
-    async putEntities(entities) { for (const e of entities) { const key = e.companyId ? String(e.companyId) : e.institutionId ? `i.${e.institutionId}` : null; if (key) store.set(`entity:${key}`, { id: `entity:${key}`, kind: "entity", label: e.companyName, doc: e as unknown as Record<string, unknown>, fetched_at: iso() }); } },
-    async entitiesInGroup(groupCode, limit) { return [...store.values()].filter((r) => r.kind === "entity").map((r) => r.doc as unknown as Entity).filter((e) => e.naicGroupCode === groupCode).slice(0, limit); },
+    async putEntities(entities) {
+      // the same merge the real one makes: into the row already saved for the company, any second row folded in
+      const plan = planEntityWrites([...store.values()].filter((r) => r.kind === "entity").map((r) => ({ id: r.id, doc: r.doc as unknown as Entity })), entities);
+      for (const r of plan.rows) store.set(r.id, { id: r.id, kind: "entity", label: entityLabel(r.doc), doc: r.doc as unknown as Record<string, unknown>, fetched_at: iso() });
+      for (const id of plan.drop) store.delete(id);
+    },
+    async entitiesInGroup(groupCode, limit) { return withSameCompanies(entityDocs().filter((e) => e.naicGroupCode === groupCode).slice(0, limit), entityDocs()).slice(0, limit); },
     async entitiesInGroupName(groupName, limit) {
       // The same filter the real one sends (ilike '%text%'): the text anywhere in the group name, any letter case.
       const pattern = groupNamePattern(groupName);
       if (!pattern) return [];
       const re = new RegExp("^" + pattern.split("%").map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$", "is");
       const rows = [...store.values()].filter((r) => r.kind === "entity" && re.test(String((r.doc as Record<string, unknown>).naicGroupName ?? ""))).sort((a, b) => a.label.localeCompare(b.label));
-      return oneEach(rows.map((r) => r.doc as unknown as Entity)).slice(0, limit);
+      return withSameCompanies(oneEach(rows.map((r) => r.doc as unknown as Entity)).slice(0, limit), entityDocs()).slice(0, limit);
     },
     async getSetting(id) { return settings.get(id) ?? null; },
     // the Live check's two reads: the latest saved results of a kind, and the company list without names

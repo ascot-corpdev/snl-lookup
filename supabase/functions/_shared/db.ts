@@ -140,16 +140,130 @@ export function groupNamePattern(name: string): string | null {
   return safe.replace(/[^\p{L}\p{N}]/gu, "").length >= 3 ? `%${safe}%` : null;
 }
 
-/** One entry for each company: repeats dropped, and a company saved by institution id alone is left out when the
-    same company is also there with its company id (as findEntities does). */
+/** One entry for each company: repeats dropped, and rows that are the same company (a company loaded by institution
+    id alone and later seen in results with its company id, say) merged into one that carries everything known about
+    it (collapseEntities). Rows with no id at all are left out. */
 export function oneEach(entities: Entity[]): Entity[] {
-  const seen = new Set<string>(), found: Entity[] = [];
-  for (const e of entities) {
-    const key = e ? entityKey(e) : null;
-    if (key && !seen.has(key)) { seen.add(key); found.push(e); }
+  return collapseEntities(entities.filter((e) => e && typeof e === "object" && entityKey(e)));
+}
+
+// ---------- one company, one row ----------
+// A company can reach the company list twice: from a loaded list (keyed by institution id, with a group name but no
+// company id or NAIC code) and from search results (keyed by company id, with a NAIC code and statutory key but no
+// group name). Saving merges the two into the row already there; reading merges any pair saved before this was so.
+
+const ID_FIELDS = ["companyId", "institutionId", "naicCompanyCode"] as const;
+const OTHER_FIELDS = ["companyName", "spStatEntityId", "naicGroupCode", "naicGroupName"] as const;
+const FIELD_ORDER = ["companyId", "companyName", "naicCompanyCode", "institutionId", "spStatEntityId", "naicGroupCode", "naicGroupName"] as const;
+/** A filled-in value as text, or null for empty, missing or not a plain value. "1" and 1 are the same id. */
+const filled = (v: unknown): string | null => (v === null || v === undefined || typeof v === "object" || typeof v === "boolean" ? null : String(v).trim() || null);
+
+/** Whether two rows are the same company: they share an S&P company id, an institution id or a NAIC company code,
+    and no id that both have differs. Two rows with different company ids are never merged. */
+export function sameCompany(a: Partial<Entity> | null | undefined, b: Partial<Entity> | null | undefined): boolean {
+  if (!a || !b) return false;
+  let shared = false;
+  for (const k of ID_FIELDS) {
+    const x = filled(a[k]), y = filled(b[k]);
+    if (x && y) { if (x !== y) return false; shared = true; }
   }
-  const withCompanyId = new Set(found.filter((e) => e.companyId && e.institutionId).map((e) => String(e.institutionId)));
-  return found.filter((e) => e.companyId || !withCompanyId.has(String(e.institutionId)));
+  return shared;
+}
+
+/** One row from two rows of the same company. older is what was saved; newer what has just been learned. Every field
+    takes newer's value when it has one, and older's otherwise, so a filled-in value is never replaced by an empty
+    one. keepGroup: the group code and name already saved are kept (search results carry no group name, or a
+    shorter one, while a loaded list carries the one the Statutory view and group look-ups rely on). */
+export function mergeEntity(older: Entity, newer: Entity, opts: { keepGroup?: boolean } = {}): Entity {
+  const pick = (k: keyof Entity, first: Entity, second: Entity) => filled(first[k]) ? String(first[k]).trim() : filled(second[k]) ? String(second[k]).trim() : null;
+  const out = {} as Entity;
+  for (const k of FIELD_ORDER) (out as Record<string, unknown>)[k] = pick(k, newer, older);
+  if (opts.keepGroup) for (const k of ["naicGroupCode", "naicGroupName"] as const) out[k] = pick(k, older, newer);
+  out.companyName = out.companyName ?? "";
+  return out;
+}
+
+/** How much a row knows: its filled-in fields, a company id counting most. The fuller row leads a merge. */
+const fullness = (e: Entity) => [...ID_FIELDS, ...OTHER_FIELDS].filter((k) => filled(e[k])).length + (filled(e.companyId) ? 10 : 0);
+
+/** The rows of a list grouped by company, in the order each company first appears. A row joins a group only when it
+    is the same company as one row there and clashes with none. */
+function companyGroups<T extends Entity>(list: T[]): T[][] {
+  type G = { at: number; rows: T[] };
+  const groups: G[] = [], byId = new Map<string, G>();
+  const keys = (e: T) => ID_FIELDS.map((k) => (filled(e[k]) ? `${k}:${filled(e[k])}` : null)).filter((k): k is string => !!k);
+  const fits = (a: T[], b: T[]) => a.every((x) => b.every((y) => !clash(x, y)));
+  for (const e of list) {
+    // The groups this row shares an id with and doesn't clash with, earliest first; it joins the first, and any
+    // other it links to is folded in when the two don't clash (a row with both ids joins the two halves).
+    const linked = [...new Set(keys(e).map((k) => byId.get(k)).filter((g): g is G => !!g))].filter((g) => fits(g.rows, [e])).sort((a, b) => a.at - b.at);
+    let home = linked[0];
+    if (home) home.rows.push(e); else groups.push(home = { at: groups.length, rows: [e] });
+    for (const g of linked.slice(1)) if (fits(home.rows, g.rows)) { home.rows.push(...g.rows); g.rows = []; }
+    // An id already taken by another company that clashes stays with that company.
+    for (const x of home.rows) for (const k of keys(x)) { const g = byId.get(k); if (!g || !g.rows.length) byId.set(k, home); }
+  }
+  return groups.filter((g) => g.rows.length).map((g) => g.rows);
+}
+const clash = (a: Entity, b: Entity) => ID_FIELDS.some((k) => { const x = filled(a[k]), y = filled(b[k]); return !!x && !!y && x !== y; });
+
+/** One row from all the rows of one company: the fullest leads, the others fill in what it lacks. */
+function mergeGroup(g: Entity[]): Entity {
+  const [lead, ...rest] = [...g].sort((a, b) => fullness(b) - fullness(a));
+  return rest.reduce((acc, e) => mergeEntity(e, acc), mergeEntity(lead, lead));
+}
+
+/** One row for each company in a list read from the company list, everything known about it merged (see
+    companyGroups and mergeGroup), in the order each company first appears. */
+export function collapseEntities(list: Entity[]): Entity[] {
+  return companyGroups(list.filter((e) => e && typeof e === "object")).map((g) => g.length === 1 ? g[0] : mergeGroup(g));
+}
+
+/** Which saved row a company lives in when several are the same company: the loaded list's row (keyed "i." and the
+    institution id) first, then a company id key, then a NAIC key, so a list loaded again lands on the same row. */
+const homeRank = (id: string) => (id.startsWith("entity:i.") ? 0 : /^entity:\d/.test(id) ? 1 : id.startsWith("entity:n.") ? 2 : 3);
+
+/** What saving companies does to the rows already saved: each company is merged into the row already there for the
+    same company (or gets a new row under entityKey), and any other row for that company, merged into it, is
+    removed. existing: the saved rows that may be the same companies. fromList: the companies come from a loaded list,
+    whose group name wins; from search results the saved group is kept. */
+export function planEntityWrites(existing: { id: string; doc: Entity }[], incoming: Entity[], opts: { fromList?: boolean } = {}): { rows: { id: string; doc: Entity }[]; drop: string[] } {
+  let saved = existing.filter((r) => r && typeof r.id === "string" && r.doc && typeof r.doc === "object");
+  const rows = new Map<string, Entity>(), drop = new Set<string>();
+  for (const e of collapseEntities(incoming.filter((e) => e && entityKey(e)))) {
+    // The saved rows of this company: each shares an id with it, or with what the rows already found add to it, and
+    // clashes with none of them.
+    const same: { id: string; doc: Entity }[] = [], order = [...saved].sort((a, b) => homeRank(a.id) - homeRank(b.id) || a.id.localeCompare(b.id));
+    for (let grew = true, cur = e; grew;) {
+      grew = false;
+      for (const r of order) {
+        if (same.includes(r) || !sameCompany(r.doc, cur) || clash(r.doc, e) || same.some((x) => clash(x.doc, r.doc))) continue;
+        same.push(r); cur = mergeGroup([e, ...same.map((x) => x.doc)]); grew = true;
+      }
+    }
+    const known = same.length ? mergeGroup(same.map((r) => r.doc)) : null;
+    const doc = known ? mergeEntity(known, e, { keepGroup: !opts.fromList }) : mergeEntity(e, e);
+    const ids = [...new Set(same.map((r) => r.id))].sort((a, b) => homeRank(a) - homeRank(b) || a.localeCompare(b));
+    const home = ids[0] ?? `entity:${entityKey(doc)}`;
+    rows.set(home, doc);
+    for (const id of ids.slice(1)) { drop.add(id); rows.delete(id); }
+    drop.delete(home);
+    saved = [...saved.filter((r) => !ids.includes(r.id)), { id: home, doc }];
+  }
+  return { rows: [...rows].map(([id, doc]) => ({ id, doc })), drop: [...drop] };
+}
+
+/** The companies found, in their order, each merged with the other rows (partners) that are the same company.
+    Partners that match no company found are left out. */
+export function withSameCompanies(found: Entity[], partners: Entity[]): Entity[] {
+  const mine = new Set(found);
+  return companyGroups([...found, ...partners]).filter((g) => g.some((e) => mine.has(e))).map((g) => g.length === 1 ? g[0] : mergeGroup(g));
+}
+
+/** The ids to look for saved rows of the same companies by: company ids, institution ids and NAIC codes, digits only. */
+export function entityIdsOf(list: Partial<Entity>[]): { companyId: string[]; institutionId: string[]; naicCompanyCode: string[] } {
+  const pick = (k: typeof ID_FIELDS[number], re: RegExp) => [...new Set(list.map((e) => filled(e?.[k])).filter((v): v is string => !!v && re.test(v)))];
+  return { companyId: pick("companyId", /^\d{1,12}$/), institutionId: pick("institutionId", /^\d{1,12}$/), naicCompanyCode: pick("naicCompanyCode", /^\d{1,6}$/) };
 }
 
 // A little over S&P's one second, because the wait is measured in the database and slept in the function.
@@ -160,6 +274,29 @@ const dayStart = (d: Date) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMont
 
 export function supabaseDb(sb: SupabaseClient, now: () => number = Date.now): Db {
   const nowIso = () => new Date(now()).toISOString();
+  /** Saved company rows whose company id, institution id or NAIC company code is one of these, with their row ids. */
+  const rowsByIds = async (ids: ReturnType<typeof entityIdsOf>): Promise<{ id: string; doc: Entity }[]> => {
+    const out = new Map<string, { id: string; doc: Entity }>();
+    for (const k of ["companyId", "institutionId", "naicCompanyCode"] as const) {
+      for (let i = 0; i < ids[k].length; i += 100) {
+        const { data, error } = await sb.from("snl_store").select("id,doc").eq("kind", "entity").in(`doc->>${k}`, ids[k].slice(i, i + 100)).limit(1000);
+        if (error) throw new Error(`Couldn't read the company list: ${error.message}`);
+        for (const r of (data ?? []) as { id?: unknown; doc?: unknown }[]) if (typeof r?.id === "string" && r.doc && typeof r.doc === "object") out.set(r.id, { id: r.id, doc: r.doc as Entity });
+      }
+    }
+    return [...out.values()];
+  };
+  /** Companies found by a look-up, each merged with any other saved row of the same company (by institution id or
+      NAIC code), so a pair saved before saving merged them reads as one company. A failed read gives the rows found. */
+  const withPartners = async (found: Entity[], limit: number): Promise<Entity[]> => {
+    const list = found.filter((e) => e && typeof e === "object" && entityKey(e));
+    let partners: Entity[] = [];
+    try {
+      const ids = entityIdsOf(list);
+      if (ids.institutionId.length || ids.naicCompanyCode.length) partners = (await rowsByIds({ companyId: [], institutionId: ids.institutionId, naicCompanyCode: ids.naicCompanyCode })).map((r) => r.doc);
+    } catch { /* the rows as found */ }
+    return withSameCompanies(list, partners).slice(0, limit);
+  };
   return {
     async takeSlot(limits) {
       const { data, error } = await sb.rpc("snl_take_slot", { p_hour_limit: limits.hour, p_day_limit: limits.day, p_gap_ms: GAP_MS });
@@ -202,34 +339,37 @@ export function supabaseDb(sb: SupabaseClient, now: () => number = Date.now): Db
       const byName = safe.length >= 2
         ? await sb.from("snl_store").select("doc").eq("kind", "entity").ilike("label", `%${safe.replace(/[%_]/g, " ")}%`).order("label").limit(limit)
         : { data: [] as { doc: Entity }[] };
-      const seen = new Set<string>(), found: Entity[] = [];
-      for (const r of [...(byId.data ?? []), ...(byName.data ?? [])]) {
-        const e = r.doc as Entity, key = e ? entityKey(e) : null;
-        if (key && !seen.has(key)) { seen.add(key); found.push(e); }
-      }
-      // A company loaded by institution id alone, and later seen in results with its company id, is shown once.
-      const withCompanyId = new Set(found.filter((e) => e.companyId && e.institutionId).map((e) => String(e.institutionId)));
-      // Likewise a company loaded by NAIC code alone, and later seen with an S&P id: the one with the id is kept.
-      const withSpId = new Set(found.filter((e) => canSearchFilings(e) && isNaicCode(e.naicCompanyCode)).map((e) => String(e.naicCompanyCode)));
-      return found.filter((e) => e.companyId || !withCompanyId.has(String(e.institutionId)))
-        .filter((e) => canSearchFilings(e) || !withSpId.has(String(e.naicCompanyCode))).slice(0, limit);
+      // A company saved twice (loaded from a list, then seen in results before saving merged the two) is listed once,
+      // with everything both rows know; so is one loaded by NAIC code alone and later seen with an S&P id.
+      return await withPartners([...(byId.data ?? []), ...(byName.data ?? [])].map((r) => r.doc as Entity), limit);
     },
     async putEntities(entities) {
       if (!entities.length) return;
-      const rows = entities.filter((e) => entityKey(e)).map((e) => ({ id: `entity:${entityKey(e)}`, kind: "entity", label: entityLabel(e), doc: e, fetched_at: nowIso() }));
-      if (!rows.length) return;
-      try { await sb.from("snl_store").upsert(rows, { onConflict: "id" }); } catch { /* the directory is a convenience; a failed save never fails a search */ }
+      const incoming = entities.filter((e) => e && entityKey(e));
+      if (!incoming.length) return;
+      try {
+        // Each company is merged into the row already saved for it (a loaded list keys it by institution id), and
+        // any second row of it saved before merging was done is folded in and removed, after the merged row is saved.
+        // If the saved rows can't be read, each company is saved under its own key as before; look-ups still read
+        // the two rows as one company.
+        let saved: { id: string; doc: Entity }[] | null = null;
+        try { saved = await rowsByIds(entityIdsOf(incoming)); } catch { saved = null; }
+        const plan = saved ? planEntityWrites(saved, incoming) : { rows: incoming.map((e) => ({ id: `entity:${entityKey(e)}`, doc: e })), drop: [] as string[] };
+        const rows = plan.rows.map((r) => ({ id: r.id, kind: "entity", label: entityLabel(r.doc), doc: r.doc, fetched_at: nowIso() }));
+        const { error } = await sb.from("snl_store").upsert(rows, { onConflict: "id" });
+        if (!error && plan.drop.length) await sb.from("snl_store").delete().eq("kind", "entity").in("id", plan.drop);
+      } catch { /* the directory is a convenience; a failed save never fails a search */ }
     },
     async entitiesInGroup(groupCode, limit) {
       if (!isNaicCode(groupCode)) return [];
       const { data } = await sb.from("snl_store").select("doc").eq("kind", "entity").eq("doc->>naicGroupCode", groupCode).order("label").limit(limit);
-      return (data ?? []).map((r) => r.doc as Entity).filter((e) => e && entityKey(e));
+      return await withPartners((data ?? []).map((r) => r.doc as Entity), limit);
     },
     async entitiesInGroupName(groupName, limit) {
       const pattern = groupNamePattern(groupName);
       if (!pattern) return [];
       const { data } = await sb.from("snl_store").select("doc").eq("kind", "entity").ilike("doc->>naicGroupName", pattern).order("label").limit(limit);
-      return oneEach((data ?? []).map((r) => r.doc as Entity)).slice(0, limit);
+      return await withPartners((data ?? []).map((r) => r.doc as Entity), limit);
     },
     async getSetting(id) {
       const { data } = await sb.from("snl_settings").select("doc").eq("id", id).maybeSingle();

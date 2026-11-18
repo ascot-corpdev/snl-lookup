@@ -126,7 +126,7 @@ const lookup = (id: string) => toolUse(id, "resolve_entity", { query: "calloway"
   ], huge);
   const id = await w.ask();
   ok("a document over the size limit is refused from its stated length, without downloading it", read.isError === true && /too large to read here/.test(read.value.error) && pulled === 0 && cancelled && w.claude.uploads.length === 0, { read, pulled, cancelled });
-  ok("and the answer says so", (w.job(id).result as any).caps.some((c: string) => c === "Filing document 70000001 is too large for Claude to read here. Open it from the Filings view."), (w.job(id).result as any).caps);
+  ok("and the answer says so", (w.job(id).result as any).caps.some((c: string) => c === `Filing document 70000001 is ${Math.ceil((LIMITS.docBytes + 1) / 1e6)} MB, too large for Claude to read here (the limit is ${LIMITS.docBytes / 1e6} MB a document). Open it from the Filings view to read it yourself.`), (w.job(id).result as any).caps);
 }
 {
   // no length given: reading stops as soon as the limit is passed

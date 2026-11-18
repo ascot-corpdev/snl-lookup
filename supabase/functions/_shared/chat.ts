@@ -12,7 +12,7 @@
 
 import Anthropic, { toFile } from "npm:@anthropic-ai/sdk@1.8.0";
 import type { Db, Step } from "./db.ts";
-import { downloadDocument, type Filing, getReference, MATCHES_PER_NAME, MAX_IDS, MAX_LOOKUP_NAMES, MAX_MEMBERS, parseDocRef, parseSearch, resolveEntity, resolveMany, savedOrFreshSearch } from "./filings.ts";
+import { downloadDocument, type Filing, filingNumber, filingNumberText, getReference, MATCHES_PER_NAME, MAX_IDS, MAX_LOOKUP_NAMES, MAX_MEMBERS, parseDocRef, parseSearch, resolveEntity, resolveMany, savedOrFreshSearch } from "./filings.ts";
 import type { Env } from "./http.ts";
 import { credsReady, Snowflake, snowflakeCreds, SnowflakeError } from "./snowflake.ts";
 import { type Gate, makeGate, NOT_CONFIGURED, planLimits, Spgmi, SpgmiError } from "./spgmi.ts";
@@ -34,7 +34,11 @@ export const LIMITS = {
   totalPages: 200,      // document pages for one question: about 620,000 to 920,000 tokens, most of the 1M window
   contextTokens: 900_000, // a read is refused if the request would pass this (leaves room for Claude's reply)
   tokensPerPage: 4_000, // the estimate for pages not yet sent; pages already sent are measured
-  docBytes: 40_000_000, // size of one download: a cut holds the file about twice over in 256 MB of memory
+  // Size of one download. The whole file comes down before any part can be cut out. With pdf-lib reading the file in
+  // place (pdf.ts, readInPlace), opening a 57 MB, 900-page file and cutting out 150 pages peaked at 105 MB of heap and
+  // buffers and 177 MB for the whole process, under the 256 MB a function may use and below what a 40 MB file took
+  // before; 60 MB covers a 900-page filing at the 50 KB a page of the one real filing measured.
+  docBytes: 60_000_000,
   sendBytes: 32_000_000, // size of one document or part sent to Claude (Anthropic's 32 MB request limit)
   cutMs: 1_000,         // time spent cutting PDFs in one function call (2 seconds of CPU a call)
   bytesPerPage: 50_000, // a document whose pages can't be counted is charged one page for each 50 KB
@@ -119,7 +123,7 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
   },
   {
     name: "search_filings",
-    description: "Search S&P's SNL Insurance Product Filings by company, state and publish date. Needs at least one company id or institution id and one state. Returns one row per filing with its type, status, dates, rate impact, description, page count and document id, plus notes that say plainly when a state or company returned nothing. Uses a saved result when the same search was run before. Pass empty lists for filters you don't want.",
+    description: "Search S&P's SNL Insurance Product Filings by company, state and publish date. Needs at least one company id or institution id and one state. Returns one row per filing with its type, status, dates, rate impact, description, page count and document id, plus notes that say plainly when a state or company returned nothing. A filing with no tracking number is identified by S&P's own filing number (sfcNumber): quote it as \"S&P no.\" and the number wherever you would give a tracking number, and never put it in tracking_numbers. Uses a saved result when the same search was run before. Pass empty lists for filters you don't want.",
     strict: true,
     input_schema: {
       type: "object",
@@ -175,9 +179,13 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
 // ---------- what an answer keeps between steps ----------
 
 export type DocRec = { documentId: number | null; filingVersionId: string | null; fileId: string; title: string; company: string | null; state: string | null; trackingNumber: string | null; pages: number | null;
+  /** S&P's own filing number, kept when the filing has no tracking number, so the filing can still be named. */
+  sfcNumber?: string | null;
   /** For part of a document: the filing's pages that were sent (page firstPage is page 1 of the part). Missing for a whole document. */
   firstPage?: number; lastPage?: number };
-export type Source = { n: number; documentId: number | null; filingVersionId: string | null; title: string; company: string | null; state: string | null; trackingNumber: string | null; pages: string | null; startPage: number | null; quote: string | null };
+export type Source = { n: number; documentId: number | null; filingVersionId: string | null; title: string; company: string | null; state: string | null; trackingNumber: string | null; pages: string | null; startPage: number | null; quote: string | null;
+  /** S&P's own filing number, when the filing has no tracking number. */
+  sfcNumber?: string | null };
 export type Segment = { text: string; cites: number[] };
 export type Table = { title: string; columns: string[]; rows: string[][]; notes: string[] };
 export type ChatState = {
@@ -362,9 +370,9 @@ const plural = (n: number, one: string, many: string) => `${n.toLocaleString("en
 /** A search row as Claude sees it: the columns that matter, with the description kept short. */
 export function compactFiling(r: Filing): Record<string, unknown> {
   const companies = (r.companies ?? []).map((c) => text(c.companyName)).filter(Boolean);
-  const desc = text(r.filingDescription);
+  const desc = text(r.filingDescription), num = filingNumber(r);
   return {
-    trackingNumber: text(r.trackingNumber), companies: companies.length ? companies : [text(r.companyName)].filter(Boolean),
+    trackingNumber: num?.kind === "tracking" ? num.value : null, ...(num?.kind === "sp" ? { sfcNumber: num.value } : {}), companies: companies.length ? companies : [text(r.companyName)].filter(Boolean),
     naicCompanyCode: text(r.naicCompanyCode), group: text(r.naicGroupName), state: text(r.serffFilingStateId),
     typeOfInsurance: text(r.typeOfInsurance), subType: text(r.subTypeOfInsurance), filingType: text(r.serffFilingType), status: text(r.filingStatus),
     submitted: text(r.dateSubmitted), published: text(r.publishDate), effectiveNew: text(r.newBusReqEffDate), effectiveRenewal: text(r.renewBusReqEffDate),
@@ -412,7 +420,7 @@ export function buildAnswer(content: Anthropic.Beta.BetaContentBlock[], docs: Do
         byKey.set(key, n);
         const quote = (c.cited_text ?? "").replace(/\s+/g, " ").trim();
         sources.push({
-          n, documentId: d.documentId, filingVersionId: d.filingVersionId, title: d.title, company: d.company, state: d.state, trackingNumber: d.trackingNumber,
+          n, documentId: d.documentId, filingVersionId: d.filingVersionId, title: d.title, company: d.company, state: d.state, trackingNumber: d.trackingNumber, ...(d.sfcNumber ? { sfcNumber: d.sfcNumber } : {}),
           pages: first === null ? null : first === lastPage ? String(first) : `${first}-${lastPage}`, startPage: first,
           quote: quote ? (quote.length > 300 ? quote.slice(0, 300) + "..." : quote) : null,
         });
@@ -492,7 +500,7 @@ export function partReadNotes(docs: DocRec[]): string[] {
     const ranges = sorted.map((p) => (p.firstPage === p.lastPage ? `${p.firstPage}` : `${p.firstPage} to ${p.lastPage}`));
     const list = ranges.length === 1 ? ranges[0] : `${ranges.slice(0, -1).join(", ")} and ${ranges.at(-1)}`;
     const word = sorted.length === 1 && sorted[0].firstPage === sorted[0].lastPage ? "page" : "pages";
-    const d = sorted[0], name = d.trackingNumber ?? (d.documentId !== null ? `document ${d.documentId}` : `version ${d.filingVersionId}`);
+    const d = sorted[0], name = filingNumberText(d) ?? (d.documentId !== null ? `document ${d.documentId}` : `version ${d.filingVersionId}`);
     return `Claude read ${word} ${list}${of ? ` of ${of.toLocaleString("en-US")}` : ""} of filing ${name}, not the whole document. Open it from the Filings view for the rest.`;
   });
 }
@@ -708,25 +716,39 @@ function makeApi(ctx: ChatCtx, st: ChatState, cap: (line: string) => void): Spgm
   return Spgmi.configured(creds) ? new Spgmi(creds, { fetch: ctx.fetch, sleep: ctx.sleep, gate }) : null;
 }
 
-/** Reads a response body, giving up (null) as soon as it passes the size limit. */
-async function readUpTo(res: Response, max: number): Promise<Uint8Array | null> {
-  if (Number(res.headers.get("content-length")) > max) { await res.body?.cancel(); return null; }
+/** Reads a response body, giving up (bytes null) as soon as it passes the size limit. When S&P says how long the
+    file is (content-length), a file over the limit is turned down before any of it is read, and one under it is
+    read straight into a single block of that size, so it is never held twice while the pieces are joined. declared:
+    the length S&P gave, when it gave one. The request has been made (and counted) either way. */
+export async function readUpTo(res: Response, max: number): Promise<{ bytes: Uint8Array | null; declared: number | null }> {
+  const said = res.headers.get("content-length"), declared = said !== null && /^\d{1,15}$/.test(said.trim()) ? Number(said) : null;
+  if (declared !== null && declared > max) { await res.body?.cancel().catch(() => {}); return { bytes: null, declared }; }
   const reader = res.body?.getReader();
-  if (!reader) return new Uint8Array(0);
+  if (!reader) return { bytes: new Uint8Array(0), declared };
+  let block = declared !== null ? new Uint8Array(declared) : null;
   const chunks: Uint8Array[] = [];
   let size = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
+    if (size + value.length > max) { await reader.cancel().catch(() => {}); return { bytes: null, declared }; }
+    if (block && size + value.length <= block.length) block.set(value, size);
+    else {
+      // longer than S&P said: carry on in pieces, still within the limit
+      if (block) { chunks.push(block.subarray(0, size)); block = null; }
+      chunks.push(value);
+    }
     size += value.length;
-    if (size > max) { await reader.cancel(); return null; }
-    chunks.push(value);
   }
+  if (block) return { bytes: size === block.length ? block : block.subarray(0, size), declared };
   const out = new Uint8Array(size);
   let at = 0;
   for (const c of chunks) { out.set(c, at); at += c.length; }
-  return out;
+  return { bytes: out, declared };
 }
+
+/** "61 MB", or "more than 60 MB" when S&P didn't say how long the file is. */
+const sizeWords = (declared: number | null, max: number) => (declared !== null ? `${Math.ceil(declared / 1_000_000).toLocaleString("en-US")} MB` : `more than ${Math.floor(max / 1_000_000)} MB`);
 
 function makeTools(ctx: ChatCtx, st: ChatState, api: Spgmi | null, client: Anthropic, sliceEnd: number, step: (line: string) => Promise<void>, cap: (line: string) => void, noteUpload: (fileId: string) => Promise<void>) {
   const { db } = ctx;
@@ -811,9 +833,11 @@ function makeTools(ctx: ChatCtx, st: ChatState, api: Spgmi | null, client: Anthr
     if (whole) return { result: { attached: true, note: `This document is already attached above as "${whole.title}". Use that copy.` } };
     const covering = sameDoc.find((d) => (asked ? d.firstPage! <= asked.first && d.lastPage! >= asked.last : d.firstPage === 1));
     if (covering) return { result: { attached: true, note: `${rangeText(covering.firstPage!, covering.lastPage!, covering.pages)} of this document are already attached above as "${covering.title}". Use that copy, or ask for pages you haven't read.` } };
-    const tracking = text(row.trackingNumber), listed = Number.isFinite(Number(row.pages)) && row.pages !== null ? Number(row.pages) : null;
+    const num = filingNumber(row), tracking = num?.kind === "tracking" ? num.value : null, spNumber = num?.kind === "sp" ? num.value : null;
+    const listed = Number.isFinite(Number(row.pages)) && row.pages !== null ? Number(row.pages) : null;
     let pages = listed;
-    const name = tracking ?? (ref.documentId !== undefined ? `document ${ref.documentId}` : `version ${ref.filingVersionId}`);
+    // A filing is named by its tracking number, or by S&P's own number when it has none ("S&P no. ABC1234567").
+    const name = filingNumberText(row) ?? (ref.documentId !== undefined ? `document ${ref.documentId}` : `version ${ref.filingVersionId}`);
     const left = LIMITS.totalPages - st.pages;
     const more = sameDoc.length ? "more of " : "";
     const overTotal = (rangeHint: boolean): ToolOut => {
@@ -843,16 +867,19 @@ function makeTools(ctx: ChatCtx, st: ChatState, api: Spgmi | null, client: Anthr
     await step(`Reading filing ${name} (${asked ? rangeText(asked.first, asked.last, pages) : pages !== null ? plural(pages, "page", "pages") : "page count n/d"})`);
     const res = await downloadDocument(api, ref);
     const type = (res.headers.get("content-type") || "").toLowerCase();
-    const bytes = await readUpTo(res, LIMITS.docBytes);
+    const got = await readUpTo(res, LIMITS.docBytes), bytes = got.bytes;
     if (!bytes) {
-      cap(`Filing ${name} is too large for Claude to read here. Open it from the Filings view.`);
-      return fail("This document is too large to read here. Tell the user to open it from the Filings view.");
+      // The whole file has to come down before any part of it can be cut out, so an over-limit file can't be read at all.
+      const size = sizeWords(got.declared, LIMITS.docBytes), limit = `${Math.floor(LIMITS.docBytes / 1_000_000)} MB`;
+      cap(`Filing ${name} is ${size}, too large for Claude to read here (the limit is ${limit} a document). Open it from the Filings view to read it yourself.`);
+      return fail(`This document is too large to read here: it is ${size}, over the ${limit} limit for one document, so no part of it can be read. Don't ask for it again. Tell the user to open it from the Filings view, and answer from the search results.`);
     }
     const isPdf = bytes.length > 4 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;   // "%PDF"
     const isText = !isPdf && type.startsWith("text/plain");
     if (!isPdf && !isText) return fail(`This document is ${type ? `a ${type} file` : "not a PDF"}, which can't be read here. Tell the user to open it from the Filings view.`);
     // S&P's page count isn't trusted on its own: the pages are counted in the file too and the larger number
-    // is used. A file whose pages can't be counted is charged by its size.
+    // is used. A file whose pages can't be counted is charged by its size. (The Live check on 18 Nov 2026 found the
+    // pages column matched the file's own count, on the one document it downloaded, of 17 pages.)
     const counted = isPdf ? countPdfPages(bytes) : null;
     pages = Math.max(listed ?? 0, counted ?? 0) || null;
     let charge = pages ?? Math.max(1, Math.ceil(bytes.length / LIMITS.bytesPerPage));
@@ -915,12 +942,12 @@ function makeTools(ctx: ChatCtx, st: ChatState, api: Spgmi | null, client: Anthr
       if (tooBigForClaude(charge)) return overContext();
     }
     const companies = Array.isArray(row.companies) ? row.companies.map(String).join(", ") : null;
-    const base = [tracking ?? name, companies, text(row.state), text(row.filingType)].filter(Boolean).join(", ");
+    const base = [name, companies, text(row.state), text(row.filingType)].filter(Boolean).join(", ");
     const title = part ? `${base}, ${rangeText(part.first, part.last, pages)}` : base;
     const file = await client.files.upload({ file: await toFile(send, isPdf ? "filing.pdf" : "filing.txt", { type: isPdf ? "application/pdf" : "text/plain" }) });
     // Noted straight away, so the upload is cleaned up even if this function call dies before the step ends.
     await noteUpload(file.id);
-    st.docs.push({ documentId: docId, filingVersionId: versionId, fileId: file.id, title, company: companies, state: text(row.state), trackingNumber: tracking, pages, ...(part ? { firstPage: part.first, lastPage: part.last } : {}) });
+    st.docs.push({ documentId: docId, filingVersionId: versionId, fileId: file.id, title, company: companies, state: text(row.state), trackingNumber: tracking, ...(spNumber ? { sfcNumber: spNumber } : {}), pages, ...(part ? { firstPage: part.first, lastPage: part.last } : {}) });
     const sent = part ? part.last - part.first + 1 : pages ?? charge;
     st.pages += sent;
     st.pendingPages = (st.pendingPages ?? 0) + (part ? sent : charge);

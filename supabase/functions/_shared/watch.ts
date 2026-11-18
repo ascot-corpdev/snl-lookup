@@ -10,7 +10,7 @@
 // last WATCH_WINDOW_DAYS days of publish dates. Filings are told apart by S&P's filingVersionId.
 
 import type { Db, FoundFiling, WatchRun, WatchScope } from "./db.ts";
-import { batches, type Cell, entitiesFrom, type Filing, getReference, MAX_IDS, MAX_IDS_PER_REQUEST, searchFilings, type SearchParams } from "./filings.ts";
+import { batches, type Cell, entitiesFrom, type Filing, filingNumberText, getReference, SP_NUMBER_MARK, MAX_IDS, MAX_IDS_PER_REQUEST, searchFilings, type SearchParams } from "./filings.ts";
 import { type Env } from "./http.ts";
 import { NOT_CONFIGURED, Spgmi, SpgmiError } from "./spgmi.ts";
 
@@ -173,7 +173,9 @@ export function foundRow(f: Filing, runId: string, at: string, baseline: boolean
     filing_status: text(f.filingStatus, 80), date_submitted: text(f.dateSubmitted, 30), publish_date: text(f.publishDate, 30),
     effective_new: text(f.newBusReqEffDate, 30), effective_renewal: text(f.renewBusReqEffDate, 30),
     rate_impact: text(f.dispOverallRateImpact, 40) ?? text(f.overallRateImpact as Cell, 40),
-    description: text(f.filingDescription, DESC_MAX), tracking_number: text(f.trackingNumber, 60),
+    // The tracking number, or "S&P no." and S&P's own filing number when the filing has none (live results so far
+    // have had none); the page and the email read the mark back, so no new column is needed.
+    description: text(f.filingDescription, DESC_MAX), tracking_number: text(filingNumberText(f), 60),
     document_id: doc !== null && Number.isInteger(doc) && doc > 0 && doc < 1e15 ? doc : null,
   };
 }
@@ -341,6 +343,9 @@ export function siteUrl(env: Env): string | null {
   return null;
 }
 
+/** How the email names a found filing: "tracking number CALL-1", "S&P no. ABC1234567", or "tracking number n/d". */
+const numberWords = (v: string | null | undefined) => (!v ? "tracking number n/d" : v.startsWith(SP_NUMBER_MARK + " ") ? v : `tracking number ${v}`);
+
 /** One plain, short email: company, state, filing type, a line of description and the tracking number for each new
     filing, and a link to the app. Nothing else from S&P goes in it. */
 export function watchEmail(rows: FoundFiling[], opts: { now: number; site: string | null }): { subject: string; text: string } {
@@ -350,7 +355,7 @@ export function watchEmail(rows: FoundFiling[], opts: { now: number; site: strin
   const line = (r: MarkedFiling) => {
     const desc = r.description ? (r.description.length > 140 ? r.description.slice(0, 139).trimEnd() + "…" : r.description) : "No description";
     const tag = r.flags.length ? `[${r.flags.map((f) => f.label).join(", ")}] ` : "";
-    return [`- ${tag}${r.companies.join("; ") || "Company n/d"}, ${r.state ?? "n/d"}, ${r.filing_type ?? "filing type n/d"}: ${desc} (tracking number ${r.tracking_number ?? "n/d"})`,
+    return [`- ${tag}${r.companies.join("; ") || "Company n/d"}, ${r.state ?? "n/d"}, ${r.filing_type ?? "filing type n/d"}: ${desc} (${numberWords(r.tracking_number)})`,
       ...r.flags.map((f) => `  ${flagSentence(f)}`)];
   };
   const marked = shown.filter((r) => r.flags.length), rest = shown.filter((r) => !r.flags.length);
