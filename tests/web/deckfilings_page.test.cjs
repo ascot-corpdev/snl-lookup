@@ -60,6 +60,7 @@ const PSTATUS = (over = {}) => ({ statutory: { configured: false, mapped: false,
         return J(400, { error: "bad", message: "Unknown action." }); }
       if (u === JSZIP_URL) return r.fulfill({ contentType: "application/javascript", body: ZIPLIB });
       if (u === BASE + "deck.js" || u === BASE + "profile-slides.js") return r.fulfill({ contentType: "application/javascript", body: fs.readFileSync(path.join(WEB, u.slice(BASE.length)), "utf8") });
+      if (u === BASE + "template-builtin.pptx") return r.fulfill({ contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", body: fs.readFileSync(path.join(WEB, "template-builtin.pptx")) });
       if (/supabase\.js/.test(u)) return r.fulfill({ contentType: "application/javascript", body: MOCK });
       if (/config\.js/.test(u)) return r.fulfill({ contentType: "application/javascript", body: CONFIG });
       if (u.startsWith(BASE)) return r.fulfill({ contentType: "text/html", body: fs.readFileSync(WEB + "/index.html", "utf8") }); return r.fulfill({ status: 404, body: "" }); });
@@ -131,7 +132,7 @@ const PSTATUS = (over = {}) => ({ statutory: { configured: false, mapped: false,
   ok("the file: named after the company, the kind of profile and the day", dl.name === "Calloway-Insurance-Co-filings-profile-2026-11-18.pptx", dl.name);
   let sl = await slidesOf(dl.zip);
   ok("a real PowerPoint file of eight slides with Claude's title and the source on each", sl.length === 8 && sl[0].includes("Calloway Insurance Co: filings profile") && sl[1].includes("Seven filings; the largest change 9.8%, pending") && sl.slice(1).every(x => x.includes("SNL Insurance Product Filings")) && sl.some(x => x.includes("S&amp;P no. ABC1234567")));
-  ok("built: says so, and that the file went nowhere; the draft's cost is shown", (await t.txt("#fpBuilt")) === "Your filings profile is ready. Calloway-Insurance-Co-filings-profile-2026-11-18.pptx was saved to your downloads. It was made in this browser and isn't stored or sent anywhere.Download again" && (await t.txt("#fpDrafted")) === "Claude has drafted the text for these filings. It cost about $0.08 (9,100 tokens read, 1,800 written).", await t.txt("#fpDrafted"));
+  ok("built: says so, and that the file went nowhere; the draft's cost is shown", (await t.txt("#fpBuilt")) === "Your filings profile is ready. Calloway-Insurance-Co-filings-profile-2026-11-18.pptx was saved to your downloads. It was made in this browser and isn't stored or sent anywhere. Built on the standard template.Download again" && (await t.txt("#fpDrafted")) === "Claude has drafted the text for these filings. It cost about $0.08 (9,100 tokens read, 1,800 written).", await t.txt("#fpDrafted"));
   dl = await t.download(() => p.click('[data-act="fp-again"]'));
   ok("Download again: the same file, no new draft", dl.name === "Calloway-Insurance-Co-filings-profile-2026-11-18.pptx" && t.of("filings_draft").length === 1);
   await p.click("#fp_draft"); await p.waitForTimeout(100);
@@ -213,7 +214,7 @@ const PSTATUS = (over = {}) => ({ statutory: { configured: false, mapped: false,
   ok("S&P filings not set up: said calmly; saved searches still open", (await t.txt("#fpOff")) === "S&P filings aren't set up yet, so a new filings profile can't be searched. A profile whose search was run before still opens from its saved result. You can build the sample below meanwhile.");
   await t.find("Calloway"); await p.click('[data-act="fp-co"][data-i="0"]'); await p.waitForTimeout(100); await p.click("#fp_get"); await p.waitForTimeout(800);
   ok("Claude not set up: plain titles, no draft choice", (await t.txt("#fpDraftNote")) === "Claude isn't set up, so the slides use plain titles and points written from the filings." && !(await p.$("#fp_draft")) && (await t.txt("#fp_buildBtn")) === "Build the PowerPoint file");
-  ok("no template, a reader: the button waits for Corp Dev", await p.isDisabled("#fp_buildBtn") && (await t.txt("#fpNoTplNote")) === "The file can be built once Corp Dev uploads the template.");
+  ok("no template, a reader: the button builds on the built-in plain template", !(await p.isDisabled("#fp_buildBtn")) && !(await p.$("#fpNoTplNote")) && (await t.txt("#pfTplState")) === "The built-in plain template: nobody has uploaded one yet.");
   await t.ctx.close();
 
   // ----- hostile text, and the session ending -----

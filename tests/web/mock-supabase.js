@@ -58,6 +58,27 @@
   M.storage = {buckets:{"snl-template":{}}, noBucket:!!O.noBucket, refuse:false, netFail:false, delay:0, calls:[], uploads:[]};
   if(O.template) M.storage.buckets["snl-template"]["template.pptx"] = {bytes:enc(O.template.text||"PK made-up template"), updated_at:O.template.updated_at||"2026-11-05T09:30:00Z"};
   const sErr = (message, statusCode, status) => ({name:"StorageApiError", message, statusCode, status});
+  // Templates of your own (migration 0008): "<user id>/template.pptx" in the same bucket. The rules follow the
+  // policies: before 0008 (option noOwnTemplates: true, or __mock.storage.ownOff) any login with a role reads every
+  // object and only Corp Dev writes; after it, everyone reads template.pptx, only Corp Dev writes it, and each login
+  // reads and writes its own "<id>/template.pptx" and nothing else. Option ownTemplates: {u1:{text, updated_at}}
+  // starts logins with one. storage.getBucket answers only after 0008 (before it the bucket is hidden from logins).
+  M.storage.ownOff = !!O.noOwnTemplates;
+  Object.entries(O.ownTemplates||{}).forEach(([uid,o]) => { M.storage.buckets["snl-template"][uid+"/template.pptx"] = {bytes:enc(o.text||"PK own template"), updated_at:o.updated_at||"2026-11-12T10:00:00Z"}; });
+  M.storage.may = (op, path) => {   // what the policies allow the login signed in now
+    const role = store.profiles[M.uid] && store.profiles[M.uid].role, read = op==="list"||op==="download";
+    if(!role) return false;
+    if(M.storage.ownOff) return read || role==="corpdev";
+    if(path==="template.pptx") return read || role==="corpdev";
+    return path===M.uid+"/template.pptx";
+  };
+  M.storage.getBucket = async id => {
+    M.storage.calls.push({op:"getBucket", bucket:id, path:null, opts:null});
+    if(M.storage.delay) await new Promise(r=>setTimeout(r, M.storage.delay));
+    if(M.storage.netFail) return {data:null, error:{name:"StorageUnknownError", message:"Failed to fetch"}};
+    if(M.storage.noBucket || M.storage.ownOff || !M.storage.buckets[id] || !(store.profiles[M.uid]&&store.profiles[M.uid].role)) return {data:null, error:sErr("Bucket not found", "404", 400)};
+    return {data:{id, name:id, public:false, file_size_limit:52428800, allowed_mime_types:["application/vnd.openxmlformats-officedocument.presentationml.presentation"]}, error:null};
+  };
   function bucket(name){
     const gate = async (op, path, opts) => {
       M.storage.calls.push({op, bucket:name, path, opts:opts?clone(opts):null});
@@ -70,16 +91,25 @@
     return {
       async list(prefix, opts){ const e=await gate("list", prefix, opts); if(e) return {data:null, error:e};
         if(M.storage.refuse) return {data:[], error:null};   // a policy hides what it doesn't allow
-        const s=opts&&opts.search||""; const B=M.storage.buckets[name];
-        return {data:Object.keys(B).filter(k=>k.includes(s)).map(k=>({name:k, id:"obj-"+k, updated_at:B[k].updated_at, created_at:B[k].updated_at, last_accessed_at:null, metadata:{size:B[k].bytes.length, mimetype:"application/vnd.openxmlformats-officedocument.presentationml.presentation"}})), error:null}; },
+        const s=opts&&opts.search||""; const B=M.storage.buckets[name], pre=prefix?String(prefix).replace(/\/$/,"")+"/":"";
+        const seen=Object.keys(B).filter(k=>k.startsWith(pre) && M.storage.may("list", k));   // what the policies let this login see
+        const folders=[...new Set(seen.map(k=>k.slice(pre.length)).filter(r=>r.includes("/")).map(r=>r.split("/")[0]))].filter(f=>f.includes(s));
+        return {data:folders.map(f=>({name:f, id:null, updated_at:null, created_at:null, last_accessed_at:null, metadata:null})).concat(seen.filter(k=>!k.slice(pre.length).includes("/")).map(k=>k.slice(pre.length)).filter(k=>k.includes(s)).map(r=>pre+r).map(k=>({name:k.slice(pre.length), id:"obj-"+k, updated_at:B[k].updated_at, created_at:B[k].updated_at, last_accessed_at:null, metadata:{size:B[k].bytes.length, mimetype:"application/vnd.openxmlformats-officedocument.presentationml.presentation"}}))), error:null}; },
       async download(path){ const e=await gate("download", path); if(e) return {data:null, error:e};
-        const o=M.storage.buckets[name][path]; if(!o) return {data:null, error:sErr("Object not found", "404", 400)};
+        const o=M.storage.buckets[name][path]; if(!o || !M.storage.may("download", path)) return {data:null, error:sErr("Object not found", "404", 400)};
         return {data:new Blob([new Uint8Array(o.bytes)]), error:null}; },
       async upload(path, body, opts){ const e=await gate("upload", path, opts); if(e) return {data:null, error:e};
+        if(!M.storage.may("upload", path)) return {data:null, error:sErr("new row violates row-level security policy", "403", 400)};
         const B=M.storage.buckets[name]; if(B[path] && !(opts&&opts.upsert)) return {data:null, error:sErr("The resource already exists", "409", 400)};
         const bytes=Array.from(new Uint8Array(await body.arrayBuffer()));
         M.storage.uploads.push({bucket:name, path, size:bytes.length, type:body.type||"", opts:opts?clone(opts):null, text:new TextDecoder().decode(new Uint8Array(bytes.slice(0,64)))});
-        B[path]={bytes, updated_at:new Date().toISOString()}; return {data:{path, id:"obj-"+path, fullPath:name+"/"+path}, error:null}; }
+        B[path]={bytes, updated_at:new Date().toISOString()}; return {data:{path, id:"obj-"+path, fullPath:name+"/"+path}, error:null}; },
+      // remove([paths]): as Supabase answers, what a policy hides is simply not removed (no error); records removes
+      async remove(paths){ const e=await gate("remove", (paths||[]).join(",")); if(e) return {data:null, error:e};
+        if(M.storage.refuse) return {data:[], error:null};
+        const B=M.storage.buckets[name], gone=(paths||[]).filter(k=>B[k] && M.storage.may("remove", k));
+        gone.forEach(k=>{ delete B[k]; }); (M.storage.removes=M.storage.removes||[]).push(...gone);
+        return {data:gone.map(k=>({name:k, bucket_id:name})), error:null}; }
     };
   }
 
@@ -154,7 +184,7 @@
 
   const client = {
     from: query,
-    storage: { from: bucket },
+    storage: { from: bucket, getBucket: id => M.storage.getBucket(id) },
     auth: {
       async getSession(){ return {data:{session: M.signedOut ? null : session()}}; },
       async signInWithPassword(c){
