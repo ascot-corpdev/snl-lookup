@@ -86,6 +86,8 @@
       lt(c, v){ st.lts.push([c, v]); return b; },
       range(a, z){ st.range=[a, z]; return b; },
       eq(c, v){ st.eqs.push([c, v]); return b; },
+      // is(c, null): "doc->>key" reads a key inside a jsonb column, as PostgREST does; a missing key is null
+      is(c, v){ (st.iss=st.iss||[]).push([c, v]); return b; },
       in(c, v){ st.ins.push([c, v]); return b; },
       order(c, o){ st.ord=[c, !(o&&o.ascending===false)]; return b; },
       limit(n){ st.lim=n; return b; },
@@ -95,7 +97,8 @@
     };
     const match = r => st.eqs.every(([c,v]) => String(r[c]) === String(v)) && st.ins.every(([c,v]) => v.map(String).includes(String(r[c])))
       && st.gtes.every(([c,v]) => String(r[c]) >= String(v)) && st.lts.every(([c,v]) => String(r[c]) < String(v))
-      && (table !== "snl_jobs" || (r.owner ?? ME) === M.uid);
+      && (table !== "snl_jobs" || (r.owner ?? ME) === M.uid)
+      && (st.iss||[]).every(([c,v]) => { const [col, ...ks]=c.split(/->>?/); let x=r[col]; for(const k of ks) x = x!==null && typeof x==="object" && k in x ? x[k] : null; return (x===undefined?null:x)===v || (x!==null && String(x)===String(v)); });
     function run(){
       const T = store[table];
       if(!T) return {data:null, error:{code:"PGRST205", message:`Could not find the table 'public.${table}' in the schema cache`}};
@@ -121,7 +124,7 @@
     // snl_store answers the way PostgREST would: only the columns asked for, where "alias:doc->a->b" is a JSON
     // path into a jsonb column and a plain name is the whole column (so "doc" alone returns every saved row).
     async function storeRun(){
-      M.storeReads.push({cols:st.cols==null?"*":String(st.cols), eqs:clone(st.eqs), ord:st.ord, lim:st.lim});
+      M.storeReads.push({cols:st.cols==null?"*":String(st.cols), eqs:clone(st.eqs), ord:st.ord, lim:st.lim, iss:clone(st.iss||[])});
       if(M.storeDelay) await new Promise(r=>setTimeout(r, M.storeDelay));
       if(M.failStore) return {data:null, error:{message:M.failStore}};
       let rows = Object.values(store.snl_store).filter(match).map(clone);

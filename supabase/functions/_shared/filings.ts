@@ -10,6 +10,7 @@
 //   resolveEntity     S&P's filings API has no company search, so names resolve only against the company list
 //                     loaded into the app and companies it has already seen in results
 //   resolveMany       the same, for several names and groups at once (Claude's market questions)
+//   groupChoices      the same, for whole groups in the Filings view's company finder
 //   parseSearch       ids are whole numbers and filters are lists (taken from the examples in S&P's public
 //                     specification, which gives no types)
 //   searchFilings     pages are numbered from 1 (S&P's example sends pageNumber 1)
@@ -110,7 +111,9 @@ export type SearchParams = {
 export const MAX_IDS_PER_REQUEST = 10;   // S&P: companyId (limit 10) or institutionId (limit 10)
 export const MAX_WINDOW_DAYS = 364;      // S&P: 365 days a request; 364 days apart is safe however S&P counts it
 export const PAGE_SIZE = 500;            // the page size in S&P's own example
-export const MAX_IDS = 50, MAX_YEARS = 10;
+// MAX_IDS: companies in one search. 100 takes any insurer group in the owner's list (the largest has 69) in one
+// search; what S&P is asked stays bounded by MAX_SEARCH_REQUESTS, which refuses a search before it starts.
+export const MAX_IDS = 100, MAX_YEARS = 10;
 
 const DAY = 86_400_000;
 const isDate = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s + "T00:00:00Z"))
@@ -149,7 +152,7 @@ const strs = (v: unknown, max: number, re: RegExp): string[] | null => {
     this follows its examples. If a live reference list shows text ids, this is the function to change. */
 export function parseSearch(b: Record<string, unknown>, today: string): { ok: true; params: SearchParams } | { ok: false; message: string } {
   const bad = (message: string) => ({ ok: false as const, message });
-  const tooMany = `Search at most ${MAX_IDS} companies at a time.`;
+  const tooMany = `Search at most ${MAX_IDS} companies at a time. Remove some companies, or split them into two searches.`;
   if ((Array.isArray(b.companyIds) ? b.companyIds.length : 0) + (Array.isArray(b.institutionIds) ? b.institutionIds.length : 0) > MAX_IDS) return bad(tooMany);
   const companyIds = ints(b.companyIds, MAX_IDS), institutionIds = ints(b.institutionIds, MAX_IDS);
   if (!companyIds || !institutionIds) return bad("Company and institution ids must be whole numbers.");
@@ -220,8 +223,20 @@ export function dedupe(rows: Record<string, Cell>[]): Filing[] {
 }
 
 export const MAX_SEARCH_REQUESTS = 60;   // S&P requests one search may use
-export const tooWide = (needed: number, allowed: number) =>
-  `This search needs at least ${needed} S&P requests (one for each batch of 10 companies and each year of dates), more than the ${allowed} one search may use. Choose fewer companies or a shorter date range.`;
+export const tooWide = (needed: number, allowed: number, p?: SearchParams) =>
+  `This search needs at least ${needed} S&P requests (one for each batch of 10 companies and each year of dates), more than the ${allowed} one search may use. Choose fewer companies or a shorter date range.${p ? " " + widthAdvice(p, allowed) : ""}`;
+
+/** What would fit in one search, in plain words: how many years of dates these companies can cover, and how many
+    companies these dates can take. Counts as planSearch does: each 10 ids of a kind and each 365 days of dates. */
+export function widthAdvice(p: SearchParams, allowed: number): string {
+  const n = p.companyIds.length + p.institutionIds.length, windows = dateWindows(p.from, p.to).length;
+  const perYear = Math.ceil(p.companyIds.length / MAX_IDS_PER_REQUEST) + Math.ceil(p.institutionIds.length / MAX_IDS_PER_REQUEST);
+  const years = Math.floor(allowed / Math.max(1, perYear)), fit = Math.min(MAX_IDS, Math.floor(allowed / windows) * MAX_IDS_PER_REQUEST);
+  const cos = (k: number) => `${k} ${k === 1 ? "company" : "companies"}`;
+  const days = (k: number) => `${(k * 365).toLocaleString("en-US")} days of dates, a little under ${k} ${k === 1 ? "year" : "years"}`;
+  const forDates = fit >= MAX_IDS_PER_REQUEST ? `over these dates, one search can take up to ${cos(fit)}` : "these dates are too long for even 10 companies";
+  return years >= 1 ? `With ${n === 1 ? "this company" : `these ${cos(n)}`}, one search can cover up to ${days(years)}; ${forDates}.` : `Choose fewer companies: ${forDates}.`;
+}
 
 export const emptyStateNote = (state: string) =>
   `S&P returned no filings for ${state} in this search. That means none are in S&P's data for these companies, dates and filters. It doesn't prove that none were filed.`;
@@ -273,12 +288,16 @@ export async function searchFilings(api: Spgmi, p: SearchParams, opts: { maxRequ
 }
 
 export const SOURCE = "S&P Global Market Intelligence, SNL Insurance Product Filings";
-export type SearchAnswer = SearchResult & { params: SearchParams & { allStatuses: boolean }; source: string; fetchedAt: string; fromStore: boolean; saved: boolean };
+export type SearchAnswer = SearchResult & { params: SearchParams & { allStatuses: boolean }; source: string; fetchedAt: string; fromStore: boolean; saved: boolean; unlisted?: boolean };
 
 /** A search as the page and Claude both run it: the saved result when there is one (unless refresh), otherwise
     S&P. With no filing status chosen it uses every status in S&P's list, because S&P needs one on every search.
-    Companies in the results are remembered, and a complete result is saved. api is null when S&P isn't set up. */
-export async function savedOrFreshSearch(api: Spgmi | null, db: Db, params: SearchParams, opts: { now: number; refresh?: boolean; maxRequests?: number; deadline?: number; clock?: () => number }): Promise<SearchAnswer> {
+    Companies in the results are remembered, and a complete result is saved. api is null when S&P isn't set up.
+    unlisted: a search kept out of the shared Recent searches list. It is kept on the saved result, not in the search
+    itself, so the saved result's id stays the hash of the search. It follows whoever last asked S&P: a search that
+    opens from a saved result changes nothing, so an earlier unlisted result stays unlisted, and a listed one stays
+    listed; a fresh fetch (a new search or Refresh) is saved listed or unlisted as that request asks. */
+export async function savedOrFreshSearch(api: Spgmi | null, db: Db, params: SearchParams, opts: { now: number; refresh?: boolean; maxRequests?: number; deadline?: number; clock?: () => number; unlisted?: boolean }): Promise<SearchAnswer> {
   const allStatuses = !params.filingStatusIds.length;
   const p = { ...params };
   if (allStatuses) {
@@ -293,13 +312,13 @@ export async function savedOrFreshSearch(api: Spgmi | null, db: Db, params: Sear
   if (!p.filingStatusIds.length) throw new SpgmiError("server", "S&P's list of filing statuses came back empty, and S&P needs a status on every search. Refresh the reference lists on the Filings view and try again.");
   // A search that can't finish inside its request limit is refused before any request is spent on it.
   const needed = planSearch(p).length, allowed = opts.maxRequests ?? MAX_SEARCH_REQUESTS;
-  if (needed > allowed) throw new SpgmiError("bad_request", tooWide(needed, allowed));
+  if (needed > allowed) throw new SpgmiError("bad_request", tooWide(needed, allowed, p));
 
   const states = await getReference(api, db, "serffFilingState", { now: opts.now });
   const knownStates = (states?.options ?? []).map((o) => String(o.id).toUpperCase()).filter((x) => /^[A-Z]{2}$/.test(x));
   const result = await searchFilings(api, p, { maxRequests: opts.maxRequests, knownStates, deadline: opts.deadline, now: opts.clock });
   await db.putEntities(entitiesFrom(result.rows));
-  const doc = { params: { ...p, allStatuses }, ...result, source: SOURCE };
+  const doc = { params: { ...p, allStatuses }, ...result, source: SOURCE, ...(opts.unlisted ? { unlisted: true } : {}) };
   // A search that was cut short isn't saved, so the next try asks S&P again.
   const wasSaved = result.capped ? false : await db.putStore({ id, kind: "search", label: `${p.states.join(",")} ${p.from} to ${p.to}`.slice(0, 400), doc });
   return { ...doc, fetchedAt: new Date(opts.now).toISOString(), fromStore: false, saved: wasSaved };
@@ -330,18 +349,59 @@ export const NO_MATCH = (q: string) =>
 /** UNCONFIRMED: S&P's Physical Documents API has no endpoint that turns a name or NAIC code into a companyId.
     Until S&P confirms one (or Snowflake's Entity view is mapped), this looks only at companies loaded from a
     company list (scripts/companies.mjs) or saved from earlier search results. It never calls S&P. Up to 50
-    matches come back, the most one search can take, so a whole group can be chosen at once. */
+    matches come back; a whole group, however large, comes from groupChoices. */
 export async function resolveEntity(db: Db, q: string, limit = 50): Promise<{ query: string; matches: Entity[]; note: string | null }> {
   const query = q.trim().slice(0, 100);
   const matches = query.length >= 2 || /^\d+$/.test(query) ? await db.findEntities(query, limit) : [];
   return { query, matches, note: matches.length ? null : NO_MATCH(query) };
 }
 
+// ---------- whole groups for the company finder ----------
+
+export const GROUP_SCAN = 400;          // companies read to find the groups a name matches; more means the name is too loose
+export const MAX_GROUP_CHOICES = 5;     // groups offered for one name
+/** A whole insurer group, as the company finder offers it: every member company in the company list, at most
+    MAX_IDS of them (the most one search takes), with the S&P requests one year of dates costs for them. */
+export type GroupChoice = {
+  name: string | null; code: string | null; companies: number; searchable: number; tooBig: boolean; requestsPerYear: number;
+  members: { companyName: string; companyId: string | null; institutionId: string | null }[];
+};
+
+/** UNCONFIRMED, for the same reason as resolveEntity: looks only in the app's company list, never at S&P. The
+    groups whose name contains q (or whose NAIC group code is q), each with all its member companies, so the page
+    can add a whole group in one click. Groups are matched by NAIC group code when the list has one, otherwise by
+    group name, as the Statutory view's finder groups them. */
+export async function groupChoices(db: Db, q: string): Promise<{ groups: GroupChoice[]; groupNote: string | null }> {
+  const query = cleanName(q);
+  const rows = /^\d{1,6}$/.test(query) ? await db.entitiesInGroup(query, GROUP_SCAN + 1) : query.length >= 3 ? await db.entitiesInGroupName(query, GROUP_SCAN + 1) : [];
+  if (rows.length > GROUP_SCAN) return { groups: [], groupNote: `More than ${GROUP_SCAN} companies are in groups whose name matches "${query}", so no whole group is offered. Type more of the group's name.` };
+  const byKey = new Map<string, Entity[]>();
+  for (const e of oneEach(rows)) {
+    const code = isNaicCode(e.naicGroupCode) ? e.naicGroupCode : null, name = e.naicGroupName ? String(e.naicGroupName) : null;
+    if (!code && !name) continue;
+    const key = code ?? "name:" + name!.toLowerCase();
+    byKey.set(key, [...(byKey.get(key) ?? []), e]);
+  }
+  const all = [...byKey.values()].map((list): GroupChoice => {
+    const ids = list.filter((e) => idOf(e.companyId) !== null || idOf(e.institutionId) !== null);
+    const members = ids.slice(0, MAX_IDS).map((e) => ({ companyName: e.companyName, companyId: idOf(e.companyId) === null ? null : String(idOf(e.companyId)), institutionId: idOf(e.companyId) === null ? String(idOf(e.institutionId)) : null }));
+    const byCompany = ids.filter((e) => idOf(e.companyId) !== null).length;
+    return {
+      name: list.find((e) => e.naicGroupName)?.naicGroupName ?? null, code: list.find((e) => isNaicCode(e.naicGroupCode))?.naicGroupCode ?? null,
+      companies: list.length, searchable: ids.length, tooBig: ids.length > MAX_IDS, members,
+      requestsPerYear: Math.ceil(byCompany / MAX_IDS_PER_REQUEST) + Math.ceil((ids.length - byCompany) / MAX_IDS_PER_REQUEST),
+    };
+  });
+  const groups = all.filter((g) => g.searchable).slice(0, MAX_GROUP_CHOICES);
+  const more = all.filter((g) => g.searchable).length - groups.length;
+  return { groups, groupNote: more > 0 ? `${more} more ${more === 1 ? "group matches" : "groups match"} "${query}". Type more of the group's name to see ${more === 1 ? "it" : "them"}.` : null };
+}
+
 // ---------- resolve several names and groups at once (Claude's market questions) ----------
 
 export const MAX_LOOKUP_NAMES = 20;   // names and groups together in one look-up
 export const MATCHES_PER_NAME = 10;   // companies listed for one name; more means the name is too loose
-export const MAX_MEMBERS = 2 * MAX_IDS;   // group members listed in one look-up: two searches' worth
+export const MAX_MEMBERS = MAX_IDS;   // group members listed in one look-up: one search's worth, more than any group in the owner's list
 
 /** A company as a look-up shows it to Claude: its name, the ids a search takes, and its group. */
 export type FoundCompany = { companyName: string; companyId: number | null; institutionId: number | null; naicCompanyCode: string | null; group: string | null; searchable: boolean };

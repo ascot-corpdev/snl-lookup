@@ -155,8 +155,8 @@ function client(answer: Parameters<typeof spStub>[1]) {
   refused("a company id that tries to carry SQL", { companyIds: ["1; drop table x"] }, /whole numbers/);
   refused("company ids that aren't a list", { companyIds: "9100001" }, /whole numbers/);
   refused("an institution id that is an object", { institutionIds: [{ id: 1 }] }, /whole numbers/);
-  refused("more than 50 companies and institutions together", { companyIds: Array.from({ length: 30 }, (_, i) => i + 1), institutionIds: Array.from({ length: 21 }, (_, i) => i + 100) }, /at most 50/);
-  refused("more than 50 companies", { companyIds: Array.from({ length: 51 }, (_, i) => i + 1) }, /at most 50/);
+  refused("more than 100 companies and institutions together", { companyIds: Array.from({ length: 60 }, (_, i) => i + 1), institutionIds: Array.from({ length: 41 }, (_, i) => i + 1000) }, /at most 100/);
+  refused("more than 100 companies", { companyIds: Array.from({ length: 101 }, (_, i) => i + 1) }, /at most 100/);
   refused("a search with no state", { states: [] }, /at least one state/);
   refused("a state written out in full", { states: ["Florida"] }, /two-letter code/);
   refused("states that aren't a list", { states: "FL" }, /two-letter code/);

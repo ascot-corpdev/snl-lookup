@@ -60,7 +60,7 @@ function ownerList(db: MemoryDb) {
   ok("it comes straight after resolve_entity, and the other tools keep their place", same(TOOLS.map((x: any) => x.name), ["resolve_entity", "resolve_entities", "search_filings", "read_filing_document", "query_statutory"]));
   ok("its description says it never calls S&P, names notFound and searchBatches, and gives the caps", /never calls S&P/.test(t.description) && t.description.includes("notFound") && t.description.includes("searchBatches") && t.description.includes(`At most ${F.MAX_LOOKUP_NAMES} names and groups, and ${F.MAX_MEMBERS} group members`) && t.description.includes("notLookedUp"), t.description);
   ok("resolve_entity's description points to resolve_entities for several companies or a group", /use resolve_entities/.test(tool("resolve_entity").description));
-  ok("the caps are sensible: room for a 15-carrier sweep, two searches of members", F.MAX_LOOKUP_NAMES >= 15 && F.MAX_MEMBERS === 2 * F.MAX_IDS && F.MATCHES_PER_NAME >= 5);
+  ok("the caps are sensible: room for a 15-carrier sweep, one search of members", F.MAX_LOOKUP_NAMES >= 15 && F.MAX_MEMBERS === F.MAX_IDS && F.MATCHES_PER_NAME >= 5);
 }
 
 // ---------- resolveMany against the owner's list (institution ids and group names only) ----------
@@ -121,7 +121,7 @@ function ownerList(db: MemoryDb) {
   ok(`a group larger than ${F.MAX_MEMBERS} members is cut at ${F.MAX_MEMBERS}, by name, and marked cut`, big.groups[0].members.length === F.MAX_MEMBERS && big.groups[0].cut === true && big.groups[0].members[0].companyName === "Nonesuch Giant Member 000 Co", big.groups[0].members.length);
   ok("the note says the group has more members than one look-up returns and what to do", big.notes.some((n: string) => n.includes('"Nonesuch Giant Group" has more member companies in the list than one look-up returns') && n.includes(`only ${F.MAX_MEMBERS} are listed`)), big.notes);
   ok("a group after the member cap is used up isn't looked up, and says so", same(big.notLookedUp, ["Calloway Group"]) && big.groups.length === 1);
-  ok(`the ${F.MAX_MEMBERS} members come back as two searches of ${F.MAX_IDS} ids, five S&P requests a year each`, same(big.searchBatches.map((b: any) => [b.institution_ids.length, b.company_ids.length, b.requestsPerYear]), [[50, 0, 5], [50, 0, 5]]), big.searchBatches.map((b: any) => b.institution_ids.length));
+  ok(`the ${F.MAX_MEMBERS} members come back as one search of ${F.MAX_IDS} ids, ten S&P requests a year`, same(big.searchBatches.map((b: any) => [b.institution_ids.length, b.company_ids.length, b.requestsPerYear]), [[100, 0, 10]]), big.searchBatches.map((b: any) => b.institution_ids.length));
   ok("each batch fits one search_filings call", big.searchBatches.every((b: any) => F.parseSearch({ companyIds: b.company_ids, institutionIds: b.institution_ids, states: ["FL"], from: "2026-01-01", to: "2026-11-13" }, "2026-11-13").ok));
 }
 
@@ -187,7 +187,7 @@ const searchOf = (id: string, batch: { company_ids: number[]; institution_ids: n
   ok("no limit was reached", same(a.result.caps, []), a.result.caps);
 }
 {
-  // A sweep at the member cap: 100 companies, two searches of 50, one year of dates.
+  // A sweep at the member cap: 100 companies, one search of 100, one year of dates.
   const seen: Record<string, any> = {};
   const w = world([
     { content: [toolUse("r1", "resolve_entities", { names: [], groups: ["Nonesuch Giant Group", "Calloway Group"] })] },
@@ -199,7 +199,7 @@ const searchOf = (id: string, batch: { company_ids: number[]; institution_ids: n
   ownerList(w.db);
   const a = await w.ask("Which carriers filed homeowners forms in Florida in 2025?");
   ok("a group over the member cap is cut, and the answer says the look-up stopped at its limit", seen.lookup.groups[0].cut === true && same(seen.lookup.notLookedUp, ["Calloway Group"]) && a.result.caps.some((c: string) => c.startsWith(`One look-up stopped at its limit of ${F.MAX_LOOKUP_NAMES} names and groups and ${F.MAX_MEMBERS} group members`)), a.result.caps);
-  ok("100 companies over one year is two searches and ten S&P search requests", w.sp.calls("/api/v1/search").length === 10 && a.result.lookups.filter((l: any) => l.tool === "search_filings").length === 2, w.sp.calls("/api/v1/search").length);
+  ok("100 companies over one year is one search and ten S&P search requests", w.sp.calls("/api/v1/search").length === 10 && a.result.lookups.filter((l: any) => l.tool === "search_filings").length === 1, w.sp.calls("/api/v1/search").length);
   ok("and the whole answer stays inside the S&P limit for one question", a.result.usage.spRequests === 1 + 2 + 2 + 10 && a.result.usage.spRequests < LIMITS.spRequests && a.job.status === "done", a.result.usage.spRequests);
 }
 {
