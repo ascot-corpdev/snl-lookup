@@ -525,6 +525,19 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 /* The nav on a phone: up to seven tabs wrap onto a second row, each row filled edge to edge, so every view stays in
    sight and the page never scrolls sideways. */
 @media (max-width:700px){nav.tabs{flex-wrap:wrap;overflow-x:visible;gap:0}nav.tabs a{flex:1 1 auto;text-align:center;padding:9px 7px}}
+/* Carrier sets: the bar beside a company picker, the control that uses a saved set, and the panel that manages them */
+.setsbar{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:flex-end;justify-content:space-between;min-width:0;border-top:1px dashed var(--grid);padding-top:10px}
+.setsbar .setsbtns{margin-left:auto}
+.setpick{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1 1 280px;max-width:560px}
+.setpick .inline{flex-wrap:nowrap}
+.setpick select{width:auto;flex:1 1 180px;min-width:0;max-width:100%}
+.setsaid{overflow-wrap:anywhere}
+.setsdr{width:min(600px,100%)}
+.setnew h3{font-size:14px}
+.setlist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.setitem{border:1px solid var(--grid);padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-width:0;overflow-wrap:anywhere}
+.setedit,.setrename{border-top:1px solid var(--grid);padding-top:10px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.setedit .wlist{display:flex;flex-direction:column;gap:6px;font-size:13px;min-width:0}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
@@ -562,6 +575,7 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 
 <div id="askRoot"></div>
 <div id="drawerRoot"></div>
+<div id="setsRoot"></div>
 <div id="toastRoot"></div>
 
 <script>
@@ -672,6 +686,7 @@ const S = {
 };
 S.chatUse=null; S.chatUseAt=0;   // the login's questions today and their cost, from the questions function
 S.w=freshWatch();
+var SET_TARGETS = window.SET_TARGETS || {};   // carrier sets: where a saved set can be used (the "Carrier sets" block below fills it; Contract A)
 
 /* ---------- helpers ---------- */
 function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
@@ -1125,7 +1140,7 @@ function companyPickerHTML(){
   return `<div class="f"><label for="f_q">Companies <em>name, group name, NAIC code or S&amp;P id; up to ${MAX_COMPANIES}</em></label>
     <div class="toolbar"><div class="grow"><input type="text" id="f_q" data-bind="f.q" value="${esc(f.q)}" autocomplete="off" spellcheck="false" placeholder="For example Calloway, 90001 or 4000001"></div>
       <button type="button" class="btn" data-act="co-find" ${f.resolving?"disabled":""}>Find company</button></div>
-    ${f.resolveErr?`<p class="err" role="alert">${esc(f.resolveErr)}</p>`:""}${found}${chips}</div>`;
+    ${f.resolveErr?`<p class="err" role="alert">${esc(f.resolveErr)}</p>`:""}${found}${chips}${typeof setsBarHTML==="function"?setsBarHTML("filings"):""}</div>`;
 }
 function refListHTML(field, label, key){
   const f=S.f, opts=refOptions(field);
@@ -1535,6 +1550,7 @@ function watchManageHTML(l, st, empty){
   return `<div class="wmanage" id="wManage">
     <div class="toolbar">${empty?"":`<button type="button" class="btn" data-act="w-add" ${w.saving?"disabled":""}>Add the companies and states chosen below</button>`}
       <button type="button" class="btn" data-act="w-toggle" ${w.saving||!l.companies.length?"disabled":""}>${l.enabled?"Switch off":"Switch on"}</button></div>
+    ${typeof setPickHTML==="function"?setPickHTML("watch"):""}
     ${l.companies.length?`<p class="t2" id="wCost">Each check uses about ${plural(cost,"S&amp;P request")} (one for each batch of 10 companies, plus 2), more if S&amp;P has many results. A check may use at most ${WATCH_BUDGET}.</p>`:""}
     <label class="f"><span>Email the new filings to <em>optional; up to ${WATCH_MAX_RECIPIENTS} addresses, separated with commas</em></span>
       <div class="toolbar"><div class="grow"><input type="text" id="w_recips" data-bind="w.recips" value="${esc(recips)}" autocomplete="off" spellcheck="false" placeholder="For example corpdev1@yourco.com"></div>
@@ -3347,7 +3363,7 @@ function snapFinderHTML(){
   return `<div class="f"><label for="sn_find">Company or group <em>part of a company or group name</em></label>
     <div class="toolbar"><div class="grow"><input type="text" id="sn_find" data-bind="snap.find.q" value="${esc(fd.q)}" autocomplete="off" spellcheck="false" placeholder="For example Calloway"></div>
       <button type="button" class="btn" data-act="snap-find" ${fd.busy?"disabled":""}>Find</button></div>
-    ${fd.err?`<p class="err" id="sn_findErr" role="alert">${esc(fd.err)}</p>`:""}${found}</div>`;
+    ${fd.err?`<p class="err" id="sn_findErr" role="alert">${esc(fd.err)}</p>`:""}${found}${typeof setsBarHTML==="function"?setsBarHTML("snapshot"):""}</div>`;
 }
 function snapChosenHTML(){
   const sn=S.snap, pk=sn.pick;
@@ -4584,6 +4600,399 @@ function cmpScreen(){
     total:snapFilings(r.rows).length, companies:names};
 }
 
+/* ---------- Carrier sets: named lists of companies and groups the team keeps, saved once and used anywhere ----------
+   Kept as the shared setting "carrier_sets" (snl_settings): every login reads it, Corp Dev logins edit it in the
+   "Carrier sets" panel, opened from a button beside the company pickers. A set holds single companies and whole
+   groups by name; a group is expanded to its member companies (the snl-filings "resolve" action) when the set is
+   used, so a set stays right when the company list is reloaded. Shape: {sets:[{id, name, note, companies:
+   [{companyName, companyId, institutionId}], groups:["group name"], updatedAt}]}. Every name and note is untrusted.
+   For other views (Contract A), call these only if they exist:
+     setPickHTML(target)   the HTML of a small "Use a saved set" control ("" when there are no sets or they haven't
+                           loaded); its click is handled here.
+     SET_TARGETS[target] = (companies, set) => ...   companies: [{kind:"companyId"|"institutionId", id:"123", name,
+                           group}], each once, only those with an S&P id; group is the name of the set's group the
+                           company came from, as written in the set, or null for one of the set's single companies.
+                           set: {id, name, note, groups (the set's group names), total, withId, noId, leftOut (companies
+                           dropped: no S&P id, or past a group's look-up limit), cut, missingGroups, failedGroups,
+                           cutGroups, notes}. It may return a message to show under
+                           the control (or a promise of one). This block registers "filings", "snapshot" and "watch". */
+const SET_MAX = {sets:40, companies:100, groups:20, name:80, note:200};
+const SET_LABELS = {watch:"Add a saved set"};   // the control's label for a target, when "Use a saved set" doesn't fit
+const SET_WATCH_MAX = 500;                      // companies the watchlist keeps (cleanWatch)
+function freshSets(){ return {loaded:false, loading:false, sets:[], problems:0, readErr:"", saving:false, saveErr:"", open:false, opener:"", edit:"", renaming:"", del:"",
+  rn:{name:"", note:""}, nw:{name:"", note:"", from:""}, find:{q:"", asked:"", matches:null, groups:[], groupNote:"", note:"", busy:false, err:""}, groups:{}, pick:{}, said:{}, using:""}; }
+S.sets=freshSets();
+const setText = (v, max) => (typeof v==="string"||typeof v==="number"?String(v):"").replace(/[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]+/g," ").replace(/\s+/g," ").trim().slice(0,max);
+const setIdNum = v => { const s=typeof v==="number"&&Number.isInteger(v)&&v>=0?String(v):typeof v==="string"?v.trim():""; return /^\d{1,12}$/.test(s)?String(Number(s)):null; };
+const setCoKey = c => c.companyId!==null ? "c:"+c.companyId : c.institutionId!==null ? "i:"+c.institutionId : c.companyName ? "n:"+c.companyName.toLowerCase() : "";
+const setTarget = t => /^[A-Za-z][A-Za-z0-9_-]{0,39}$/.test(String(t??"")) ? String(t) : "";
+const setQ = s => `"${s}"`;
+function setHash(s){ let h=7; for(const ch of String(s)) h=(h*31+ch.codePointAt(0))>>>0; return "s-"+h.toString(36); }
+/* The saved setting, keeping only what can be used (the functions read it the same way: cleanCarrierSets in
+   supabase/functions/_shared/filings.ts). problems counts what was left out. */
+function cleanSets(raw){
+  const d=raw&&typeof raw==="object"&&!Array.isArray(raw)?raw:{}, sets=[], names=new Set(), ids=new Set();
+  let problems=raw===null||raw===undefined||Array.isArray(d.sets)?0:1;
+  for(const s of Array.isArray(d.sets)?d.sets:[]){
+    const o=s&&typeof s==="object"&&!Array.isArray(s)?s:null, name=o?setText(o.name,SET_MAX.name):"";
+    if(!o || !name || names.has(name.toLowerCase()) || sets.length>=SET_MAX.sets){ problems++; continue; }
+    names.add(name.toLowerCase());
+    const companies=[], keys=new Set();
+    for(const c of Array.isArray(o.companies)?o.companies:[]){
+      const x=c&&typeof c==="object"&&!Array.isArray(c)?c:{}, co={companyName:setText(x.companyName,120), companyId:setIdNum(x.companyId), institutionId:setIdNum(x.institutionId)}, k=setCoKey(co);
+      if(!k || companies.length>=SET_MAX.companies){ problems++; continue; }
+      if(!keys.has(k)){ keys.add(k); companies.push(co); }
+    }
+    const groups=[];
+    for(const g of Array.isArray(o.groups)?o.groups:[]){ const n=setText(g,120); if(!n || groups.length>=SET_MAX.groups){ problems++; continue; } if(!groups.some(x=>x.toLowerCase()===n.toLowerCase())) groups.push(n); }
+    let id=typeof o.id==="string"&&/^[A-Za-z0-9_-]{1,40}$/.test(o.id)?o.id:setHash(name); if(ids.has(id)) id=setHash(name+"|"+sets.length); ids.add(id);
+    sets.push({id, name, note:setText(o.note,SET_MAX.note), companies, groups, updatedAt:typeof o.updatedAt==="string"&&!isNaN(Date.parse(o.updatedAt))?o.updatedAt:null});
+  }
+  return {sets, problems};
+}
+async function readSetsDoc(){
+  try{ const {data, error}=await S.sb.from("snl_settings").select("doc").eq("id","carrier_sets").maybeSingle(); if(error) return {error}; return cleanSets(data&&data.doc); }
+  catch(e){ return {error:e}; }
+}
+async function loadSets(){
+  const ss=S.sets; if(ss.loading) return;
+  ss.loading=true;
+  const doc=await readSetsDoc();
+  if(!S.session || S.sets!==ss) return;
+  ss.loading=false; ss.loaded=true;
+  if(doc.error) ss.readErr="Couldn't read the carrier sets: "+((doc.error&&doc.error.message)||"unknown error")+".";
+  else { ss.sets=doc.sets; ss.problems=doc.problems; ss.readErr=""; }
+  render(); setsCount();
+}
+/* Every change starts from what is saved now, so two people editing at once don't undo each other's changes (as the
+   watchlist does). change gets the saved sets and returns them changed, null for no change, or a message to show. */
+async function changeSets(change, done){
+  const ss=S.sets; if(ss.saving) return false;
+  if(!isCorpDev()){ ss.saveErr="Only Corp Dev logins can change carrier sets. Ask Corp Dev."; render(); return false; }
+  ss.saving=true; ss.saveErr=""; render();
+  const cur=await readSetsDoc();
+  if(!S.session || S.sets!==ss) return false;
+  if(cur.error){ ss.saving=false; ss.saveErr="Couldn't read the carrier sets: "+((cur.error&&cur.error.message)||"unknown error")+". Nothing was changed."; render(); return false; }
+  ss.sets=cur.sets; ss.problems=cur.problems; ss.loaded=true; ss.readErr="";
+  const next=change(JSON.parse(JSON.stringify(cur.sets)));
+  if(!next || typeof next==="string"){ ss.saving=false; ss.saveErr=typeof next==="string"?next:""; render(); return false; }
+  let error=null;
+  try{ ({error}=await S.sb.from("snl_settings").upsert({id:"carrier_sets", doc:{sets:next}})); }catch(e){ error=e; }
+  if(!S.session || S.sets!==ss) return false;
+  ss.saving=false;
+  if(error){ const t=`${error.code||""} ${error.message||""}`;
+    ss.saveErr=/42501|row-level security|permission/i.test(t) ? "Only Corp Dev logins can change carrier sets. Ask Corp Dev."
+      : /23514|check constraint/i.test(t) ? "The carrier sets are too big to save. Remove some companies, or delete a set the team no longer uses. Nothing was changed."
+      : "Couldn't save the carrier sets: "+(error.message||"unknown error")+". Nothing was changed.";
+    render(); return false; }
+  ss.sets=cleanSets({sets:next}).sets; ss.problems=0; render();
+  if(done) toast(typeof done==="function"?done():done);
+  setsCount();
+  return true;
+}
+const SET_GONE = "That set has been deleted, here or by someone else. Nothing was changed.";
+const setNow = () => new Date().toISOString();
+function setNameProblem(list, name, exceptId){
+  if(!name) return "Give the set a name.";
+  if(list.some(s=>s.id!==exceptId && s.name.toLowerCase()===name.toLowerCase())) return `There is already a set named ${setQ(name)}. Choose another name.`;
+  return "";
+}
+/** One change to one set, by id, from what is saved now. fn returns true when it changed the set, null for no change, or a message. */
+function setsEditOne(id, fn, done){
+  return changeSets(list=>{ const s=list.find(x=>x.id===id); if(!s) return SET_GONE; const r=fn(s, list); if(r!==true) return r; s.updatedAt=setNow(); return list; }, done);
+}
+function setsCreate(fromFilings){
+  const ss=S.sets, name=setText(ss.nw.name, SET_MAX.name), note=setText(ss.nw.note, SET_MAX.note);
+  if(!name){ ss.saveErr="Give the set a name."; render(); document.getElementById("sets_name")?.focus(); return; }
+  const chips=fromFilings&&S.f ? S.f.chips.slice(0, SET_MAX.companies) : [];
+  if(fromFilings && !chips.length){ ss.saveErr="Choose companies in the Filings form first, then save them as a set."; render(); return; }
+  let id="s-"+Math.random().toString(36).slice(2,8);
+  changeSets(list=>{
+    if(list.length>=SET_MAX.sets) return `There are ${SET_MAX.sets} sets, the most the app keeps. Delete one the team no longer uses to make room.`;
+    const bad=setNameProblem(list, name, ""); if(bad) return bad;
+    while(list.some(s=>s.id===id)) id+="x";
+    list.push({id, name, note, companies:chips.map(c=>({companyName:c.name||"", companyId:c.kind==="companyId"?c.id:null, institutionId:c.kind==="institutionId"?c.id:null})), groups:[], updatedAt:setNow()});
+    return list;
+  }, fromFilings ? `Saved ${plural(chips.length,"company","companies")} as ${setQ(name)}.` : `Created ${setQ(name)}. Add companies and groups to it below.`)
+  .then(done=>{ if(done){ ss.nw={name:"", note:"", from:""}; if(!fromFilings){ ss.edit=id; setFindReset(); } render(); } });
+}
+function setsRename(id){
+  const ss=S.sets, name=setText(ss.rn.name, SET_MAX.name), note=setText(ss.rn.note, SET_MAX.note);
+  if(!name){ ss.saveErr="Give the set a name."; render(); return; }
+  setsEditOne(id, (s, list)=>{ const bad=setNameProblem(list, name, id); if(bad) return bad; if(s.name===name && s.note===note) return null; s.name=name; s.note=note; return true; }, "Saved the name and note.")
+  .then(done=>{ if(done){ ss.renaming=""; render(); } });
+}
+function setsDelete(id){
+  const ss=S.sets, s=ss.sets.find(x=>x.id===id); const name=s?s.name:"the set";
+  changeSets(list=>{ const n=list.filter(x=>x.id!==id); return n.length===list.length ? SET_GONE : n; }, `Deleted ${setQ(name)}.`)
+  .then(done=>{ if(done){ ss.del=""; if(ss.edit===id) ss.edit=""; render(); } });
+}
+function setsAddCompany(i){
+  const ss=S.sets, m=(ss.find.matches||[])[i]; if(!m || !ss.edit) return;
+  const co={companyName:setText(m.companyName,120), companyId:setIdNum(m.companyId), institutionId:setIdNum(m.institutionId)};
+  if(co.companyId===null && co.institutionId===null) return;
+  const label=co.companyName||"That company";
+  setsEditOne(ss.edit, s=>{
+    if(s.companies.some(c=>(co.companyId!==null&&c.companyId===co.companyId) || (co.institutionId!==null&&c.institutionId===co.institutionId))) return `${label} is already in the set.`;
+    if(s.companies.length>=SET_MAX.companies) return `A set holds at most ${SET_MAX.companies} single companies. Add a whole group instead, or remove a company.`;
+    s.companies.push(co); return true;
+  }, `Added ${label} to the set.`);
+}
+function setsAddGroup(i){
+  const ss=S.sets, g=(ss.find.groups||[])[i]; if(!g || !ss.edit) return;
+  const name=setText(!blank(g.name)?g.name:g.code, 120); if(!name) return;
+  setsEditOne(ss.edit, s=>{
+    if(s.groups.some(x=>x.toLowerCase()===name.toLowerCase())) return `${name} is already in the set.`;
+    if(s.groups.length>=SET_MAX.groups) return `A set holds at most ${SET_MAX.groups} groups. Remove one to add another.`;
+    s.groups.push(name); return true;
+  }, `Added the group ${name} to the set. Its companies are counted when the set is used.`);
+}
+function setsRemoveCompany(id, k){ setsEditOne(id, s=>{ const n=s.companies.filter(c=>setCoKey(c)!==k); if(n.length===s.companies.length) return null; s.companies=n; return true; }, "Removed from the set."); }
+function setsRemoveGroup(id, g){ setsEditOne(id, s=>{ const n=s.groups.filter(x=>x!==g); if(n.length===s.groups.length) return null; s.groups=n; return true; }, "Removed the group from the set."); }
+
+/* ----- finding companies and groups to add, with the same look-up as the Filings company finder ----- */
+function setFindReset(){ S.sets.find={q:"", asked:"", matches:null, groups:[], groupNote:"", note:"", busy:false, err:""}; }
+async function setsFind(){
+  const ss=S.sets, fd=ss.find, q=fd.q.trim();
+  if(!q){ fd.matches=null; fd.groups=[]; fd.err="Type a company name, a group name, a NAIC code or an S&P id."; render(); return; }
+  fd.busy=true; fd.err=""; fd.asked=q; fd.matches=null; fd.groups=[]; render();
+  const r=await callFn("snl-filings",{action:"resolve", q});
+  if(!S.session || S.sets!==ss || ss.find!==fd || fd.asked!==q) return;
+  fd.busy=false;
+  if(r.data){ fd.matches=Array.isArray(r.data.matches)?r.data.matches.filter(m=>m&&typeof m==="object"):[]; fd.groups=Array.isArray(r.data.groups)?r.data.groups.filter(g=>g&&typeof g==="object"&&Array.isArray(g.members)):[]; fd.groupNote=typeof r.data.groupNote==="string"?r.data.groupNote:""; fd.note=typeof r.data.note==="string"?r.data.note:""; }
+  else if(r.err!=="signin"){ fd.matches=[]; fd.err="Couldn't look that up. "+errText(r); }
+  render();
+}
+
+/* ----- a set's groups, expanded to their member companies (no S&P requests: the company list only) ----- */
+// The look-up keeps only plain characters of what it is given, so "Calloway Group (SNL P&C Group)" is looked up by its
+// first plain part (as the Snapshot does) and the group is then held to its full name.
+function setGroupQuery(name){
+  const s=String(name).trim(); if(/^\d{1,6}$/.test(s)) return s;
+  return s.split(/[^\p{L}\p{N} .&'-]/u).map(p=>p.replace(/\s+/g," ").trim()).find(p=>p.replace(/[^\p{L}\p{N}]/gu,"").length>=3)||"";
+}
+function setMemberOf(m){
+  if(!m || typeof m!=="object") return null;
+  const name=setText(m.companyName,120), co=setIdNum(m.companyId), inst=setIdNum(m.institutionId);
+  return co!==null ? {kind:"companyId", id:co, name} : inst!==null ? {kind:"institutionId", id:inst, name} : null;
+}
+function setGroupFetch(name){
+  const ss=S.sets, key=name.toLowerCase(), have=ss.groups[key];
+  if(have && have.status==="loading") return have.p;
+  if(have && have.status!=="error") return Promise.resolve();
+  const p=(async()=>{
+    const q=setGroupQuery(name);
+    if(!q){ ss.groups[key]={status:"missing"}; return; }
+    const r=await callFn("snl-filings",{action:"resolve", q});
+    if(S.sets!==ss) return;
+    if(!r.data){ ss.groups[key]={status:"error", msg:errText(r)}; return; }
+    const code=/^\d{1,6}$/.test(name.trim());
+    const g=(Array.isArray(r.data.groups)?r.data.groups:[]).find(x=>x&&typeof x==="object"&&Array.isArray(x.members)&&(code ? String(x.code??"").trim()===name.trim() : setText(x.name,120).toLowerCase()===key));
+    if(!g){ ss.groups[key] = !blank(r.data.groupNote) ? {status:"error", msg:"other groups in the company list have names like it, so it couldn't be picked out"} : {status:"missing"}; return; }
+    const seen=new Set(), members=[];
+    for(const m of g.members){ const x=setMemberOf(m), k=x&&x.kind+":"+x.id; if(x && !seen.has(k)){ seen.add(k); members.push(x); } }
+    const n=v=>isNum(v)?Math.max(0, Math.round(+v)):0, searchable=Math.max(n(g.searchable), members.length);
+    ss.groups[key]={status:"ok", members, noId:Math.max(0, n(g.companies)-searchable), cut:Math.max(0, searchable-members.length)};
+  })();
+  ss.groups[key]={status:"loading", p};
+  return p;
+}
+async function setGroupsReady(names){ for(const n of names) await setGroupFetch(n); }
+/* Counts what every set expands to today, for the panel. Runs when the panel opens and after each change. */
+async function setsCount(){
+  const ss=S.sets; if(!ss.open || !ss.loaded) return;
+  const names=[...new Map(ss.sets.flatMap(s=>s.groups).map(g=>[g.toLowerCase(), g])).values()].filter(g=>!ss.groups[g.toLowerCase()] || ss.groups[g.toLowerCase()].status==="error");
+  for(const g of names){ if(S.sets!==ss || !ss.open) return; await setGroupFetch(g); if(S.sets===ss && ss.open) renderSets(); }
+}
+/** What a set gives today: its companies with S&P ids (single companies and group members, each once), and what
+    can't be used. pending: a group is still being looked up. */
+function expandSet(s){
+  const ss=S.sets, seen=new Set(), companies=[], missing=[], failed=[], cutGroups=[];
+  let noId=0, cut=0, pending=false;
+  const add=c=>{ const k=c.kind+":"+c.id; if(!seen.has(k)){ seen.add(k); companies.push(c); } };
+  for(const c of s.companies){ if(c.companyId!==null) add({kind:"companyId", id:c.companyId, name:c.companyName, group:null}); else if(c.institutionId!==null) add({kind:"institutionId", id:c.institutionId, name:c.companyName, group:null}); else noId++; }
+  for(const g of s.groups){
+    const e=ss.groups[g.toLowerCase()];
+    if(!e || e.status==="loading"){ pending=true; continue; }
+    if(e.status==="missing"){ missing.push(g); continue; }
+    if(e.status==="error"){ failed.push(g); continue; }
+    e.members.forEach(m=>add({...m, group:g})); noId+=e.noId; if(e.cut){ cut+=e.cut; cutGroups.push(g); }
+  }
+  return {companies, noId, cut, missing, failed, cutGroups, pending, total:companies.length+noId+cut};
+}
+function setInfo(s, x){
+  const info={id:s.id, name:s.name, note:s.note, groups:s.groups.slice(), total:x.total, withId:x.companies.length, noId:x.noId, leftOut:x.noId+x.cut, cut:x.cut,
+    missingGroups:x.missing.slice(), failedGroups:x.failed.slice(), cutGroups:x.cutGroups.slice()};
+  info.notes=setLeftNotes(info);
+  return info;
+}
+/* What a set couldn't give, in plain sentences: never left out silently. */
+function setLeftNotes(set){
+  const out=[], list=a=>andList(a.map(setQ), 3);
+  if(set.noId) out.push(`${plural(set.noId,"company in the set has","companies in the set have")} no S&P id, so ${set.noId===1?"its":"their"} filings can't be searched.`);
+  if(set.missingGroups.length) out.push(`${list(set.missingGroups)} no longer ${set.missingGroups.length===1?"matches":"match"} the company list, so ${set.missingGroups.length===1?"it was":"they were"} left out. Corp Dev can remove ${set.missingGroups.length===1?"it":"them"} from the set.`);
+  if(set.failedGroups.length) out.push(`${list(set.failedGroups)} couldn't be looked up just now and ${set.failedGroups.length===1?"was":"were"} left out. Try again.`);
+  if(set.cut) out.push(`${list(set.cutGroups)} ${set.cutGroups.length===1?"has":"have"} more companies than one look-up lists, so ${plural(set.cut,"company was","companies were")} left out.`);
+  return out;
+}
+const setSay = (lead, set, extra) => [lead, extra||"", ...set.notes].filter(Boolean).join(" ");
+
+/* ----- using a set: the control, and what it does ----- */
+var SET_TARGETS = window.SET_TARGETS || SET_TARGETS || {};
+function setPickHTML(target, label){
+  const ss=S.sets, t=setTarget(target); if(!t || !ss || !ss.loaded || ss.readErr || !ss.sets.length) return "";
+  const pick=ss.pick[t]&&ss.sets.some(s=>s.id===ss.pick[t]) ? ss.pick[t] : ss.sets[0].id, lab=label||SET_LABELS[t]||"Use a saved set";
+  return `<div class="setpick" id="setpick_${t}"><label class="f" for="setsel_${t}">${esc(lab)}</label>
+    <div class="inline"><select id="setsel_${t}" data-bind="sets.pick.${t}">${ss.sets.map(s=>`<option value="${esc(s.id)}"${s.id===pick?" selected":""}>${esc(s.name)}</option>`).join("")}</select>
+    <button type="button" class="btn sm" data-act="set-use" data-target="${t}" ${ss.using?"disabled":""}>${ss.using===t?"Getting the companies…":lab===SET_LABELS[t]?"Add":"Use"}</button></div>
+    ${ss.said[t]?`<p class="t2 setsaid" id="setsaid_${t}" role="status">${esc(ss.said[t])}</p>`:""}</div>`;
+}
+/* The bar beside a company picker: the control, the button that opens the panel, and on the Filings view "Save these
+   companies as a set" for Corp Dev. */
+function setsBarHTML(target){
+  const t=setTarget(target), ss=S.sets; if(!t || !ss) return "";
+  const fromF=t==="filings" && isCorpDev() && S.f && S.f.chips.length>0;
+  return `<div class="setsbar" id="setsbar_${t}">${setPickHTML(t)}<span class="inline setsbtns">${fromF?`<button type="button" class="btn sm ghost" data-act="sets-from-filings">Save these companies as a set</button>`:""}<button type="button" class="btn sm ghost" data-act="sets-open" id="setsOpen_${t}" aria-haspopup="dialog">Carrier sets${ss.loaded&&ss.sets.length?` (${count(ss.sets.length)})`:""}</button></span></div>`;
+}
+async function useSet(target, id){
+  const ss=S.sets, t=setTarget(target); if(!t || ss.using) return;
+  const s=ss.sets.find(x=>x.id===id) || ss.sets[0];
+  if(!s){ ss.said[t]="There are no saved sets yet."; render(); return; }
+  ss.pick[t]=s.id;
+  const T=SET_TARGETS[t];
+  if(typeof T!=="function"){ ss.said[t]="Saved sets can't be used here yet."; render(); return; }
+  ss.using=t; ss.said[t]=""; render();
+  await setGroupsReady(s.groups);
+  if(!S.session || S.sets!==ss) return;
+  const x=expandSet(s), info=setInfo(s, x);
+  let msg="";
+  try{ msg=await T(x.companies.map(c=>({...c})), info); }catch(e){ msg="Couldn't use the set here: "+((e&&e.message)||"unknown error")+"."; }
+  if(S.sets!==ss) return;
+  ss.using=""; ss.said[t]=typeof msg==="string"?msg:""; render();
+}
+// The Filings form: the set's companies join those chosen, up to the most one search takes.
+SET_TARGETS.filings=(companies, set)=>{
+  const f=S.f; let added=0, have=0, full=0;
+  for(const c of companies){
+    if(f.chips.some(x=>x.kind===c.kind && x.id===c.id)){ have++; continue; }
+    if(f.chips.length>=MAX_COMPANIES){ full++; continue; }
+    f.chips.push({kind:c.kind, id:c.id, name:c.name||""}); added++;
+  }
+  f.formErr="";
+  const lead = added ? `Added ${plural(added,"company","companies")} from ${setQ(set.name)}.` : have ? `Every company in ${setQ(set.name)} with an S&P id is already chosen.` : `${setQ(set.name)} has no company with an S&P id to add.`;
+  return setSay(lead, set, full ? `A search takes at most ${MAX_COMPANIES} companies, so ${plural(full,"company was","companies were")} left out: remove some to make room, or search the rest separately.` : "");
+};
+// The Snapshot: a set is taken like a group, all its companies, with the Snapshot's own cost line and size checks.
+SET_TARGETS.snapshot=(companies, set)=>{
+  const sn=S.snap; if(sn.busy || sn.picking) return "A snapshot is being made. Try again when it has finished.";
+  sn.pick={kind:"group", name:`${set.name} (saved set)`, group:"", ids:companies.map(c=>({kind:c.kind, id:c.id, name:c.name||""})), noId:set.noId, cut:false, over:companies.length+set.cut>MAX_COMPANIES};
+  sn.find.matches=null; sn.formErr=""; sn.pickErr="";
+  return setSay(`Chosen: ${setQ(set.name)}, ${plural(companies.length,"company","companies")} with S&P ids.`, {...set, notes:set.notes.filter(n=>!/no S&P id/.test(n))}, "");
+};
+// The watchlist (Corp Dev, under Manage): the set's companies join what is watched.
+SET_TARGETS.watch=(companies, set)=>{
+  if(!isCorpDev()) return "Only Corp Dev logins can change the watchlist.";
+  let added=0, full=0;
+  return changeWatch(l=>{
+    added=0; full=0;
+    for(const c of companies){ if(l.companies.some(x=>x.kind===c.kind && x.id===c.id)) continue; if(l.companies.length>=SET_WATCH_MAX){ full++; continue; } l.companies.push({kind:c.kind, id:c.id, name:c.name||""}); added++; }
+    return added ? l : null;
+  }).then(()=> S.w.saveErr ? "" : setSay(added ? `Added ${plural(added,"company","companies")} from ${setQ(set.name)} to the watchlist.` : full ? "" : `Every company in ${setQ(set.name)} with an S&P id is already watched.`, set,
+    full ? `The watchlist keeps at most ${count(SET_WATCH_MAX)} companies, so ${plural(full,"company was","companies were")} left out.` : ""));
+};
+
+/* ----- the panel ----- */
+function openSets(opener){
+  const ss=S.sets; ss.open=true; ss.opener=opener&&opener.id||""; ss.saveErr="";
+  if(!ss.loaded && !ss.loading) loadSets();
+  render(); document.getElementById("setsClose")?.focus(); setsCount();
+}
+function closeSets(){
+  const ss=S.sets; ss.open=false; ss.edit=""; ss.renaming=""; ss.del=""; ss.saveErr=""; render();
+  (ss.opener && document.getElementById(ss.opener) || document.querySelector('[data-act="sets-open"]'))?.focus();
+}
+function setsFromFilings(t){
+  const ss=S.sets; ss.nw={name:ss.nw.name, note:ss.nw.note, from:"filings"}; openSets(t);
+  if(ss.loaded) document.getElementById("sets_name")?.focus();
+}
+function renderSets(){
+  const root=document.getElementById("setsRoot"), ss=S.sets; if(!root) return;
+  if(!S.session || !ss || !ss.open){ if(root.innerHTML) root.innerHTML=""; return; }
+  const keep=keepUi("setsRoot"); root.innerHTML=setsDrawerHTML(); keep();
+}
+function setsNewHTML(){
+  const ss=S.sets, nw=ss.nw, chips=S.f?S.f.chips.length:0, fromF=nw.from==="filings"&&chips>0;
+  if(ss.sets.length>=SET_MAX.sets) return `<div class="info" id="setsFull" role="status"><span>There are ${SET_MAX.sets} sets, the most the app keeps. Delete one the team no longer uses to make room for a new one.</span></div>`;
+  const saveF=chips?`<button type="button" class="btn${fromF?" primary":""}" data-act="sets-create-filings" ${ss.saving?"disabled":""}>Save the ${plural(chips,"company","companies")} chosen in the Filings form</button>`:"";
+  const empty=`<button type="button" class="btn${fromF?"":" primary"}" data-act="sets-create" ${ss.saving?"disabled":""}>Create an empty set</button>`;
+  return `<div class="tcard setnew" id="setsNew"><h3>${fromF?"Save the companies chosen in the Filings form as a set":"New set"}</h3>
+    <label class="f">Name <em>up to ${SET_MAX.name} characters, for example Florida homeowners peers</em><input type="text" id="sets_name" data-bind="sets.nw.name" value="${esc(nw.name)}" maxlength="${SET_MAX.name}" autocomplete="off" spellcheck="false"></label>
+    <label class="f">Note <em>optional, one line, for example which line and state it covers</em><input type="text" id="sets_note" data-bind="sets.nw.note" value="${esc(nw.note)}" maxlength="${SET_MAX.note}" autocomplete="off"></label>
+    <div class="toolbar">${fromF?saveF+empty:empty+saveF}</div>
+    <p class="t2">A set holds up to ${SET_MAX.companies} single companies and ${SET_MAX.groups} whole groups.${chips?"":" To save the companies chosen in the Filings form, choose them there first."}</p></div>`;
+}
+function setFinderHTML(s){
+  const ss=S.sets, fd=ss.find;
+  let found="";
+  if(fd.busy) found=`<p class="t2" role="status">Looking…</p>`;
+  else if(fd.matches!==null){
+    const gs=fd.groups.map((g,i)=>{ const n=isNum(g.searchable)?+g.searchable:g.members.length, nm=!blank(g.name)?String(g.name):!blank(g.code)?`NAIC group ${g.code}`:"Group", inSet=s.groups.some(x=>x.toLowerCase()===String(!blank(g.name)?g.name:g.code).toLowerCase());
+      return `<li><div><div class="t1">${esc(nm)}</div><div class="t2">Whole group, ${esc(plural(n,"company","companies"))} with S&amp;P ids today; kept by name, so its companies are counted again each time the set is used</div></div><span class="inline">${inSet?`<span class="t2">In the set</span>`:`<button type="button" class="btn sm" data-act="sets-add-group" data-i="${i}" ${ss.saving?"disabled":""}>Add group</button>`}</span></li>`; }).join("");
+    const cos=fd.matches.map((m,i)=>{ const x=setMemberOf(m), inSet=x&&s.companies.some(c=>(x.kind==="companyId"&&c.companyId===x.id)||(setIdNum(m.institutionId)!==null&&c.institutionId===setIdNum(m.institutionId)));
+      const meta=[x?`S&P ${x.kind==="companyId"?"company":"institution"} id ${x.id}`:"", !blank(m.naicGroupName)?`group ${m.naicGroupName}`:""].filter(Boolean).join(" · ");
+      return `<li><div><div class="t1">${esc(m.companyName||"n/d")}</div>${meta?`<div class="t2">${esc(meta)}</div>`:""}</div><span class="inline">${!x?`<span class="t2 noadd">Can't be added: the company list has no S&amp;P id for it.</span>`:inSet?`<span class="t2">In the set</span>`:`<button type="button" class="btn sm" data-act="sets-add-co" data-i="${i}" ${ss.saving?"disabled":""}>Add</button>`}</span></li>`; }).join("");
+    found = (gs?`<ul class="matches groups" id="setsGroups" aria-label="Whole groups">${gs}</ul>`:"") + (fd.groupNote?`<p class="t2">${esc(fd.groupNote)}</p>`:"")
+      + (cos?`<ul class="matches" id="setsMatches" aria-label="Matching companies">${cos}</ul>`:"")
+      + (!gs&&!cos?`<div class="info" id="setsNoMatch" role="status"><span>Nothing in the app's company list matches ${esc(setQ(fd.asked))}. Try a shorter part of the name.</span></div>`:"");
+  }
+  return `<div class="f"><label for="sets_q">Add companies and groups <em>name, group name, NAIC code or S&amp;P id</em></label>
+    <div class="toolbar"><div class="grow"><input type="text" id="sets_q" data-bind="sets.find.q" value="${esc(fd.q)}" autocomplete="off" spellcheck="false" placeholder="For example Calloway"></div>
+      <button type="button" class="btn" data-act="sets-find" ${fd.busy?"disabled":""}>Find</button></div>
+    ${fd.err?`<p class="err" role="alert">${esc(fd.err)}</p>`:""}${found}</div>`;
+}
+function setEditorHTML(s){
+  const ss=S.sets, dis=ss.saving?"disabled":"", lab=c=>c.companyName||(c.companyId!==null?`S&P company id ${c.companyId}`:c.institutionId!==null?`S&P institution id ${c.institutionId}`:"Company");
+  const cos=s.companies.length ? `<div class="chips">${s.companies.map(c=>`<span class="cchip"><b>${esc(lab(c))}</b>${c.companyId===null&&c.institutionId===null?` <span class="t2">no S&amp;P id</span>`:""}<button type="button" data-act="sets-co-remove" data-id="${esc(s.id)}" data-k="${esc(setCoKey(c))}" aria-label="Remove ${esc(lab(c))} from the set" ${dis}>×</button></span>`).join("")}</div>` : `<p class="t2">None yet.</p>`;
+  const grs=s.groups.length ? `<div class="chips">${s.groups.map(g=>`<span class="cchip"><b>${esc(g)}</b><button type="button" data-act="sets-gr-remove" data-id="${esc(s.id)}" data-g="${esc(g)}" aria-label="Remove the group ${esc(g)} from the set" ${dis}>×</button></span>`).join("")}</div>` : `<p class="t2">None yet.</p>`;
+  return `<div class="setedit" id="setEdit">
+    <div class="wlist"><b>Single companies (${count(s.companies.length)} of ${SET_MAX.companies})</b>${cos}</div>
+    <div class="wlist"><b>Whole groups (${count(s.groups.length)} of ${SET_MAX.groups})</b>${grs}</div>
+    ${setFinderHTML(s)}</div>`;
+}
+function setItemHTML(s){
+  const ss=S.sets, cd=isCorpDev(), x=expandSet(s), sid=esc(s.id), dis=ss.saving?"disabled":"";
+  const saved=`${plural(s.companies.length,"company","companies")} and ${plural(s.groups.length,"group")} saved`;
+  const today=x.pending ? "Counting the companies in its groups…" : `${plural(x.total,"company","companies")} today, ${count(x.companies.length+x.cut)} with an S&P id${x.failed.length?`, not counting ${plural(x.failed.length,"group")} that couldn't be checked`:""}`;
+  let h=`<li class="setitem" id="set_${sid}"><div class="blk-h"><div><div class="t1 setname">${esc(s.name)}</div>${s.note?`<div class="t2 setnote">${esc(s.note)}</div>`:""}</div>
+    ${cd?`<span class="inline"><button type="button" class="btn sm${ss.edit===s.id?" primary":""}" data-act="sets-edit" data-id="${sid}" aria-expanded="${ss.edit===s.id}">${ss.edit===s.id?"Done":"Change companies"}</button><button type="button" class="btn sm ghost" data-act="sets-rename" data-id="${sid}">Rename</button><button type="button" class="btn sm ghost" data-act="sets-del" data-id="${sid}">Delete</button></span>`:""}</div>
+    <p class="t2 setcount">${esc(saved)}. ${esc(today)}.${s.updatedAt?` Changed ${esc(fmtAt(s.updatedAt))}.`:""}</p>`;
+  if(x.missing.length) h+=`<p class="t2 bigwarn setmissing">${esc(`${andList(x.missing.map(setQ), 3)} no longer ${x.missing.length===1?"matches":"match"} the company list, so ${x.missing.length===1?"it gives":"they give"} no companies.${cd?" Remove "+(x.missing.length===1?"it":"them")+" under Change companies.":""}`)}</p>`;
+  if(x.failed.length) h+=`<p class="t2 setfailed">${esc(`${andList(x.failed.map(setQ), 3)} couldn't be looked up just now.`)} <button type="button" class="lnk t2" data-act="sets-recount">Try again</button></p>`;
+  if(cd && ss.renaming===s.id) h+=`<div class="setrename" id="setRename"><label class="f">Name<input type="text" id="sets_rn_name" data-bind="sets.rn.name" value="${esc(ss.rn.name)}" maxlength="${SET_MAX.name}" autocomplete="off" spellcheck="false"></label>
+    <label class="f">Note <em>optional, one line</em><input type="text" id="sets_rn_note" data-bind="sets.rn.note" value="${esc(ss.rn.note)}" maxlength="${SET_MAX.note}" autocomplete="off"></label>
+    <div class="toolbar"><button type="button" class="btn sm primary" data-act="sets-rename-save" data-id="${sid}" ${dis}>Save</button><button type="button" class="btn sm" data-act="sets-rename-cancel">Cancel</button></div></div>`;
+  if(cd && ss.del===s.id) h+=`<div class="banner" id="setDel" role="alert"><span>Delete ${esc(setQ(s.name))}? It goes for every login. Searches already run are kept.</span><span class="inline"><button type="button" class="btn sm primary" data-act="sets-del-yes" data-id="${sid}" ${dis}>Delete the set</button><button type="button" class="btn sm" data-act="sets-del-no">Keep it</button></span></div>`;
+  if(cd && ss.edit===s.id) h+=setEditorHTML(s);
+  return h+`</li>`;
+}
+function setsDrawerHTML(){
+  const ss=S.sets, cd=isCorpDev();
+  let b=`<p class="t2" id="setsVisible">Every login on the site can see and use these sets, so a set's name, note and companies show which companies the team follows. Keep a name and note to the market a set covers, and leave off any company the team would not want named.</p>`;
+  if(!cd) b+=`<div class="info" id="setsReader" role="status"><span><b>Only Corp Dev logins can create or change sets.</b> To add a set or change one, ask Corp Dev. You can use any set beside the company pickers.</span></div>`;
+  if(!ss.loaded) b+=`<p class="t2" role="status" id="setsLoading">Loading the carrier sets…</p>`;
+  else if(ss.readErr) b+=`<div class="banner" role="alert" id="setsReadErr"><span>${esc(ss.readErr)}</span><button type="button" class="btn sm" data-act="sets-retry">Try again</button></div>`;
+  if(ss.loaded && !ss.readErr && ss.problems) b+=`<div class="notes" id="setsProblems" role="status"><b>Part of the saved carrier sets can't be used</b><ul><li>${plural(ss.problems,"entry was","entries were")} unreadable, repeated or over the limits, and ${ss.problems===1?"is":"are"} left out.${cd?" The next change saves the sets as they show here.":""}</li></ul></div>`;
+  if(ss.saveErr) b+=`<p class="err" id="setsErr" role="alert">${esc(ss.saveErr)}</p>`;
+  if(cd && ss.loaded && !ss.readErr) b+=setsNewHTML();
+  if(ss.loaded && !ss.readErr) b+= ss.sets.length ? `<ul class="setlist" id="setList" aria-label="Saved sets">${ss.sets.map(setItemHTML).join("")}</ul>`
+    : `<div class="empty" id="setsEmpty"><p><b>No carrier sets yet.</b> ${cd?"Name one above, then add companies and whole groups to it.":"Corp Dev can create them."}</p></div>`;
+  return `<div class="scrim" data-act="sets-close"></div><aside class="drawer setsdr" role="dialog" aria-modal="true" aria-labelledby="setsTitle" id="setsDrawer">
+    <div class="drawer-h"><div style="flex:1;min-width:0"><div class="kicker">Shared with every login</div><h2 id="setsTitle">Carrier sets</h2>
+      <p class="t2" style="margin:4px 0 0">Named lists of companies and groups the team checks again and again, ready for a search, a snapshot, the watchlist and Ask Claude.</p></div>
+      <button type="button" class="btn ghost" data-act="sets-close" id="setsClose">Close</button></div>
+    <div class="drawer-b" id="setsBody" data-keep>${b}</div></aside>`;
+}
+
 /* ---------- render ---------- */
 /* The view (or the Ask Claude panel) is rebuilt from state each time: keep the cursor, the scroll position of boxes
    marked data-keep, and anything half-typed in boxes that aren't bound to state (the sign-in form). */
@@ -4610,6 +5019,7 @@ function render(){
   if(on){ dot.setAttribute("aria-label", `Account: ${S.session.name}`); dot.textContent=S.session.name.trim().split(/\s+/).map(x=>x[0]).slice(0,2).join("").toUpperCase(); }
   else setMenu(false);
   document.body.classList.toggle("signed", on);
+  renderSets();
   const keep=keepUi("view");
   if(!on){ v.innerHTML=loginHTML(); keep(); renderDrawer(); renderAsk(); renderConn(); renderLive(); return; }
   document.querySelectorAll("nav.tabs a").forEach(a=>a.setAttribute("aria-current", a.dataset.view===S.view ? "page" : "false"));
@@ -4657,6 +5067,7 @@ function enterView(){
   if(S.view==="snapshot") enterSnapshot();
   if(S.view==="forms") enterForms();
   if(S.view==="compare") enterCompare();
+  if(!S.sets.loaded && !S.sets.loading) loadSets();
 }
 function route(){
   const h=location.hash.replace(/^#/,""); let v=VIEWS.includes(h)?h:null;
@@ -4839,6 +5250,27 @@ document.addEventListener("click", e=>{
     case "cmp-more": S.cmp.shown+=CMP_LATEST; render(); break;
     case "cmp-snap": cmpToSnapshot(+t.dataset.i); break;
     case "cmp-filings": cmpToFilings(+t.dataset.k); break;
+
+    case "sets-open": openSets(t); break;
+    case "sets-close": closeSets(); break;
+    case "sets-retry": S.sets.loaded=false; S.sets.readErr=""; render(); loadSets(); break;
+    case "sets-from-filings": setsFromFilings(t); break;
+    case "sets-create": setsCreate(false); break;
+    case "sets-create-filings": setsCreate(true); break;
+    case "sets-edit": { const id=t.dataset.id; S.sets.edit=S.sets.edit===id?"":id; S.sets.renaming=""; S.sets.del=""; S.sets.saveErr=""; setFindReset(); render(); if(S.sets.edit) document.getElementById("sets_q")?.focus(); break; }
+    case "sets-rename": { const s=S.sets.sets.find(x=>x.id===t.dataset.id); if(s){ S.sets.renaming=s.id; S.sets.del=""; S.sets.rn={name:s.name, note:s.note}; S.sets.saveErr=""; render(); document.getElementById("sets_rn_name")?.focus(); } break; }
+    case "sets-rename-save": setsRename(t.dataset.id); break;
+    case "sets-rename-cancel": S.sets.renaming=""; render(); break;
+    case "sets-del": S.sets.del=t.dataset.id; S.sets.renaming=""; S.sets.saveErr=""; render(); break;
+    case "sets-del-yes": setsDelete(t.dataset.id); break;
+    case "sets-del-no": S.sets.del=""; render(); break;
+    case "sets-find": setsFind(); break;
+    case "sets-add-co": setsAddCompany(+t.dataset.i); break;
+    case "sets-add-group": setsAddGroup(+t.dataset.i); break;
+    case "sets-co-remove": setsRemoveCompany(t.dataset.id, t.dataset.k); break;
+    case "sets-gr-remove": setsRemoveGroup(t.dataset.id, t.dataset.g); break;
+    case "sets-recount": for(const [k,v] of Object.entries(S.sets.groups)) if(v.status==="error") delete S.sets.groups[k]; render(); setsCount(); break;
+    case "set-use": useSet(t.dataset.target, document.getElementById("setsel_"+setTarget(t.dataset.target))?.value); break;
   }
 });
 function onInput(e){
@@ -4871,6 +5303,9 @@ document.addEventListener("keydown", e=>{
   if((e.target.id==="lib_title" || e.target.id==="lib_tags") && e.key==="Enter"){ e.preventDefault(); libSubmit(); return; }
   if(e.target.id==="ask_input" && e.key==="Enter" && !e.shiftKey && !e.isComposing){ e.preventDefault(); askQuestion(); return; }
   if(e.key==="Enter" && e.target.closest && e.target.closest("#pwForm")){ e.preventDefault(); savePassword(); return; }
+  if(e.target.id==="sets_q" && e.key==="Enter"){ e.preventDefault(); setsFind(); return; }
+  if(e.target.id==="sets_name" && e.key==="Enter"){ e.preventDefault(); setsCreate(S.sets.nw.from==="filings" && !!S.f && S.f.chips.length>0); return; }
+  if(e.key==="Escape" && S.sets && S.sets.open){ closeSets(); return; }
   if(e.key==="Escape" && S.drawer){ closeDrawer(); return; }
   if(e.key==="Escape" && S.menuOpen){ setMenu(false); document.getElementById("whoDot").focus(); return; }
   // Esc closes the Ask Claude panel, unless the cursor is in a box on the page, where Esc belongs to that box
@@ -4895,6 +5330,7 @@ function resetState(){
   S.snap=freshSnap();
   resetForms();
   S.cmp=freshCmp();
+  S.sets=freshSets();
 }
 async function onSignedIn(session){
   const {data, error}=await S.sb.from("profiles").select("username,display_name,role").eq("id", session.user.id).maybeSingle();

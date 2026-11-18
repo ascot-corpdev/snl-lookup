@@ -29,6 +29,7 @@ import { type Db, supabaseDb } from "../_shared/db.ts";
 import { type ChatCtx, clearOld, deleteFiles, fileIdsOf, LIMITS, makeClient, newState, runJob, screenNote, type Turn } from "../_shared/chat.ts";
 import type { Gate } from "../_shared/spgmi.ts";
 import { libraryAction } from "../_shared/library.ts";
+import { savedSetsNote } from "../_shared/filings.ts";
 
 export type Deps = {
   env: Env; fetch: typeof fetch; anthropicFetch?: typeof fetch; now?: () => number; whoIs?: WhoIs; db?: Db; gate?: Gate;
@@ -133,7 +134,9 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
     if (!jobId) return json(500, { error: "server", message: "The answer couldn't be started. Try again." });
     // What is on the user's screen is passed on only if it passes the same checks as a search or a query.
     const today = new Date(nowFn()).toISOString().slice(0, 10);
-    await db.putJobState(jobId, newState(question, turns, today, screenNote(body.screen, today)) as unknown as Record<string, unknown>);
+    // and the names of the team's saved carrier sets, so a market question can use one instead of a guessed list
+    const setsNote = await savedSetsNote(db);
+    await db.putJobState(jobId, newState(question, turns, today, [screenNote(body.screen, today), setsNote].filter(Boolean).join("\n\n") || null) as unknown as Record<string, unknown>);
     run((async () => {
       await clearOld(db, ctx);
       if (await db.claimJob(jobId, ["queued"])) await runJob(jobId, ctx);
