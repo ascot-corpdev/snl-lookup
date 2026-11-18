@@ -170,5 +170,19 @@
       async updateUser(v){ M.log.push({op:"updateUser", password:v&&v.password}); return {error: M.failUpdateUser ? {message:M.failUpdateUser} : null}; }
     }
   };
-  window.supabase = { createClient(url, key){ M.created = {url, key}; return client; } };
+  // Cloudflare sign-on: the page makes its client with supabase-js's accessToken option. Then, as supabase-js 2.119.0
+  // does, the client has no auth (touching it throws), and every table read and storage call asks the callback for
+  // the token first. Each ask is recorded in M.tokens as {what: "table:<name>" or "storage:<op>", token}.
+  M.tokens = [];
+  function tokenClient(opts){
+    const ask = async what => { const token = await opts.accessToken(); M.tokens.push({what, token}); };
+    return {
+      from(t){ const q = query(t), then = q.then; q.then = (res, rej) => ask("table:"+t).then(() => then.call(q, res, rej)); return q; },
+      storage: { from(name){ const B = bucket(name); return Object.fromEntries(Object.entries(B).map(([k, f]) => [k, async (...a) => { await ask("storage:"+k); return f(...a); }])); } },
+      auth: new Proxy({}, { get(_, prop){ throw new Error("@supabase/supabase-js: Supabase Client is configured with the accessToken option, accessing supabase.auth."+String(prop)+" is not possible"); } })
+    };
+  }
+  window.supabase = { createClient(url, key, opts){
+    if(opts && opts.accessToken){ M.createdWithToken = {url, key, fetch: !!(opts.global && opts.global.fetch)}; return tokenClient(opts); }
+    M.created = {url, key}; return client; } };
 })();

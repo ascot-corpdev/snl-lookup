@@ -30,6 +30,11 @@ verify_jwt = false
 [functions.snl-index]
 verify_jwt = false
 
+# Cloudflare sign-on: turns a Cloudflare Access sign-in into a short Supabase session. Called only by the site's
+# Cloudflare Worker, and checks the Access token itself (secrets CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD, SNL_ADMIN_EMAILS).
+[functions.snl-signin]
+verify_jwt = false
+
 # Lets background tasks run under `supabase functions serve` on your own machine.
 [edge_runtime]
 policy = "per_worker"

@@ -589,3 +589,87 @@ export function digestTables(_clock: Clock) {
   };
   return t;
 }
+
+// ---------- Cloudflare sign-on (snl-signin): a made-up Access team, its keys, and Supabase users in memory ----------
+
+const b64u = (b: Uint8Array | string) => btoa(typeof b === "string" ? b : String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+/** A made-up Cloudflare Access team: RSA key pairs made here, the certs address they are published at, and tokens
+    signed the way Access signs its application tokens. Every name and address is made up. */
+export async function accessTeam(team = "team.example.cloudflareaccess.com", aud = "aud-calloway-0001") {
+  const pair = async () => await crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]) as CryptoKeyPair;
+  const kit = {
+    team, aud, keys: [] as { kid: string; pair: CryptoKeyPair }[], published: [] as string[], certCalls: 0, certsDown: false,
+    async addKey(kid: string, publish = true) { const k = { kid, pair: await pair() }; kit.keys.push(k); if (publish) kit.published.push(kid); return k; },
+    /** The JSON Cloudflare publishes at https://<team>/cdn-cgi/access/certs, for the keys published now. */
+    async certs() {
+      const keys = [];
+      for (const k of kit.keys.filter((k) => kit.published.includes(k.kid))) {
+        const j = await crypto.subtle.exportKey("jwk", k.pair.publicKey);
+        keys.push({ kid: k.kid, kty: "RSA", alg: "RS256", use: "sig", e: j.e, n: j.n });
+      }
+      return { keys, public_cert: { kid: keys[0]?.kid, cert: "-----BEGIN CERTIFICATE----- made-up -----END CERTIFICATE-----" }, public_certs: [] };
+    },
+    /** A fetch that answers only the certs address (and counts calls); anything else is a test failure. */
+    fetch: (async (input: Request | URL | string) => {
+      const u = String(input instanceof Request ? input.url : input);
+      if (u !== `https://${team}/cdn-cgi/access/certs`) throw new Error("unexpected fetch " + u);
+      kit.certCalls++;
+      if (kit.certsDown) return new Response("down", { status: 503 });
+      return J(await kit.certs());
+    }) as unknown as typeof fetch,
+    /** A token as Access issues it, with any field changed. nowSec: issue time. */
+    async token(o: { kid?: string; claims?: Record<string, unknown>; header?: Record<string, unknown>; nowSec?: number; drop?: string[] } = {}) {
+      const now = o.nowSec ?? Math.floor(Date.parse("2026-11-13T12:00:00Z") / 1000);
+      const k = o.kid ? kit.keys.find((x) => x.kid === o.kid)! : kit.keys[0];
+      const header: Record<string, unknown> = { alg: "RS256", kid: k.kid, typ: "JWT", ...(o.header ?? {}) };
+      const claims: Record<string, unknown> = { aud: [aud], email: "jane.doe@calloway.example", exp: now + 3600, iat: now, nbf: now, iss: `https://${team}`, type: "app", identity_nonce: "made-up-nonce", sub: "00000000-made-up-sub", country: "US", ...(o.claims ?? {}) };
+      for (const d of o.drop ?? []) delete claims[d];
+      const head = b64u(JSON.stringify(header)) + "." + b64u(JSON.stringify(claims));
+      const sig = new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", k.pair.privateKey, new TextEncoder().encode(head)));
+      return head + "." + b64u(sig);
+    },
+  };
+  await kit.addKey("kid-made-up-1");
+  return kit;
+}
+export type AccessTeam = Awaited<ReturnType<typeof accessTeam>>;
+
+/** Supabase's users and profiles in memory, behind the SigninStore interface snl-signin uses. Sessions carry a
+    refresh token, as real ones do, so tests can prove it never leaves the function. */
+export function memorySignin(clock: Clock) {
+  type U = { id: string; email: string; password: string; confirmed: boolean };
+  let seq = 0;
+  const s = {
+    users: new Map<string, U>(), profiles: new Map<string, { id: string; username: string; display_name: string; role: string }>(),
+    log: [] as string[], fail: "" as "" | "create" | "mint" | "profile" | "save",
+    minted: [] as { userId: string; accessToken: string; refreshToken: string }[],
+    addUser(email: string, id?: string) { const u = { id: id ?? `00000000-0000-4000-8000-${String(++seq).padStart(12, "0")}`, email, password: "old", confirmed: true }; s.users.set(u.id, u); return u; },
+    byEmail(email: string) { return [...s.users.values()].find((u) => u.email === email) ?? null; },
+    async ensureUser(email: string) {
+      s.log.push("ensureUser");
+      if (s.fail === "create") throw new Error("made-up create failure");
+      if (s.byEmail(email)) return;
+      const u = s.addUser(email); u.password = crypto.randomUUID() + crypto.randomUUID();
+    },
+    async mint(email: string) {
+      s.log.push("mint");
+      if (s.fail === "mint") throw new Error("made-up mint failure");
+      const u = s.byEmail(email);
+      if (!u) throw new Error("no such user");
+      const m = { userId: u.id, accessToken: `access-${u.id}-${s.minted.length + 1}`, refreshToken: `refresh-SECRET-${s.minted.length + 1}` };
+      s.minted.push(m);
+      return { userId: m.userId, accessToken: m.accessToken, expiresAt: Math.floor(clock.now / 1000) + 3600 };
+    },
+    async profile(id: string) { if (s.fail === "profile") throw new Error("made-up read failure"); const p = s.profiles.get(id); return p ? { ...p } : null; },
+    async usernameOwner(username: string) { return [...s.profiles.values()].find((p) => p.username === username)?.id ?? null; },
+    async saveProfile(p: { id: string; username: string; display_name: string; role: string }) {
+      s.log.push("saveProfile");
+      if (s.fail === "save") throw new Error("made-up write failure");
+      if (!/^[a-z0-9._-]{2,40}$/.test(p.username) || !["corpdev", "reader"].includes(p.role)) throw new Error("violates check constraint");
+      if ([...s.profiles.values()].some((x) => x.username === p.username && x.id !== p.id)) throw new Error("duplicate key value violates unique constraint");
+      s.profiles.set(p.id, { ...p });
+    },
+  };
+  return s;
+}
