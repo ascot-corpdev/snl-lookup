@@ -21,10 +21,15 @@ House rules for anyone changing the code are in [.github/copilot-instructions.md
 | `snl-statutory` | Supabase Edge Function | Statutory financials from S&P's data on Snowflake. Holds the Snowflake credentials. |
 | `snl-watch` | Supabase Edge Function | Optional. The daily watchlist check: new filings for the companies and states the team follows. |
 | `snl-profile` | Supabase Edge Function | Optional. The figures and the text for a company profile. |
+| `snl-digest` | Supabase Edge Function | Optional. Filing summaries: made once, saved, and searched. |
+| `snl-index` | Supabase Edge Function | Optional. The market index: sweeps a state for every listed company and answers from what it kept. |
 | `web/deck.js`, `web/profile-slides.js` | The browser | Build the profile as a PowerPoint file on your template. The file is made in the browser and never stored on the server. |
 | `supabase/migrations/0001_snl.sql` | Supabase Postgres | Logins and roles, saved S&P results, the S&P request counter, Claude answers in progress. |
 | `supabase/migrations/0003_watchlist.sql` | Supabase Postgres | Optional. The filings the watchlist found and the record of its checks. |
 | `supabase/migrations/0004_profile_template.sql` | Supabase Storage | Optional. A private place for the PowerPoint template. |
+| `supabase/migrations/0005_filing_digests.sql` | Supabase Postgres | Optional. Saved filing summaries. |
+| `supabase/migrations/0006_market_index.sql` | Supabase Postgres | Optional. The market index and the record of its sweeps. |
+| `supabase/migrations/0007_answer_library.sql` | Supabase Postgres | Optional. The team library of saved answers. |
 | `scripts/logins.mjs` | Your computer | Creates logins. There is no self sign-up. |
 | `scripts/companies.mjs` | Your computer | Loads a company list so companies can be found by name or NAIC code. |
 
@@ -308,6 +313,68 @@ The **Profile** view builds a company profile as a PowerPoint file on your team'
 
 **What a profile leaves out on purpose.** No comparisons with past deals, no teaser claims, no ownership or management pages: the app holds no deal information and only S&P's data. Add those in PowerPoint.
 
+**A filings profile, from S&P's filings alone.** While statutory data isn't set up, the Profile view opens on **Filings profile**. Find a company or a whole group by name, choose the last year, 3 years or 5 years, and choose **Get the filings**. The page shows what it will cost and which slides it fills, then builds the deck on your template: summary, rate changes, where it files, filings by year and type, latest form and rule filings, time with the regulator, and diligence questions. Rate impacts are S&P's overall figure for each filing, not weighted by premium; for a filing that isn't approved, the figure may be the change asked for. Use **Build a sample filings profile** to check your template with made-up filings. It needs steps 1 to 3 above and nothing else.
+
+### 11. Filing summaries (optional)
+
+A filing is read by Claude once and its facts are saved: a short summary, the programs it names, its form schedule and its rate figures, each with the page it came from. Later questions are answered from the summary instead of paying to read the document again. Summaries are made in two ways: automatically after an Ask Claude answer that read a filing (from the same reading, for roughly $0.25 to $0.45), or with **Summarise this filing** on a Filings row (1 S&P request and one of the day's questions; about $2.50 for 150 pages). A long filing is summarised from its first 150 pages, and the summary says so. **Search saved summaries** on the Filings view finds them by form number or phrase at no cost.
+
+1. **SQL editor:** run `supabase/migrations/0005_filing_digests.sql`.
+2. Deploy the new function, and the questions function again:
+
+   ```bash
+   supabase functions deploy snl-digest --no-verify-jwt
+   ```
+
+   ```bash
+   supabase functions deploy snl-chat --no-verify-jwt
+   ```
+
+**Programs and forms** (Compare tab, second page) uses these summaries: choose two to four carriers, a state and a type of insurance, and it lists each carrier's form filings, summarises the ones you choose, and sets out programs, form numbers and editions side by side, each with its filing and page. Nothing is summarised until you choose, and the page states the cost first. Until step 2 is done it still lists filings and opens documents.
+
+### 12. Market index (optional)
+
+S&P's filings search always needs companies named, so it cannot answer "who filed homeowners forms in Florida this year". The market index sweeps a chosen state for every company in your company list and keeps the filing details in your own database. After that the **Market** tab searches all of them at no S&P cost, and Claude asks the index first for a market question in a state it covers. Every answer says what the index covers: the state, the period, when the sweep last completed, and how many companies it did and did not cover. It is the companies in your list, not the whole market.
+
+1. **SQL editor:** run `supabase/migrations/0006_market_index.sql`.
+2. Deploy the new function, and the questions function again:
+
+   ```bash
+   supabase functions deploy snl-index --no-verify-jwt
+   ```
+
+   ```bash
+   supabase functions deploy snl-chat --no-verify-jwt
+   ```
+
+3. On the site, a Corp Dev login opens **Market**, chooses a state and a period and starts a sweep. The page shows the cost before it starts and carries the sweep on while it is open; closing the tab pauses it without losing work.
+4. Optional, to keep sweeping with the page closed and to top a state up: set a secret of at least 24 characters, different from `WATCH_SECRET`, then open `supabase/index_schedule.sql`, replace `YOUR_PROJECT_REF` and `YOUR_INDEX_SECRET`, and run it in the SQL editor.
+
+   ```bash
+   supabase secrets set INDEX_SECRET=...
+   ```
+
+   `INDEX_TOPUP_DAYS` (default 7; 0 for none) sets how often a state is topped up.
+
+**What a sweep costs.** One request covers 10 companies and up to 365 days. With about 2,700 companies, one state for one year is about 300 S&P requests and six minutes; three years is about 900. A top-up costs about the same as a one-year sweep, so weekly or monthly is the right rhythm, not daily. Sweeps leave the last 150 requests of each hour and 3,000 of each day for people using the site, and wait when they reach that. Storage is about 0.6 KB a filing: one state for one year is roughly 5 to 12 MB, and all 50 states for three years would not fit the free 500 MB plan.
+
+### 13. Team library (optional)
+
+Anyone can save one of their own finished answers from Claude where every login can read it. Before saving, the page says plainly that everyone with a login will be able to read the question and its answer, including which companies it is about. Saved answers stay until the person who saved them, or Corp Dev, removes them; the 30-day clean-up of answers does not touch them. The library holds at most 500 answers.
+
+1. **SQL editor:** run `supabase/migrations/0007_answer_library.sql`.
+2. Redeploy the questions function:
+
+   ```bash
+   supabase functions deploy snl-chat --no-verify-jwt
+   ```
+
+### Needing no set-up
+
+- **Compare** (tab): two to eight carriers, each a company or a whole group, side by side over the last 1, 3 or 5 years: a summary table, rate changes over time, carrier by state and by type of insurance, filings by year and the latest filings. Worked out in the browser from ordinary filing searches. A comparison of more than 100 companies runs as several searches, and one comparison may use at most 150 S&P requests.
+- **Carrier sets.** Corp Dev logins save named sets of companies and whole groups from the **Carrier sets** button beside the company pickers. Every login can see and use them on the Filings form, the Snapshot, Compare, Programs and forms and the watchlist, and Claude checks a matching saved set instead of choosing carriers itself. Sets are visible to every login, so a set shows which companies the team follows. A group is kept by name and expanded to its member companies each time the set is used.
+- **Ask about a Snapshot.** "Ask Claude about this" on a finished Snapshot writes a question from what is on screen and puts it in the box; nothing is sent until you press Ask.
+
 ## The first live search
 
 After step 5:
@@ -335,6 +402,10 @@ After step 5:
 | A search | 1 for each batch of 10 companies, for each year of dates, for each 500 rows. Four companies over five years is 6. |
 | The same search again | 0. It opens from the saved result until you click Refresh. |
 | Opening a document | 1. The page keeps it until you close the tab. |
+| Building a filings profile | 1 for each 10 companies for each year of dates, plus up to 3 for signing in and the lists, more if a year has over 500 filings. At most 60; refused before it starts if its search would need more than 50. 0 if the same search was run before. Claude's text counts as one question. |
+| A comparison (Compare tab) | 1 for each 10 companies for each year of dates, across all the carriers together; at most 150. 0 when reopened. |
+| Summarising a filing | 1 for the document (2 with a fresh sign-in). 0 for a summary already saved, for searching summaries, and for summaries made after an answer that read the filing. |
+| A market index sweep | About 300 for one state for one year with 2,700 companies; about 900 for three years. Searching the index: 0. |
 | Building a profile | At most 6 for its filings page (sign-in, the reference lists if they aren't saved, and up to 3 pages of results). 0 when the same profile was built earlier that day. The statutory figures use no S&P request. |
 | Asking Claude | Whatever Claude looks up: the searches above plus 1 for each document it reads, and 2 the first time for the lists of insurance types and filing types if they aren't saved yet. One question is capped at 150 S&P requests, 24 lookups, 8 documents or parts of documents, 150 pages a read and 200 document pages in all. A filing longer than 150 pages is read in parts, starting with its front pages; each part costs 1 S&P request, and the answer says which pages of how many were read. |
 
@@ -390,6 +461,11 @@ Nothing in this list is guessed in the code: each item is either handled both wa
 | **The columns of S&P's reference lists.** The specification does not give them. The app takes the first column ending in "Id" as the id and the next as the name, and keeps the raw rows. Seen 18 Nov 2026 (one fetch of each list): the first column ending in Id is the id and the next the name. | `referenceOptions` in `_shared/filings.ts` | Live check (step 5) |
 | **Paging fields in search results** (`totalPages` and so on). They are in S&P's user guide but not the public specification. The app works with or without them. Seen 18 Nov 2026 on one live search: `totalPages` comes back; the app still copes without it. | `searchFilings` in `_shared/filings.ts` | Live check (step 5) |
 | **How to find a company's S&P company id or institution id**, and which identifiers these are in Capital IQ Pro. The filings API has no company search and cannot search by NAIC code, so names are looked up in a list you load (step 2a) and in companies seen in earlier results. | `resolveEntity` in `_shared/filings.ts` | S&P |
+| **What a filing summary gets right.** Code checks its shape, that every page number is inside the pages read, and that form numbers and rate figures appear in the words quoted for them. It cannot check that the quoted words are on that page or that a program's segment ("private client", "middle market") is judged correctly. | `checkDigest` in `_shared/digest.ts` | Open the filing at the page given |
+| **Which filings are form filings, and how form editions read.** A filing type counts as a form filing when its name contains "form"; editions are read as month and year. | `fcFilingTypes` and `fcEdition` in `web/index.html` | The first live comparison of programs and forms |
+| **Which carrier a filing belongs to in a comparison.** Each company on a filing is taken to carry the S&P id it was searched by. A filing matching none of the chosen ids is left out and counted. | `cmpOwners` in `web/index.html` | The first live comparison |
+| **How many filings a state has, and how many extra pages a sweep needs.** The market index's cost and storage figures assume about 10% extra pages and 5 to 12 MB a state a year. | `_shared/marketindex.ts` | The first sweep |
+| **A set's group, expanded from the company list.** A group in a carrier set is matched to the list by name each time it is used. | `setGroupMembers` in `_shared/filings.ts` | Reload of the company list |
 | **Which carriers Claude checks for a question about a market.** S&P's filings search has no "every company in a state" option, so for a market or segment question Claude chooses likely carriers itself, looks them up in the company list (several names and whole groups in one step) and says in its answer that the choice is its own and may miss carriers. | `resolveMany` in `_shared/filings.ts`; the system prompt in `_shared/chat.ts` | Read the answer: it names the carriers checked and those not in the list |
 | **How filings are sorted in a snapshot.** A filing counts as a rate, rule or form filing when S&P's filing type contains that word, only a status containing "approved" is drawn as approved, and the publish date is taken as close to, not the same as, the regulator's decision. | `snapKinds`, `snapApproved` and `snapDays` in `web/index.html` | Live check, then a look at a real snapshot |
 | **Tokens per page of a real filing.** The page limits, the guard on how much Claude is sent at once and the costs above rest on 3,100 to 4,600 tokens a page, and on the front pages of a filing holding its summary, rate information and form schedule. | `LIMITS` and `read` in `_shared/chat.ts` | The cost line under the first live answers that read long filings |
