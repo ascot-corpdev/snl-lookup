@@ -31,7 +31,7 @@ Security in one paragraph: the repository is public and holds no secret. Every c
 
 ## Setup (about 30 minutes)
 
-The owner does these steps. Steps 5 to 7 can wait until each credential arrives; the app says "not set up yet" for whatever is missing and everything else works.
+The owner does these steps. Step 7 can wait until the Snowflake account arrives; the app says "not set up yet" for whatever is missing and everything else works.
 
 ### 1. Supabase project
 
@@ -69,7 +69,7 @@ The role is `corpdev` (can also set up the statutory mapping) or `reader` (can s
 S&P's filings search needs S&P's own company id or institution id for every company, and it has no search by name. Loading a list once lets everyone find a company, or a whole group, by name or NAIC code.
 
 1. Export the list from S&P Capital IQ Pro with these columns where you have them: company name, S&P company id, institution id, NAIC company code, NAIC group code and group name. It needs the name and at least one of: an S&P company id, an institution id, or a NAIC company code. A NAIC code alone is enough to be useful: on the Statutory view people can type part of a company or group name, pick from the matches and add a whole group at once, instead of remembering NAIC codes. Companies with an S&P id can also be found by name on the Filings view; companies with only a NAIC code show there but can't be searched for filings.
-2. Save it as a CSV (in Excel: **File > Save As > CSV UTF-8**). Keep the file out of this repository: it may be S&P's data, and `.csv` files are ignored by git here for that reason.
+2. Save it as a CSV (in Excel: **File > Save As > CSV UTF-8**). S&P's own export headings, such as "S&P Institution Key" and "S&P Statutory Entity Key", are recognised without any options. Keep the file out of this repository: it may be S&P's data, and `.csv` files are ignored by git here for that reason.
 3. See what would be loaded. This changes nothing and needs no key:
 
 ```bash
@@ -124,7 +124,7 @@ supabase functions deploy snl-chat --no-verify-jwt
 
 A merge to `main` is a deploy.
 
-### 5. S&P filings API (when S&P sends API credentials)
+### 5. S&P filings API
 
 The API needs S&P **API** credentials. A Capital IQ Pro website login does not work. Once S&P sends them:
 
@@ -147,6 +147,8 @@ supabase secrets set SPGMI_ACCOUNT=production
 Functions read new secrets straight away; there is nothing to redeploy.
 
 **Check the S&P connection first.** Sign in to the site and click **Check S&P connection** at the right of the grey strip under the tabs. In a few seconds it signs in to S&P, checks the account can use SNL Insurance Product Filings, and loads the lists of states, types of insurance, filing types and statuses (at most five S&P requests). Each step says Done or Failed. If anything failed, click **Copy for S&P** and paste the text into an email to S&P support: it says what failed and gives S&P's reference number where S&P sent one. If S&P has locked the API account, ask S&P to unlock it. The app stops signing in for 30 minutes after a lock so it can't make the lock worse, and for 5 minutes after a refused password unless the password is changed.
+
+**Live check (Corp Dev logins).** Click **Live check** next to Check S&P connection. In about a minute it looks at your recent saved searches, the company list and a few real S&P answers (at most six S&P requests: a sign-in, one small search and one document, plus any missing list), and says for each thing the app assumes about S&P's data whether it holds or differs. The report holds no S&P data, only column names, value types, counts, shares and patterns, so it is safe to send. Click **Copy for developer** and paste it into a message to whoever maintains the app. It saves nothing except reference lists it had to fetch, and it never sends a wrong password, so it can't lock the account. It skips S&P when fewer than 20 requests are left in the hour or day.
 
 Then run [the first live search](#the-first-live-search).
 
@@ -229,7 +231,7 @@ The free plan pauses a project after about a week with no activity. To prevent t
 
 ### 9. Watchlist (optional)
 
-Name the companies and states the team follows once; a daily check shows any new rate, rule or form filing on the Filings view, and can email it. It works before S&P is set up (it says "not set up yet" and asks S&P nothing) and starts checking when the S&P secrets are set.
+Name the companies and states the team follows once; a daily check shows any new rate, rule or form filing on the Filings view, and can email it. Until each step below is done, the watchlist card on the Filings view says which one is missing.
 
 The watchlist is visible to every login on the site and is kept in your Supabase project. It names companies the team follows, so decide whether a name belongs on it before adding it.
 
@@ -254,7 +256,7 @@ The watchlist is visible to every login on the site and is kept in your Supabase
    supabase secrets set SITE_URL=https://YOUR_GITHUB_USER.github.io/REPO_NAME/
    ```
 
-   Without `WATCH_FROM`, Resend only delivers to the Resend account's own address. Without `SITE_URL`, the email links to the first address in `ALLOWED_ORIGIN`.
+   `RESEND_API_KEY` is optional: without it the Filings view still shows everything. Without `WATCH_FROM`, Resend only delivers to the Resend account's own address. Without `SITE_URL`, the email links to the first address in `ALLOWED_ORIGIN`.
 3. Deploy the function. `--no-verify-jwt` is safe: it checks the login, or the secret, itself.
 
    ```bash
@@ -263,13 +265,17 @@ The watchlist is visible to every login on the site and is kept in your Supabase
 
 4. **SQL editor:** open `supabase/watch_schedule.sql`, replace `YOUR_PROJECT_REF` and `YOUR_WATCH_SECRET` (the same value as `WATCH_SECRET`), and run it. It checks every day at 06:23 UTC. Don't commit the file with your values in it.
 
-On the site, a Corp Dev login chooses companies and states in the search form and clicks **Manage**, then **Add the companies and states chosen below**. **Check now** runs a check straight away.
+On the site, a Corp Dev login chooses companies and states in the search form and clicks **Manage**, then **Add the companies and states chosen below**. Then click **Check now** once: this first check records what is already there as the starting point, so the next daily check shows only what is new. Run `supabase/watch_schedule.sql` only once; to change the secret later, use the line at the end of that file.
 
 **What a check costs.** Each check asks S&P for filings published in the last 14 days. It uses one S&P request for every 10 company ids, one for every 10 institution ids, and up to 2 more (the sign-in and S&P's list of filing statuses, often reused), plus one for each extra page of results. For example, 25 companies by company id and 3 by institution id cost 3 + 1 + 2 = 6 requests a day, about 180 a month. A check may use at most 30 requests, so it covers up to 280 companies. A bigger watchlist is refused before any request is spent, with how many companies to remove. Checks go through the same one-a-second throttle and hourly and daily counter as every other S&P call.
 
 **The first check only records a starting point.** A filing counts as new only if its company and state were already covered by the last complete check, so adding a company never floods the list.
 
-**Email and S&P's licence.** Emailing S&P's data out of the app is a licence question for the owner: check that your S&P agreement allows it before setting `RESEND_API_KEY`. The email is kept to the company, state, filing type, one line of description and the tracking number of each new filing, with a link to the app. Without email, the Filings view shows the same information.
+**Marks.** Some new filings carry a mark such as *New program*, *New to state*, *New form*, *Withdrawal* or *Large rate change* (10% or more either way). Marked filings are listed first, and a button shows only those. A mark is a hint worked out from the filing type, status, rate impact and description, never a fact: the page and the email say "may be" and show the words or figures that triggered it. A filing without a mark can still matter. Changing the rules re-marks every kept filing; no database change is needed.
+
+**After a gap.** If the last complete check was more than 3 days ago (switched off, failing, or Supabase paused), the next check looks back to 14 days before it, up to 60 days, so filings published in the gap are still found. This uses no extra S&P requests beyond extra pages of results.
+
+**Email.** The email gives each new filing's company, state, filing type, one line of description, tracking number and any mark, marked ones first, with a link to the app. Without email, the Filings view shows the same information.
 
 ### 10. Company profiles (optional)
 
@@ -323,7 +329,7 @@ After step 5:
 
 The app waits its turn so calls are at least a second apart, and stops with a plain message, before calling S&P, when the hour's or day's limit is used up. A search that would need more than 60 S&P requests (40 inside a Claude answer) is refused before any is spent, with the reason. A search with very many pages of results, or one where S&P answers slowly, stops early and says the results are incomplete; an incomplete result is never saved. Each login can have one Claude answer running at a time.
 
-**Claude tokens** (billed to the Anthropic account whose key you set; Claude Opus 5.5 is $4 per million input tokens and $20 per million output tokens). These are estimates until the first live run:
+**Claude tokens** (billed to the Anthropic account whose key you set; Claude Opus 5.5 is $4 per million input tokens and $20 per million output tokens). These are estimates; the cost line under each answer shows the real figure:
 
 - A question answered from search results alone: a few cents.
 - A question that reads documents: Anthropic counts 1,500 to 3,000 text tokens a page plus an image of each page. Three filings of about 50 pages each is roughly 400,000 to 600,000 tokens, or about $2 to $3 for the answer. Later steps of the same answer re-read the documents from Anthropic's cache at a twentieth of the price.
@@ -365,25 +371,26 @@ Nothing in this list is guessed in the code: each item is either handled both wa
 
 | What | Where it sits | Who confirms it |
 | --- | --- | --- |
-| **S&P API credentials.** The API does not accept a Capital IQ Pro website login. Nothing has run against the live API; every test uses made-up fixtures. | Step 5 | S&P |
+| **S&P API credentials.** The API does not accept a Capital IQ Pro website login. Sign-in, the filings search and document downloads have run against the live API with a trial account. Tests still use made-up fixtures only. The Live check (step 5) shows which of the assumptions below hold against real answers. | Step 5 | S&P |
 | **How long S&P's refresh token stays usable.** The sign-in address, its form-encoded `username` and `password`, the token's `expires_in_seconds` and the refresh call (`POST .../api/v1/tokenRefresh`, form field `refreshToken`) are confirmed by S&P's public Authenticate specification. The app gets a new token a minute before the old one expires. The refresh token lasts up to 7 days and expires after 24 hours without activity; whether ordinary API calls count as activity is not stated, so the app counts only refresh use, the cautious reading. | `signIn` and `refresh` in `_shared/spgmi.ts` | First live call |
 | **How long S&P locks an account, and whether the refresh can answer 423.** 423 "Account Locked" at sign-in is confirmed. The app stops signing in for 30 minutes after a 423 from any call. The 30 minutes, and the 5-minute wait after a refused password, are this app's choices, not S&P's. | `_shared/spgmi.ts` | S&P |
 | **Whether sign-in errors carry an S&P reference.** The Authenticate specification's error body is `{error, message}` with no request id, so a failed sign-in may show no reference number. | `_shared/connection.ts` | First live call |
-| **Florida coverage.** | The state list in step 1 of the first live search | First live call |
-| **The columns of S&P's reference lists.** The specification does not give them. The app takes the first column ending in "Id" as the id and the next as the name, and keeps the raw rows. | `referenceOptions` in `_shared/filings.ts` | First live call |
-| **Paging fields in search results** (`totalPages` and so on). They are in S&P's user guide but not the public specification. The app works with or without them. | `searchFilings` in `_shared/filings.ts` | First live call |
+| **Florida coverage.** | The state list in step 1 of the first live search | Live check (step 5) |
+| **The columns of S&P's reference lists.** The specification does not give them. The app takes the first column ending in "Id" as the id and the next as the name, and keeps the raw rows. | `referenceOptions` in `_shared/filings.ts` | Live check (step 5) |
+| **Paging fields in search results** (`totalPages` and so on). They are in S&P's user guide but not the public specification. The app works with or without them. | `searchFilings` in `_shared/filings.ts` | Live check (step 5) |
 | **How to find a company's S&P company id or institution id**, and which identifiers these are in Capital IQ Pro. The filings API has no company search and cannot search by NAIC code, so names are looked up in a list you load (step 2a) and in companies seen in earlier results. | `resolveEntity` in `_shared/filings.ts` | S&P |
 | **Which carriers Claude checks for a question about a market.** S&P's filings search has no "every company in a state" option, so for a market or segment question Claude chooses likely carriers itself, looks them up in the company list (several names and whole groups in one step) and says in its answer that the choice is its own and may miss carriers. | `resolveMany` in `_shared/filings.ts`; the system prompt in `_shared/chat.ts` | Read the answer: it names the carriers checked and those not in the list |
+| **The wording that marks a watchlist filing** as a new program, new form, new to a state or a withdrawal, and that S&P's rate impact is in percentage points. The rules were written before any real filing had been seen. | `flagFiling` and `rateChange` in `_shared/watch.ts` | The first live watchlist results |
 | **The column headings of a Capital IQ Pro export.** The import matches likely headings and shows what it matched before loading; any column can be named outright. | `matchColumns` in `scripts/companies-lib.mjs` | Your first export |
-| **Date and rate-impact formats** in results. The app shows what S&P sends and "n/d" when it is missing. | The Filings view | First live call |
+| **Date and rate-impact formats** in results. The app shows what S&P sends and "n/d" when it is missing. | The Filings view | Live check (step 5) |
 | **How S&P counts requests**: whether sign-ins count, and when its day starts. The app counts every call and uses UTC days, so it can only over-count. S&P's public API specification also limits document downloads to 500 an hour on a trial account (1,000 in production); the app does not count those separately. | `makeGate` in `_shared/spgmi.ts` | S&P |
-| **Ids are whole numbers and filters are lists.** S&P's specification gives no types; the app follows its examples (company, institution, status, type and filing type ids as numbers; states as two-letter codes). If a live reference list shows text ids, searches by that filter will be refused until this is changed. | `parseSearch` in `_shared/filings.ts` | First live call |
-| **Pages of results are numbered from 1**, as in S&P's example. | `searchFilings` in `_shared/filings.ts` | First live call |
-| **One filing version has one document, state and set of dates.** When several rows share a `filingVersionId`, the app keeps the first row and lists every company on it. | `dedupe` in `_shared/filings.ts` | First live call |
+| **Ids are whole numbers and filters are lists.** S&P's specification gives no types; the app follows its examples (company, institution, status, type and filing type ids as numbers; states as two-letter codes). If a live reference list shows text ids, searches by that filter will be refused until this is changed. | `parseSearch` in `_shared/filings.ts` | Live check (step 5) |
+| **Pages of results are numbered from 1**, as in S&P's example. | `searchFilings` in `_shared/filings.ts` | Live check (step 5) |
+| **One filing version has one document, state and set of dates.** When several rows share a `filingVersionId`, the app keeps the first row and lists every company on it. | `dedupe` in `_shared/filings.ts` | Live check (step 5) |
 | **What `pages` means.** Taken as the document's page count. The app also counts the pages in the file and uses the larger number for Claude's limits. | `read` in `_shared/chat.ts` | First live answer |
-| **What a `filingVersionId` looks like.** S&P's example is a 36-character id; the app passes on any id of 8 to 64 letters, digits, dots, underscores and dashes. | `parseDocRef` in `_shared/filings.ts` | First live call |
+| **What a `filingVersionId` looks like.** S&P's example is a 36-character id; the app passes on any id of 8 to 64 letters, digits, dots, underscores and dashes. | `parseDocRef` in `_shared/filings.ts` | Live check (step 5) |
 | **How S&P answers a wrong username or password.** 401 "User unauthorized" is confirmed by the Authenticate specification. A 400 at sign-in is not in the specification; the app reads it as a refused sign-in too. | `signIn` in `_shared/spgmi.ts` | First live call |
-| **The unit of `overallRateImpact`.** Shown as a percentage when S&P's display value is missing. | The Filings view (`web/index.html`) | First live call |
+| **The unit of `overallRateImpact`.** Shown as a percentage when S&P's display value is missing. | The Filings view (`web/index.html`) | Live check (step 5) |
 | **How an account name with an underscore is written in the Snowflake sign-in token.** Snowflake's documentation does not say; the app keeps the underscore. | `jwtAccount` in `_shared/snowflake.ts` | First Snowflake call |
 | **Whether S&P limits API access to fixed IP addresses.** Supabase functions do not have fixed addresses. | n/a | S&P |
 | **The Snowflake reader account**: the account identifier, the service user with key-pair sign-in, and the warehouse name. | Step 7 | S&P |
@@ -420,5 +427,7 @@ npm test
 - **Documents.** Usually PDFs. Claude can read PDFs and plain text of up to 100 pages each; anything else opens from the Filings view. When S&P gives no page count, the app counts the pages in the file itself, and refuses a file over 5 MB whose pages it can't count.
 - **Follow-up questions** in the same conversation carry the earlier questions and answers, not the documents. Claude re-reads a document if it needs it again (1 S&P request).
 - **Bulk download** (the "API Drive" delivery in S&P's API specification) needs separate credentials and is not used.
+- **Searching a whole group.** Type a group's name in the company finder and choose "Add all" on the group: one search takes up to 100 companies. S&P counts one request for each 10 companies for each 365 days of dates, and one search may use at most 60 (Claude: 40). A 69-company group costs about 7 requests a year: 12 months, 3 or 5 years run; 10 years is refused, with a message saying how many years or companies would fit.
+- **Keeping a search out of Recent searches.** Tick "Keep this search out of Recent searches" on the Filings form. The result is still saved, so the same search costs nothing again, but it isn't listed. Whoever last fetches a search from S&P decides whether it is listed; opening a saved result changes nothing. This hides a search from the list, not from the database: any login can still read saved results there.
 - **One answer at a time.** A login with an answer in progress is asked to wait before asking another. If its tab was closed, open the app again to pick it up, or a new question is accepted ten minutes later.
 - **Housekeeping.** Finished answers are removed after 30 days, and leftovers from abandoned answers are cleared whenever someone opens the app.

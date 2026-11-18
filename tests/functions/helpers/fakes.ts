@@ -58,6 +58,14 @@ export function memoryDb(clock: Clock) {
       return oneEach(rows.map((r) => r.doc as unknown as Entity)).slice(0, limit);
     },
     async getSetting(id) { return settings.get(id) ?? null; },
+    // the Live check's two reads: the latest saved results of a kind, and the company list without names
+    async recentStore(kind, limit) { return [...store.values()].filter((r) => r.kind === kind).sort((a, b) => b.fetched_at.localeCompare(a.fetched_at)).slice(0, limit).map((r) => structuredClone(r)); },
+    async entityFields(limit) {
+      return [...store.values()].filter((r) => r.kind === "entity").slice(0, limit).map((r) => {
+        const e = r.doc as Record<string, unknown>, s = (v: unknown) => (v === null || v === undefined ? null : String(v));
+        return { companyId: s(e.companyId), institutionId: s(e.institutionId), spStatEntityId: s(e.spStatEntityId), naicCompanyCode: s(e.naicCompanyCode), naicGroupCode: s(e.naicGroupCode), naicGroupName: s(e.naicGroupName) };
+      });
+    },
     ...watchTables(clock),
     async createJob(owner, question) {
       const id = `00000000-0000-4000-8000-${String(++jobSeq).padStart(12, "0")}`;

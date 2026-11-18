@@ -63,6 +63,24 @@ ok("the counts say how many have each kind of id", same(r.counts, { withCompanyI
 const noIds = readCompanies("Company Name,State\nCalloway Insurance Co,OH\n");
 ok("a list with no S&P id column is refused, saying what it needs and what the first row reads", noIds.ok === false && /needs a company name column and an S&P company id, institution id or NAIC company code column/.test(noIds.message) && same(noIds.headings, ["Company Name", "State"]), noIds);
 
+// ---------- an S&P export's own headings, with S&P's row of field codes under them ----------
+ok("S&P's statutory entity key and institution key headings are matched with no flags", same(cols(["Entity Name", "S&P Statutory Entity Key", "S&P Institution Key", "NAIC Group Name"]),
+  { naicGroupName: "NAIC Group Name", spStatEntityId: "S&P Statutory Entity Key", institutionId: "S&P Institution Key", companyName: "Entity Name" }));
+ok("so are S&P's field codes, and the SNL-era names", cols(["SNL_STAT_ENTITY_KEY", "Company Name", "Institution Key"]).spStatEntityId === "SNL_STAT_ENTITY_KEY" && cols(["Statutory Entity Key", "Name", "SNL Institution Key"]).spStatEntityId === "Statutory Entity Key");
+const SP_EXPORT = [
+  "Made-up S&P screen export",
+  "",
+  "Entity Name,S&P Statutory Entity Key,S&P Institution Key,NAIC Group Name",
+  "SNL_ENTITY_NAME,SNL_STAT_ENTITY_KEY,SNL_INSTN_KEY,SNL_GROUP_NAME",
+  "Calloway Insurance Co,C90001,5000001,Calloway Group (SNL P&C Group)",
+  ",,,",
+  "Calloway Coastal Co,C90003,5000003,Calloway Group (SNL P&C Group)",
+].join("\n");
+const sp = readCompanies(SP_EXPORT);
+ok("an S&P export loads with no flags, from its heading row down", sp.ok && sp.headingRow === 3 && sp.columns.spStatEntityId === "S&P Statutory Entity Key" && sp.columns.institutionId === "S&P Institution Key" && same(sp.unused, []), sp);
+ok("each company keeps its statutory entity key and institution key", same(sp.companies.map((c) => [c.companyName, c.institutionId, c.spStatEntityId, c.naicGroupName]), [["Calloway Insurance Co", "5000001", "C90001", "Calloway Group (SNL P&C Group)"], ["Calloway Coastal Co", "5000003", "C90003", "Calloway Group (SNL P&C Group)"]]), sp.companies);
+ok("S&P's second row of field codes is left out, as a row with no id, and the blank row is skipped", sp.companies.length === 2 && !sp.companies.some((c) => /SNL_/.test(c.companyName)) && same(sp.skipped, { noName: 0, noId: 1 }), sp.skipped);
+
 // ---------- the rows saved ----------
 const rows = toStoreRows(r.companies, "2026-11-13T12:00:00.000Z");
 ok("a company is saved under entity:<company id>, labelled with name, NAIC code and group", same([rows[0].id, rows[0].kind, rows[0].label, rows[0].fetched_at], ["entity:4000001", "entity", "Calloway Insurance Co | NAIC 90001 | Calloway Group", "2026-11-13T12:00:00.000Z"]) && same(rows[0].doc, r.companies[0]));

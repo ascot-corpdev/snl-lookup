@@ -10,21 +10,26 @@
 // POST /functions/v1/snl-filings  {"action": ...}
 //   status                                        -> what is set up, S&P requests used, when data was last fetched
 //   reference {field?, refresh?}                  -> S&P's id lists (types of insurance, statuses, states, filing types)
-//   resolve   {q}                                 -> companies in the app's company list, by name, NAIC code or S&P id
+//   resolve   {q}                                 -> companies in the app's company list, by name, NAIC code or S&P id,
+//                                                    and whole groups whose name or group code matches {groups, groupNote}
 //   search    {companyIds, institutionIds, states, from, to, filingStatusIds?, typeOfInsuranceIds?, filingTypeIds?,
-//              spStatEntityIds?, trackingNumbers?, refresh?}
+//              spStatEntityIds?, trackingNumbers?, refresh?, unlisted?}
 //                                                 -> {rows, total, notes, byState, byCompany, requests, capped, fetchedAt, ...}
 //   document  {documentId} or {filingVersionId}   -> the document itself, as S&P sends it (usually a PDF)
 //   check                                         -> the S&P connection check: sign-in, entitlement, the four lists
 //                                                    (at most five S&P requests), as a plain-English report
+//   diagnose                                      -> the Live check (Corp Dev only): shapes and counts of real S&P answers,
+//                                                    never S&P's data (at most six S&P requests), _shared/diagnose.ts
 
 import { adminClient, type Env, type Json, readBody, sleep, type WhoIs, whoIs, withCors } from "../_shared/http.ts";
 import { type Db, supabaseDb } from "../_shared/db.ts";
 import { downloadDocument, getReference, MAX_SEARCH_REQUESTS, parseDocRef, parseSearch, type Reference, REFERENCE_FIELDS, type ReferenceField, resolveEntity, savedOrFreshSearch } from "../_shared/filings.ts";
+import { groupChoices } from "../_shared/filings.ts";
 import { clearOld } from "../_shared/chat.ts";
 import { type Gate, makeGate, NOT_CONFIGURED, planLimits, Spgmi, SpgmiError } from "../_shared/spgmi.ts";
 import { snowflakeConfigured } from "../_shared/snowflake.ts";
 import { checkConnection } from "../_shared/connection.ts";
+import { diagnose } from "../_shared/diagnose.ts";
 
 export type Deps = { env: Env; fetch: typeof fetch; anthropicFetch?: typeof fetch; now?: () => number; whoIs?: WhoIs; db?: Db; gate?: Gate; sleep?: (ms: number) => Promise<void> };
 
@@ -85,13 +90,15 @@ async function serve(req: Request, deps: Deps, json: Json, cors: Record<string, 
 
       case "resolve": {
         if (typeof body.q !== "string" || !body.q.trim()) return json(400, { error: "bad", message: "Type a company name, a NAIC code or an S&P id." });
-        return json(200, await resolveEntity(db, body.q));
+        // The companies that match, and whole groups whose name or NAIC group code matches, to add in one click.
+        return json(200, { ...(await resolveEntity(db, body.q)), ...(await groupChoices(db, body.q)) });
       }
 
       case "search": {
         const parsed = parseSearch(body, new Date(now).toISOString().slice(0, 10));
         if (!parsed.ok) return json(400, { error: "bad", message: parsed.message });
-        const answer = await savedOrFreshSearch(api, db, parsed.params, { now, refresh: body.refresh === true, maxRequests: MAX_SEARCH_REQUESTS, deadline: now + SEARCH_TIME_MS, clock: deps.now ?? Date.now });
+        // unlisted: kept out of the shared Recent searches list (still saved, so the same search costs nothing again).
+        const answer = await savedOrFreshSearch(api, db, parsed.params, { now, refresh: body.refresh === true, maxRequests: MAX_SEARCH_REQUESTS, deadline: now + SEARCH_TIME_MS, clock: deps.now ?? Date.now, unlisted: body.unlisted === true });
         return json(200, { ...answer, ...(await usage()) });
       }
 
@@ -112,6 +119,10 @@ async function serve(req: Request, deps: Deps, json: Json, cors: Record<string, 
 
       case "check":
         return json(200, await checkConnection({ creds, db, gate: deps.gate ?? makeGate(db, limits, wait), fetch: deps.fetch, sleep: wait, now: deps.now ?? Date.now, plan: limits.plan, limits }));
+
+      case "diagnose":
+        if (who.role !== "corpdev") return json(403, { error: "forbidden", message: "Only Corp Dev logins can run the Live check." });
+        return json(200, await diagnose({ creds, db, gate: deps.gate ?? makeGate(db, limits, wait), fetch: deps.fetch, sleep: wait, now: deps.now ?? Date.now, plan: limits.plan, limits }));
 
       default:
         return json(400, { error: "bad", message: "Unknown action. Use status, reference, resolve, search, document or check." });

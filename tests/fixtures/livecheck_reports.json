@@ -1,0 +1,1540 @@
+{
+ "_about": "Made-up answers from the snl-filings function's {action: \"diagnose\"}, for the page tests. Made by running _shared/diagnose.ts against the fake S&P in tests/functions/helpers/fakes.ts; every value behind them is made up.",
+ "ok": {
+  "configured": true,
+  "ranAt": "2026-11-13T12:00:00.000Z",
+  "account": "trial",
+  "limits": {
+   "hour": 500,
+   "day": 12000
+  },
+  "used": {
+   "hour": 3,
+   "day": 3
+  },
+  "requests": 3,
+  "maxRequests": 6,
+  "seconds": 2,
+  "stopped": null,
+  "basis": "Based on 1 saved search (8 rows), 3 rows from one live search, 4 companies in the company list and one document.",
+  "summary": "17 of 17 assumptions checked hold; 0 differ. 1 couldn't be checked this time.",
+  "counts": {
+   "holds": 17,
+   "differs": 0,
+   "unknown": 1,
+   "info": 5
+  },
+  "findings": [
+   {
+    "id": "signin.expiry",
+    "group": "signin",
+    "title": "How long a token lasts (expires_in_seconds)",
+    "where": "lifetimeMs and keep in _shared/spgmi.ts",
+    "outcome": "holds",
+    "found": "It came back as text of digits, about 60 minutes. The sign-in answer's keys: scope, token_type, access_token, expires_in_seconds and refresh_token.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "signin.refresh",
+    "group": "signin",
+    "title": "A refresh token with the sign-in",
+    "where": "keep and refresh in _shared/spgmi.ts",
+    "outcome": "holds",
+    "found": "A refresh token came back, as text.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.typeOfInsurance",
+    "group": "lists",
+    "title": "Types of insurance: which column is the id and which the name",
+    "where": "referenceOptions in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "2 rows (saved). Columns: typeOfInsuranceId and typeOfInsurance. The app takes typeOfInsuranceId as the id (whole number, 1 to 2 digits (100.0%)) and typeOfInsurance as the name.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.filingStatus",
+    "group": "lists",
+    "title": "Statuses: which column is the id and which the name",
+    "where": "referenceOptions in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "3 rows (saved). Columns: filingStatusId and filingStatus. The app takes filingStatusId as the id (whole number, 1 digit (100.0%)) and filingStatus as the name.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.serffFilingState",
+    "group": "lists",
+    "title": "States: which column is the id and which the name",
+    "where": "referenceOptions in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "3 rows (saved). Columns: serffFilingStateId and serffFilingState. The app takes serffFilingStateId as the id (text, 2 characters (100.0%)) and serffFilingState as the name.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.serffFilingType",
+    "group": "lists",
+    "title": "Filing types: which column is the id and which the name",
+    "where": "referenceOptions in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "4 rows (saved). Columns: serffFilingTypeId and serffFilingType. The app takes serffFilingTypeId as the id (whole number, 1 digit (100.0%)) and serffFilingType as the name.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.idTypes",
+    "group": "lists",
+    "title": "Ids are whole numbers; states are two-letter codes",
+    "where": "ints and the state check in parseSearch, _shared/filings.ts (and the state list in web/index.html, stateOptions)",
+    "outcome": "holds",
+    "found": "Ids of types of insurance: whole number, 1 to 2 digits (100.0%). Ids of statuses: whole number, 1 digit (100.0%). Ids of filing types: whole number, 1 digit (100.0%). State ids: text, 2 characters (100.0%).",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.florida",
+    "group": "lists",
+    "title": "Florida, and the 50 states and DC, in S&P's state list",
+    "where": "the first live search (README); stateOptions in web/index.html",
+    "outcome": "holds",
+    "found": "3 states in the list. Missing of the 50 states and DC: AL, AK, AZ, AR, CA, CO, CT, DE, DC, HI, ID, IL, IN, IA, KS, KY, LA, ME, MD, MA, MI, MN, MS, MO, MT, NE, NV, NH, NJ, NM, NY, NC, ND, OH, OK, OR, PA, RI, SC, SD, TN, UT, VT, VA, WA, WV, WI, WY.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "search.columns",
+    "group": "search",
+    "title": "The result columns",
+    "where": "SEARCH_COLUMNS and mapRows in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "30 columns in the live answer. Every column the app reads is there.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "search.paging",
+    "group": "search",
+    "title": "Paging fields in the answer (totalPages and so on)",
+    "where": "searchFilings in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "Top-level keys: numCols, numRows, currentPageSize, currentPage, totalPages, headers and rows. totalPages came back as 1.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "search.pageBase",
+    "group": "search",
+    "title": "Pages of results are numbered from 1",
+    "where": "the page loop (let page = 1) in searchFilings, _shared/filings.ts",
+    "outcome": "holds",
+    "found": "Asked for page 1 of 20 rows: 3 rows came back and S&P said there is 1 page. Numbered from 0, page 1 would have been empty.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "search.dates",
+    "group": "search",
+    "title": "Dates look like 2026-01-31",
+    "where": "the newest-first sort in searchFilings (_shared/filings.ts), dateOf in _shared/profile.ts, parseDay in web/index.html",
+    "outcome": "holds",
+    "found": "dateSubmitted: YYYY-MM-DD (100.0%). publishDate: YYYY-MM-DD (100.0%). renewBusReqEffDate: YYYY-MM-DD (90.9%); empty (9.1%). newBusReqEffDate: YYYY-MM-DD (90.9%); empty (9.1%).",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "search.rateImpact",
+    "group": "search",
+    "title": "Rate impact: overallRateImpact is in percentage points, like the display value",
+    "where": "rateImpact and the rate sort in web/index.html; rateImpactOf in _shared/profile.ts",
+    "outcome": "holds",
+    "found": "overallRateImpact: empty (63.6%); decimal number (18.2%); whole number, 1 digit (18.2%) (lowest -2, median -2, highest 6.5). dispOverallRateImpact: empty (63.6%); number followed by % (36.4%). Of 4 rows with both and not zero, 4 have the same number, 0 have the display value 100 times overallRateImpact. 0 rows have overallRateImpact with no display value.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "search.versions",
+    "group": "search",
+    "title": "Rows that share a filingVersionId differ only by company",
+    "where": "dedupe in _shared/filings.ts",
+    "outcome": "unknown",
+    "found": "In the live search, 0 of 3 rows share a filingVersionId with another row. In saved results, 1 of 8 filings (12.5%) name more than one company.",
+    "verdict": "Couldn't tell: no two live rows shared a filingVersionId."
+   },
+   {
+    "id": "search.ids",
+    "group": "search",
+    "title": "What filingVersionId and documentId look like",
+    "where": "parseDocRef in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "filingVersionId on 100.0% of rows: 36-character id (8-4-4-4-12 letters and digits) (100.0%). documentId on 90.9%: whole number, 8 digits (100.0%). The app accepts 11 of 11 filingVersionIds and 10 of 10 documentIds.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "search.pages",
+    "group": "search",
+    "title": "The pages column",
+    "where": "read in _shared/chat.ts (Claude's page limits); LIMITS.docPages",
+    "outcome": "info",
+    "found": "On 90.9% of rows. Lowest 25, median 36, 90th percentile 58, highest 310. Over 100 pages: 10.0%; over 600: 0.0%.",
+    "verdict": "For the record. Whether it is the document's page count is checked under the document below."
+   },
+   {
+    "id": "search.perCompanyYear",
+    "group": "search",
+    "title": "Filings per company per year",
+    "where": "PAGE_SIZE and MAX_SEARCH_REQUESTS in _shared/filings.ts",
+    "outcome": "info",
+    "found": "Across 7 company-years in saved results: median 1, 90th percentile 3, highest 3. A search asks for 500 rows a page.",
+    "verdict": "For the record."
+   },
+   {
+    "id": "search.companyIds",
+    "group": "search",
+    "title": "Company ids in results: companyId, institutionId, NAIC code and statutory key",
+    "where": "entitiesFrom (companies are remembered by companyId) and the byCompany count in searchFilings, _shared/filings.ts; spStatEntityIds in parseSearch",
+    "outcome": "holds",
+    "found": "Filled on: companyId 100.0%, institutionId 100.0%, naicCompanyCode 100.0%, spStatEntityId 100.0%. companyId is always a whole number; institutionId is. spStatEntityId: A9999 (100.0%); it looks like the statutory keys in the company list. 3 of 3 institution ids in results are in the company list.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "doc.type",
+    "group": "document",
+    "title": "What a document download is",
+    "where": "the document action in snl-filings/index.ts; read in _shared/chat.ts",
+    "outcome": "holds",
+    "found": "Content type application/pdf; 9 KB; the file is a PDF. A file name came with it, ending .pdf. Answer headers: content-disposition, content-length and content-type.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "doc.pages",
+    "group": "document",
+    "title": "The pages column is the document's page count",
+    "where": "read in _shared/chat.ts (it takes the larger of the two); countPdfPages in _shared/chat.ts",
+    "outcome": "holds",
+    "found": "The row said 30 pages; the file has 30 pages.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "doc.text",
+    "group": "document",
+    "title": "Whether the PDF has text Claude can read",
+    "where": "read in _shared/chat.ts",
+    "outcome": "info",
+    "found": "Text is drawn on 30 of the 30 pages read, and readable as letters on 30. Reading it took about 1 ms.",
+    "verdict": "For the record: a text layer is there."
+   },
+   {
+    "id": "doc.sections",
+    "group": "document",
+    "title": "SERFF section headings and the pages they are on",
+    "where": "document prompt text in _shared/chat.ts",
+    "outcome": "info",
+    "found": "Filing at a glance on page 1, General information on page 2, Disposition on page 7, Rate information on page 3, Rate/rule schedule on page 4, Form schedule on page 5 and Supporting documentation on page 6. Not found: Company and contact, Filing fees and Correspondence summary.",
+    "verdict": "For the record."
+   },
+   {
+    "id": "dir.counts",
+    "group": "directory",
+    "title": "What the company list holds",
+    "where": "scripts/companies-lib.mjs; resolveEntity and resolveMany in _shared/filings.ts",
+    "outcome": "info",
+    "found": "4 companies. With a company id 0, an institution id 4, a statutory key 4, a NAIC company code 0, a group code 0, a group name 4. 4 can be searched for filings. 2 groups; the largest have 3 and 1 companies; 0 have more than 50.",
+    "verdict": "For the record."
+   }
+  ],
+  "columns": [
+   {
+    "name": "serffFilingEntityEventId",
+    "filled": "100.0%",
+    "shapes": "whole number, 4 digits (100.0%)"
+   },
+   {
+    "name": "serffFilingEventId",
+    "filled": "100.0%",
+    "shapes": "whole number, 4 digits (100.0%)"
+   },
+   {
+    "name": "trackingNumber",
+    "filled": "100.0%",
+    "shapes": "AAAA-999999999 (100.0%)"
+   },
+   {
+    "name": "sfcNumber",
+    "filled": "0.0%",
+    "shapes": "empty (100.0%)"
+   },
+   {
+    "name": "institutionId",
+    "filled": "100.0%",
+    "shapes": "whole number, 6 digits (100.0%)"
+   },
+   {
+    "name": "spStatEntityId",
+    "filled": "100.0%",
+    "shapes": "A9999 (100.0%)"
+   },
+   {
+    "name": "naicCompanyCode",
+    "filled": "100.0%",
+    "shapes": "digits only, as text, 5 digits (100.0%)"
+   },
+   {
+    "name": "companyId",
+    "filled": "100.0%",
+    "shapes": "whole number, 7 digits (100.0%)"
+   },
+   {
+    "name": "companyName",
+    "filled": "100.0%",
+    "shapes": "text, 19 to 26 characters (100.0%)"
+   },
+   {
+    "name": "naicGroupCode",
+    "filled": "81.8%",
+    "shapes": "digits only, as text, 4 digits (81.8%); empty (18.2%)"
+   },
+   {
+    "name": "naicGroupName",
+    "filled": "81.8%",
+    "shapes": "text, 22 characters (81.8%); empty (18.2%)"
+   },
+   {
+    "name": "serffFilingStateId",
+    "filled": "100.0%",
+    "shapes": "text, 2 characters (100.0%)"
+   },
+   {
+    "name": "serffFilingState",
+    "filled": "100.0%",
+    "shapes": "text, 5 to 7 characters (100.0%)"
+   },
+   {
+    "name": "typeOfInsuranceId",
+    "filled": "100.0%",
+    "shapes": "whole number, 1 to 2 digits (100.0%)"
+   },
+   {
+    "name": "typeOfInsurance",
+    "filled": "100.0%",
+    "shapes": "text, 10 to 13 characters (100.0%)"
+   },
+   {
+    "name": "subTypeOfInsurance",
+    "filled": "100.0%",
+    "shapes": "text, 22 to 25 characters (100.0%)"
+   },
+   {
+    "name": "dateSubmitted",
+    "filled": "100.0%",
+    "shapes": "YYYY-MM-DD (100.0%)"
+   },
+   {
+    "name": "publishDate",
+    "filled": "100.0%",
+    "shapes": "YYYY-MM-DD (100.0%)"
+   },
+   {
+    "name": "renewBusReqEffDate",
+    "filled": "90.9%",
+    "shapes": "YYYY-MM-DD (90.9%); empty (9.1%)"
+   },
+   {
+    "name": "newBusReqEffDate",
+    "filled": "90.9%",
+    "shapes": "YYYY-MM-DD (90.9%); empty (9.1%)"
+   },
+   {
+    "name": "filingStatusId",
+    "filled": "100.0%",
+    "shapes": "whole number, 1 digit (100.0%)"
+   },
+   {
+    "name": "filingStatus",
+    "filled": "100.0%",
+    "shapes": "text, 7 to 17 characters (100.0%)"
+   },
+   {
+    "name": "serffFilingTypeId",
+    "filled": "100.0%",
+    "shapes": "whole number, 1 digit (100.0%)"
+   },
+   {
+    "name": "serffFilingType",
+    "filled": "100.0%",
+    "shapes": "text, 4 characters (100.0%)"
+   },
+   {
+    "name": "overallRateImpact",
+    "filled": "36.4%",
+    "shapes": "empty (63.6%); decimal number (18.2%); whole number, 1 digit (18.2%)"
+   },
+   {
+    "name": "dispOverallRateImpact",
+    "filled": "36.4%",
+    "shapes": "empty (63.6%); number followed by % (36.4%)"
+   },
+   {
+    "name": "filingDescription",
+    "filled": "100.0%",
+    "shapes": "text, 23 to 121 characters (100.0%)"
+   },
+   {
+    "name": "documentId",
+    "filled": "90.9%",
+    "shapes": "whole number, 8 digits (90.9%); empty (9.1%)"
+   },
+   {
+    "name": "filingVersionId",
+    "filled": "100.0%",
+    "shapes": "36-character id (8-4-4-4-12 letters and digits) (100.0%)"
+   },
+   {
+    "name": "pages",
+    "filled": "90.9%",
+    "shapes": "whole number, 2 to 3 digits (90.9%); empty (9.1%)"
+   }
+  ],
+  "notCovered": [
+   "What S&P answers to a wrong password, and whether a refused sign-in carries an S&P reference: this check never sends a wrong password, so it can't lock the account.",
+   "How long S&P locks an account, and how long a refresh token stays usable: these take a lock or several days to see.",
+   "How S&P counts requests and when its day starts: only S&P can say (any limit figures S&P sends with an answer are listed under search results).",
+   "Whether S&P limits access to fixed IP addresses, and everything about Snowflake."
+  ]
+ },
+ "differs": {
+  "configured": true,
+  "ranAt": "2026-11-13T12:00:00.000Z",
+  "account": "trial",
+  "limits": {
+   "hour": 500,
+   "day": 12000
+  },
+  "used": {
+   "hour": 4,
+   "day": 4
+  },
+  "requests": 4,
+  "maxRequests": 6,
+  "seconds": 3,
+  "stopped": null,
+  "basis": "Based on no saved searches, 2 rows from one live search, 4 companies in the company list and one document.",
+  "summary": "10 of 18 assumptions checked hold; 8 differ. 1 couldn't be checked this time.",
+  "counts": {
+   "holds": 10,
+   "differs": 8,
+   "unknown": 1,
+   "info": 4
+  },
+  "findings": [
+   {
+    "id": "signin.expiry",
+    "group": "signin",
+    "title": "How long a token lasts (expires_in_seconds)",
+    "where": "lifetimeMs and keep in _shared/spgmi.ts",
+    "outcome": "holds",
+    "found": "It came back as text of digits, about 60 minutes. The sign-in answer's keys: scope, token_type, access_token, expires_in_seconds and refresh_token.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "signin.refresh",
+    "group": "signin",
+    "title": "A refresh token with the sign-in",
+    "where": "keep and refresh in _shared/spgmi.ts",
+    "outcome": "holds",
+    "found": "A refresh token came back, as text.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.typeOfInsurance",
+    "group": "lists",
+    "title": "Types of insurance: which column is the id and which the name",
+    "where": "referenceOptions in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "2 rows (saved). Columns: typeOfInsuranceId and typeOfInsurance. The app takes typeOfInsuranceId as the id (whole number, 1 to 2 digits (100.0%)) and typeOfInsurance as the name.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.filingStatus",
+    "group": "lists",
+    "title": "Statuses: which column is the id and which the name",
+    "where": "referenceOptions in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "3 rows (saved). Columns: filingStatusId and filingStatus. The app takes filingStatusId as the id (whole number, 1 digit (100.0%)) and filingStatus as the name.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.serffFilingState",
+    "group": "lists",
+    "title": "States: which column is the id and which the name",
+    "where": "referenceOptions in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "3 rows (saved). Columns: serffFilingStateId and serffFilingState. The app takes serffFilingStateId as the id (text, 2 characters (100.0%)) and serffFilingState as the name.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.serffFilingType",
+    "group": "lists",
+    "title": "Filing types: which column is the id and which the name",
+    "where": "referenceOptions in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "4 rows (saved). Columns: serffFilingTypeId and serffFilingType. The app takes serffFilingTypeId as the id (whole number, 1 digit (100.0%)) and serffFilingType as the name.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.idTypes",
+    "group": "lists",
+    "title": "Ids are whole numbers; states are two-letter codes",
+    "where": "ints and the state check in parseSearch, _shared/filings.ts (and the state list in web/index.html, stateOptions)",
+    "outcome": "holds",
+    "found": "Ids of types of insurance: whole number, 1 to 2 digits (100.0%). Ids of statuses: whole number, 1 digit (100.0%). Ids of filing types: whole number, 1 digit (100.0%). State ids: text, 2 characters (100.0%).",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.florida",
+    "group": "lists",
+    "title": "Florida, and the 50 states and DC, in S&P's state list",
+    "where": "the first live search (README); stateOptions in web/index.html",
+    "outcome": "holds",
+    "found": "3 states in the list. Missing of the 50 states and DC: AL, AK, AZ, AR, CA, CO, CT, DE, DC, HI, ID, IL, IN, IA, KS, KY, LA, ME, MD, MA, MI, MN, MS, MO, MT, NE, NV, NH, NJ, NM, NY, NC, ND, OH, OK, OR, PA, RI, SC, SD, TN, UT, VT, VA, WA, WV, WI, WY.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "search.columns",
+    "group": "search",
+    "title": "The result columns",
+    "where": "SEARCH_COLUMNS and mapRows in _shared/filings.ts",
+    "outcome": "differs",
+    "found": "30 columns in the live answer. Not there: sfcNumber. Not known to the app: newColumnFromSp.",
+    "verdict": "Differs: the app reads 1 column S&P didn't send, shown as n/d. Update SEARCH_COLUMNS."
+   },
+   {
+    "id": "search.paging",
+    "group": "search",
+    "title": "Paging fields in the answer (totalPages and so on)",
+    "where": "searchFilings in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "Top-level keys: numCols, numRows, currentPageSize, currentPage, totalPages, headers and rows. totalPages came back as 2.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "search.pageBase",
+    "group": "search",
+    "title": "Pages of results are numbered from 1",
+    "where": "the page loop (let page = 1) in searchFilings, _shared/filings.ts",
+    "outcome": "differs",
+    "found": "S&P said 2 pages of 20. Page 1 had 2 rows; page 2, the last if pages start at 1, had 0 rows. For page 1, currentPage said 1.",
+    "verdict": "Differs: the last page by S&P's count came back empty, which means pages start at 0. Start the page loop at 0 and stop at totalPages - 1, or every search misses its first page."
+   },
+   {
+    "id": "search.dates",
+    "group": "search",
+    "title": "Dates look like 2026-01-31",
+    "where": "the newest-first sort in searchFilings (_shared/filings.ts), dateOf in _shared/profile.ts, parseDay in web/index.html",
+    "outcome": "differs",
+    "found": "dateSubmitted: YYYY-MM-DD (100.0%). publishDate: M/D/YYYY (100.0%). renewBusReqEffDate: YYYY-MM-DD (100.0%). newBusReqEffDate: YYYY-MM-DD (100.0%).",
+    "verdict": "Differs: publishDate isn't always YYYY-MM-DD. The page reads M/D/YYYY too, but the newest-first sort and the profile's dates need YYYY-MM-DD; convert them in mapRows."
+   },
+   {
+    "id": "search.rateImpact",
+    "group": "search",
+    "title": "Rate impact: overallRateImpact is in percentage points, like the display value",
+    "where": "rateImpact and the rate sort in web/index.html; rateImpactOf in _shared/profile.ts",
+    "outcome": "differs",
+    "found": "overallRateImpact: decimal number (100.0%) (lowest 0.045, median 0.045, highest 0.045). dispOverallRateImpact: number followed by % (100.0%). Of 2 rows with both and not zero, 0 have the same number, 2 have the display value 100 times overallRateImpact. 0 rows have overallRateImpact with no display value.",
+    "verdict": "Differs: overallRateImpact is a fraction (0.045 for 4.5%). Multiply it by 100 where it is shown without the display value and in the rate sort."
+   },
+   {
+    "id": "search.versions",
+    "group": "search",
+    "title": "Rows that share a filingVersionId differ only by company",
+    "where": "dedupe in _shared/filings.ts",
+    "outcome": "differs",
+    "found": "In the live search, 2 of 2 rows share a filingVersionId with another row; between them these columns differ: companyName and serffFilingStateId.",
+    "verdict": "Differs: serffFilingStateId also differs, and dedupe keeps only the first row's. Keep one filing per filingVersionId and state, or list the differing values."
+   },
+   {
+    "id": "search.ids",
+    "group": "search",
+    "title": "What filingVersionId and documentId look like",
+    "where": "parseDocRef in _shared/filings.ts",
+    "outcome": "differs",
+    "found": "filingVersionId on 100.0% of rows: text, 16 characters (100.0%). documentId on 100.0%: whole number, 8 digits (100.0%). The app accepts 0 of 2 filingVersionIds and 2 of 2 documentIds.",
+    "verdict": "Differs: some ids wouldn't open their document. Widen the patterns in parseDocRef."
+   },
+   {
+    "id": "search.pages",
+    "group": "search",
+    "title": "The pages column",
+    "where": "read in _shared/chat.ts (Claude's page limits); LIMITS.docPages",
+    "outcome": "info",
+    "found": "On 100.0% of rows. Lowest 42, median 42, 90th percentile 42, highest 42. Over 100 pages: 0.0%; over 600: 0.0%.",
+    "verdict": "For the record. Whether it is the document's page count is checked under the document below."
+   },
+   {
+    "id": "search.perCompanyYear",
+    "group": "search",
+    "title": "Filings per company per year",
+    "where": "PAGE_SIZE and MAX_SEARCH_REQUESTS in _shared/filings.ts",
+    "outcome": "unknown",
+    "found": "No saved searches to count.",
+    "verdict": "Couldn't tell: no saved searches."
+   },
+   {
+    "id": "search.companyIds",
+    "group": "search",
+    "title": "Company ids in results: companyId, institutionId, NAIC code and statutory key",
+    "where": "entitiesFrom (companies are remembered by companyId) and the byCompany count in searchFilings, _shared/filings.ts; spStatEntityIds in parseSearch",
+    "outcome": "differs",
+    "found": "Filled on: companyId 0.0%, institutionId 100.0%, naicCompanyCode 100.0%, spStatEntityId 100.0%. companyId is always a whole number; institutionId is. spStatEntityId: A9999 (100.0%); it looks like the statutory keys in the company list. 1 of 1 institution id in results are in the company list.",
+    "verdict": "Differs: companyId is empty on 100.0% of rows, so entitiesFrom doesn't remember those companies (it keys them by companyId); key them by institutionId too."
+   },
+   {
+    "id": "doc.type",
+    "group": "document",
+    "title": "What a document download is",
+    "where": "the document action in snl-filings/index.ts; read in _shared/chat.ts",
+    "outcome": "holds",
+    "found": "Content type application/pdf; 9 KB; the file is a PDF. A file name came with it, ending .pdf. Answer headers: content-disposition, content-length and content-type.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "doc.pages",
+    "group": "document",
+    "title": "The pages column is the document's page count",
+    "where": "read in _shared/chat.ts (it takes the larger of the two); countPdfPages in _shared/chat.ts",
+    "outcome": "differs",
+    "found": "The row said 42 pages; the file has 30 pages.",
+    "verdict": "Differs by 12 pages. The app already uses the larger number for Claude's limits; say what pages means before relying on it elsewhere."
+   },
+   {
+    "id": "doc.text",
+    "group": "document",
+    "title": "Whether the PDF has text Claude can read",
+    "where": "read in _shared/chat.ts",
+    "outcome": "info",
+    "found": "Text is drawn on 30 of the 30 pages read, and readable as letters on 30. Reading it took about 1 ms.",
+    "verdict": "For the record: a text layer is there."
+   },
+   {
+    "id": "doc.sections",
+    "group": "document",
+    "title": "SERFF section headings and the pages they are on",
+    "where": "document prompt text in _shared/chat.ts",
+    "outcome": "info",
+    "found": "Filing at a glance on page 1, General information on page 2, Disposition on page 7, Rate information on page 3, Rate/rule schedule on page 4, Form schedule on page 5 and Supporting documentation on page 6. Not found: Company and contact, Filing fees and Correspondence summary.",
+    "verdict": "For the record."
+   },
+   {
+    "id": "dir.counts",
+    "group": "directory",
+    "title": "What the company list holds",
+    "where": "scripts/companies-lib.mjs; resolveEntity and resolveMany in _shared/filings.ts",
+    "outcome": "info",
+    "found": "4 companies. With a company id 0, an institution id 4, a statutory key 4, a NAIC company code 0, a group code 0, a group name 4. 4 can be searched for filings. 2 groups; the largest have 3 and 1 companies; 0 have more than 50.",
+    "verdict": "For the record."
+   }
+  ],
+  "columns": [
+   {
+    "name": "serffFilingEntityEventId",
+    "filled": "100.0%",
+    "shapes": "whole number, 4 digits (100.0%)"
+   },
+   {
+    "name": "serffFilingEventId",
+    "filled": "100.0%",
+    "shapes": "whole number, 4 digits (100.0%)"
+   },
+   {
+    "name": "trackingNumber",
+    "filled": "100.0%",
+    "shapes": "AAAA-999999999 (100.0%)"
+   },
+   {
+    "name": "sfcNumber",
+    "filled": "0.0%",
+    "shapes": "empty (100.0%)"
+   },
+   {
+    "name": "institutionId",
+    "filled": "100.0%",
+    "shapes": "whole number, 6 digits (100.0%)"
+   },
+   {
+    "name": "spStatEntityId",
+    "filled": "100.0%",
+    "shapes": "A9999 (100.0%)"
+   },
+   {
+    "name": "naicCompanyCode",
+    "filled": "100.0%",
+    "shapes": "digits only, as text, 5 digits (100.0%)"
+   },
+   {
+    "name": "companyId",
+    "filled": "0.0%",
+    "shapes": "empty (100.0%)"
+   },
+   {
+    "name": "companyName",
+    "filled": "100.0%",
+    "shapes": "text, 16 to 21 characters (100.0%)"
+   },
+   {
+    "name": "naicGroupCode",
+    "filled": "100.0%",
+    "shapes": "digits only, as text, 4 digits (100.0%)"
+   },
+   {
+    "name": "naicGroupName",
+    "filled": "100.0%",
+    "shapes": "text, 22 characters (100.0%)"
+   },
+   {
+    "name": "serffFilingStateId",
+    "filled": "100.0%",
+    "shapes": "text, 2 characters (100.0%)"
+   },
+   {
+    "name": "serffFilingState",
+    "filled": "100.0%",
+    "shapes": "text, 7 characters (100.0%)"
+   },
+   {
+    "name": "typeOfInsuranceId",
+    "filled": "100.0%",
+    "shapes": "whole number, 1 digit (100.0%)"
+   },
+   {
+    "name": "typeOfInsurance",
+    "filled": "100.0%",
+    "shapes": "text, 10 characters (100.0%)"
+   },
+   {
+    "name": "subTypeOfInsurance",
+    "filled": "100.0%",
+    "shapes": "text, 25 characters (100.0%)"
+   },
+   {
+    "name": "dateSubmitted",
+    "filled": "100.0%",
+    "shapes": "YYYY-MM-DD (100.0%)"
+   },
+   {
+    "name": "publishDate",
+    "filled": "100.0%",
+    "shapes": "M/D/YYYY (100.0%)"
+   },
+   {
+    "name": "renewBusReqEffDate",
+    "filled": "100.0%",
+    "shapes": "YYYY-MM-DD (100.0%)"
+   },
+   {
+    "name": "newBusReqEffDate",
+    "filled": "100.0%",
+    "shapes": "YYYY-MM-DD (100.0%)"
+   },
+   {
+    "name": "filingStatusId",
+    "filled": "100.0%",
+    "shapes": "whole number, 1 digit (100.0%)"
+   },
+   {
+    "name": "filingStatus",
+    "filled": "100.0%",
+    "shapes": "text, 17 characters (100.0%)"
+   },
+   {
+    "name": "serffFilingTypeId",
+    "filled": "100.0%",
+    "shapes": "whole number, 1 digit (100.0%)"
+   },
+   {
+    "name": "serffFilingType",
+    "filled": "100.0%",
+    "shapes": "text, 4 characters (100.0%)"
+   },
+   {
+    "name": "overallRateImpact",
+    "filled": "100.0%",
+    "shapes": "decimal number (100.0%)"
+   },
+   {
+    "name": "dispOverallRateImpact",
+    "filled": "100.0%",
+    "shapes": "number followed by % (100.0%)"
+   },
+   {
+    "name": "filingDescription",
+    "filled": "100.0%",
+    "shapes": "text, 119 characters (100.0%)"
+   },
+   {
+    "name": "documentId",
+    "filled": "100.0%",
+    "shapes": "whole number, 8 digits (100.0%)"
+   },
+   {
+    "name": "filingVersionId",
+    "filled": "100.0%",
+    "shapes": "text, 16 characters (100.0%)"
+   },
+   {
+    "name": "pages",
+    "filled": "100.0%",
+    "shapes": "whole number, 2 digits (100.0%)"
+   },
+   {
+    "name": "newColumnFromSp",
+    "filled": "0.0%",
+    "shapes": "empty (100.0%)"
+   }
+  ],
+  "notCovered": [
+   "What S&P answers to a wrong password, and whether a refused sign-in carries an S&P reference: this check never sends a wrong password, so it can't lock the account.",
+   "How long S&P locks an account, and how long a refresh token stays usable: these take a lock or several days to see.",
+   "How S&P counts requests and when its day starts: only S&P can say (any limit figures S&P sends with an answer are listed under search results).",
+   "Whether S&P limits access to fixed IP addresses, and everything about Snowflake."
+  ]
+ },
+ "stopped": {
+  "configured": true,
+  "ranAt": "2026-11-13T12:00:00.000Z",
+  "account": "trial",
+  "limits": {
+   "hour": 500,
+   "day": 12000
+  },
+  "used": {
+   "hour": 2,
+   "day": 2
+  },
+  "requests": 2,
+  "maxRequests": 6,
+  "seconds": 1,
+  "stopped": "Stopped at the live search: S&P refused the request (500). S&P reference: req-forced. What it learned before that is below.",
+  "basis": "Based on 1 saved search (8 rows), no live search, 4 companies in the company list and no document.",
+  "summary": "13 of 13 assumptions checked hold; 0 differ. 5 couldn't be checked this time.",
+  "counts": {
+   "holds": 13,
+   "differs": 0,
+   "unknown": 5,
+   "info": 3
+  },
+  "findings": [
+   {
+    "id": "signin.expiry",
+    "group": "signin",
+    "title": "How long a token lasts (expires_in_seconds)",
+    "where": "lifetimeMs and keep in _shared/spgmi.ts",
+    "outcome": "holds",
+    "found": "It came back as text of digits, about 60 minutes. The sign-in answer's keys: scope, token_type, access_token, expires_in_seconds and refresh_token.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "signin.refresh",
+    "group": "signin",
+    "title": "A refresh token with the sign-in",
+    "where": "keep and refresh in _shared/spgmi.ts",
+    "outcome": "holds",
+    "found": "A refresh token came back, as text.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.typeOfInsurance",
+    "group": "lists",
+    "title": "Types of insurance: which column is the id and which the name",
+    "where": "referenceOptions in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "2 rows (saved). Columns: typeOfInsuranceId and typeOfInsurance. The app takes typeOfInsuranceId as the id (whole number, 1 to 2 digits (100.0%)) and typeOfInsurance as the name.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.filingStatus",
+    "group": "lists",
+    "title": "Statuses: which column is the id and which the name",
+    "where": "referenceOptions in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "3 rows (saved). Columns: filingStatusId and filingStatus. The app takes filingStatusId as the id (whole number, 1 digit (100.0%)) and filingStatus as the name.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.serffFilingState",
+    "group": "lists",
+    "title": "States: which column is the id and which the name",
+    "where": "referenceOptions in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "3 rows (saved). Columns: serffFilingStateId and serffFilingState. The app takes serffFilingStateId as the id (text, 2 characters (100.0%)) and serffFilingState as the name.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.serffFilingType",
+    "group": "lists",
+    "title": "Filing types: which column is the id and which the name",
+    "where": "referenceOptions in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "4 rows (saved). Columns: serffFilingTypeId and serffFilingType. The app takes serffFilingTypeId as the id (whole number, 1 digit (100.0%)) and serffFilingType as the name.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.idTypes",
+    "group": "lists",
+    "title": "Ids are whole numbers; states are two-letter codes",
+    "where": "ints and the state check in parseSearch, _shared/filings.ts (and the state list in web/index.html, stateOptions)",
+    "outcome": "holds",
+    "found": "Ids of types of insurance: whole number, 1 to 2 digits (100.0%). Ids of statuses: whole number, 1 digit (100.0%). Ids of filing types: whole number, 1 digit (100.0%). State ids: text, 2 characters (100.0%).",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.florida",
+    "group": "lists",
+    "title": "Florida, and the 50 states and DC, in S&P's state list",
+    "where": "the first live search (README); stateOptions in web/index.html",
+    "outcome": "holds",
+    "found": "3 states in the list. Missing of the 50 states and DC: AL, AK, AZ, AR, CA, CO, CT, DE, DC, HI, ID, IL, IN, IA, KS, KY, LA, ME, MD, MA, MI, MN, MS, MO, MT, NE, NV, NH, NJ, NM, NY, NC, ND, OH, OK, OR, PA, RI, SC, SD, TN, UT, VT, VA, WA, WV, WI, WY.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "search.columns",
+    "group": "search",
+    "title": "The result columns",
+    "where": "SEARCH_COLUMNS and mapRows in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "30 columns in saved results. Every column the app reads is there.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "search.paging",
+    "group": "search",
+    "title": "Paging fields in the answer (totalPages and so on)",
+    "where": "searchFilings in _shared/filings.ts",
+    "outcome": "unknown",
+    "found": "Not reached: Stopped at the live search: S&P refused the request (500). S&P reference: req-forced. What it learned before that is below.",
+    "verdict": "Couldn't tell: no live search."
+   },
+   {
+    "id": "search.pageBase",
+    "group": "search",
+    "title": "Pages of results are numbered from 1",
+    "where": "the page loop (let page = 1) in searchFilings, _shared/filings.ts",
+    "outcome": "unknown",
+    "found": "Not reached: Stopped at the live search: S&P refused the request (500). S&P reference: req-forced. What it learned before that is below.",
+    "verdict": "Couldn't tell: no live search."
+   },
+   {
+    "id": "search.dates",
+    "group": "search",
+    "title": "Dates look like 2026-01-31",
+    "where": "the newest-first sort in searchFilings (_shared/filings.ts), dateOf in _shared/profile.ts, parseDay in web/index.html",
+    "outcome": "holds",
+    "found": "dateSubmitted: YYYY-MM-DD (100.0%). publishDate: YYYY-MM-DD (100.0%). renewBusReqEffDate: YYYY-MM-DD (87.5%); empty (12.5%). newBusReqEffDate: YYYY-MM-DD (87.5%); empty (12.5%).",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "search.rateImpact",
+    "group": "search",
+    "title": "Rate impact: overallRateImpact is in percentage points, like the display value",
+    "where": "rateImpact and the rate sort in web/index.html; rateImpactOf in _shared/profile.ts",
+    "outcome": "holds",
+    "found": "overallRateImpact: empty (75.0%); decimal number (12.5%); whole number, 1 digit (12.5%) (lowest -2, median -2, highest 6.5). dispOverallRateImpact: empty (75.0%); number followed by % (25.0%). Of 2 rows with both and not zero, 2 have the same number, 0 have the display value 100 times overallRateImpact. 0 rows have overallRateImpact with no display value.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "search.versions",
+    "group": "search",
+    "title": "Rows that share a filingVersionId differ only by company",
+    "where": "dedupe in _shared/filings.ts",
+    "outcome": "unknown",
+    "found": "No live rows. In saved results, 1 of 8 filings (12.5%) name more than one company.",
+    "verdict": "Couldn't tell: no two live rows shared a filingVersionId."
+   },
+   {
+    "id": "search.ids",
+    "group": "search",
+    "title": "What filingVersionId and documentId look like",
+    "where": "parseDocRef in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "filingVersionId on 100.0% of rows: 36-character id (8-4-4-4-12 letters and digits) (100.0%). documentId on 87.5%: whole number, 8 digits (100.0%). The app accepts 8 of 8 filingVersionIds and 7 of 7 documentIds.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "search.pages",
+    "group": "search",
+    "title": "The pages column",
+    "where": "read in _shared/chat.ts (Claude's page limits); LIMITS.docPages",
+    "outcome": "info",
+    "found": "On 87.5% of rows. Lowest 25, median 40, 90th percentile 310, highest 310. Over 100 pages: 14.3%; over 600: 0.0%.",
+    "verdict": "For the record. Whether it is the document's page count is checked under the document below."
+   },
+   {
+    "id": "search.perCompanyYear",
+    "group": "search",
+    "title": "Filings per company per year",
+    "where": "PAGE_SIZE and MAX_SEARCH_REQUESTS in _shared/filings.ts",
+    "outcome": "info",
+    "found": "Across 7 company-years in saved results: median 1, 90th percentile 3, highest 3. A search asks for 500 rows a page.",
+    "verdict": "For the record."
+   },
+   {
+    "id": "search.companyIds",
+    "group": "search",
+    "title": "Company ids in results: companyId, institutionId, NAIC code and statutory key",
+    "where": "entitiesFrom (companies are remembered by companyId) and the byCompany count in searchFilings, _shared/filings.ts; spStatEntityIds in parseSearch",
+    "outcome": "holds",
+    "found": "Filled on: companyId 100.0%, institutionId 100.0%, naicCompanyCode 100.0%, spStatEntityId 100.0%. companyId is always a whole number; institutionId is. spStatEntityId: A9999 (100.0%); it looks like the statutory keys in the company list. 3 of 3 institution ids in results are in the company list.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "doc.type",
+    "group": "document",
+    "title": "What a document download is",
+    "where": "the document action in snl-filings/index.ts; read in _shared/chat.ts",
+    "outcome": "unknown",
+    "found": "Not reached: Stopped at the live search: S&P refused the request (500). S&P reference: req-forced. What it learned before that is below.",
+    "verdict": "Couldn't tell: no document."
+   },
+   {
+    "id": "doc.pages",
+    "group": "document",
+    "title": "The pages column is the document's page count",
+    "where": "read in _shared/chat.ts (it takes the larger of the two)",
+    "outcome": "unknown",
+    "found": "Not reached: Stopped at the live search: S&P refused the request (500). S&P reference: req-forced. What it learned before that is below.",
+    "verdict": "Couldn't tell: no document."
+   },
+   {
+    "id": "dir.counts",
+    "group": "directory",
+    "title": "What the company list holds",
+    "where": "scripts/companies-lib.mjs; resolveEntity and resolveMany in _shared/filings.ts",
+    "outcome": "info",
+    "found": "4 companies. With a company id 0, an institution id 4, a statutory key 4, a NAIC company code 0, a group code 0, a group name 4. 4 can be searched for filings. 2 groups; the largest have 3 and 1 companies; 0 have more than 50.",
+    "verdict": "For the record."
+   }
+  ],
+  "columns": [
+   {
+    "name": "serffFilingEntityEventId",
+    "filled": "100.0%",
+    "shapes": "whole number, 4 digits (100.0%)"
+   },
+   {
+    "name": "serffFilingEventId",
+    "filled": "100.0%",
+    "shapes": "whole number, 4 digits (100.0%)"
+   },
+   {
+    "name": "trackingNumber",
+    "filled": "100.0%",
+    "shapes": "AAAA-999999999 (100.0%)"
+   },
+   {
+    "name": "sfcNumber",
+    "filled": "0.0%",
+    "shapes": "empty (100.0%)"
+   },
+   {
+    "name": "institutionId",
+    "filled": "100.0%",
+    "shapes": "whole number, 6 digits (100.0%)"
+   },
+   {
+    "name": "spStatEntityId",
+    "filled": "100.0%",
+    "shapes": "A9999 (100.0%)"
+   },
+   {
+    "name": "naicCompanyCode",
+    "filled": "100.0%",
+    "shapes": "digits only, as text, 5 digits (100.0%)"
+   },
+   {
+    "name": "companyId",
+    "filled": "100.0%",
+    "shapes": "whole number, 7 digits (100.0%)"
+   },
+   {
+    "name": "companyName",
+    "filled": "100.0%",
+    "shapes": "text, 19 to 26 characters (100.0%)"
+   },
+   {
+    "name": "naicGroupCode",
+    "filled": "75.0%",
+    "shapes": "digits only, as text, 4 digits (75.0%); empty (25.0%)"
+   },
+   {
+    "name": "naicGroupName",
+    "filled": "75.0%",
+    "shapes": "text, 22 characters (75.0%); empty (25.0%)"
+   },
+   {
+    "name": "serffFilingStateId",
+    "filled": "100.0%",
+    "shapes": "text, 2 characters (100.0%)"
+   },
+   {
+    "name": "serffFilingState",
+    "filled": "100.0%",
+    "shapes": "text, 5 to 7 characters (100.0%)"
+   },
+   {
+    "name": "typeOfInsuranceId",
+    "filled": "100.0%",
+    "shapes": "whole number, 1 to 2 digits (100.0%)"
+   },
+   {
+    "name": "typeOfInsurance",
+    "filled": "100.0%",
+    "shapes": "text, 10 to 13 characters (100.0%)"
+   },
+   {
+    "name": "subTypeOfInsurance",
+    "filled": "100.0%",
+    "shapes": "text, 22 to 25 characters (100.0%)"
+   },
+   {
+    "name": "dateSubmitted",
+    "filled": "100.0%",
+    "shapes": "YYYY-MM-DD (100.0%)"
+   },
+   {
+    "name": "publishDate",
+    "filled": "100.0%",
+    "shapes": "YYYY-MM-DD (100.0%)"
+   },
+   {
+    "name": "renewBusReqEffDate",
+    "filled": "87.5%",
+    "shapes": "YYYY-MM-DD (87.5%); empty (12.5%)"
+   },
+   {
+    "name": "newBusReqEffDate",
+    "filled": "87.5%",
+    "shapes": "YYYY-MM-DD (87.5%); empty (12.5%)"
+   },
+   {
+    "name": "filingStatusId",
+    "filled": "100.0%",
+    "shapes": "whole number, 1 digit (100.0%)"
+   },
+   {
+    "name": "filingStatus",
+    "filled": "100.0%",
+    "shapes": "text, 7 to 17 characters (100.0%)"
+   },
+   {
+    "name": "serffFilingTypeId",
+    "filled": "100.0%",
+    "shapes": "whole number, 1 digit (100.0%)"
+   },
+   {
+    "name": "serffFilingType",
+    "filled": "100.0%",
+    "shapes": "text, 4 characters (100.0%)"
+   },
+   {
+    "name": "overallRateImpact",
+    "filled": "25.0%",
+    "shapes": "empty (75.0%); decimal number (12.5%); whole number, 1 digit (12.5%)"
+   },
+   {
+    "name": "dispOverallRateImpact",
+    "filled": "25.0%",
+    "shapes": "empty (75.0%); number followed by % (25.0%)"
+   },
+   {
+    "name": "filingDescription",
+    "filled": "100.0%",
+    "shapes": "text, 23 to 121 characters (100.0%)"
+   },
+   {
+    "name": "documentId",
+    "filled": "87.5%",
+    "shapes": "whole number, 8 digits (87.5%); empty (12.5%)"
+   },
+   {
+    "name": "filingVersionId",
+    "filled": "100.0%",
+    "shapes": "36-character id (8-4-4-4-12 letters and digits) (100.0%)"
+   },
+   {
+    "name": "pages",
+    "filled": "87.5%",
+    "shapes": "whole number, 2 to 3 digits (87.5%); empty (12.5%)"
+   }
+  ],
+  "notCovered": [
+   "What S&P answers to a wrong password, and whether a refused sign-in carries an S&P reference: this check never sends a wrong password, so it can't lock the account.",
+   "How long S&P locks an account, and how long a refresh token stays usable: these take a lock or several days to see.",
+   "How S&P counts requests and when its day starts: only S&P can say (any limit figures S&P sends with an answer are listed under search results).",
+   "Whether S&P limits access to fixed IP addresses, and everything about Snowflake."
+  ]
+ },
+ "notConfigured": {
+  "configured": false,
+  "ranAt": "2026-11-13T12:00:00.000Z",
+  "account": "trial",
+  "limits": {
+   "hour": 500,
+   "day": 12000
+  },
+  "used": {
+   "hour": 0,
+   "day": 0
+  },
+  "requests": 0,
+  "maxRequests": 6,
+  "seconds": 0,
+  "stopped": "S&P isn't set up yet, so the Live check asked S&P nothing. When the S&P secrets are set (README, step 5), run it again. Below is what it could read from results the app has already saved and from the company list.",
+  "basis": "Based on 1 saved search (8 rows), no live search, 4 companies in the company list and no document.",
+  "summary": "S&P isn't set up yet, so the Live check asked S&P nothing. When the S&P secrets are set (README, step 5), run it again. Below is what it could read from results the app has already saved and from the company list.",
+  "counts": {
+   "holds": 11,
+   "differs": 0,
+   "unknown": 7,
+   "info": 3
+  },
+  "findings": [
+   {
+    "id": "signin.expiry",
+    "group": "signin",
+    "title": "How long a token lasts (expires_in_seconds)",
+    "where": "lifetimeMs and keep in _shared/spgmi.ts",
+    "outcome": "unknown",
+    "found": "Not reached: S&P isn't set up yet, so the Live check asked S&P nothing. When the S&P secrets are set (README, step 5), run it again. Below is what it could read from results the app has already saved and from the company list.",
+    "verdict": "Couldn't tell: the sign-in wasn't seen."
+   },
+   {
+    "id": "signin.refresh",
+    "group": "signin",
+    "title": "A refresh token with the sign-in",
+    "where": "keep and refresh in _shared/spgmi.ts",
+    "outcome": "unknown",
+    "found": "Not reached: S&P isn't set up yet, so the Live check asked S&P nothing. When the S&P secrets are set (README, step 5), run it again. Below is what it could read from results the app has already saved and from the company list.",
+    "verdict": "Couldn't tell: the sign-in wasn't seen."
+   },
+   {
+    "id": "lists.typeOfInsurance",
+    "group": "lists",
+    "title": "Types of insurance: which column is the id and which the name",
+    "where": "referenceOptions in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "2 rows (saved). Columns: typeOfInsuranceId and typeOfInsurance. The app takes typeOfInsuranceId as the id (whole number, 1 to 2 digits (100.0%)) and typeOfInsurance as the name.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.filingStatus",
+    "group": "lists",
+    "title": "Statuses: which column is the id and which the name",
+    "where": "referenceOptions in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "3 rows (saved). Columns: filingStatusId and filingStatus. The app takes filingStatusId as the id (whole number, 1 digit (100.0%)) and filingStatus as the name.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.serffFilingState",
+    "group": "lists",
+    "title": "States: which column is the id and which the name",
+    "where": "referenceOptions in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "3 rows (saved). Columns: serffFilingStateId and serffFilingState. The app takes serffFilingStateId as the id (text, 2 characters (100.0%)) and serffFilingState as the name.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.serffFilingType",
+    "group": "lists",
+    "title": "Filing types: which column is the id and which the name",
+    "where": "referenceOptions in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "4 rows (saved). Columns: serffFilingTypeId and serffFilingType. The app takes serffFilingTypeId as the id (whole number, 1 digit (100.0%)) and serffFilingType as the name.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.idTypes",
+    "group": "lists",
+    "title": "Ids are whole numbers; states are two-letter codes",
+    "where": "ints and the state check in parseSearch, _shared/filings.ts (and the state list in web/index.html, stateOptions)",
+    "outcome": "holds",
+    "found": "Ids of types of insurance: whole number, 1 to 2 digits (100.0%). Ids of statuses: whole number, 1 digit (100.0%). Ids of filing types: whole number, 1 digit (100.0%). State ids: text, 2 characters (100.0%).",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "lists.florida",
+    "group": "lists",
+    "title": "Florida, and the 50 states and DC, in S&P's state list",
+    "where": "the first live search (README); stateOptions in web/index.html",
+    "outcome": "holds",
+    "found": "3 states in the list. Missing of the 50 states and DC: AL, AK, AZ, AR, CA, CO, CT, DE, DC, HI, ID, IL, IN, IA, KS, KY, LA, ME, MD, MA, MI, MN, MS, MO, MT, NE, NV, NH, NJ, NM, NY, NC, ND, OH, OK, OR, PA, RI, SC, SD, TN, UT, VT, VA, WA, WV, WI, WY.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "search.columns",
+    "group": "search",
+    "title": "The result columns",
+    "where": "SEARCH_COLUMNS and mapRows in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "30 columns in saved results. Every column the app reads is there.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "search.paging",
+    "group": "search",
+    "title": "Paging fields in the answer (totalPages and so on)",
+    "where": "searchFilings in _shared/filings.ts",
+    "outcome": "unknown",
+    "found": "Not reached: S&P isn't set up yet, so the Live check asked S&P nothing. When the S&P secrets are set (README, step 5), run it again. Below is what it could read from results the app has already saved and from the company list.",
+    "verdict": "Couldn't tell: no live search."
+   },
+   {
+    "id": "search.pageBase",
+    "group": "search",
+    "title": "Pages of results are numbered from 1",
+    "where": "the page loop (let page = 1) in searchFilings, _shared/filings.ts",
+    "outcome": "unknown",
+    "found": "Not reached: S&P isn't set up yet, so the Live check asked S&P nothing. When the S&P secrets are set (README, step 5), run it again. Below is what it could read from results the app has already saved and from the company list.",
+    "verdict": "Couldn't tell: no live search."
+   },
+   {
+    "id": "search.dates",
+    "group": "search",
+    "title": "Dates look like 2026-01-31",
+    "where": "the newest-first sort in searchFilings (_shared/filings.ts), dateOf in _shared/profile.ts, parseDay in web/index.html",
+    "outcome": "holds",
+    "found": "dateSubmitted: YYYY-MM-DD (100.0%). publishDate: YYYY-MM-DD (100.0%). renewBusReqEffDate: YYYY-MM-DD (87.5%); empty (12.5%). newBusReqEffDate: YYYY-MM-DD (87.5%); empty (12.5%).",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "search.rateImpact",
+    "group": "search",
+    "title": "Rate impact: overallRateImpact is in percentage points, like the display value",
+    "where": "rateImpact and the rate sort in web/index.html; rateImpactOf in _shared/profile.ts",
+    "outcome": "holds",
+    "found": "overallRateImpact: empty (75.0%); decimal number (12.5%); whole number, 1 digit (12.5%) (lowest -2, median -2, highest 6.5). dispOverallRateImpact: empty (75.0%); number followed by % (25.0%). Of 2 rows with both and not zero, 2 have the same number, 0 have the display value 100 times overallRateImpact. 0 rows have overallRateImpact with no display value.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "search.versions",
+    "group": "search",
+    "title": "Rows that share a filingVersionId differ only by company",
+    "where": "dedupe in _shared/filings.ts",
+    "outcome": "unknown",
+    "found": "No live rows. In saved results, 1 of 8 filings (12.5%) name more than one company.",
+    "verdict": "Couldn't tell: no two live rows shared a filingVersionId."
+   },
+   {
+    "id": "search.ids",
+    "group": "search",
+    "title": "What filingVersionId and documentId look like",
+    "where": "parseDocRef in _shared/filings.ts",
+    "outcome": "holds",
+    "found": "filingVersionId on 100.0% of rows: 36-character id (8-4-4-4-12 letters and digits) (100.0%). documentId on 87.5%: whole number, 8 digits (100.0%). The app accepts 8 of 8 filingVersionIds and 7 of 7 documentIds.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "search.pages",
+    "group": "search",
+    "title": "The pages column",
+    "where": "read in _shared/chat.ts (Claude's page limits); LIMITS.docPages",
+    "outcome": "info",
+    "found": "On 87.5% of rows. Lowest 25, median 40, 90th percentile 310, highest 310. Over 100 pages: 14.3%; over 600: 0.0%.",
+    "verdict": "For the record. Whether it is the document's page count is checked under the document below."
+   },
+   {
+    "id": "search.perCompanyYear",
+    "group": "search",
+    "title": "Filings per company per year",
+    "where": "PAGE_SIZE and MAX_SEARCH_REQUESTS in _shared/filings.ts",
+    "outcome": "info",
+    "found": "Across 7 company-years in saved results: median 1, 90th percentile 3, highest 3. A search asks for 500 rows a page.",
+    "verdict": "For the record."
+   },
+   {
+    "id": "search.companyIds",
+    "group": "search",
+    "title": "Company ids in results: companyId, institutionId, NAIC code and statutory key",
+    "where": "entitiesFrom (companies are remembered by companyId) and the byCompany count in searchFilings, _shared/filings.ts; spStatEntityIds in parseSearch",
+    "outcome": "holds",
+    "found": "Filled on: companyId 100.0%, institutionId 100.0%, naicCompanyCode 100.0%, spStatEntityId 100.0%. companyId is always a whole number; institutionId is. spStatEntityId: A9999 (100.0%); it looks like the statutory keys in the company list. 3 of 3 institution ids in results are in the company list.",
+    "verdict": "As the app assumes."
+   },
+   {
+    "id": "doc.type",
+    "group": "document",
+    "title": "What a document download is",
+    "where": "the document action in snl-filings/index.ts; read in _shared/chat.ts",
+    "outcome": "unknown",
+    "found": "Not reached: S&P isn't set up yet, so the Live check asked S&P nothing. When the S&P secrets are set (README, step 5), run it again. Below is what it could read from results the app has already saved and from the company list.",
+    "verdict": "Couldn't tell: no document."
+   },
+   {
+    "id": "doc.pages",
+    "group": "document",
+    "title": "The pages column is the document's page count",
+    "where": "read in _shared/chat.ts (it takes the larger of the two)",
+    "outcome": "unknown",
+    "found": "Not reached: S&P isn't set up yet, so the Live check asked S&P nothing. When the S&P secrets are set (README, step 5), run it again. Below is what it could read from results the app has already saved and from the company list.",
+    "verdict": "Couldn't tell: no document."
+   },
+   {
+    "id": "dir.counts",
+    "group": "directory",
+    "title": "What the company list holds",
+    "where": "scripts/companies-lib.mjs; resolveEntity and resolveMany in _shared/filings.ts",
+    "outcome": "info",
+    "found": "4 companies. With a company id 0, an institution id 4, a statutory key 4, a NAIC company code 0, a group code 0, a group name 4. 4 can be searched for filings. 2 groups; the largest have 3 and 1 companies; 0 have more than 50.",
+    "verdict": "For the record."
+   }
+  ],
+  "columns": [
+   {
+    "name": "serffFilingEntityEventId",
+    "filled": "100.0%",
+    "shapes": "whole number, 4 digits (100.0%)"
+   },
+   {
+    "name": "serffFilingEventId",
+    "filled": "100.0%",
+    "shapes": "whole number, 4 digits (100.0%)"
+   },
+   {
+    "name": "trackingNumber",
+    "filled": "100.0%",
+    "shapes": "AAAA-999999999 (100.0%)"
+   },
+   {
+    "name": "sfcNumber",
+    "filled": "0.0%",
+    "shapes": "empty (100.0%)"
+   },
+   {
+    "name": "institutionId",
+    "filled": "100.0%",
+    "shapes": "whole number, 6 digits (100.0%)"
+   },
+   {
+    "name": "spStatEntityId",
+    "filled": "100.0%",
+    "shapes": "A9999 (100.0%)"
+   },
+   {
+    "name": "naicCompanyCode",
+    "filled": "100.0%",
+    "shapes": "digits only, as text, 5 digits (100.0%)"
+   },
+   {
+    "name": "companyId",
+    "filled": "100.0%",
+    "shapes": "whole number, 7 digits (100.0%)"
+   },
+   {
+    "name": "companyName",
+    "filled": "100.0%",
+    "shapes": "text, 19 to 26 characters (100.0%)"
+   },
+   {
+    "name": "naicGroupCode",
+    "filled": "75.0%",
+    "shapes": "digits only, as text, 4 digits (75.0%); empty (25.0%)"
+   },
+   {
+    "name": "naicGroupName",
+    "filled": "75.0%",
+    "shapes": "text, 22 characters (75.0%); empty (25.0%)"
+   },
+   {
+    "name": "serffFilingStateId",
+    "filled": "100.0%",
+    "shapes": "text, 2 characters (100.0%)"
+   },
+   {
+    "name": "serffFilingState",
+    "filled": "100.0%",
+    "shapes": "text, 5 to 7 characters (100.0%)"
+   },
+   {
+    "name": "typeOfInsuranceId",
+    "filled": "100.0%",
+    "shapes": "whole number, 1 to 2 digits (100.0%)"
+   },
+   {
+    "name": "typeOfInsurance",
+    "filled": "100.0%",
+    "shapes": "text, 10 to 13 characters (100.0%)"
+   },
+   {
+    "name": "subTypeOfInsurance",
+    "filled": "100.0%",
+    "shapes": "text, 22 to 25 characters (100.0%)"
+   },
+   {
+    "name": "dateSubmitted",
+    "filled": "100.0%",
+    "shapes": "YYYY-MM-DD (100.0%)"
+   },
+   {
+    "name": "publishDate",
+    "filled": "100.0%",
+    "shapes": "YYYY-MM-DD (100.0%)"
+   },
+   {
+    "name": "renewBusReqEffDate",
+    "filled": "87.5%",
+    "shapes": "YYYY-MM-DD (87.5%); empty (12.5%)"
+   },
+   {
+    "name": "newBusReqEffDate",
+    "filled": "87.5%",
+    "shapes": "YYYY-MM-DD (87.5%); empty (12.5%)"
+   },
+   {
+    "name": "filingStatusId",
+    "filled": "100.0%",
+    "shapes": "whole number, 1 digit (100.0%)"
+   },
+   {
+    "name": "filingStatus",
+    "filled": "100.0%",
+    "shapes": "text, 7 to 17 characters (100.0%)"
+   },
+   {
+    "name": "serffFilingTypeId",
+    "filled": "100.0%",
+    "shapes": "whole number, 1 digit (100.0%)"
+   },
+   {
+    "name": "serffFilingType",
+    "filled": "100.0%",
+    "shapes": "text, 4 characters (100.0%)"
+   },
+   {
+    "name": "overallRateImpact",
+    "filled": "25.0%",
+    "shapes": "empty (75.0%); decimal number (12.5%); whole number, 1 digit (12.5%)"
+   },
+   {
+    "name": "dispOverallRateImpact",
+    "filled": "25.0%",
+    "shapes": "empty (75.0%); number followed by % (25.0%)"
+   },
+   {
+    "name": "filingDescription",
+    "filled": "100.0%",
+    "shapes": "text, 23 to 121 characters (100.0%)"
+   },
+   {
+    "name": "documentId",
+    "filled": "87.5%",
+    "shapes": "whole number, 8 digits (87.5%); empty (12.5%)"
+   },
+   {
+    "name": "filingVersionId",
+    "filled": "100.0%",
+    "shapes": "36-character id (8-4-4-4-12 letters and digits) (100.0%)"
+   },
+   {
+    "name": "pages",
+    "filled": "87.5%",
+    "shapes": "whole number, 2 to 3 digits (87.5%); empty (12.5%)"
+   }
+  ],
+  "notCovered": [
+   "What S&P answers to a wrong password, and whether a refused sign-in carries an S&P reference: this check never sends a wrong password, so it can't lock the account.",
+   "How long S&P locks an account, and how long a refresh token stays usable: these take a lock or several days to see.",
+   "How S&P counts requests and when its day starts: only S&P can say (any limit figures S&P sends with an answer are listed under search results).",
+   "Whether S&P limits access to fixed IP addresses, and everything about Snowflake."
+  ]
+ }
+}

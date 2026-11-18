@@ -106,7 +106,7 @@ const WSTATUS=(over={})=>({configured:true, emailConfigured:true, enabled:true, 
   await p.click('[data-act="w-manage"]'); await p.waitForTimeout(100);
   ok("Manage shows remove buttons, the switch, the cost and the email box", (await p.$$('[data-act="w-co-remove"]')).length===2 && (await p.$$('[data-act="w-st-remove"]')).length===2 && (await t.txt('[data-act="w-toggle"]'))==="Switch off"
     && (await t.txt("#wCost"))==="Each check uses about 4 S&P requests (one for each batch of 10 companies, plus 2), more if S&P has many results. A check may use at most 30." && !!(await p.$("#w_recips")), await t.txt("#wCost"));
-  ok("says when email isn't set up, and what an email would hold", (await t.txt("#wEmailNote"))==="Email isn't set up for the app yet, so nobody is emailed. An email lists only the company, state, filing type, a line of description and the tracking number of each new filing, with a link here. Everything shows on this page either way.");
+  ok("says when email isn't set up, and what an email would hold", (await t.txt("#wEmailNote"))==="Email isn't set up for the app yet (RESEND_API_KEY, README, Watchlist, step 2), so nobody is emailed. An email lists the company, state, filing type, a line of description, the tracking number and any mark of each new filing, marked ones first, with a link here. Everything shows on this page either way.");
   await p.click('[data-act="w-co-remove"][data-k="institutionId:5000001"]'); await p.waitForTimeout(300);
   ok("removing a company", same((await t.saved()).companies.map(c=>c.id),["4000001"]) && same(await t.all("#wCos .cchip b"),["Calloway Insurance Co"]) && (await t.txt(".toast"))==="Removed from the watchlist.");
   await p.click('[data-act="w-st-remove"][data-s="GA"]'); await p.waitForTimeout(300);
@@ -174,7 +174,7 @@ const WSTATUS=(over={})=>({configured:true, emailConfigured:true, enabled:true, 
   ok("too big: the reason and how to shrink it", (await t.txt("#wTooBig"))==="The watchlist is too big to check: it needs at least 31 S&P requests. Remove at least 10 companies." && !(await p.$("#wFailed")));
   await t.ctx.close();
   t=await stateOf({status:404, empty:true}); p=t.p;
-  ok("the function not deployed: Corp Dev gets the command; the list still shows", (await t.txt("#wNoFn"))==="The watchlist function isn't deployed yet. Run: supabase functions deploy snl-watch --no-verify-jwt (see the README)." && (await p.$$("#wCos .cchip")).length===2, await t.txt("#wNoFn"));
+  ok("the function not deployed: Corp Dev gets the missing steps and the command; the list still shows", (await t.txt("#wNoFn"))==="The daily check isn't set up yet: the watchlist function isn't deployed. Do steps 1 to 3 of the README's Watchlist section: run migration 0003, set WATCH_SECRET, then run: supabase functions deploy snl-watch --no-verify-jwt. After that, this card shows the last check and Check now works. You can choose what to watch already." && (await p.$$("#wCos .cchip")).length===2, await t.txt("#wNoFn"));
   await t.ctx.close();
   t=await stateOf({status:500, body:{error:"server", message:"The watchlist function failed: made-up fault. Try again."}}); p=t.p;
   const before=t.wcalls("status").length;

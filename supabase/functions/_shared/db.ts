@@ -14,6 +14,9 @@ export type Entity = {
   spStatEntityId: string | null; naicGroupCode: string | null; naicGroupName: string | null;
 };
 
+/** A company's ids and group, without its name: what the Live check counts in the company list. */
+export type EntityFields = Omit<Entity, "companyName">;
+
 export type Slot = { allowed: boolean; waitMs: number; hour: number; day: number };
 export type Usage = { hour: number; day: number };
 
@@ -60,6 +63,11 @@ export interface Db {
       without NAIC group codes still has group names. */
   entitiesInGroupName(groupName: string, limit: number): Promise<Entity[]>;
   getSetting(id: string): Promise<Record<string, unknown> | null>;
+  // ---------- the Live check (_shared/diagnose.ts); optional, so a stand-in without them still works ----------
+  /** The latest saved results of one kind, newest first. */
+  recentStore?(kind: StoreKind, limit: number): Promise<StoreRow[]>;
+  /** The ids and group of every company in the company list (never the names), up to limit. */
+  entityFields?(limit: number): Promise<EntityFields[]>;
   // ---------- the watchlist (migration 0003) ----------
   /** Starts a check, first closing any check still "running" after staleMs (with staleMessage). Returns its id, or
       null when another check is running (only one may run at a time). */
@@ -226,6 +234,24 @@ export function supabaseDb(sb: SupabaseClient, now: () => number = Date.now): Db
     async getSetting(id) {
       const { data } = await sb.from("snl_settings").select("doc").eq("id", id).maybeSingle();
       return (data?.doc as Record<string, unknown> | undefined) ?? null;
+    },
+    async recentStore(kind, limit) {
+      const { data, error } = await sb.from("snl_store").select("id,kind,label,doc,fetched_at").eq("kind", kind).order("fetched_at", { ascending: false }).limit(limit);
+      if (error) throw new Error(`Couldn't read the saved results: ${error.message}`);
+      return (data ?? []) as StoreRow[];
+    },
+    async entityFields(limit) {
+      // Only the ids and the group, a thousand rows at a time (the most PostgREST returns in one answer).
+      const out: EntityFields[] = [];
+      for (let from = 0; from < limit; from += 1000) {
+        const { data, error } = await sb.from("snl_store")
+          .select("companyId:doc->>companyId,institutionId:doc->>institutionId,spStatEntityId:doc->>spStatEntityId,naicCompanyCode:doc->>naicCompanyCode,naicGroupCode:doc->>naicGroupCode,naicGroupName:doc->>naicGroupName")
+          .eq("kind", "entity").order("id").range(from, Math.min(limit, from + 1000) - 1);
+        if (error) throw new Error(`Couldn't read the company list: ${error.message}`);
+        out.push(...((data ?? []) as EntityFields[]));
+        if ((data ?? []).length < 1000) break;
+      }
+      return out;
     },
     async startWatchRun(trigger, staleMs, staleMessage) {
       await sb.from("snl_watch_runs").update({ status: "failed", finished_at: nowIso(), message: staleMessage }).eq("status", "running").lt("started_at", new Date(now() - staleMs).toISOString());

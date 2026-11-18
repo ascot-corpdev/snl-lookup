@@ -178,6 +178,155 @@ export function foundRow(f: Filing, runId: string, at: string, baseline: boolean
   };
 }
 
+// ---------- marks: filings that may introduce something ----------
+// A mark is a hint for someone watching competitors, worked out from what the search row already carries: the
+// filing type, the type and sub-type of insurance, the status, the overall rate impact and the description. It is
+// never stored: it is worked out each time the found filings are read back, so changing the rules below re-marks
+// every kept filing with no migration. A filing with no mark is not thereby unimportant.
+
+export type FlagKind = "new_program" | "new_state" | "new_form" | "withdrawal" | "large_rate";
+/** label: a word or two for the page; reason: which field or words triggered it, for the reader to judge. */
+export type FilingFlag = { kind: FlagKind; label: string; reason: string };
+export type MarkedFiling = FoundFiling & { flags: FilingFlag[] };
+
+/** A rate change at or beyond 10% either way counts as large. Most personal and small commercial rate revisions
+    land in low or middle single digits; a change in double digits is uncommon and usually means a repricing, a
+    program being rebuilt, or an exit in all but name. Several states also start closer review of a rate change
+    around this size. Tune it after the first live results. */
+export const LARGE_RATE_CHANGE_PCT = 10;
+
+/** What each mark means, in the words "May be …" takes on the page and in the email. */
+export const FLAG_MEANING: Record<FlagKind, string> = {
+  new_program: "a new program or product", new_state: "a company new to the state", new_form: "a new form or coverage",
+  withdrawal: "a withdrawal", large_rate: "a large rate change",
+};
+const FLAG_LABEL: Record<FlagKind, string> = { new_program: "New program", new_state: "New to state", new_form: "New form", withdrawal: "Withdrawal", large_rate: "Large rate change" };
+
+/** Lower case, accents dropped, everything that isn't a letter or digit turned into one space, so "New-Program!",
+    "NEW  PROGRAM" and "new program" read alike. What a mark quotes back comes from this, so it is plain words only. */
+const words = (v: unknown): string => typeof v === "string" ? v.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 600) : "";
+
+/** The overall rate impact as a number of percentage points, or null. Reads "6.500%", "-2.4", "+12%", "(5.0%)" and
+    a range such as "-5% to 12%" (the change furthest from zero). */
+export function rateChange(v: unknown): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v !== "string") return null;
+  const s = v.slice(0, 60);
+  let best: number | null = null;
+  for (const m of s.matchAll(/(\(\s*)?([-+−–]\s*)?(\d{1,4}(?:\.\d{1,6})?)(\s*%?\s*\))?/g)) {
+    // A dash straight after a number is a range ("5-12%"), not a minus sign.
+    const before = s.slice(0, m.index).trimEnd().slice(-1);
+    const minus = !!m[2] && !m[2].startsWith("+") && !/[\d%]/.test(before);
+    const n = Number(m[3]) * ((m[1] && m[4]) || minus ? -1 : 1);
+    if (Number.isFinite(n) && (best === null || Math.abs(n) > Math.abs(best))) best = n;
+  }
+  return best;
+}
+const signedPct = (n: number) => `${n > 0 ? "+" : n < 0 ? "-" : ""}${Math.abs(n).toFixed(1)}%`;
+
+const NEW_THING = String.raw`\bnew (?!business\b)(?:[a-z0-9]+ ){0,3}?`;
+/** "no", "not", "without" or "never" up to three words before a phrase cancels it ("no new product is introduced"). */
+const NEGATED = /\b(?:no|not|non|without|never)\s+(?:[a-z0-9]+\s+){0,3}$/;
+
+/** UNCONFIRMED: S&P's exact filing type names, status names and how companies word descriptions are not known, so
+    every rule that marks a filing lives in this one function, written to be tolerant (case, punctuation, common
+    phrasings). Tune it after the first live results; see LARGE_RATE_CHANGE_PCT for the rate threshold.
+      New program   filing type says new or initial; or the description, type or sub-type of insurance says "new …
+                    program", "new … product", "new line of business", "introduc…", "launch…", "roll out",
+                    "initial filing / submission / program / rates", "first filing" (not "no new program")
+      New to state  description says "entering / expanding … the state or market", "expansion into", "new to the
+                    state", "new entrant / company / carrier / insurer", "newly licensed / admitted",
+                    "begin / start writing or offering"
+      New form      description says "new … form / endorsement / coverage / rider / application", "adds … endorsement
+                    or coverage", "introduc… a form", "initial forms" (left out when it is already a new program)
+      Withdrawal    status or filing type says withdraw…; or the description says "withdraw…", "discontinu…",
+                    "cease / stop writing or offering", "no longer writ… / offer…", "run off", "exit… the state or
+                    market", "non-renewal of all"
+      Large rate    the overall rate impact is LARGE_RATE_CHANGE_PCT or more, up or down (read by rateChange, which
+                    takes S&P's figure as percentage points: "6.500%" and 6.5 both mean 6.5%)
+    Each mark carries the field and the words that triggered it. */
+export function flagFiling(r: Partial<FoundFiling> | null | undefined): FilingFlag[] {
+  if (!r || typeof r !== "object") return [];
+  const desc = words(r.description), type = words(r.filing_type), status = words(r.filing_status);
+  const kinds = [["the description", desc], ["the type of insurance", words(r.type_of_insurance)], ["the sub-type of insurance", words(r.sub_type_of_insurance)]] as const;
+  const quote = (s: string) => `"${s.length > 48 ? s.slice(0, 47).trimEnd() + "…" : s}"`;
+  /** The first match in s that isn't negated just before it ("no new program"). */
+  const find = (s: string, re: RegExp): string | null => {
+    for (const m of s.matchAll(new RegExp(re.source, "g"))) {
+      const from = m.index! > 40 ? s.indexOf(" ", m.index! - 40) + 1 : 0;   // whole words only
+      if (!NEGATED.test(" " + s.slice(from, m.index))) return m[0];
+    }
+    return null;
+  };
+  const out: FilingFlag[] = [];
+  const add = (kind: FlagKind, reason: string) => out.push({ kind, label: FLAG_LABEL[kind], reason });
+
+  // New program or product
+  const FORMISH = String.raw`(?:policy )?(?:forms?|endorsements?|coverages?|riders?|applications?)\b`;
+  const program = [
+    new RegExp(NEW_THING + String.raw`(?:programs?|products?|lines? of business)\b`),
+    new RegExp(String.raw`\b(?:introduc(?:e|es|ed|ing|tion)|launch(?:es|ed|ing)?|roll(?:s|ed|ing)? out)\b(?! (?:[a-z0-9]+ ){0,2}?` + FORMISH + ")"),
+    /\binitial (?:filing|filings|submission|program|product|rates?|rate and rule|offering)\b/,
+    /\bfirst (?:time )?filing\b/,
+  ];
+  let hit: string | null = null;
+  if (type && /\b(?:new|initial|introduc\w*)\b/.test(type)) add("new_program", `the filing type is "${clean(r.filing_type, 80)}"`);
+  else for (const [where, s] of kinds) {
+    for (const re of program) if (s && (hit = find(s, re))) break;
+    if (hit) { add("new_program", `${where} says ${quote(hit)}`); break; }
+  }
+
+  // A company new to the state
+  const entry = [
+    /\b(?:enter|enters|entering|entry into|expand|expands|expanding|expansion)(?: [a-z0-9]+){0,2}? (?:state|states|market|markets)\b/,
+    /\bexpan(?:d|ds|ding|sion) into\b/,
+    /\bnew (?:to (?:the |this )?(?:state|market)|entrant|company|carrier|insurer|writer)\b/,
+    /\bnewly (?:licensed|admitted|formed|authori[sz]ed)\b/,
+    /\b(?:begin|begins|beginning|start|starts|starting|commence|commences|commencing) (?:writing|to write|offering|to offer)\b/,
+  ];
+  for (const re of entry) if (desc && (hit = find(desc, re))) { add("new_state", `the description says ${quote(hit)}`); break; }
+
+  // A new form or coverage, unless it is already marked as a new program
+  if (!out.some((f) => f.kind === "new_program")) {
+    const form = [
+      new RegExp(NEW_THING + FORMISH),
+      new RegExp(String.raw`\b(?:add|adds|added|adding|addition of)(?: [a-z0-9]+){0,2}? (?:optional )?(?:endorsements?|coverages?|forms?|riders?)\b`),
+      new RegExp(String.raw`\bintroduc(?:e|es|ed|ing|tion)(?: of)? (?:[a-z0-9]+ ){0,2}?` + FORMISH),
+      /\binitial (?:policy )?forms?\b/,
+    ];
+    for (const re of form) if (desc && (hit = find(desc, re))) { add("new_form", `the description says ${quote(hit)}`); break; }
+  }
+
+  // A withdrawal: the filing, a program, or the company leaving a market
+  const WITHDRAW = /\bwithdr(?:aw|ew)[a-z]*\b/;
+  if (WITHDRAW.test(status)) add("withdrawal", `the status is "${clean(r.filing_status, 80)}"`);
+  else if (WITHDRAW.test(type)) add("withdrawal", `the filing type is "${clean(r.filing_type, 80)}"`);
+  else {
+    const leave = [
+      WITHDRAW, /\bdiscontinu(?:e|es|ed|ing|ance|ation)\b/,
+      /\b(?:cease|ceases|ceased|ceasing|stop|stops|stopped|stopping) (?:writing|offering|to write|to offer|selling)\b/,
+      /\bno longer (?:writ|offer|sell|available|be offered)[a-z]*\b/, /\brun ?off\b/,
+      /\b(?:exit|exits|exited|exiting|leave|leaves|leaving)(?: the)?(?: [a-z0-9]+)? (?:state|market|line|business)\b/,
+      /\bnon ?renew(?:al|als|ing)? of (?:all|the entire|its entire)\b/,
+    ];
+    for (const re of leave) if (desc && (hit = find(desc, re))) { add("withdrawal", `the description says ${quote(hit)}`); break; }
+  }
+
+  // A large rate change
+  const rate = rateChange(r.rate_impact);
+  if (rate !== null && Math.abs(rate) >= LARGE_RATE_CHANGE_PCT) add("large_rate", `the overall rate impact is ${signedPct(rate)}`);
+  return out;
+}
+
+/** "May be a new form: the description says "new policy form"." */
+export const flagSentence = (f: FilingFlag) => `May be ${FLAG_MEANING[f.kind] ?? "worth a look"}: ${f.reason}.`;
+
+/** Found filings with their marks, marked ones first, each group in the order given. */
+export function markFound(rows: FoundFiling[]): MarkedFiling[] {
+  const all = rows.map((r) => ({ ...r, flags: flagFiling(r) }));
+  return [...all.filter((r) => r.flags.length), ...all.filter((r) => !r.flags.length)];
+}
+
 // ---------- the email ----------
 
 const plural = (n: number, one: string, many = one + "s") => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
@@ -195,19 +344,28 @@ export function siteUrl(env: Env): string | null {
 /** One plain, short email: company, state, filing type, a line of description and the tracking number for each new
     filing, and a link to the app. Nothing else from S&P goes in it. */
 export function watchEmail(rows: FoundFiling[], opts: { now: number; site: string | null }): { subject: string; text: string } {
-  const shown = rows.slice(0, MAX_EMAIL_ITEMS);
-  const line = (r: FoundFiling) => {
+  // Filings that may introduce something come first, under their own heading, each with its mark in words.
+  const all = markFound(rows), nMarked = all.filter((r) => r.flags.length).length;
+  const shown = all.slice(0, MAX_EMAIL_ITEMS);
+  const line = (r: MarkedFiling) => {
     const desc = r.description ? (r.description.length > 140 ? r.description.slice(0, 139).trimEnd() + "…" : r.description) : "No description";
-    return `- ${r.companies.join("; ") || "Company n/d"}, ${r.state ?? "n/d"}, ${r.filing_type ?? "filing type n/d"}: ${desc} (tracking number ${r.tracking_number ?? "n/d"})`;
+    const tag = r.flags.length ? `[${r.flags.map((f) => f.label).join(", ")}] ` : "";
+    return [`- ${tag}${r.companies.join("; ") || "Company n/d"}, ${r.state ?? "n/d"}, ${r.filing_type ?? "filing type n/d"}: ${desc} (tracking number ${r.tracking_number ?? "n/d"})`,
+      ...r.flags.map((f) => `  ${flagSentence(f)}`)];
   };
+  const marked = shown.filter((r) => r.flags.length), rest = shown.filter((r) => !r.flags.length);
   const text = [
     `The daily watchlist check on ${shortDay(opts.now)} found ${plural(rows.length, "new filing")}:`, "",
-    ...shown.map(line),
+    ...(nMarked ? [
+      `Worth a closer look (${nMarked.toLocaleString("en-US")} of ${rows.length.toLocaleString("en-US")}): these may be new programs, new forms, withdrawals or large rate changes. A mark is a hint from the filing type, status, rate impact and description, not a fact, so check the filing.`,
+      ...marked.flatMap(line), "", ...(rest.length ? ["Other new filings:"] : []),
+    ] : []),
+    ...rest.flatMap(line),
     ...(rows.length > shown.length ? [`- and ${plural(rows.length - shown.length, "more filing")}`] : []), "",
     opts.site ? `Open SNL lookup to see the details and the documents: ${opts.site}` : "Open SNL lookup to see the details and the documents.",
     "", "Source: S&P Global Market Intelligence, SNL Insurance Product Filings. Confidential: strategy and corporate development use only.",
   ].join("\n");
-  return { subject: `SNL lookup: ${plural(rows.length, "new filing")} on the watchlist`, text };
+  return { subject: `SNL lookup: ${plural(rows.length, "new filing")} on the watchlist${nMarked ? `, ${nMarked.toLocaleString("en-US")} worth a closer look` : ""}`, text };
 }
 
 export const RESEND_URL = "https://api.resend.com/emails";
@@ -228,7 +386,28 @@ export async function sendEmail(fetchFn: typeof fetch, env: Env, to: string[], m
 export type RunOutcome = {
   status: "ok" | "failed" | "skipped" | "busy"; reason: string | null; message: string;
   requests: number; found: number; newCount: number; baseline: boolean; complete: boolean; emailed: number; runId: string | null;
+  windowDays?: number;
 };
+
+/** A gap of more than this many days since the last complete check widens the next check's window. */
+export const WATCH_GAP_DAYS = 3;
+/** The widest a check looks back. Kept well under WATCH_KEEP_DAYS, so every filing in the window that an earlier
+    check saw is still on record as seen and can't come back as new. */
+export const WATCH_CATCHUP_DAYS = 60;
+const CATCH_UP_RUNS = 20;
+
+/** How many days of publish dates a check asks S&P for. Normally WATCH_WINDOW_DAYS. When the last complete check
+    is more than WATCH_GAP_DAYS old, from WATCH_WINDOW_DAYS before that check up to today, at most
+    WATCH_CATCHUP_DAYS. No complete check among the recent ones means a long gap. The first check (nothing complete
+    on record) keeps the normal window: it is only the starting point. */
+export function catchUpWindow(hasPrev: boolean, recent: WatchRun[], now: number): { days: number; since: string | null } {
+  if (!hasPrev) return { days: WATCH_WINDOW_DAYS, since: null };
+  const last = recent.find((r) => r.status === "ok" && r.complete && r.scope);
+  const at = last ? Date.parse(last.started_at) : NaN;
+  const gap = Number.isFinite(at) ? (now - at) / DAY : Infinity;
+  if (gap <= WATCH_GAP_DAYS) return { days: WATCH_WINDOW_DAYS, since: last?.started_at ?? null };
+  return { days: Math.min(WATCH_CATCHUP_DAYS, Math.ceil(gap) + WATCH_WINDOW_DAYS), since: last?.started_at ?? null };
+}
 
 export const STOPPED = "The check stopped before it finished, probably because it ran out of time. The next check will try again.";
 export const NOTHING_WATCHED = "Nothing is watched yet. Corp Dev can add companies and states on the Filings view.";
@@ -268,7 +447,11 @@ export async function runWatch(ctx: RunCtx): Promise<RunOutcome> {
     const filingStatusIds = (statuses?.options ?? []).map((o) => Number(o.id)).filter((n) => Number.isInteger(n));
     if (!filingStatusIds.length) throw new SpgmiError("server", "S&P's list of filing statuses came back empty, and S&P needs a status on every search. Refresh the lists on the Filings view and check again.");
 
-    const to = new Date(start).toISOString().slice(0, 10), from = new Date(start - (WATCH_WINDOW_DAYS - 1) * DAY).toISOString().slice(0, 10);
+    // After a gap in complete checks (switched off, failing, Supabase paused), look back further so filings
+    // published in the gap are still found. One search covers up to 364 days, so this costs no more requests.
+    const prev = await db.lastWatchScope();
+    const win = catchUpWindow(prev !== null, prev ? await db.watchRuns(CATCH_UP_RUNS) : [], start);
+    const to = new Date(start).toISOString().slice(0, 10), from = new Date(start - (win.days - 1) * DAY).toISOString().slice(0, 10);
     const base: Omit<SearchParams, "companyIds" | "institutionIds"> = { states: list.states, filingStatusIds, typeOfInsuranceIds: list.typeOfInsuranceIds, filingTypeIds: list.filingTypeIds, spStatEntityIds: [], trackingNumbers: [], from, to };
     const searches: SearchParams[] = [
       ...batches(idsOf(list, "companyId"), MAX_IDS).map((ids) => ({ ...base, companyIds: ids, institutionIds: [] })),
@@ -293,7 +476,6 @@ export async function runWatch(ctx: RunCtx): Promise<RunOutcome> {
     const rows = [...byVersion.values()];
     await db.putEntities(entitiesFrom(rows));
 
-    const prev = await db.lastWatchScope();
     const seen = new Set(await db.seenFilings(rows.map((f) => String(f.filingVersionId))));
     const seenAt = at();
     const fresh = rows.filter((f) => !seen.has(String(f.filingVersionId)))
@@ -309,6 +491,7 @@ export async function runWatch(ctx: RunCtx): Promise<RunOutcome> {
     else {
       parts.push(news.length ? `Found ${plural(news.length, "new filing")}.` : "Nothing new since the last check.");
       if (startPoint) parts.push(`${plural(startPoint, "filing")} for newly added companies, states or filters ${startPoint === 1 ? "was" : "were"} recorded as the starting point, not as new.`);
+      if (win.days > WATCH_WINDOW_DAYS) parts.push(`The last complete check was ${win.since ? `on ${shortDay(Date.parse(win.since))}` : "a while ago"}, so this check looked back ${win.days} days instead of ${WATCH_WINDOW_DAYS}, to catch filings published in between.`);
     }
     if (capped) parts.push("The check stopped before S&P had returned everything, so it may have missed some filings. Remove companies or states from the watchlist.");
     if (noVersion) parts.push(`${plural(noVersion, "filing")} came back without a filing version id, so ${noVersion === 1 ? "it" : "they"} can't be tracked.`);
@@ -320,7 +503,7 @@ export async function runWatch(ctx: RunCtx): Promise<RunOutcome> {
     }
     const message = parts.join(" ");
     await db.finishWatchRun(runId, { status: "ok", requests: ctx.used(), found: rows.length, new_count: news.length, baseline: !prev, complete: !capped, emailed, message, scope });
-    return outcome({ status: "ok", message, found: rows.length, newCount: news.length, baseline: !prev, complete: !capped, emailed, runId });
+    return outcome({ status: "ok", message, found: rows.length, newCount: news.length, baseline: !prev, complete: !capped, emailed, runId, windowDays: win.days });
   } catch (e) {
     const message = e instanceof SpgmiError ? e.message : `The check failed: ${String((e as Error)?.message || "unknown error").replace(/[.\s]+$/, "")}. It will try again at the next check.`;
     try { await db.finishWatchRun(runId, { status: "failed", requests: ctx.used(), message: message.slice(0, 1000), scope }); } catch { /* the stale-run rule closes it later */ }
@@ -333,8 +516,19 @@ export async function runWatch(ctx: RunCtx): Promise<RunOutcome> {
 export type WatchStatus = {
   configured: boolean; emailConfigured: boolean; enabled: boolean; watchlist: Watchlist; problems: string[];
   cost: number; budget: number; maxCompanies: number; tooBig: string | null; windowDays: number; keepDays: number;
-  running: boolean; lastRun: WatchRun | null; lastCheck: WatchRun | null; found: FoundFiling[];
+  running: boolean; lastRun: WatchRun | null; lastCheck: WatchRun | null; found: MarkedFiling[];
+  /** Whether WATCH_SECRET is set (24 characters or more), so the daily schedule can run checks. */
+  scheduleReady: boolean;
+  /** When the daily schedule last called (any outcome), from the recent checks; null when none is on record. */
+  lastScheduled: string | null;
+  /** True when the recent checks span more than a day and a half and none came from the schedule. */
+  scheduleQuiet: boolean;
 };
+
+/** Said instead of a database error when migration 0003 hasn't been run, so the card can say which step is missing. */
+export const NO_TABLES = "The watchlist's tables aren't in the database yet. Run supabase/migrations/0003_watchlist.sql in the Supabase SQL editor (README, Watchlist, step 1). After that, this card shows the last check and Check now works.";
+/** A database error that means migration 0003 hasn't been run. */
+export const missingTables = (e: unknown) => /snl_watch_(runs|found)/.test(String((e as Error)?.message ?? e)) && /does not exist|could not find|schema cache|42P01|PGRST205/i.test(String((e as Error)?.message ?? e));
 
 const publicRun = (r: WatchRun | undefined): WatchRun | null => (r ? { ...r, scope: null } : null);
 
@@ -343,11 +537,17 @@ export async function watchStatus(db: Db, env: Env, configured: boolean, now: nu
   const { list, problems } = parseWatchlist(await db.getSetting(WATCH_ID));
   const runs = await db.watchRuns(20);
   const running = runs.some((r) => r.status === "running" && now - Date.parse(r.started_at) < WATCH_STALE_MS);
+  const lastScheduled = runs.find((r) => r.trigger === "schedule")?.started_at ?? null;
+  const oldest = runs.length ? Date.parse(runs[runs.length - 1].started_at) : now;
+  const quietSince = now - 36 * 3600_000;
   return {
     configured, emailConfigured: !!env("RESEND_API_KEY"), enabled: list.enabled, watchlist: list, problems,
     cost: watchCost(list), budget: WATCH_MAX_REQUESTS, maxCompanies: MAX_CHECK_COMPANIES, tooBig: tooBig(list), windowDays: WATCH_WINDOW_DAYS, keepDays: WATCH_KEEP_DAYS,
     running, lastRun: publicRun(runs.find((r) => r.status !== "running")), lastCheck: publicRun(runs.find((r) => r.status === "ok")),
-    found: await db.foundFilings(100),
+    // Marks are worked out here, from the stored rows, so changing flagFiling re-marks every kept filing.
+    found: markFound(await db.foundFilings(100)),
+    scheduleReady: (env("WATCH_SECRET") ?? "").length >= 24, lastScheduled,
+    scheduleQuiet: !(lastScheduled && Date.parse(lastScheduled) >= quietSince) && (runs.length < 20 || oldest < quietSince),
   };
 }
 

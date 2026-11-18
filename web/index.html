@@ -68,6 +68,18 @@ nav.tabs a:hover{background:var(--alt)}
 .conn .mk{font-weight:bold}
 .conn .mk.no{color:var(--magenta)}
 .conn textarea{min-height:140px;font-size:12px}
+/* Live check (Corp Dev): shapes and counts of real S&P answers, each finding marked in words and colour */
+.strip .s-live{min-width:0}
+.strip .s-live .lnk:disabled{color:var(--muted);text-decoration:none;cursor:default}
+#liveRoot .wrap{padding-block:0 10px}
+.live h3{font-size:13px;margin:6px 0 0}
+.live ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:5px}
+.live .mk.ok{color:var(--blue)}
+.live .mk.unk,.live .mk.rec{color:var(--muted)}
+.live .lv-v{display:block;margin-top:2px}
+.live .lv-stop{color:var(--magenta);font-weight:bold}
+.live details summary{cursor:pointer;font-weight:bold}
+.live details ul{margin-top:6px}
 
 main .wrap{padding-block:22px 28px;display:flex;flex-direction:column;gap:22px}
 footer.foot{border-top:1px solid var(--grid)}
@@ -183,6 +195,12 @@ label.f em,.f em{font-weight:normal;font-style:normal;color:var(--muted)}
 .recent-i .t1{color:var(--blue)}
 #st_named:empty{display:none}
 .noadd{max-width:44ch}
+/* Whole groups in the company finder, and the tick that keeps a search out of Recent searches */
+.matches.groups{border-color:var(--blue)}
+.matches.groups li{background:var(--alt)}
+.unl{display:flex;gap:8px;align-items:flex-start;font-weight:normal;cursor:pointer;min-width:0;overflow-wrap:anywhere}
+.unl input{margin:3px 0 0;flex:none}
+.bigwarn{color:var(--magenta)}
 
 /* Tables */
 .tbl-wrap{overflow-x:auto;border:1px solid var(--grid);max-width:100%}
@@ -321,6 +339,11 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 .watch .wlist>b{font-size:12px}
 .watch .wmanage{border-top:1px solid var(--grid);padding-top:10px;display:flex;flex-direction:column;gap:10px;min-width:0}
 .watch .pill.on{color:var(--teal)}.watch .pill.off{color:var(--muted)}
+.watch .wmarks{display:flex;flex-direction:column;gap:4px;margin-bottom:6px;min-width:0}
+.watch .wmark{font-size:12px;line-height:1.35;overflow-wrap:anywhere}
+.watch .pill.mark{color:var(--purple);margin-right:6px;white-space:normal}
+@media (min-width:701px){.watch .filings .c-co{min-width:230px}}
+.watch .wmarked{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;min-width:0}
 /* Profile: the figures at a glance, the slides in or out, the draft choice and the template */
 .pfout{display:flex;flex-direction:column;gap:18px;min-width:0}
 .pfout:empty{display:none}
@@ -373,6 +396,7 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 </header>
 <div class="strip" id="strip" hidden><div class="wrap" id="stripIn" role="status" aria-label="S&amp;P usage and data freshness"></div></div>
 <div id="connRoot"></div>
+<div id="liveRoot"></div>
 
 <main><div class="wrap" id="view"></div></main>
 <footer class="foot"><div class="wrap"><span id="footOrg">2026</span><span>Confidential: strategy and corporate development use only. Data: S&amp;P Global Market Intelligence.</span></div></footer>
@@ -455,7 +479,8 @@ WI:["M579 113h4l-2 2zM560 121h3l5 -1l8 -5l4 1l-2 3l-1 4l3 -3l5 3l3 1l2 4l17 3l5 
 WV:["M733 295l5 -2v-3h2l-1 -5l2 -5l3 3l2 -2l-1 -3l1 -5h2l2 -4l2 2l2 -2l4 -6l2 -7l-1 -4l2 -5l-1 -4l-1 -2l2 -2l4 21l17 -3l2 12l3 -3l3 -5l2 1l2 -5l3 2l3 -1l2 -3l3 -2l3 2l3 -1v2l3 4l-1 5l-10 -6v7l-6 11l-3 -2l-2 8l-2 3l-3 -1l-3 -2v4l-4 7v3l-3 5l-1 3l2 1l-1 3l-3 3l-1 -2l-4 4l-2 -1v2l-6 3l-3 -2l-3 4h-2l-3 -1l-3 -4v-2h-3l-3 -2l-1 -2l-4 -3l-2 -4v-4z","West Virginia",763,291],
 WY:["M369 156l-4 45l-4 46l-28 -3l-32 -4l-24 -3l-24 -3l-9 -2l3 -22l9 -56l2 -12l5 1l35 5l41 5z","Wyoming",308,195]
 };
-const PAGE = 100, MAX_COMPANIES = 50, MAX_YEARS = 10, MAX_QUESTION = 4000, MAX_HISTORY = 6, MAX_HISTORY_ANSWER = 20000, MAX_CODES = 8, MAX_STAT_YEARS = 15;
+const PAGE = 100, MAX_COMPANIES = 100, MAX_YEARS = 10, MAX_QUESTION = 4000, MAX_HISTORY = 6, MAX_HISTORY_ANSWER = 20000, MAX_CODES = 8, MAX_STAT_YEARS = 15;
+const MAX_SEARCH_REQUESTS = 60;   // the most S&P requests one search may use (snl-filings refuses a wider search before asking S&P)
 const XLSX_SRC = "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.mini.min.js";
 const DOCX_SRC = "https://cdn.jsdelivr.net/npm/docx@9.5.1/dist/index.iife.min.js";   // the Word export, loaded on the first click
 const JOB_COLS = "id,status,question,progress,partial,result,error,segments,created_at,updated_at,heartbeat_at";
@@ -596,6 +621,7 @@ function stripHTML(){
   items.push(`<span class="s-i" id="s_stat">${st.statutory&&st.statutory.configured ? (rf.statutory?`Statutory data refreshed ${fmtAt(rf.statutory)}`:"Statutory data: connected, nothing fetched yet") : "Statutory data: not set up yet"}</span>`);
   if(st.claude && st.claude.configured===false) items.push(`<span class="s-i" id="s_claude">Questions: not set up yet</span>`);
   items.push(connButtonHTML());
+  if(isCorpDev()) items.push(liveButtonHTML());
   return items.join("");
 }
 
@@ -653,6 +679,77 @@ async function copyConn(){
   const r=S.conn&&S.conn.report; if(!r) return;
   try{ await navigator.clipboard.writeText(connText(r)); toast("Copied. Paste it into your email to S&P support."); }
   catch{ S.conn.showText=true; renderConn(); const t=document.getElementById("connText"); if(t){ t.focus(); t.select(); } toast("Couldn't copy here. Select the text below and copy it."); }
+}
+
+/* ---------- Live check (Corp Dev only): looks at real S&P answers and reports only their shapes and counts, so the
+   report can be sent to whoever maintains the app without sending S&P's data ---------- */
+const LIVE_GROUPS=[["signin","Signing in"],["lists","Reference lists"],["search","Search results"],["document","A filing document"],["directory","Company list"]];
+const LIVE_MARK={holds:["ok","As the app assumes"], differs:["no","Differs"], unknown:["unk","Couldn't tell"], info:["rec","For the record"]};
+function liveButtonHTML(){
+  const busy=!!(S.live&&S.live.busy);
+  return `<span class="s-live" id="s_live"><button type="button" class="lnk" id="liveBtn" data-act="live-check" ${busy?"disabled":""} title="Looks at real S&amp;P answers and reports only their shapes and counts, for whoever maintains the app (at most six S&amp;P requests)">${busy?"Running live check…":"Live check"}</button></span>`;
+}
+async function runLiveCheck(){
+  if(S.live&&S.live.busy) return;
+  S.live={busy:true, focus:true}; render();
+  const r=await callFn("snl-filings",{action:"diagnose"});
+  if(!S.session) return;
+  if(r.data){
+    S.live={report:r.data, focus:true}; takeUsage(r.data);
+    if(+r.data.requests>0){ loadStatus(); if(S.view==="filings" && (!S.refs || Object.values(S.refs).some(l=>!l))){ S.refs=null; loadRefs(false); } }
+  } else if(r.err!=="signin") S.live={err:errText(r), focus:true};
+  render();
+}
+/* The verdict, shown when it adds to the mark ("Differs: ..." says what to change; "As the app assumes." doesn't). */
+const liveVerdict = f => (!f.verdict || f.verdict==="As the app assumes." || f.verdict==="For the record." || f.verdict==="Couldn't tell." || f.verdict==="Differs.") ? "" : f.verdict;
+/* The plain-text report for whoever maintains the app. It carries only what the function sent: no S&P data. */
+function liveText(r){
+  const lines=["Live check of S&P answers (SNL lookup)", `Ran: ${connAt(r.ranAt)}`,
+    `Account: ${r.account||"n/d"} (${count(r.limits&&r.limits.hour)} requests an hour, ${count(r.limits&&r.limits.day)} a day). S&P requests used: ${count(r.requests)} of at most ${count(r.maxRequests)}. Took ${plural(r.seconds,"second")}.`,
+    `Result: ${r.summary}`];
+  if(r.stopped && r.stopped!==r.summary) lines.push(`Stopped: ${r.stopped}`);
+  lines.push(r.basis||"", "This report holds no S&P data: only column names, value types, counts, shares and patterns.");
+  for(const [g,label] of LIVE_GROUPS){
+    const fs=(r.findings||[]).filter(f=>f.group===g); if(!fs.length) continue;
+    lines.push("", label+":");
+    for(const f of fs){ const v=liveVerdict(f); lines.push(`- ${(LIVE_MARK[f.outcome]||LIVE_MARK.unknown)[1]}: ${f.title}. ${f.found}${v?" "+v:""}`, `  Code: ${f.where}`); }
+  }
+  if((r.columns||[]).length){ lines.push("", "Value types of every result column:"); for(const c of r.columns) lines.push(`- ${c.name}: filled ${c.filled}. ${c.shapes}`); }
+  if((r.notCovered||[]).length){ lines.push("", "Not checked, on purpose:"); for(const n of r.notCovered) lines.push(`- ${n}`); }
+  return lines.join("\n");
+}
+function liveHTML(){
+  const c=S.live; if(!c) return "";
+  const close=`<button type="button" class="btn sm ghost" data-act="live-close">Close</button>`;
+  if(c.busy) return `<div class="wrap"><div class="info conn live" id="livePanel" role="status" tabindex="-1"><span><b>Running the Live check.</b> It signs in to S&amp;P, runs one small search and opens one document, using at most six S&amp;P requests. This can take a minute.</span></div></div>`;
+  if(c.err) return `<div class="wrap"><div class="banner conn live" id="livePanel" role="alert" tabindex="-1"><span><b>Couldn't run the Live check.</b> ${esc(c.err)}</span><span class="inline"><button type="button" class="btn sm" data-act="live-check">Try again</button>${close}</span></div></div>`;
+  const r=c.report, acct=r.account==="production"?"Production":"Trial";
+  const groups=LIVE_GROUPS.map(([g,label])=>{
+    const fs=(r.findings||[]).filter(f=>f.group===g); if(!fs.length) return "";
+    return `<h3>${esc(label)}</h3><ul>${fs.map(f=>{ const m=LIVE_MARK[f.outcome]||LIVE_MARK.unknown, v=liveVerdict(f);
+      return `<li data-id="${esc(f.id)}" data-outcome="${esc(f.outcome)}"><span class="mk ${m[0]}">${m[1]}:</span> <b>${esc(f.title)}.</b> ${esc(f.found)}${v?`<span class="lv-v">${esc(v)}</span>`:""}</li>`; }).join("")}</ul>`;
+  }).join("");
+  const cols=(r.columns||[]).length ? `<details id="liveCols"><summary>Value types of every result column (${count(r.columns.length)})</summary><ul>${r.columns.map(x=>`<li><b>${esc(x.name)}</b>: filled ${esc(x.filled)}. ${esc(x.shapes)}</li>`).join("")}</ul></details>` : "";
+  const nc=(r.notCovered||[]).length ? `<details id="liveNot"><summary>What this check doesn't settle, on purpose</summary><ul>${r.notCovered.map(n=>`<li>${esc(n)}</li>`).join("")}</ul></details>` : "";
+  return `<div class="wrap"><div class="info conn live" id="livePanel" role="status" tabindex="-1" aria-label="Live check"><div>
+    <p id="liveSummary"><b>${esc(r.summary)}</b></p>
+    ${r.stopped && r.stopped!==r.summary?`<p class="lv-stop" id="liveStopped">${esc(r.stopped)}</p>`:""}
+    <p class="t2">The report below holds no S&amp;P data: only column names, value types, counts, shares and patterns. Copy it for whoever maintains the app.</p>
+    ${groups}${cols}${nc}
+    <p class="t2" id="liveMeta">${esc(r.basis||"")} ${acct} account. This check used ${esc(count(r.requests))} of at most ${esc(count(r.maxRequests))} S&amp;P requests and took ${esc(plural(r.seconds,"second"))}. Ran ${fmtAt(r.ranAt)} at ${esc(fmtTime(r.ranAt))}.</p>
+    ${c.showText?`<label class="f">Select this and copy it for whoever maintains the app<textarea id="liveText" readonly>${esc(liveText(r))}</textarea></label>`:""}
+    <div class="inline"><button type="button" class="btn sm" data-act="live-copy">Copy for developer</button><button type="button" class="btn sm ghost" data-act="live-check">Run again</button>${close}</div>
+  </div></div></div>`;
+}
+function renderLive(){
+  const root=document.getElementById("liveRoot"), h=S.session&&isCorpDev()?liveHTML():"";
+  if(renderLive.shown!==h){ root.innerHTML=h; renderLive.shown=h; }   // redrawn only when it changes, so focus, selection and open details stay
+  if(S.live&&S.live.focus&&h){ S.live.focus=false; document.getElementById("livePanel")?.focus({preventScroll:true}); }
+}
+async function copyLive(){
+  const r=S.live&&S.live.report; if(!r) return;
+  try{ await navigator.clipboard.writeText(liveText(r)); toast("Copied. Paste it into a message to whoever maintains the app."); }
+  catch{ S.live.showText=true; renderLive(); const t=document.getElementById("liveText"); if(t){ t.focus(); t.select(); } toast("Couldn't copy here. Select the text below and copy it."); }
 }
 
 /* ---------- Filings: the search form ---------- */
@@ -731,6 +828,7 @@ function estimateText(){
   if(!f.chips.length || !a || !b || a>b) return "";
   const windows=Math.ceil((Math.round((b-a)/DAY)+1)/365), n=k=>Math.ceil(f.chips.filter(c=>c.kind===k).length/10);
   const req=windows*(n("companyId")+n("institutionId"));
+  if(req>MAX_SEARCH_REQUESTS) return tooWideText(req, windows, n("companyId")+n("institutionId"), f.chips.length);
   return `About ${plural(req,"S&P request")}, more if there are many results. A search someone has already run costs none.`;
 }
 async function resolveCompany(){
@@ -742,6 +840,7 @@ async function resolveCompany(){
   if(!S.session) return;
   if(r.data){ f.matches=Array.isArray(r.data.matches)?r.data.matches:[]; f.resolveNote=r.data.note||""; }
   else if(r.err!=="signin"){ f.matches=[]; f.resolveErr=errText(r); }
+  f.groups=r.data&&Array.isArray(r.data.groups)?r.data.groups.filter(g=>g&&typeof g==="object"&&Array.isArray(g.members)):[]; f.groupNote=r.data&&typeof r.data.groupNote==="string"?r.data.groupNote:"";
   render();
 }
 function addChip(kind, id, name){
@@ -766,6 +865,75 @@ function addAllMatches(){
   toast(full ? `Added ${added}. A search takes at most ${MAX_COMPANIES} companies, so the rest were left out.` : added ? `Added ${plural(added,"company","companies")}.` : "Those companies are already chosen.");
   document.getElementById("f_q")?.focus();
 }
+/* ---------- Filings: whole groups in the company finder ----------
+   The function offers each group whose name (or NAIC group code) matches what was typed, with every member company
+   that has an S&P id, so a whole group goes into one search in one click. */
+const idsPerYear = list => Math.ceil(list.filter(m=>!blank(m.companyId)).length/10) + Math.ceil(list.filter(m=>blank(m.companyId)&&!blank(m.institutionId)).length/10);
+const groupName = g => !blank(g.name) ? String(g.name) : !blank(g.code) ? `NAIC group ${g.code}` : "Group";
+function groupChoicesHTML(){
+  const f=S.f, gs=f.groups||[];
+  if(!gs.length) return f.groupNote ? `<p class="t2" id="groupNote">${esc(f.groupNote)}</p>` : "";
+  const rows=gs.map((g,i)=>{
+    const members=g.members.filter(m=>m&&(!blank(m.companyId)||!blank(m.institutionId))), n=isNum(g.searchable)?+g.searchable:members.length;
+    const without=isNum(g.companies)&&+g.companies>n ? +g.companies-n : 0, req=idsPerYear(members);
+    const meta=[!blank(g.code)?`NAIC group ${g.code}`:"", g.tooBig ? `about ${plural(req,"S&P request")} for each year of dates for the first ${count(members.length)}` : `about ${plural(req,"S&P request")} for each year of dates`,
+      without?`${plural(without,"company has","companies have")} no S&P id and can't be searched`:""].filter(Boolean).join(" · ");
+    const big = g.tooBig ? `<div class="t2 bigwarn" data-big>Too big for one search: a search takes at most ${count(MAX_COMPANIES)} companies. Add the first ${count(members.length)} and search, then remove them, find the others by name and search again.</div>` : "";
+    return `<li><div><div class="t1">${esc(groupName(g))}, ${esc(plural(n,"company","companies"))}${g.tooBig?"":": add all"}</div><div class="t2">${esc(meta)}</div>${big}</div>
+      <span class="inline"><button type="button" class="btn sm" data-act="co-add-group" data-i="${i}">${g.tooBig?`Add the first ${count(members.length)}`:`Add all ${count(n)}`}</button></span></li>`; }).join("");
+  return `<ul class="matches groups" id="groupChoices" aria-label="Whole groups">${rows}</ul>${f.groupNote?`<p class="t2" id="groupNote">${esc(f.groupNote)}</p>`:""}`;
+}
+/** Adds every company of a group not already chosen, up to the most one search takes, and says what happened. */
+function addGroup(i){
+  const f=S.f, g=(f.groups||[])[i]; if(!g) return;
+  let added=0, left=0;
+  for(const m of g.members){
+    const kind=!blank(m.companyId)?"companyId":!blank(m.institutionId)?"institutionId":null; if(!kind) continue;
+    const id=String(m[kind]).trim();
+    if(!/^\d{1,12}$/.test(id) || f.chips.some(c=>c.kind===kind && c.id===id)) continue;
+    if(f.chips.length>=MAX_COMPANIES){ left++; continue; }
+    f.chips.push({kind, id, name:m.companyName||""}); added++;
+  }
+  f.q=""; f.matches=null; f.groups=[]; f.groupNote=""; f.resolveNote=""; f.resolveErr=""; f.formErr=""; render();
+  const name=groupName(g);
+  toast(left&&!added ? `A search takes at most ${MAX_COMPANIES} companies and ${MAX_COMPANIES} are chosen, so none of ${name} was added. Remove some companies to make room.`
+    : left ? `Added ${plural(added,"company","companies")} from ${name}. A search takes at most ${MAX_COMPANIES} companies, so ${count(left)} ${left===1?"was":"were"} left out. Remove some companies to make room.`
+    : added ? `Added ${plural(added,"company","companies")} from ${name}.` : `Every company in ${name} is already chosen.`);
+  document.getElementById("f_q")?.focus();
+}
+/* What the estimate says when a search is too wide for one search, with what would fit. */
+function tooWideText(req, windows, perYear, n){
+  const years=Math.floor(MAX_SEARCH_REQUESTS/Math.max(1,perYear)), fit=Math.min(MAX_COMPANIES, Math.floor(MAX_SEARCH_REQUESTS/windows)*10);
+  const dates = years>=1 ? `with these ${plural(n,"company","companies")}, a search can cover up to ${count(years*365)} days of dates (a little under ${plural(years,"year")})` : "";
+  const cos = fit>=10 ? `over these dates, a search can take up to ${plural(fit,"company","companies")}` : "these dates are too long for even 10 companies";
+  return `About ${plural(req,"S&P request")}: more than the ${MAX_SEARCH_REQUESTS} one search may use, so S&P won't be asked. Choose fewer years or fewer companies: ${[dates, cos].filter(Boolean).join("; ")}.`;
+}
+
+/* ---------- Filings: keeping a search out of Recent searches ----------
+   The tick is remembered for this login's session in this tab. Such a search is still saved, so the same search
+   costs nothing next time, but the Recent searches list leaves it out (the function marks the saved result). */
+const UNLISTED_KEY = "snl.f.unlisted";
+function unlistedOn(){
+  if(S.f.unlisted===undefined){ let v=false; try{ v=sessionStorage.getItem(UNLISTED_KEY)==="1"; }catch{} S.f.unlisted=v; }
+  return S.f.unlisted;
+}
+function setUnlisted(on){
+  S.f.unlisted=!!on;
+  try{ if(on) sessionStorage.setItem(UNLISTED_KEY,"1"); else sessionStorage.removeItem(UNLISTED_KEY); }catch{}
+  render();
+}
+function unlistedTickHTML(){
+  return `<label class="unl" for="f_unlisted"><input type="checkbox" id="f_unlisted" data-act="unlisted-tick" ${unlistedOn()?"checked":""}><span>Keep this search out of Recent searches <em class="t2" style="font-style:normal">The result is still saved, so running the same search again costs no S&amp;P requests, but it isn't listed for anyone. Remembered until you sign out.</em></span></label>`;
+}
+function unlistedNoteHTML(r){
+  const f=S.f; if(f.busy || !f.last || !f.last.unlisted) return "";
+  if(r.unlisted) return `<p class="t2" id="unlistedNote">Kept out of Recent searches. The result is saved, so the same search costs no S&amp;P requests next time.</p>`;
+  if(r.fromStore) return `<p class="t2" id="unlistedNote">This search had been run before and is already in Recent searches. Opening it again doesn't add anything to the list.</p>`;
+  // a filings function from before this tick existed saves every search as listed
+  if(r.saved!==false) return `<p class="t2 bigwarn" id="unlistedNote">This search may show in Recent searches: the filings function hasn't been updated to keep searches out of the list yet. Tell Corp Dev.</p>`;
+  return "";
+}
+
 /* A match from the company list with no S&P id: shown, but it can't be added to a filing search. */
 function noFilingsHTML(m){
   return `<span class="t2 noadd">Can't be added: the company list has no S&amp;P id for it, so its filings can't be searched.${!blank(m.naicCompanyCode)?" Its NAIC code works on the Statutory view.":""}</span>`;
@@ -784,16 +952,17 @@ function companyPickerHTML(){
         : hasIn ? `<button type="button" class="btn sm" data-act="co-add" data-kind="institutionId" data-id="${esc(m.institutionId)}" data-name="${esc(m.companyName)}">Add</button>` : noFilingsHTML(m);
       return `<li><div><div class="t1">${esc(m.companyName)}</div><div class="t2">${esc(meta)}</div></div><span class="inline">${add}</span></li>`; }).join("");
     const addable=f.matches.filter(m=>!blank(m.companyId)||!blank(m.institutionId)).length;
-    const all = addable>1 ? `<p class="t2" id="addAll"><button type="button" class="btn sm" data-act="co-add-all">Add all ${addable}</button> to search a whole group at once.</p>` : "";
+    const gh=groupChoicesHTML();
+    const all = addable>1 ? `<p class="t2" id="addAll"><button type="button" class="btn sm" data-act="co-add-all">Add all ${addable}</button> ${gh?"to add every company listed.":"to search a whole group at once."}</p>` : "";
     const byId = numeric ? `<li id="byId"><div><div class="t1">Use ${esc(f.asked.trim())} as an S&amp;P id</div><div class="t2">For a company the app hasn't seen yet. The name fills in after the first search.</div></div><span class="inline">
         <button type="button" class="btn sm" data-act="co-add" data-kind="companyId" data-id="${esc(f.asked.trim())}">Add as company id</button>
         <button type="button" class="btn sm" data-act="co-add" data-kind="institutionId" data-id="${esc(f.asked.trim())}">Add as institution id</button></span></li>` : "";
-    found = (f.resolveNote ? `<div class="info" id="resolveNote" role="status"><span>${esc(f.resolveNote)}${numeric?"":" Type the id (a whole number) in the box above to add it."}</span></div>` : "")
+    found = gh + (f.resolveNote && !gh ? `<div class="info" id="resolveNote" role="status"><span>${esc(f.resolveNote)}${numeric?"":" Type the id (a whole number) in the box above to add it."}</span></div>` : "")
       + (rows||byId ? `<ul class="matches" id="matches" aria-label="Matching companies">${rows}${byId}</ul>${all}` : "");
   }
   const chips = f.chips.length ? `<div class="chips" id="chips" aria-label="Chosen companies">${f.chips.map((c,i)=>`<span class="cchip"><span><b>${esc(c.name||(c.kind==="companyId"?"Company":"Institution")+" "+c.id)}</b>${c.name?` <span class="t2">${esc(chipLabel(c))}</span>`:` <span class="t2">S&amp;P ${c.kind==="companyId"?"company":"institution"} id</span>`}</span><button type="button" data-act="co-remove" data-i="${i}" aria-label="Remove ${esc(c.name||chipLabel(c))}">×</button></span>`).join("")}</div>`
     : `<p class="t2" id="noChips">No companies chosen yet.</p>`;
-  return `<div class="f"><label for="f_q">Companies <em>name, NAIC code or S&amp;P id; up to ${MAX_COMPANIES}</em></label>
+  return `<div class="f"><label for="f_q">Companies <em>name, group name, NAIC code or S&amp;P id; up to ${MAX_COMPANIES}</em></label>
     <div class="toolbar"><div class="grow"><input type="text" id="f_q" data-bind="f.q" value="${esc(f.q)}" autocomplete="off" spellcheck="false" placeholder="For example Calloway, 90001 or 4000001"></div>
       <button type="button" class="btn" data-act="co-find" ${f.resolving?"disabled":""}>Find company</button></div>
     ${f.resolveErr?`<p class="err" role="alert">${esc(f.resolveErr)}</p>`:""}${found}${chips}</div>`;
@@ -831,6 +1000,7 @@ function filingsFormHTML(){
     </div>
     ${listsOff||S.refsMsg||S.refsErr?`<p class="t2" id="refsMsg">${esc(S.refsErr||S.refsMsg||"Some of S&P's lists aren't loaded yet.")}</p>`:""}
     <label class="f"><span>Tracking numbers <em>optional; separate with commas</em></span><input type="text" id="f_tracking" data-bind="f.tracking" value="${esc(f.tracking)}" autocomplete="off" spellcheck="false"></label>
+    ${unlistedTickHTML()}
     ${f.formErr?`<p class="err" id="formErr" role="alert">${esc(f.formErr)}</p>`:""}
     <div class="toolbar"><button class="btn primary" data-act="search" ${f.busy?"disabled":""}>${f.busy?"Searching…":"Search filings"}</button>
       <span class="t2 grow" id="f_est">${esc(est)}</span>
@@ -847,6 +1017,7 @@ async function runSearch(refresh, given){
     if(problem){ f.formErr=problem; render(); document.getElementById("formErr")?.scrollIntoView({block:"nearest"}); return; }
     payload=searchPayload(); f.last=payload; f.res=null;
   }
+  if(unlistedOn()) payload.unlisted=true; else delete payload.unlisted;   // kept out of Recent searches, or not, as the tick says now
   f.formErr=""; f.busy=true; f.err=null; render();
   const r=await callFn("snl-filings", payload);
   f.busy=false;
@@ -917,6 +1088,7 @@ function filingsResultsHTML(){
   else if(f.err) h+=problemHTML(f.err, "Couldn't refresh the search.", "search-refresh");
   else if(r.fromStore) h+=`<div class="info" id="fromStore" role="status"><span>From the last fetch on ${fmtAt(r.fetchedAt)}.</span><button class="btn sm" data-act="search-refresh">Refresh</button></div>`;
   if(r.capped) h+=`<div class="banner" id="capped" role="alert"><span><b>These results are incomplete.</b> The search stopped before S&amp;P had returned everything. Narrow the dates, states or companies and search again.</span></div>`;
+  h+=unlistedNoteHTML(r);
   if(r.saved===false && !r.capped && !f.busy) h+=`<p class="t2" id="notSaved">These results couldn't be saved, so the next search will ask S&amp;P again.</p>`;
   if(notes.length || !all.length) h+=`<div class="notes" id="notes" role="status"><b>${all.length?"Read this before you rely on the results":"Nothing came back, and that isn't proof that nothing was filed"}</b><ul>${(notes.length?notes:[EMPTY_RESULT]).map(n=>`<li>${esc(n)}</li>`).join("")}</ul></div>`;
   const bs=Array.isArray(r.byState)?r.byState:[], bc=Array.isArray(r.byCompany)?r.byCompany:[];
@@ -966,7 +1138,7 @@ async function loadRecent(){
   if(R.loading){ R.again=true; return; }
   R.loading=true; R.again=false; R.err=""; render();
   let data=null, error=null;
-  try{ ({data, error}=await S.sb.from("snl_store").select(RECENT_COLS).eq("kind","search").order("fetched_at",{ascending:false}).limit(R.limit+1)); }catch(e){ error=e||{}; }
+  try{ ({data, error}=await S.sb.from("snl_store").select(RECENT_COLS).eq("kind","search").is("doc->>unlisted",null).order("fetched_at",{ascending:false}).limit(R.limit+1)); }catch(e){ error=e||{}; }
   if(!S.session || S.f!==f) return;   // signed out while it loaded
   R.loading=false;
   if(error || !Array.isArray(data)){
@@ -1061,7 +1233,7 @@ function reopenRecent(i){
    What is watched is the shared setting "watchlist" (snl_settings): every login reads it, Corp Dev edits it here.
    The snl-watch function checks it every day and says what it found (status), or checks now (run). */
 const WATCH_BUDGET = 30, WATCH_SHOWN = 5, WATCH_CHIPS = 12, WATCH_MAX_RECIPIENTS = 10;
-function freshWatch(){ return {loaded:false, loading:false, doc:null, problems:[], readErr:"", status:null, statusErr:null, checking:false, saving:false, saveErr:"", recips:null, manage:false, showAll:false, allCos:false, runNote:null}; }
+function freshWatch(){ return {loaded:false, loading:false, doc:null, problems:[], readErr:"", status:null, statusErr:null, checking:false, saving:false, saveErr:"", recips:null, manage:false, showAll:false, allCos:false, runNote:null, onlyMarked:false}; }
 const isEmailAddr = s => s.length<=254 && /^[A-Za-z0-9._%+'-]{1,64}@[A-Za-z0-9-]{1,63}(\.[A-Za-z0-9-]{1,63})*\.[A-Za-z]{2,24}$/.test(s);
 /* The saved document is typed by people: keep only what can be used, the same way the function reads it. */
 function cleanWatch(raw){
@@ -1154,8 +1326,17 @@ const watchRow = r => ({companies:(Array.isArray(r.companies)?r.companies:[]).ma
   typeOfInsurance:r.type_of_insurance, subTypeOfInsurance:r.sub_type_of_insurance, filingStatus:r.filing_status, dateSubmitted:r.date_submitted, publishDate:r.publish_date,
   newBusReqEffDate:r.effective_new, renewBusReqEffDate:r.effective_renewal, dispOverallRateImpact:r.rate_impact, filingDescription:r.description, trackingNumber:r.tracking_number,
   documentId:r.document_id, filingVersionId:r.filing_version_id});
+/* Marks come from the function (flagFiling in watch.ts): hints, never facts, each with the words that triggered it. */
+const watchFlags = r => (Array.isArray(r&&r.flags)?r.flags:[]).filter(f=>f&&!blank(f.label)).slice(0,5);
+const WATCH_FLAG_MEANING = {new_program:"a new program or product", new_state:"a company new to the state", new_form:"a new form or coverage", withdrawal:"a withdrawal", large_rate:"a large rate change"};
+function watchMarksHTML(r){
+  const fl=watchFlags(r); if(!fl.length) return "";
+  return `<div class="wmarks">${fl.map(f=>`<div class="wmark"><span class="pill mark">${esc(f.label)}</span><span class="t2">May be ${esc(WATCH_FLAG_MEANING[f.kind]||"worth a closer look")}${blank(f.reason)?"":`: ${esc(f.reason)}`}.</span></div>`).join("")}</div>`;
+}
 function watchFoundHTML(st){
-  const w=S.w, found=(Array.isArray(st.found)?st.found:[]).filter(r=>r&&!blank(r.filing_version_id)), last=st.lastCheck;
+  const w=S.w, last=st.lastCheck, listed=(Array.isArray(st.found)?st.found:[]).filter(r=>r&&!blank(r.filing_version_id));
+  const marked=listed.filter(r=>watchFlags(r).length), only=w.onlyMarked&&marked.length>0;
+  const found=only?marked:[...marked, ...listed.filter(r=>!watchFlags(r).length)];
   let h="";
   if(!last) h+=`<p class="t2" id="wNever">${st.configured===false?"":"Not checked yet. "}The first check records the filings already there as the starting point; after that, new filings show here.</p>`;
   else if(last.baseline) h+=`<p class="t2" id="wBaseline">The first check, on ${esc(whenAt(last.started_at))}, recorded ${plural(last.found,"filing")} as the starting point. Filings that appear after it show here as new.</p>`;
@@ -1163,9 +1344,12 @@ function watchFoundHTML(st){
   else h+=`<p id="wNew" style="margin:0"><b>The last check, on ${esc(whenAt(last.started_at))}, found ${plural(last.new_count,"new filing")}.</b></p>`;
   if(!found.length) return h;
   const shown=w.showAll?found:found.slice(0,WATCH_SHOWN);
-  h+=`<div class="t2">New filings found in the last ${count(st.keepDays||90)} days, the latest found first:</div>
+  if(listed.some(r=>Array.isArray(r.flags))) h+=`<div class="wmarked" id="wMarked"><span>${marked.length?`<b>${count(marked.length)} of ${count(listed.length)}</b> may be worth a closer look: a new program or form, a company new to a state, a withdrawal or a large rate change.`:`${listed.length===1?"The new filing isn't":`None of the ${count(listed.length)} new filings is`} marked as a new program, new form, withdrawal or large rate change.`}</span>
+    ${marked.length?`<button type="button" class="btn sm" data-act="w-marked" aria-pressed="${only}">${only?`Show all ${count(listed.length)} new filings`:`Show only the ${count(marked.length)} marked`}</button>`:""}</div>
+    <p class="t2" id="wMarkNote" style="margin:0">A mark is a hint from the filing type, status, rate impact and description, not a fact: it says which words or figures triggered it, so check the filing. A filing without a mark can still matter.</p>`;
+  h+=`<div class="t2">${only?`Showing ${plural(marked.length,"marked new filing")}, the latest found first:`:`New filings found in the last ${count(st.keepDays||90)} days, ${marked.length?"marked ones first, then ":""}the latest found first:`}</div>
     <div class="tbl-wrap cardwrap" id="watchWrap" data-keep><table class="cards filings" id="watchTable"><thead><tr><th>Company</th><th>State</th><th>Filing type</th><th>Type of insurance</th><th>Status</th><th>Dates</th><th class="num">Rate impact</th><th>Description</th><th>Tracking number</th><th>Document</th></tr></thead>
-    <tbody>${shown.map(r=>filingRowHTML({r:watchRow(r), key:"w"+r.filing_version_id})).join("")}</tbody></table></div>`;
+    <tbody>${shown.map(r=>filingRowHTML({r:watchRow(r), key:"w"+r.filing_version_id}).replace('<td class="c-co">', ()=>`<td class="c-co">${watchMarksHTML(r)}`)).join("")}</tbody></table></div>`;
   if(found.length>WATCH_SHOWN) h+=`<div class="inline"><button type="button" class="btn sm" data-act="w-all">${w.showAll?"Show fewer":`Show all ${count(found.length)}`}</button></div>`;
   return h+`<p class="source">Source: S&amp;P Global Market Intelligence, SNL Insurance Product Filings, found by the watchlist check. Opening a document uses one S&amp;P request the first time.</p>`;
 }
@@ -1178,7 +1362,8 @@ function watchManageHTML(l, st, empty){
     <label class="f"><span>Email the new filings to <em>optional; up to ${WATCH_MAX_RECIPIENTS} addresses, separated with commas</em></span>
       <div class="toolbar"><div class="grow"><input type="text" id="w_recips" data-bind="w.recips" value="${esc(recips)}" autocomplete="off" spellcheck="false" placeholder="For example corpdev1@yourco.com"></div>
       <button type="button" class="btn sm" data-act="w-recips-save" ${w.saving?"disabled":""}>Save recipients</button></div></label>
-    <p class="t2" id="wEmailNote">${st&&st.emailConfigured===false?"Email isn't set up for the app yet, so nobody is emailed. ":""}An email lists only the company, state, filing type, a line of description and the tracking number of each new filing, with a link here. Everything shows on this page either way.</p>
+    <p class="t2" id="wEmailNote">${st&&st.emailConfigured===false?"Email isn't set up for the app yet (RESEND_API_KEY, README, Watchlist, step 2), so nobody is emailed. ":""}An email lists the company, state, filing type, a line of description, the tracking number and any mark of each new filing, marked ones first, with a link here. Everything shows on this page either way.</p>
+    <p class="t2" id="wVisible">Every login on the site can see this watchlist, so it shows which companies the team follows. Leave off any company the team would not want named.</p>
   </div>`;
 }
 function watchHTML(){
@@ -1190,7 +1375,7 @@ function watchHTML(){
   const list=l||{enabled:false, companies:[], states:[], typeOfInsuranceIds:[], filingTypeIds:[], recipients:[]}, empty=!list.companies.length||!list.states.length;
   const running=w.checking || !!(st&&st.running);
   const summary = empty ? "Name companies and states once; a daily check shows any new rate, rule or form filing here."
-    : `${list.enabled?`<span class="pill on">On</span> Checked every day for filings published in the last ${count(st&&st.windowDays||14)} days.`:`<span class="pill off">Off</span> Not being checked.`}${st&&st.lastRun?` Last checked ${esc(whenAt(st.lastRun.started_at))}.`:""}`;
+    : `${list.enabled?`<span class="pill on">On</span> ${st&&st.scheduleReady===false?"Checked when Corp Dev clicks Check now,":"Checked every day"} for filings published in the last ${count(st&&st.windowDays||14)} days.`:`<span class="pill off">Off</span> Not being checked.`}${st&&st.lastRun?` Last checked ${esc(whenAt(st.lastRun.started_at))}.`:""}`;
   let h=`<section class="tcard watch" id="watch" aria-label="Watchlist">${head(summary)}`;
   if(w.runNote){ const n=w.runNote, bad=n.status==="failed"||n.status==="error";
     h+=`<div class="${bad?"banner":"info"}" id="wRun" role="${bad?"alert":"status"}"><span>${bad?"<b>The check didn't finish.</b> ":""}${esc(n.message||"")}${isNum(n.requests)&&+n.requests?` ${plural(n.requests,"S&amp;P request")} used.`:""}</span></div>`; }
@@ -1206,15 +1391,19 @@ function watchHTML(){
   const problems=(st&&Array.isArray(st.problems)&&st.problems.length?st.problems:w.problems.length?["Some entries in the saved watchlist couldn't be used and are left out."]:[]);
   if(problems.length && !empty) h+=`<div class="notes" id="wProblems" role="status"><b>Part of the saved watchlist can't be used</b><ul>${problems.map(p=>`<li>${esc(p)}</li>`).join("")}</ul></div>`;
   if(w.statusErr){ const e=w.statusErr;
-    h+= e.err==="not_deployed" ? `<div class="info" id="wNoFn" role="status"><span>${esc(errText(e))}</span></div>` : problemHTML(e, "Couldn't get the last check.", "w-retry"); }
+    h+= e.err==="not_deployed" ? `<div class="info" id="wNoFn" role="status"><span>${cd?`<b>The daily check isn't set up yet: the watchlist function isn't deployed.</b> Do steps 1 to 3 of the README's Watchlist section: run migration 0003, set WATCH_SECRET, then run: supabase functions deploy snl-watch --no-verify-jwt. After that, this card shows the last check and Check now works. You can choose what to watch already.`:"<b>The daily check isn't set up yet.</b> Corp Dev can set it up; what is watched still shows here."}</span></div>`
+      : e.err==="no_tables" ? `<div class="info" id="wNoTables" role="status"><span>${cd?`<b>The daily check isn't set up yet.</b> ${esc(e.msg||"")}`:"<b>The daily check isn't set up yet.</b> Corp Dev can set it up; what is watched still shows here."}</span></div>`
+      : problemHTML(e, "Couldn't get the last check.", "w-retry"); }
   else if(st){
     if(st.configured===false && !empty) h+=`<div class="info" id="wNotSetUp" role="status"><span><b>Checks start once S&amp;P API access is set up.</b> The watchlist is kept until then.</span></div>`;
+    else if(!empty && list.enabled && st.scheduleReady===false) h+=`<div class="info" id="wNoSchedule" role="status"><span><b>Daily checks aren't set up yet, so the list is checked only when ${cd?"you click":"Corp Dev clicks"} Check now.</b>${cd?" Missing: WATCH_SECRET on Supabase (README, Watchlist, step 2), then the daily schedule (step 4, supabase/watch_schedule.sql). After both, a check runs by itself every day.":""}</span></div>`;
+    else if(!empty && list.enabled && st.scheduleQuiet===true && cd) h+=`<div class="info" id="wQuiet" role="status"><span><b>No daily check has run ${st.lastScheduled?`since ${esc(whenAt(st.lastScheduled))}`:"yet"}.</b> If step 4 of the README's Watchlist section (supabase/watch_schedule.sql) is done, the next one runs at the time set there (06:23 UTC unless you changed it). If not, run that file in the Supabase SQL editor.</span></div>`;
     if(st.tooBig && !empty) h+=`<div class="banner" id="wTooBig" role="alert"><span>${esc(st.tooBig)}</span></div>`;
     else if(st.lastRun && st.lastRun.status==="failed" && !running) h+=`<div class="banner" id="wFailed" role="alert"><span><b>The last check, on ${esc(whenAt(st.lastRun.started_at))}, failed.</b> ${esc(st.lastRun.message||"No reason was recorded.")}</span></div>`;
     if(!empty && !list.enabled) h+=`<div class="info" id="wOff" role="status"><span><b>Switched off.</b> ${cd?"Switch it on under Manage to check every day.":"Corp Dev can switch it on."}</span></div>`;
     if(!empty || (st.found&&st.found.length)) h+=watchFoundHTML(st);
   }
-  if(cd && !empty) h+=`<div class="toolbar"><button type="button" class="btn sm primary" data-act="w-check" id="wCheck" ${running||w.saving?"disabled":""}>${w.checking?"Checking…":"Check now"}</button><span class="t2 grow">Uses a few S&amp;P requests. The daily check runs by itself once it is set up.</span></div>`;
+  if(cd && !empty && !(w.statusErr&&["not_deployed","no_tables"].includes(w.statusErr.err))) h+=`<div class="toolbar"><button type="button" class="btn sm primary" data-act="w-check" id="wCheck" ${running||w.saving?"disabled":""}>${w.checking?"Checking…":"Check now"}</button><span class="t2 grow">Uses a few S&amp;P requests. The daily check runs by itself once it is set up.</span></div>`;
   if(w.saveErr) h+=`<p class="err" id="wErr" role="alert">${esc(w.saveErr)}</p>`;
   if(cd && w.manage) h+=watchManageHTML(list, st, empty);
   return h+`</section>`;
@@ -2410,12 +2599,13 @@ function render(){
   else setMenu(false);
   document.body.classList.toggle("signed", on);
   const keep=keepUi("view");
-  if(!on){ v.innerHTML=loginHTML(); keep(); renderDrawer(); renderAsk(); renderConn(); return; }
+  if(!on){ v.innerHTML=loginHTML(); keep(); renderDrawer(); renderAsk(); renderConn(); renderLive(); return; }
   document.querySelectorAll("nav.tabs a").forEach(a=>a.setAttribute("aria-current", a.dataset.view===S.view ? "page" : "false"));
   document.getElementById("stripIn").innerHTML=stripHTML();
   v.innerHTML = S.view==="statutory" ? renderStatutory() : S.view==="profile" ? renderProfile() : renderFilings();
   keep(); renderDrawer(); renderAsk();
   renderConn();
+  renderLive();
 }
 function renderDrawer(){
   const root=document.getElementById("drawerRoot"), dr=S.session?S.drawer:null;
@@ -2490,10 +2680,15 @@ document.addEventListener("click", e=>{
     case "conn-check": runConnCheck(); break;
     case "conn-copy": copyConn(); break;
     case "conn-close": S.conn=null; render(); document.getElementById("connBtn")?.focus(); break;
+    case "live-check": runLiveCheck(); break;
+    case "live-copy": copyLive(); break;
+    case "live-close": S.live=null; render(); document.getElementById("liveBtn")?.focus(); break;
 
     case "co-find": resolveCompany(); break;
     case "co-add": addChip(t.dataset.kind, t.dataset.id, t.dataset.name); break;
     case "co-add-all": addAllMatches(); break;
+    case "co-add-group": addGroup(+t.dataset.i); break;
+    case "unlisted-tick": setUnlisted(t.checked); break;
     case "co-remove": f.chips.splice(+t.dataset.i,1); render(); break;
     case "state-toggle": { const s=t.dataset.s; f.states=f.states.includes(s)?f.states.filter(x=>x!==s):f.states.concat(s); f.formErr=""; render(); document.querySelector(`#states [data-s="${CSS.escape(s)}"]`)?.focus({preventScroll:true}); if(t.dataset.map) showStateRow(s); break; }   // neither the page nor the list jumps; a click on the map brings its row into view in the list
     case "state-all": f.states=stateOptions().map(s=>s.id); f.formErr=""; render(); break;
@@ -2523,6 +2718,7 @@ document.addEventListener("click", e=>{
     case "w-check": watchCheckNow(); break;
     case "w-manage": S.w.manage=!S.w.manage; S.w.saveErr=""; render(); break;
     case "w-all": S.w.showAll=!S.w.showAll; render(); break;
+    case "w-marked": S.w.onlyMarked=!S.w.onlyMarked; S.w.showAll=false; render(); break;
     case "w-more": S.w.allCos=!S.w.allCos; render(); break;
     case "w-retry": S.w.loaded=false; S.w.readErr=""; S.w.statusErr=null; loadWatch(); break;
 
@@ -2602,12 +2798,14 @@ document.addEventListener("keydown", e=>{
 /* ---------- auth: Supabase email and password; usernames map to <username>@<usernameDomain> ---------- */
 function toEmail(u){ u=u.trim().toLowerCase(); return u.includes("@") ? u : u+"@"+(CFG.usernameDomain||"snl-lookup.local"); }
 function resetState(){
+  try{ sessionStorage.removeItem(UNLISTED_KEY); }catch{}
   clearTimeout(S.ask.timer);
   for(const d of Object.values(S.docs)) if(d.url){ try{ URL.revokeObjectURL(d.url); }catch{} }
   S.session=null; S.drawer=null; S.status=null; S.statusErr=""; S.refs=null; S.refsLoading=false; S.refsMsg=""; S.refsErr=""; S.docs={};
   S.f=freshFilings(); S.ask=freshAsk(); S.st=freshStat();
   S.chatUse=null; S.chatUseAt=0;
   S.conn=null;
+  S.live=null;
   S.past=freshPast();
   S.w=freshWatch();
   S.pf=freshProfile();   // the template's bytes and any built file go with it

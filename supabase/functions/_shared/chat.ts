@@ -56,7 +56,7 @@ Rules that matter
 - S&P's filings API has no company search: every search needs S&P company ids or institution ids. resolve_entity and resolve_entities find them in the app's company list, which holds the companies the owner loaded plus every company seen in earlier results. They never call S&P. If a company isn't in the list, say so and tell the user they can add it on the Filings view by its S&P company id or institution id. Don't guess ids.
 - An insurer group usually files through several companies. Search every company the user names.
 - S&P can't list every company that filed in a market, so a question about a market or a segment rather than named companies (for example "which carriers filed high net worth homeowners forms in Florida this year") needs a list of companies to check. Choosing that list is the one place to use your general knowledge: pick the carriers or groups most likely to write that business there, usually 10 to 15, and look them all up in one resolve_entities call, with insurer groups under groups so every member company comes back. Then search the searchBatches it returns. In the answer, say plainly that the carriers checked are your own choice, not a list from S&P, and may miss carriers. Describe the results as covering the carriers checked, never the whole market. Name the candidates that weren't in the company list and tell the user they can add them on the Filings view by S&P company id or institution id.
-- Narrow a search before you run it, so it fits the limits on one question: only the states asked about, dates no wider than the question needs (each 364 days of dates costs one S&P request for every 10 companies, so "this year" is one request for each 10), and the type_of_insurance_ids and filing_type_ids that fit the question (for example homeowners and form filings). You see at most ${LIMITS.rowsToClaude} filings from one search, so a wide search hides the rest. One search takes up to ${MAX_IDS} ids.
+- Narrow a search before you run it, so it fits the limits on one question: only the states asked about, dates no wider than the question needs (each 364 days of dates costs one S&P request for every 10 companies, so "this year" is one request for each 10), and the type_of_insurance_ids and filing_type_ids that fit the question (for example homeowners and form filings). You see at most ${LIMITS.rowsToClaude} filings from one search, so a wide search hides the rest. One search takes up to ${MAX_IDS} ids. To find a filing you already know again, put its tracking number in tracking_numbers, with its company and state.
 - Reading documents is slow and counts against S&P's request limit, so read the filings that decide the answer, not every filing. Start from the search results (filing type, description, sub-type and dates), then read what you need. When you state something a document says, rely on the document so the page citation is recorded.
 - Insurers often file separate programs for different customers, for example a private client or high net worth program alongside a standard program. When asked whether forms differ by customer segment, work from the program, product and form names and numbers in the filings, say what you based each classification on, and follow any mapping the user gives (for example which product is the private client one). If the filings don't settle it, say so.
 - There are limits on lookups and document pages for one question. If a tool says a limit is reached, answer from what you have and say what you couldn't check.
@@ -121,8 +121,9 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
         type_of_insurance_ids: { type: "array", items: { type: "integer" }, description: "S&P type of insurance ids to keep, or [] for all" },
         filing_type_ids: { type: "array", items: { type: "integer" }, description: "S&P filing type ids to keep (rate, rule, form and so on), or [] for all" },
         filing_status_ids: { type: "array", items: { type: "integer" }, description: "S&P filing status ids to keep, or [] for all" },
+        tracking_numbers: { type: "array", items: { type: "string" }, description: "Tracking numbers of filings to find again, exactly as a search row or the user gives them (up to 20), or [] for any. An exact way to find a known filing; the search still needs its company and state." },
       },
-      required: ["company_ids", "institution_ids", "states", "from", "to", "type_of_insurance_ids", "filing_type_ids", "filing_status_ids"],
+      required: ["company_ids", "institution_ids", "states", "from", "to", "type_of_insurance_ids", "filing_type_ids", "filing_status_ids", "tracking_numbers"],
       additionalProperties: false,
     },
   },
@@ -709,7 +710,7 @@ function makeTools(ctx: ChatCtx, st: ChatState, api: Spgmi | null, client: Anthr
   async function search(input: Record<string, unknown>): Promise<ToolOut> {
     const now = ctx.now();
     const parsed = parseSearch({ companyIds: input.company_ids, institutionIds: input.institution_ids, states: input.states, from: input.from, to: input.to,
-      typeOfInsuranceIds: input.type_of_insurance_ids, filingTypeIds: input.filing_type_ids, filingStatusIds: input.filing_status_ids }, new Date(now).toISOString().slice(0, 10));
+      typeOfInsuranceIds: input.type_of_insurance_ids, filingTypeIds: input.filing_type_ids, filingStatusIds: input.filing_status_ids, trackingNumbers: input.tracking_numbers }, new Date(now).toISOString().slice(0, 10));
     if (!parsed.ok) return fail(parsed.message);
     const p = parsed.params, n = p.companyIds.length + p.institutionIds.length;
     const range = p.from.slice(0, 4) === p.to.slice(0, 4) ? p.from.slice(0, 4) : `${p.from.slice(0, 4)} to ${p.to.slice(0, 4)}`;
