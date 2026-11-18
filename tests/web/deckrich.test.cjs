@@ -190,11 +190,29 @@ function hostile() { const v = copy(RICH); v.facts.programs.programs[0].name = E
   const sl = await slidesOf(z);
   ok("sample build: thirteen slides, each well-formed, the maps as groups of 51 freeforms", sl.length === 13 && (await p.evaluate(xs => xs.every(x => !new DOMParser().parseFromString(x, "application/xml").getElementsByTagName("parsererror").length), sl)) && (sl[2].match(/<a:custGeom>/g) || []).length >= 51 && (sl[3].match(/<a:custGeom>/g) || []).length >= 51);
   ok("sample build: every content slide made-up and sourced", sl.slice(1).every(x => /made-up/i.test(x) && x.includes("SNL Insurance Product Filings")));
-  let py = "";
-  try {
-    py = execFileSync("python3", ["-I", "-c", "import sys\nfrom pptx import Presentation\nfrom pptx.enum.shapes import MSO_SHAPE_TYPE as T\np=Presentation(sys.argv[1])\nfor i,s in enumerate(p.slides,1):\n  for g in s.shapes:\n    if g.shape_type==T.GROUP: print(i,g.name,sum(1 for x in g.shapes if x.shape_type==T.FREEFORM),len(g.shapes))\nprint('slides',len(p.slides))", file], { encoding: "utf8" });
-  } catch (e) { py = "ERROR " + e.message; }
-  ok("python-pptx opens the deck and reads each map as a group of 51 freeform shapes with their labels", /slides 13/.test(py) && /^3 Map of filings by state 51 \d+$/m.test(py) && /^4 Map of latest rate change by state 51 \d+$/m.test(py), py);
+  // The same structure, read from the slides' own XML, so it is checked on every machine.
+  const maps = await p.evaluate(xs => xs.map(x => {
+    const d = new DOMParser().parseFromString(x, "application/xml"), P = "http://schemas.openxmlformats.org/presentationml/2006/main", A = "http://schemas.openxmlformats.org/drawingml/2006/main";
+    return [...d.getElementsByTagNameNS(P, "grpSp")].map(g => {
+      const nv = g.getElementsByTagNameNS(P, "nvGrpSpPr")[0], nm = nv && nv.getElementsByTagNameNS(P, "cNvPr")[0];
+      const kids = [...g.children].filter(c => c.namespaceURI === P && (c.localName === "sp" || c.localName === "cxnSp" || c.localName === "grpSp" || c.localName === "pic"));
+      return [nm ? nm.getAttribute("name") : "", kids.filter(c => c.localName === "sp" && c.getElementsByTagNameNS(A, "custGeom").length).length, kids.length];
+    });
+  }), sl);
+  const mapOn = (i, name) => maps[i].filter(m => m[0] === name && m[1] === 51 && m[2] >= 51).length === 1;
+  ok("each map is one named group holding 51 freeform shapes and their labels", mapOn(2, "Map of filings by state") && mapOn(3, "Map of latest rate change by state"), [maps[2], maps[3]]);
+  // And opened by another program, python-pptx, where it is installed. GitHub's test run installs it, so there it
+  // always runs; on a computer without it this one check is left out and says so.
+  let hasPptx = true;
+  try { execFileSync("python3", ["-I", "-c", "import pptx"], { stdio: "ignore" }); } catch { hasPptx = false; }
+  if (!hasPptx && !process.env.CI) console.log("note: python-pptx isn't installed here, so the check that it opens the deck was left out (pip install python-pptx to run it)");
+  else {
+    let py = "";
+    try {
+      py = execFileSync("python3", ["-I", "-c", "import sys\nfrom pptx import Presentation\nfrom pptx.enum.shapes import MSO_SHAPE_TYPE as T\np=Presentation(sys.argv[1])\nfor i,s in enumerate(p.slides,1):\n  for g in s.shapes:\n    if g.shape_type==T.GROUP: print(i,g.name,sum(1 for x in g.shapes if x.shape_type==T.FREEFORM),len(g.shapes))\nprint('slides',len(p.slides))", file], { encoding: "utf8" });
+    } catch (e) { py = "ERROR " + e.message; }
+    ok("python-pptx opens the deck and reads each map as a group of 51 freeform shapes with their labels", /slides 13/.test(py) && /^3 Map of filings by state 51 \d+$/m.test(py) && /^4 Map of latest rate change by state 51 \d+$/m.test(py), py);
+  }
 
   ok("no page errors", errs.length === 0, errs);
   await b.close();
