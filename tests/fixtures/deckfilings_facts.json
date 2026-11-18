@@ -296,6 +296,53 @@
     "hi": 90
    },
    "left": 2
+  },
+  "map": {
+   "searched": []
+  },
+  "summaries": {
+   "checked": false,
+   "version": 2,
+   "note": "Saved summaries weren't looked up for this profile.",
+   "rate": {
+    "filings": 4,
+    "withDocument": 4,
+    "summarised": 0,
+    "older": 0
+   },
+   "form": {
+    "filings": 2,
+    "withDocument": 2,
+    "summarised": 0,
+    "older": 0
+   }
+  },
+  "exposure": {
+   "rows": [],
+   "total": 0,
+   "latest": [],
+   "latestPremium": null,
+   "latestPolicyholders": null,
+   "summarised": 0
+  },
+  "adequacy": {
+   "rows": [],
+   "total": 0,
+   "summarised": 0
+  },
+  "programs": {
+   "programs": [],
+   "programsTotal": 0,
+   "forms": [],
+   "formsTotal": 0,
+   "summaries": 0
+  },
+  "market": {
+   "checked": false,
+   "reason": "The market index wasn't looked up for this profile.",
+   "rows": [],
+   "coverage": [],
+   "indexed": []
   }
  },
  "text": {
@@ -411,6 +458,59 @@
     {
      "lead": "Left out",
      "text": "2 filings don't have both dates and are left out."
+    }
+   ]
+  },
+  "rateMap": {
+   "title": "Latest change an increase in 1 of 2 states",
+   "points": [
+    {
+     "lead": "Highest",
+     "text": "FL: 9.8%, published 5 Nov, pending, not approved, so it may be the change asked for."
+    },
+    {
+     "lead": "Lowest",
+     "text": "TX: (3.5%), published 1 Mar 2025, approved."
+    },
+    {
+     "lead": "Direction",
+     "text": "1 up, 1 down, 0 unchanged; 1 state with filings but no rate impact in S&P's data."
+    }
+   ]
+  },
+  "exposure": {
+   "title": "Premium and policyholders the rate filings state",
+   "points": [
+    {
+     "lead": "Not stated",
+     "text": "Saved summaries weren't looked up for this profile."
+    }
+   ]
+  },
+  "adequacy": {
+   "title": "Rate adequacy and loss costs",
+   "points": [
+    {
+     "lead": "Not stated",
+     "text": "Saved summaries weren't looked up for this profile."
+    }
+   ]
+  },
+  "programs": {
+   "title": "Programs and forms",
+   "points": [
+    {
+     "lead": "None recorded",
+     "text": "Saved summaries weren't looked up for this profile."
+    }
+   ]
+  },
+  "market": {
+   "title": "Against the market",
+   "points": [
+    {
+     "lead": "Not compared",
+     "text": "The market index wasn't looked up for this profile."
     }
    ]
   },

@@ -16,6 +16,8 @@ House rules for anyone changing the code are in [.github/copilot-instructions.md
 | Part | Where it runs | What it does |
 | --- | --- | --- |
 | `web/` | GitHub Pages | The site. One page, no build step. Holds only the Supabase address and publishable key. |
+| `worker/`, `wrangler.toml` | Cloudflare Worker | Optional, recommended (step 4a). Serves the same site at a `workers.dev` address behind Cloudflare Access, and is then the only way to a Supabase session. Holds no secrets. |
+| `snl-signin` | Supabase Edge Function | Optional (step 4a). Checks a Cloudflare sign-in itself and turns it into a one-hour Supabase session for that person. |
 | `snl-filings` | Supabase Edge Function | Filing search, reference lists and documents from S&P's Physical Documents API. Holds the S&P API credentials. |
 | `snl-chat` | Supabase Edge Function | Claude, with the filing search, filing documents and statutory data as tools. Holds the Anthropic key. |
 | `snl-statutory` | Supabase Edge Function | Statutory financials from S&P's data on Snowflake. Holds the Snowflake credentials. |
@@ -30,6 +32,7 @@ House rules for anyone changing the code are in [.github/copilot-instructions.md
 | `supabase/migrations/0005_filing_digests.sql` | Supabase Postgres | Optional. Saved filing summaries. |
 | `supabase/migrations/0006_market_index.sql` | Supabase Postgres | Optional. The market index and the record of its sweeps. |
 | `supabase/migrations/0007_answer_library.sql` | Supabase Postgres | Optional. The team library of saved answers. |
+| `supabase/migrations/0008_own_templates.sql` | Supabase Storage | Optional. Lets each login keep one PowerPoint template of their own, private to them. |
 | `scripts/logins.mjs` | Your computer | Creates logins. There is no self sign-up. |
 | `scripts/companies.mjs` | Your computer | Loads a company list so companies can be found by name or NAIC code. |
 
@@ -137,6 +140,123 @@ supabase functions deploy snl-chat --no-verify-jwt
 3. Merge to `main`, or run the "Deploy site to GitHub Pages" workflow. The site appears at `https://YOUR_GITHUB_ORG.github.io/snl-lookup/`.
 
 A merge to `main` is a deploy.
+
+### 4a. Cloudflare sign-on (optional, recommended: replaces usernames and passwords)
+
+The site is served by a Cloudflare Worker at `https://snl-lookup.YOUR_SUBDOMAIN.workers.dev`, behind Cloudflare Access. Colleagues sign in with a one-time code Cloudflare emails them. The owner can sign in with their Cloudflare account. Nobody needs a username or a password, and no login is made by a script.
+
+How it works:
+
+- **Cloudflare decides who comes in.** The list of email addresses is the Access policy. The Worker checks Cloudflare's signed sign-in on every request and serves nothing without it, including when Access is switched off.
+- **The back end is tied to the same sign-in.** A sign-in page in front of a static site protects nothing behind it, because the page talks straight to Supabase. So the page asks the Worker for a session, the Worker passes the Cloudflare sign-in to `snl-signin`, and `snl-signin` checks it again against Cloudflare's own keys before it gives out a Supabase token. Row-level security, each function's own login check and the storage rules are unchanged.
+- **The token lasts about an hour and cannot renew itself.** No refresh token ever leaves Supabase. The page comes back through Cloudflare for a new token before the old one ends.
+- **`SNL_ADMIN_EMAILS` decides who is Corp Dev.** Everyone else Cloudflare lets in is a reader. The role follows that list at every sign-in, up and down.
+- **Usernames** are the part of the address before the @ (`jane.doe`), with `-2`, `-3` when taken. The email address is shown in the account menu.
+
+The GitHub Pages copy keeps working with usernames and passwords until you retire them (the last step), so nothing breaks while you switch over.
+
+**1. Deploy the Worker.** From the repository root. Until its settings exist it answers 403 to everyone.
+
+```bash
+npx wrangler login
+```
+
+```bash
+npx wrangler deploy
+```
+
+**2. Switch on Access for its address.** Cloudflare dashboard > Workers & Pages > snl-lookup > Access > protect this Worker behind Access, for all traffic. The dashboard's wording may differ slightly.
+
+**3. Set who may come in.** In Zero Trust:
+
+1. Integrations > Identity providers: check **Cloudflare** is listed with "Restrict to account members" on, and add **One-time PIN**.
+2. Access controls > Applications > the snl-lookup application > Edit: add an Allow policy that includes your colleagues' email addresses, and tick both login methods.
+3. Copy the **Application Audience (AUD) tag** from the application's additional settings. Your team domain is `YOUR_TEAM.cloudflareaccess.com`: the address of the Cloudflare sign-in page shows it.
+4. Ask colleagues to allow mail from `noreply@notify.cloudflare.com`, which sends the codes.
+
+Keep "Restrict to account members" on. If the Cloudflare account has other members, they can come in as readers.
+
+**4. Set the Worker's settings.** Each command asks for the value. None is a secret, but none is committed, because the repository is public. A deploy never removes them. `ORG_NAME` is optional.
+
+```bash
+npx wrangler secret put TEAM_DOMAIN
+```
+
+```bash
+npx wrangler secret put POLICY_AUD
+```
+
+```bash
+npx wrangler secret put SUPABASE_URL
+```
+
+```bash
+npx wrangler secret put SUPABASE_PUBLISHABLE_KEY
+```
+
+```bash
+npx wrangler secret put ORG_NAME
+```
+
+Use the publishable key, never the secret key. A secret key set here by mistake is refused and never sent to a browser.
+
+**5. Set the Supabase secrets.** `SNL_ADMIN_EMAILS` is a comma-separated list; for the owner it is the email address of their Cloudflare account.
+
+```bash
+supabase secrets set CF_ACCESS_TEAM_DOMAIN=YOUR_TEAM.cloudflareaccess.com
+```
+
+```bash
+supabase secrets set CF_ACCESS_AUD=...
+```
+
+```bash
+supabase secrets set SNL_ADMIN_EMAILS=...
+```
+
+**6. Deploy `snl-signin`.** Authentication > Sign In / Providers > Email must stay on (the session is made through a sign-in link that is never sent). "Allow new users to sign up" can stay off.
+
+```bash
+supabase functions deploy snl-signin --no-verify-jwt
+```
+
+**7. Let the page call the functions from the new address.** Keep both addresses while you switch over.
+
+```bash
+supabase secrets set ALLOWED_ORIGIN=https://YOUR_GITHUB_ORG.github.io,https://snl-lookup.YOUR_SUBDOMAIN.workers.dev
+```
+
+**8. Keep your history.** Past answers, recent searches and saved things belong to your existing login. Point it at your real email address before your first Cloudflare sign-in, so that sign-in lands on the same login. Do the same for any colleague whose history should be kept. The `logins` commands here need `SUPABASE_URL` and `SUPABASE_SECRET_KEY` set as in step 2.
+
+```bash
+npm run logins -- link YOUR_USERNAME YOUR_EMAIL
+```
+
+**9. First sign-in.** Open the `workers.dev` address and sign in. The account menu should show your email address and "Corp Dev". This first sign-in is the live check of everything above.
+
+**10. Retire the passwords**, once everyone has signed in through Cloudflare. The first command only lists what it would do.
+
+```bash
+npm run logins -- retire-passwords
+```
+
+```bash
+npm run logins -- retire-passwords --apply
+```
+
+```bash
+supabase secrets set ALLOWED_ORIGIN=https://snl-lookup.YOUR_SUBDOMAIN.workers.dev
+```
+
+Then run `delete from auth.sessions;` once in the SQL editor: it ends any password session still open, and people on Cloudflare are signed in again by themselves. Optionally switch GitHub Pages off (Settings > Pages). After this, the only way to get a session is `snl-signin`, which gives one only for a sign-in Cloudflare signed for this application.
+
+**Adding a person:** add their email address to the Access policy. Their login and profile are made at their first sign-in.
+
+**Removing a person:** remove their address from the Access policy, then Zero Trust > Team & Resources > Users > select them > Revoke. The token already in their browser lasts until it expires, one hour by default (Supabase's Auth settings set the access token expiry; Supabase advises no less than 5 minutes). For an immediate cut-off, also run `npm run logins -- remove THEIR_USERNAME`.
+
+**Deploying the site** on this route is `npx wrangler deploy` again after a `git pull`. A merge to `main` deploys only the GitHub Pages copy.
+
+**Cost.** Free at this size: Cloudflare's free Workers plan allows 100,000 requests a day, and Zero Trust is free for up to 50 users. Cloudflare describes `workers.dev` addresses as meant for projects that are not business-critical and recommends a custom domain for production.
 
 ### 5. S&P filings API
 
@@ -304,16 +424,24 @@ The **Profile** view builds a company profile as a PowerPoint file on your team'
 
    The profile adds statutory fields the other functions also list, so deploy `snl-statutory` and `snl-chat` again too (step 3).
 
-3. Sign in with a Corp Dev login, open **Profile** and choose **Upload template**. Pick your team's PowerPoint template (.pptx, up to 50 MB). The page checks the file before it uploads it: the template needs a cover layout named "Title White" and a content layout named "Spectrum Title Only White".
+3. Optional: sign in with a Corp Dev login, open **Profile** and choose **Upload the standard template** (.pptx, up to 50 MB). Until one is uploaded, decks are built on the site's built-in plain template (`web/template-builtin.pptx`). The page checks every file before it uploads it: it must be widescreen, with a cover layout named "Title White" and a content layout named "Spectrum Title Only White".
 4. Choose **Build a sample profile** to see how your template comes out. The sample uses made-up figures, so it works before statutory data is set up. Open the file in PowerPoint and check the slides before relying on the builder.
 5. When Snowflake is set up, map the extra statutory fields on **Statutory > Field set-up**, as in step 7: gross premiums written, net premiums earned, net income, paid-in capital, total assets, risk-based capital ratio, net loss and LAE reserves, prior-year reserve development, reinsurance recoverables, and ceded premiums by reinsurer. The last of these also names an `item` column, the reinsurer's name. A slide whose figures aren't mapped is left out, and the page says why.
 6. Find a company or group, choose **Get figures** to see which slides it fills, then build the file.
+
+**Which template a deck is built on.** The first of these that exists: a file chosen "just this once" (kept in memory, never stored), your own template, the standard template Corp Dev uploaded, the built-in plain template. The Profile view says which one the next deck will use, and the "ready" message names it.
+
+**Templates of your own.** Anyone can upload a template that only they use (up to 20 MB), replace it, or remove it to go back to the standard one. Nobody else can see or use it, Corp Dev included. To switch this on, run `supabase/migrations/0008_own_templates.sql` in the **SQL editor**, after step 1. Until it is run, decks keep working on the standard or built-in template and "Upload your own" says what is needed. If you ever run 0004 again, run 0008 again after it. When a login is removed, its template stays in storage: in the Supabase dashboard open **Storage > snl-template**, open the folder named with that login's user id (shown under **Authentication > Users**) and delete it.
 
 **The text on the slides.** With an Anthropic key set, Claude drafts the slide titles, takeaways and diligence questions from that company's figures only. The function checks every figure Claude writes against the data; a section with a figure it can't match is replaced with plain text, and the page says so. A draft counts as one of the login's questions for the day (`CHAT_DAILY_LIMIT`) and appears in Past answers. Without a key, the slides use plain text. Read the drafted text before you use it: it is a first draft, and judgements are marked "(inferred)".
 
 **What a profile leaves out on purpose.** No comparisons with past deals, no teaser claims, no ownership or management pages: the app holds no deal information and only S&P's data. Add those in PowerPoint.
 
-**A filings profile, from S&P's filings alone.** While statutory data isn't set up, the Profile view opens on **Filings profile**. Find a company or a whole group by name, choose the last year, 3 years or 5 years, and choose **Get the filings**. The page shows what it will cost and which slides it fills, then builds the deck on your template: summary, rate changes, where it files, filings by year and type, latest form and rule filings, time with the regulator, and diligence questions. Rate impacts are S&P's overall figure for each filing, not weighted by premium; for a filing that isn't approved, the figure may be the change asked for. Use **Build a sample filings profile** to check your template with made-up filings. It needs steps 1 to 3 above and nothing else.
+**A filings profile, from S&P's filings alone.** While statutory data isn't set up, the Profile view opens on **Filings profile**. Find a company or a whole group by name, choose the last year, 3 years or 5 years, and choose **Get the filings**. The page shows what it will cost and which slides it fills, then builds the deck on your template: summary, rate changes, where it files, filings by year and type, latest form and rule filings, time with the regulator, and diligence questions. Rate impacts are S&P's overall figure for each filing, not weighted by premium; for a filing that isn't approved, the figure may be the change asked for. Use **Build a sample filings profile** to check your template with made-up filings. It needs steps 1 and 2 above and nothing else.
+
+**What the filings profile adds when it can.** Two US maps drawn as shapes you can recolour in PowerPoint: filings by state, and the latest rate change by state. A state where S&P returned nothing is hatched, never shown as zero. Where saved filing summaries exist (step 11): the premium and policyholders each rate filing states for the book it covers, which is not statutory premium; rate adequacy and loss costs (indicated against filed against approved change, loss cost multiplier and reference, trend, loss ratio, expense and profit assumptions); and programs and forms. Every such figure carries its filing number and page. Where the market index (step 12) covers a state the company files in, one slide sets the company against the index. A slide that can't be filled is left out, and the page says why and what it would cost to include.
+
+**Summarise before building.** After **Get the filings** the page shows how many of the company's rate and form filings already have a saved summary, and offers to summarise the latest ones (5 rate and 3 form filings by default, up to 10 of each). The cost is shown first: each summary is 1 S&P request, about $2.30 to $3.50 of Claude reading and one of the day's questions, so the default is about $18 to $28. Saved summaries are free. Summaries made before this version don't hold the loss cost and adequacy figures; the profile counts them as older and offers to make them again. A summary reads up to 150 pages, and these figures often sit in later exhibits, so some filings will show "n/d". After updating, deploy `snl-profile` and `snl-digest` again.
 
 ### 11. Filing summaries (optional)
 
@@ -488,6 +616,9 @@ Nothing in this list is guessed in the code: each item is either handled both wa
 | **The storage rules for the template.** The migration uses the statements Supabase documents for storage policies, but has not been run against a real project. | `0004_profile_template.sql` | First upload of the template |
 | **How the profile comes out on the real template.** It is tested on a made-up stand-in with the same layout names. | `web/deck.js` | The sample profile, opened in PowerPoint |
 | **Who pays for Snowflake credits** and whether use is capped. | n/a | S&P |
+| **Cloudflare sign-on against the live services.** Tested with stand-ins for Cloudflare and Supabase only. Unconfirmed until the first sign-in: that Access passes its sign-in header to a Worker serving static files; the two Supabase calls that make a session, with sign-ups off; that `snl-signin` accepts a call carrying only the publishable key; that Access's logout address signs the browser out on a `workers.dev` address; the exact dashboard wording in step 4a. | `worker/index.js`, `_shared/access.ts` | First Cloudflare sign-in (step 4a) |
+| **The richer filings profile on real filings.** Whether Claude finds the indicated change, loss cost multiplier and assumptions in real rate filings and quotes them so the check keeps them; how often filings state premium and policyholders; whether the market comparison's exact match on type of insurance works on real index data; how the maps look in PowerPoint itself (checked in LibreOffice and python-pptx only). | `_shared/digest.ts`, `_shared/profile.ts`, `web/deck.js` | First real filings profile with summaries |
+| **Templates of your own.** Tested against a stand-in for Supabase Storage. The page tells whether 0008 has been run by whether a login can see the bucket's settings; if some other rule already allows that, the page would offer uploads that storage then refuses. | `0008_own_templates.sql` | First upload of a template of your own |
 | **Claude reading real filings.** Tested against a stand-in for Anthropic's API only. Watch the first live answer: the page citations, the cost and how long each step takes. | `_shared/chat.ts` | First live answer |
 
 S&P's "SNL Insurance Product Filings User Guide" was not available when this was built. The code follows the summary of it in the build brief and S&P's public API specification.

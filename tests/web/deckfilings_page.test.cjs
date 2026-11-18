@@ -60,6 +60,7 @@ const PSTATUS = (over = {}) => ({ statutory: { configured: false, mapped: false,
         return J(400, { error: "bad", message: "Unknown action." }); }
       if (u === JSZIP_URL) return r.fulfill({ contentType: "application/javascript", body: ZIPLIB });
       if (u === BASE + "deck.js" || u === BASE + "profile-slides.js") return r.fulfill({ contentType: "application/javascript", body: fs.readFileSync(path.join(WEB, u.slice(BASE.length)), "utf8") });
+      if (u === BASE + "template-builtin.pptx") return r.fulfill({ contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", body: fs.readFileSync(path.join(WEB, "template-builtin.pptx")) });
       if (/supabase\.js/.test(u)) return r.fulfill({ contentType: "application/javascript", body: MOCK });
       if (/config\.js/.test(u)) return r.fulfill({ contentType: "application/javascript", body: CONFIG });
       if (u.startsWith(BASE)) return r.fulfill({ contentType: "text/html", body: fs.readFileSync(WEB + "/index.html", "utf8") }); return r.fulfill({ status: 404, body: "" }); });
@@ -116,7 +117,8 @@ const PSTATUS = (over = {}) => ({ statutory: { configured: false, mapped: false,
   await p.waitForTimeout(1200); t.delay.filings_facts = 0;
   ok("asks for the company by its S&P id and the period: no figures, no NAIC code", same(t.of("filings_facts").map(c => c.body), [{ action: "filings_facts", kind: "company", years: 3, companyId: "9100002" }]), t.of("filings_facts").map(c => c.body));
   ok("the name, what it covers and the headline counts", (await t.txt("#fpName")) === "Calloway Insurance Co" && (await t.txt("#fpMeta")) === "Company · filings published 20 Nov 2023 to 18 Nov" && same(await p.$$eval("#fpHead .pftile", e => e.map(x => [x.querySelector("span").textContent, x.querySelector("b").textContent])), [["Filings", "7"], ["Rate filings", "4"], ["States with filings", "3"]]), await t.txt("#fpMeta"));
-  ok("the slides: all eight filled from these filings", same(await t.list("#fpPlan li"), ["CoverIncluded", "SummaryIncluded", "Rate changesIncluded", "Where it filesIncluded", "Filings by year and typeIncluded", "Latest form and rule filingsIncluded", "Time with the regulatorIncluded", "Key diligence questionsIncluded"]), await t.list("#fpPlan li"));
+  ok("the slides: the nine these filings fill, and the four that need saved summaries or the market index left out, saying why", same((await t.list("#fpPlan li")).map(x => x.replace(/Left out: .*/, "Left out")), ["CoverIncluded", "Executive summaryIncluded", "Where it files (map)Included", "Latest rate change by state (map)Included", "Rate changesIncluded",
+    "Premium and policyholders the rate filings stateLeft out", "Rate adequacy and loss costsLeft out", "Programs and formsLeft out", "Against the marketLeft out", "Filings by year and typeIncluded", "Latest form and rule filingsIncluded", "Time with the regulatorIncluded", "Key diligence questionsIncluded"]), await t.list("#fpPlan li"));
   ok("the source, what rate impacts are, and the S&P requests used", (await t.txt("#fpSource")) === "Source: S&P Global Market Intelligence, SNL Insurance Product Filings. Rate impacts are S&P's overall figure for each filing, not weighted by premium; for a filing that isn't approved it may be the change asked for. 6 S&P requests used.", await t.txt("#fpSource"));
   ok("Claude's draft is on by default, counted as one of today's questions", await p.isChecked("#fp_draft") && (await t.txt("#fpDraftCost")).startsWith("Counts as one of today's questions to Claude. You've asked 2 of 20 questions today") && (await t.txt("#fp_buildBtn")) === "Draft with Claude and build");
   ok("Ask Claude is told the search behind the profile", same(await p.evaluate(() => askScreen()), { view: "filings", search: { companyIds: [9100002], institutionIds: [], states: ["FL", "GA", "TX"], from: "2023-11-20", to: "2026-11-18", typeOfInsuranceIds: [], filingTypeIds: [], filingStatusIds: [] }, total: 7, companies: ["Calloway Insurance Co"] }));
@@ -130,8 +132,8 @@ const PSTATUS = (over = {}) => ({ statutory: { configured: false, mapped: false,
   ok("the draft is saved as a past answer and counted as seen", (await p.evaluate(() => localStorage.getItem("snl.seenAnswer"))) === "job-fp-1");
   ok("the file: named after the company, the kind of profile and the day", dl.name === "Calloway-Insurance-Co-filings-profile-2026-11-18.pptx", dl.name);
   let sl = await slidesOf(dl.zip);
-  ok("a real PowerPoint file of eight slides with Claude's title and the source on each", sl.length === 8 && sl[0].includes("Calloway Insurance Co: filings profile") && sl[1].includes("Seven filings; the largest change 9.8%, pending") && sl.slice(1).every(x => x.includes("SNL Insurance Product Filings")) && sl.some(x => x.includes("S&amp;P no. ABC1234567")));
-  ok("built: says so, and that the file went nowhere; the draft's cost is shown", (await t.txt("#fpBuilt")) === "Your filings profile is ready. Calloway-Insurance-Co-filings-profile-2026-11-18.pptx was saved to your downloads. It was made in this browser and isn't stored or sent anywhere.Download again" && (await t.txt("#fpDrafted")) === "Claude has drafted the text for these filings. It cost about $0.08 (9,100 tokens read, 1,800 written).", await t.txt("#fpDrafted"));
+  ok("a real PowerPoint file of nine slides with Claude's title and the source on each", sl.length === 9 && sl[0].includes("Calloway Insurance Co: filings profile") && sl[1].includes("Seven filings; the largest change 9.8%, pending") && sl.slice(1).every(x => x.includes("SNL Insurance Product Filings")) && sl.some(x => x.includes("S&amp;P no. ABC1234567")));
+  ok("built: says so, and that the file went nowhere; the draft's cost is shown", (await t.txt("#fpBuilt")) === "Your filings profile is ready. Calloway-Insurance-Co-filings-profile-2026-11-18.pptx was saved to your downloads. It was made in this browser and isn't stored or sent anywhere. Built on the standard template.Download again" && (await t.txt("#fpDrafted")) === "Claude has drafted the text for these filings. It cost about $0.08 (9,100 tokens read, 1,800 written).", await t.txt("#fpDrafted"));
   dl = await t.download(() => p.click('[data-act="fp-again"]'));
   ok("Download again: the same file, no new draft", dl.name === "Calloway-Insurance-Co-filings-profile-2026-11-18.pptx" && t.of("filings_draft").length === 1);
   await p.click("#fp_draft"); await p.waitForTimeout(100);
@@ -191,7 +193,7 @@ const PSTATUS = (over = {}) => ({ statutory: { configured: false, mapped: false,
   t = await open({ template: { text: "PK" } }, { facts: nothing }); p = t.p;
   await t.find("Calloway"); await p.click('[data-act="fp-co"][data-i="0"]'); await p.waitForTimeout(100); await p.click("#fp_get"); await p.waitForTimeout(800);
   ok("nothing returned: S&P returned nothing for this search, never that nothing was filed", (await t.txt("#fpNothing")) === "S&P returned nothing for this search. No filings came back for Calloway Insurance Co in any state over the last 3 years. That doesn't prove nothing was filed. Check the choice, or try a longer period." && !/no filings exist/i.test(await t.txt("#fpOut")));
-  ok("…and the slides that need filings are left out, saying why", (await t.list("#fpPlan li")).filter(x => x.includes("Left out: S&P returned nothing for this search")).length === 5);
+  ok("…and the slides that need filings are left out, saying why", (await t.list("#fpPlan li")).filter(x => x.includes("Left out: S&P returned nothing for this search")).length === 10);
   await t.ctx.close();
   t = await open({ template: { text: "PK" } }, { facts: () => { const a = FACTS_ANS(); a.body.facts.search.capped = true; a.body.spRequests = 60; return a; } }); p = t.p;
   await t.find("Calloway"); await p.click('[data-act="fp-co"][data-i="0"]'); await p.waitForTimeout(100); await p.click("#fp_get"); await p.waitForTimeout(800);
@@ -201,7 +203,7 @@ const PSTATUS = (over = {}) => ({ statutory: { configured: false, mapped: false,
   // ----- the sample, statutory ready, S&P not set up, Claude not set up, no template -----
   t = await open({ template: { text: "PK" } }); p = t.p;
   dl = await t.download(() => p.click('[data-act="fp-sample"]')); await p.waitForTimeout(200);
-  ok("the sample filings profile: asked for and built in one click", same(t.of("filings_sample").map(c => c.body), [{ action: "filings_sample" }]) && dl.name === "Calloway-Group-filings-profile-sample-2026-11-18.pptx" && (await slidesOf(dl.zip)).length === 8, dl.name);
+  ok("the sample filings profile: asked for and built in one click", same(t.of("filings_sample").map(c => c.body), [{ action: "filings_sample" }]) && dl.name === "Calloway-Group-filings-profile-sample-2026-11-18.pptx" && (await slidesOf(dl.zip)).length === 13, dl.name);
   ok("the sample says it is made up, has no draft, and nothing is told to Claude", (await t.txt("#fpSample")).startsWith("This is a sample filings profile.") && (await t.txt("#fpDraftNote")) === "The sample uses plain text written from its figures." && (await p.evaluate(() => askScreen())) === null);
   await p.click('[data-act="pf-sample"]'); await p.waitForTimeout(400);
   ok("the full profile's sample switches to the full profile", (await p.getAttribute('[data-act="pf-mode"][data-m="full"]', "aria-pressed")) === "true");
@@ -213,7 +215,7 @@ const PSTATUS = (over = {}) => ({ statutory: { configured: false, mapped: false,
   ok("S&P filings not set up: said calmly; saved searches still open", (await t.txt("#fpOff")) === "S&P filings aren't set up yet, so a new filings profile can't be searched. A profile whose search was run before still opens from its saved result. You can build the sample below meanwhile.");
   await t.find("Calloway"); await p.click('[data-act="fp-co"][data-i="0"]'); await p.waitForTimeout(100); await p.click("#fp_get"); await p.waitForTimeout(800);
   ok("Claude not set up: plain titles, no draft choice", (await t.txt("#fpDraftNote")) === "Claude isn't set up, so the slides use plain titles and points written from the filings." && !(await p.$("#fp_draft")) && (await t.txt("#fp_buildBtn")) === "Build the PowerPoint file");
-  ok("no template, a reader: the button waits for Corp Dev", await p.isDisabled("#fp_buildBtn") && (await t.txt("#fpNoTplNote")) === "The file can be built once Corp Dev uploads the template.");
+  ok("no template, a reader: the button builds on the built-in plain template", !(await p.isDisabled("#fp_buildBtn")) && !(await p.$("#fpNoTplNote")) && (await t.txt("#pfTplState")) === "The built-in plain template: nobody has uploaded one yet.");
   await t.ctx.close();
 
   // ----- hostile text, and the session ending -----

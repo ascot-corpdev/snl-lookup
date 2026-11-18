@@ -187,7 +187,7 @@ const F = P.filingsFactsFrom(T3, { rows: ROWS, capped: false, fromStore: false, 
   const plain = P.filingsPlainText(F);
   const good = (edit: (t: any) => void = () => {}) => { const t: any = structuredClone(plain); delete t.by; delete t.note; t.summary.title = "Seven filings, the largest change 9.8% and pending"; edit(t); return t; };
   let r = P.checkFilingsDraft(good(), F, plain);
-  ok("a good draft is kept, marked as Claude's, with no note", r.text.by === "claude" && r.text.note === null && r.text.summary.title === "Seven filings, the largest change 9.8% and pending" && r.replaced.kept === 8, r.replaced);
+  ok("a good draft is kept, marked as Claude's, with no note", r.text.by === "claude" && r.text.note === null && r.text.summary.title === "Seven filings, the largest change 9.8% and pending" && r.replaced.kept === 13, r.replaced);
   r = P.checkFilingsDraft(good((t) => { t.rates.points[0].text = "Rates rose 6.1% on average across 4 filings."; }), F, plain);
   ok("an average Claude worked out isn't in the facts: that section falls back to the plain text, with a note", same(r.text.rates, plain.rates) && r.text.by === "claude" && /couldn't be matched to the filings' figures/.test(r.text.note!) && r.replaced.figures === 1, r.text.note);
   r = P.checkFilingsDraft(good((t) => { t.states.points[0].text = "FL had 12 filings."; t.questions.items[0].text = "Filed on 9 Nov. Why?"; }), F, plain);

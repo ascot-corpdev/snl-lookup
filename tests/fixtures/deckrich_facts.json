@@ -1,0 +1,733 @@
+{
+ "facts": {
+  "version": 1,
+  "profile": "filings",
+  "sample": false,
+  "asOf": "2026-11-18",
+  "entity": {
+   "kind": "company",
+   "name": "Calloway Insurance Co",
+   "groupName": "Calloway Group",
+   "companies": 1,
+   "noId": 0
+  },
+  "period": {
+   "years": 3,
+   "from": "2023-11-20",
+   "to": "2026-11-18"
+  },
+  "source": "S&P Global Market Intelligence, SNL Insurance Product Filings",
+  "search": {
+   "capped": false,
+   "statesSearched": 51,
+   "fromStore": false,
+   "fetchedAt": null
+  },
+  "totals": {
+   "filings": 6,
+   "rate": 4,
+   "rule": 0,
+   "form": 2,
+   "other": 0,
+   "states": 3,
+   "latest": "2026-11-05",
+   "undated": 0
+  },
+  "largest": {
+   "date": "2026-11-05",
+   "state": "FL",
+   "toi": "Homeowners",
+   "rate": 9.8,
+   "status": "Pending",
+   "approved": false,
+   "filingNo": "S&P no. CAL0000102"
+  },
+  "approval": {
+   "rateFilings": 4,
+   "approved": 3,
+   "share": 75
+  },
+  "rates": {
+   "filings": 4,
+   "withImpact": 4,
+   "notApproved": 1,
+   "noDate": 0,
+   "lo": -3.5,
+   "hi": 9.8,
+   "points": [
+    {
+     "date": "2024-08-20",
+     "state": "TX",
+     "toi": "Commercial property",
+     "rate": 2,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2025-03-01",
+     "state": "TX",
+     "toi": "Homeowners",
+     "rate": -3.5,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2026-10-10",
+     "state": "FL",
+     "toi": "Homeowners",
+     "rate": 4.5,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2026-11-05",
+     "state": "FL",
+     "toi": "Homeowners",
+     "rate": 9.8,
+     "status": "Pending",
+     "approved": false
+    }
+   ],
+   "pointsTotal": 4,
+   "rows": [
+    {
+     "state": "FL",
+     "toi": "Homeowners",
+     "n": 2,
+     "withRate": 2,
+     "lo": 4.5,
+     "hi": 9.8,
+     "latest": {
+      "date": "2026-11-05",
+      "state": "FL",
+      "toi": "Homeowners",
+      "rate": 9.8,
+      "status": "Pending",
+      "approved": false
+     }
+    },
+    {
+     "state": "TX",
+     "toi": "Commercial property",
+     "n": 1,
+     "withRate": 1,
+     "lo": 2,
+     "hi": 2,
+     "latest": {
+      "date": "2024-08-20",
+      "state": "TX",
+      "toi": "Commercial property",
+      "rate": 2,
+      "status": "Approved",
+      "approved": true
+     }
+    },
+    {
+     "state": "TX",
+     "toi": "Homeowners",
+     "n": 1,
+     "withRate": 1,
+     "lo": -3.5,
+     "hi": -3.5,
+     "latest": {
+      "date": "2025-03-01",
+      "state": "TX",
+      "toi": "Homeowners",
+      "rate": -3.5,
+      "status": "Approved",
+      "approved": true
+     }
+    }
+   ],
+   "rowsTotal": 3
+  },
+  "states": {
+   "rows": [
+    {
+     "state": "FL",
+     "n": 3,
+     "rate": 2,
+     "latest": {
+      "date": "2026-11-05",
+      "state": "FL",
+      "toi": "Homeowners",
+      "rate": 9.8,
+      "status": "Pending",
+      "approved": false
+     }
+    },
+    {
+     "state": "TX",
+     "n": 2,
+     "rate": 2,
+     "latest": {
+      "date": "2025-03-01",
+      "state": "TX",
+      "toi": "Homeowners",
+      "rate": -3.5,
+      "status": "Approved",
+      "approved": true
+     }
+    },
+    {
+     "state": "GA",
+     "n": 1,
+     "rate": 0,
+     "latest": null
+    }
+   ],
+   "noState": 0
+  },
+  "years": {
+   "years": [
+    2023,
+    2024,
+    2025,
+    2026
+   ],
+   "types": [
+    "Rate",
+    "Form"
+   ],
+   "counts": [
+    [
+     0,
+     0
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     2,
+     0
+    ]
+   ],
+   "totals": [
+    0,
+    2,
+    2,
+    2
+   ],
+   "byType": [
+    4,
+    2
+   ]
+  },
+  "latest": {
+   "rows": [
+    {
+     "company": "Calloway Insurance Co",
+     "state": "FL",
+     "toi": "Homeowners",
+     "type": "Form",
+     "status": "Approved",
+     "published": "2025-06-15",
+     "filingNo": "S&P no. CAL0000104"
+    },
+    {
+     "company": "Calloway Insurance Co",
+     "state": "GA",
+     "toi": "Inland marine",
+     "type": "Form",
+     "status": "Approved",
+     "published": "2024-02-10",
+     "filingNo": "S&P no. CAL0000105"
+    }
+   ],
+   "total": 2
+  },
+  "regulator": {
+   "rows": [
+    {
+     "state": "FL",
+     "n": 3,
+     "median": 60,
+     "lo": 30,
+     "hi": 70
+    },
+    {
+     "state": "TX",
+     "n": 2,
+     "median": 90,
+     "lo": 90,
+     "hi": 90
+    },
+    {
+     "state": "GA",
+     "n": 1,
+     "median": 39,
+     "lo": 39,
+     "hi": 39
+    }
+   ],
+   "all": {
+    "state": null,
+    "n": 6,
+    "median": 65,
+    "lo": 30,
+    "hi": 90
+   },
+   "left": 0
+  },
+  "map": {
+   "searched": [
+    "AL",
+    "FL",
+    "GA",
+    "TX"
+   ]
+  },
+  "summaries": {
+   "checked": true,
+   "version": 2,
+   "note": null,
+   "rate": {
+    "filings": 4,
+    "withDocument": 3,
+    "summarised": 2,
+    "older": 1
+   },
+   "form": {
+    "filings": 2,
+    "withDocument": 2,
+    "summarised": 2,
+    "older": 1
+   }
+  },
+  "exposure": {
+   "rows": [
+    {
+     "filingNo": "S&P no. CAL0000103",
+     "state": "TX",
+     "toi": "Homeowners",
+     "published": "2025-03-01",
+     "status": "Approved",
+     "approved": true,
+     "premium": 31700000,
+     "policyholders": 44900,
+     "exposures": null,
+     "rate": -3.5,
+     "page": 5,
+     "exposuresPage": 5
+    },
+    {
+     "filingNo": "S&P no. CAL0000101",
+     "state": "FL",
+     "toi": "Homeowners",
+     "published": "2026-10-10",
+     "status": "Approved",
+     "approved": true,
+     "premium": 48200000,
+     "policyholders": 61400,
+     "exposures": 63000,
+     "rate": 4.5,
+     "page": 3,
+     "exposuresPage": 4
+    }
+   ],
+   "total": 2,
+   "latest": [
+    {
+     "filingNo": "S&P no. CAL0000101",
+     "state": "FL",
+     "toi": "Homeowners",
+     "published": "2026-10-10",
+     "status": "Approved",
+     "approved": true,
+     "premium": 48200000,
+     "policyholders": 61400,
+     "exposures": 63000,
+     "rate": 4.5,
+     "page": 3,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL0000103",
+     "state": "TX",
+     "toi": "Homeowners",
+     "published": "2025-03-01",
+     "status": "Approved",
+     "approved": true,
+     "premium": 31700000,
+     "policyholders": 44900,
+     "exposures": null,
+     "rate": -3.5,
+     "page": 5,
+     "exposuresPage": 5
+    }
+   ],
+   "latestPremium": 79900000,
+   "latestPolicyholders": 106300,
+   "summarised": 2
+  },
+  "adequacy": {
+   "rows": [
+    {
+     "filingNo": "S&P no. CAL0000101",
+     "state": "FL",
+     "toi": "Homeowners",
+     "published": "2026-10-10",
+     "status": "Approved",
+     "approved": true,
+     "spRate": 4.5,
+     "lossCostRef": "Nonesuch Rating Bureau NRB-HO-2025-01",
+     "page": 3,
+     "pages": {
+      "overallPct": 3,
+      "requestedPct": 3,
+      "approvedPct": 3,
+      "indicatedPct": 14,
+      "lossCostMultiplier": 9,
+      "targetLossRatio": 14,
+      "lossTrendPct": 15,
+      "expensePct": 16,
+      "lossCostRef": 9
+     },
+     "overallPct": 4.5,
+     "requestedPct": 4.5,
+     "approvedPct": 4.5,
+     "indicatedPct": 9.1,
+     "lossCostMultiplier": 1.25,
+     "targetLossRatio": 62.5,
+     "lossTrendPct": 6.5,
+     "expensePct": 27.4
+    },
+    {
+     "filingNo": "S&P no. CAL0000103",
+     "state": "TX",
+     "toi": "Homeowners",
+     "published": "2025-03-01",
+     "status": "Approved",
+     "approved": true,
+     "spRate": -3.5,
+     "lossCostRef": null,
+     "page": 5,
+     "pages": {
+      "overallPct": 5,
+      "requestedPct": 5
+     },
+     "overallPct": -3.5,
+     "requestedPct": -3.5
+    }
+   ],
+   "total": 2,
+   "summarised": 2
+  },
+  "programs": {
+   "programs": [
+    {
+     "name": "Calloway Signature Home",
+     "segment": "private client",
+     "filingNo": "S&P no. CAL0000104",
+     "state": "FL",
+     "published": "2025-06-15",
+     "page": 4
+    }
+   ],
+   "programsTotal": 1,
+   "forms": [
+    {
+     "number": "CHO 30 01",
+     "edition": "06 25",
+     "title": "Homeowners policy",
+     "action": "new",
+     "filingNo": "S&P no. CAL0000104",
+     "state": "FL",
+     "published": "2025-06-15",
+     "page": 12
+    },
+    {
+     "number": "CHO 31 07",
+     "edition": "06 25",
+     "title": "Water backup endorsement",
+     "action": "replaced",
+     "filingNo": "S&P no. CAL0000104",
+     "state": "FL",
+     "published": "2025-06-15",
+     "page": 13
+    },
+    {
+     "number": "CHO 04 90",
+     "edition": "01 24",
+     "title": "Scheduled personal property",
+     "action": "revised",
+     "filingNo": "S&P no. CAL0000105",
+     "state": "GA",
+     "published": "2024-02-10",
+     "page": 10
+    }
+   ],
+   "formsTotal": 3,
+   "summaries": 4
+  },
+  "market": {
+   "checked": true,
+   "reason": "",
+   "indexed": [
+    "FL"
+   ],
+   "rows": [
+    {
+     "state": "FL",
+     "toi": "Homeowners",
+     "from": "2024-11-19",
+     "to": "2026-11-18",
+     "truncated": false,
+     "market": {
+      "filings": 7,
+      "companies": 4,
+      "withRate": 6,
+      "lo": -1,
+      "q1": 3.375,
+      "median": 5.25,
+      "q3": 8.85,
+      "hi": 12
+     },
+     "carrier": {
+      "filings": 2,
+      "withRate": 2,
+      "lo": 4.5,
+      "hi": 9.8,
+      "latest": {
+       "rate": 9.8,
+       "date": "2026-11-05",
+       "approved": false
+      }
+     },
+     "share": 28.5714,
+     "rank": 2
+    }
+   ],
+   "coverage": [
+    {
+     "state": "FL",
+     "from": "2024-11-19",
+     "to": "2026-11-18",
+     "lastComplete": "2026-11-15",
+     "covered": 2712,
+     "missed": 3
+    }
+   ]
+  }
+ },
+ "text": {
+  "by": "plain",
+  "note": null,
+  "cover": {
+   "subtitle": "6 filings published 20 Nov 2023 to 18 Nov 2026"
+  },
+  "summary": {
+   "title": "6 filings in 3 states over the last 3 years",
+   "points": [
+    {
+     "lead": "Filings",
+     "text": "S&P returned 6 filings published 20 Nov 2023 to 18 Nov 2026: 4 rate, 0 rule and 2 form."
+    },
+    {
+     "lead": "States",
+     "text": "Filings in 3 states; the most in FL (3)."
+    },
+    {
+     "lead": "Largest rate change",
+     "text": "9.8% in FL (Homeowners), published 5 Nov, pending, not approved, so it may be the change asked for."
+    },
+    {
+     "lead": "Exposure",
+     "text": "The latest rate filings state $79.9M of written premium affected; the largest FL (Homeowners) at $48.2M (S&P no. CAL0000101, page 3)."
+    },
+    {
+     "lead": "Rate adequacy",
+     "text": "1 of 1 rate filing filed below the indicated change; FL (Homeowners) indicated 9.1%, filed 4.5%."
+    },
+    {
+     "lead": "Against the market",
+     "text": "FL Homeowners: 2 of 7 filings (28.6%), rank 2 of 4 companies; index median rate change 5.3% (derived), its latest 9.8%."
+    }
+   ]
+  },
+  "rates": {
+   "title": "Overall rate changes from (3.5%) to 9.8%",
+   "points": [
+    {
+     "lead": "Range",
+     "text": "From (3.5%) to 9.8% across 4 filings; each is S&P's overall figure for the filing, not weighted by premium."
+    },
+    {
+     "lead": "Not approved",
+     "text": "1 filing with a rate impact isn't approved; its figure may be the change asked for."
+    },
+    {
+     "lead": "Latest",
+     "text": "9.8% in FL (Homeowners), published 5 Nov, pending."
+    }
+   ]
+  },
+  "states": {
+   "title": "Most filings in FL: 3 of 6",
+   "points": [
+    {
+     "lead": "Top states",
+     "text": "FL 3, TX 2, GA 1."
+    },
+    {
+     "lead": "Spread",
+     "text": "Filings in 3 states of the 51 searched."
+    },
+    {
+     "lead": "Rate filings",
+     "text": "2 of the 3 filings in FL are rate filings."
+    }
+   ]
+  },
+  "years": {
+   "title": "Most filings in 2026: 2 of 6",
+   "points": [
+    {
+     "lead": "Busiest year",
+     "text": "2026: 2 filings."
+    },
+    {
+     "lead": "By type",
+     "text": "Rate 4, Form 2."
+    },
+    {
+     "lead": "Part years",
+     "text": "2023 and 2026 are part years."
+    }
+   ]
+  },
+  "forms": {
+   "title": "2 form and rule filings; latest 15 Jun 2025",
+   "points": [
+    {
+     "lead": "Latest",
+     "text": "Form filing in FL (Homeowners), published 15 Jun 2025, approved."
+    },
+    {
+     "lead": "In the period",
+     "text": "2 form and rule filings of 6 filings."
+    }
+   ]
+  },
+  "regulator": {
+   "title": "About 65 days with the regulator (median)",
+   "points": [
+    {
+     "lead": "Median",
+     "text": "About 65 days from submitted to published over 6 filings, from 30 to 90 days (approximate)."
+    },
+    {
+     "lead": "Slowest state",
+     "text": "TX: about 90 days, the median of 2 filings."
+    }
+   ]
+  },
+  "rateMap": {
+   "title": "Latest change an increase in 1 of 2 states",
+   "points": [
+    {
+     "lead": "Highest",
+     "text": "FL: 9.8%, published 5 Nov, pending, not approved, so it may be the change asked for."
+    },
+    {
+     "lead": "Lowest",
+     "text": "TX: (3.5%), published 1 Mar 2025, approved."
+    },
+    {
+     "lead": "Direction",
+     "text": "1 up, 1 down, 0 unchanged; 1 state with filings but no rate impact in S&P's data."
+    }
+   ]
+  },
+  "exposure": {
+   "title": "Latest rate filings state $79.9M of premium affected",
+   "points": [
+    {
+     "lead": "Largest book",
+     "text": "FL (Homeowners): $48.2M of written premium, 61,400 policyholders (S&P no. CAL0000101, page 3)."
+    },
+    {
+     "lead": "What it is",
+     "text": "What each rate filing says about the book it covers, from 2 summarised filings; not statutory premium. The total adds the latest filing for each state and type (derived)."
+    },
+    {
+     "lead": "Not yet read",
+     "text": "2 rate filings have no saved summary."
+    }
+   ]
+  },
+  "adequacy": {
+   "title": "Indicated above filed in 1 of 1 rate filing",
+   "points": [
+    {
+     "lead": "Indicated and filed",
+     "text": "FL (Homeowners): indicated 9.1%, filed 4.5%, approved 4.5% (S&P no. CAL0000101, page 14)."
+    },
+    {
+     "lead": "Loss costs",
+     "text": "FL (Homeowners): adopts Nonesuch Rating Bureau NRB-HO-2025-01, multiplier 1.250 (S&P no. CAL0000101, page 9)."
+    },
+    {
+     "lead": "Assumptions",
+     "text": "FL (Homeowners): loss trend 6.5%, target loss ratio 62.5%, expenses 27.4% (S&P no. CAL0000101)."
+    }
+   ]
+  },
+  "programs": {
+   "title": "1 program and 3 forms in the saved summaries",
+   "points": [
+    {
+     "lead": "Segments",
+     "text": "private client 1."
+    },
+    {
+     "lead": "Latest forms",
+     "text": "CHO 30 01, Homeowners policy, in FL, published 15 Jun 2025 (S&P no. CAL0000104, page 12)."
+    },
+    {
+     "lead": "Where from",
+     "text": "From 4 saved summaries; each item names its filing and page."
+    }
+   ]
+  },
+  "market": {
+   "title": "28.6% of indexed FL Homeowners filings",
+   "points": [
+    {
+     "lead": "Share",
+     "text": "FL Homeowners: 2 of 7 filings (28.6%), rank 2 of 4 companies; index median rate change 5.3% (derived), its latest 9.8%."
+    },
+    {
+     "lead": "Coverage",
+     "text": "The market index holds the companies in the app's company list only, so it isn't the whole market."
+    }
+   ]
+  },
+  "questions": {
+   "title": "Key diligence questions",
+   "items": [
+    {
+     "title": "Rate requests in progress",
+     "text": "1 filing with a rate impact isn't approved, the largest 9.8% in FL. What outcome and timing does management expect?"
+    },
+    {
+     "title": "Indicated above filed",
+     "text": "In FL a rate filing indicated 9.1% but filed 4.5% (S&P no. CAL0000101). How and when will the gap be closed?"
+    },
+    {
+     "title": "Rate versus the market",
+     "text": "Its latest FL Homeowners change is 9.8% against an index median of 5.3% (derived). What explains the difference?"
+    },
+    {
+     "title": "State concentration",
+     "text": "FL had 3 of the 6 filings. How exposed is the book to that state's regulator and weather?"
+    }
+   ]
+  }
+ }
+}

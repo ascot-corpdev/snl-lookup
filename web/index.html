@@ -406,10 +406,20 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 .pfcheck{display:flex;gap:10px;align-items:flex-start;cursor:pointer;min-width:0;overflow-wrap:anywhere}
 .pfcheck input{margin-top:3px;flex:none;width:16px;height:16px}
 .pfdraft{display:flex;flex-direction:column;gap:6px;min-width:0}
+.fpsum{display:flex;flex-direction:column;gap:8px;min-width:0;border-top:1px solid var(--grid);padding-top:12px}
+.fpsum p{overflow-wrap:anywhere}
 .pfdraft p{margin:0}
 .pfsample{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;border-top:1px solid var(--grid);padding-top:12px;min-width:0}
 .pfsample>div{flex:1 1 260px;min-width:0}
 .pfsample p{margin:2px 0 0}
+/* Profile: the template block (which template the next deck uses; your own, just this once, the standard one) */
+.tplnowbox{display:flex;flex-direction:column;gap:2px;background:var(--alt);border-left:3px solid var(--ink);padding:8px 12px;min-width:0}
+.tplnow{margin:0;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;justify-content:space-between;min-width:0;overflow-wrap:anywhere}
+.tplnow>span{min-width:0;flex:1 1 260px}
+.tplrow{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;border-top:1px solid var(--grid);padding-top:12px;min-width:0}
+.tplrow>div:first-child{flex:1 1 300px;min-width:0;overflow-wrap:anywhere}
+.tplrow p{margin:2px 0 0}
+@media (max-width:560px){.tplrow .inline .btn{white-space:normal;text-align:left}}
 @media (max-width:560px){.pftiles{grid-template-columns:1fr}.pftile{flex-direction:row;justify-content:space-between;align-items:baseline;gap:8px}.pftile b{font-size:17px}.pfplan .pfwhy{text-align:left;flex-basis:100%}}
 /* Snapshot: one company or group at a glance. Tiles, then the map, rate changes, filings by year, the latest form and
    rule filings and time with the regulator, each a block with its numbers as a table beside or under its chart. */
@@ -621,6 +631,7 @@ const CFG = Object.assign({}, window.SNL_CONFIG || {});
 if(CFG.supabaseUrl) CFG.supabaseUrl = String(CFG.supabaseUrl).trim().replace(/\/+$/,"").replace(/\/(rest|auth)\/v1$/,"");
 // The company's name is a setting (orgName, from the ORG_NAME repository variable), so the public code stays neutral.
 const ORG = String(CFG.orgName ?? "").trim();
+const CF_SIGNON = CFG.signOn === "cloudflare";   // served by the Cloudflare Worker: Cloudflare signs people in (see "Cloudflare sign-on" below)
 document.title = ORG ? `${ORG} SNL lookup` : "SNL lookup";
 { const f = document.getElementById("footOrg"); if(f) f.innerHTML = ORG ? `2026 ${esc(ORG)}` : "2026"; }
 // How often the page checks a running answer, how old a heartbeat may get before the page asks the function to
@@ -791,11 +802,12 @@ function problemHTML(r, lead, retryAct){
 /* Returns {data} on success, {res} for a raw answer (documents), or {err, msg, status, requestId}. */
 async function callFn(fn, payload, opts){
   let session=null;
+  if(CF_SIGNON) session=await cfSessionNow(); else
   try{ ({data:{session}}=await S.sb.auth.getSession()); }catch{}
   if(!session){ sessionEnded("Your session ended. Sign in again."); return {err:"signin", msg:"Your session ended. Sign in again.", status:401}; }
   let res;
   try{
-    res=await fetch(CFG.supabaseUrl+"/functions/v1/"+fn, {method:"POST",
+    res=await (CF_SIGNON?cfFetch:fetch)(CFG.supabaseUrl+"/functions/v1/"+fn, {method:"POST",
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+session.access_token,"apikey":CFG.supabaseAnonKey}, body:JSON.stringify(payload)});
   }catch{ return {err:"network", msg:`Couldn't reach ${FN[fn]}. Check your connection and try again.`, status:0}; }
   if(res.ok && opts && opts.raw) return {res, status:res.status};
@@ -1795,9 +1807,25 @@ function dgDigestHTML(d, key){
   const money=v=>isNum(v)?usdM(v):"n/d", rates=[["Overall rate change", isNum(rate.overallPct)?pct(rate.overallPct):"n/d"],["Requested", isNum(rate.requestedPct)?pct(rate.requestedPct):"n/d"],["Approved", isNum(rate.approvedPct)?pct(rate.approvedPct):"n/d"],
     ["Written premium affected", money(rate.premium)],["Policyholders affected", count(rate.policyholders)],["Effective, new business", fmtDay(rate.effectiveNew)],["Effective, renewals", fmtDay(rate.effectiveRenewal)]];
   h+=`<section id="dgRate"><h3>Rate figures</h3>${isNum(rate.page)?`<div class="rate">${rates.map(([k,v])=>`<span>${k}</span><b>${esc(v)}</b>`).join("")}</div><p class="t2" style="margin-top:4px">From ${dgPageBtn(key, rate.page)}.</p>`:`<p class="t2">No rate figures were found on the pages read.</p>`}</section>`;
+  h+=dgRateMoreHTML(d, key);
   h+=`<section id="dgElig"><h3>Eligibility</h3>${dgListHTML(elig, key, none, e=>esc(e.text))}</section>`;
   h+=`<section id="dgNotable"><h3>Notable points</h3>${dgListHTML(notable, key, none, n=>esc(n.text))}</section>`;
   return h;
+}
+/* The rate figures a summary holds from version 2 on (loss costs, the indicated change, assumptions), each with its
+   page; an older summary says it was made before these were read. */
+const DG_RATE_MORE = [["indicatedPct","Indicated rate change","pct"],["maxPct","Largest change for one policyholder","pct"],["minPct","Smallest change for one policyholder","pct"],["lossCostChangePct","Change in advisory loss costs adopted","pct"],
+  ["lossCostMultiplier","Loss cost multiplier","x3"],["lossCostRef","Advisory loss costs adopted","text"],["targetLossRatio","Permissible or target loss ratio","pct"],["projectedLossRatio","Projected loss ratio","pct"],
+  ["lossTrendPct","Annual loss trend","pct"],["expensePct","Expense provision","pct"],["profitPct","Profit and contingencies provision","pct"],["exposures","Exposures affected","count"]];
+function dgRateMoreList(rate){
+  const r=rate&&typeof rate==="object"?rate:{}, pages=r.pages&&typeof r.pages==="object"?r.pages:{};
+  return DG_RATE_MORE.filter(([k,,kind])=>kind==="text"?!blank(r[k]):isNum(r[k])).map(([k,label,kind])=>({k, label, page:isNum(pages[k])?+pages[k]:(isNum(r.page)?+r.page:null),
+    text: kind==="pct"?pct(r[k]):kind==="x3"?(+r[k]).toFixed(3):kind==="count"?count(r[k]):String(r[k]).slice(0,120)}));
+}
+function dgRateMoreHTML(d, key){
+  const list=dgRateMoreList(d.rate), v=isNum(d.v)?+d.v:1;
+  if(!list.length) return v<2 ? `<section id="dgRateMore"><h3>Loss costs and rate adequacy</h3><p class="t2">This summary was made before loss costs, the indicated change and the filing's assumptions were read. Making it again adds them where the filing gives them.</p></section>` : "";
+  return `<section id="dgRateMore"><h3>Loss costs and rate adequacy</h3><div class="rate">${list.map(x=>`<span>${esc(x.label)}</span><b>${esc(x.text)} ${x.page?dgPageBtn(key, x.page):""}</b>`).join("")}</div></section>`;
 }
 function dgDrawerHTML(){
   const dr=dgOf().dr, d=dr.digest, r=dr.row||{}, key=dr.key;
@@ -2840,7 +2868,7 @@ const JSZIP_SRC = "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js";
 const DECK_SRC = "deck.js", SLIDES_SRC = "profile-slides.js";                        // beside this page
 const PPTX_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 const TPL_BUCKET = "snl-template", TPL_PATH = "template.pptx", TPL_MAX = 50*1024*1024;
-function freshTemplate(){ return {checked:false, loading:false, info:null, err:"", errKind:"", bytes:null, uploading:"", upErr:"", upNote:""}; }
+function freshTemplate(){ return {checked:false, loading:false, info:null, err:"", errKind:"", bytes:null, uploading:"", upErr:"", upNote:"", ...freshTplMore()}; }
 function freshProfile(){
   return {status:null, statusErr:null, loading:false, kind:"company", code:"", name:"", formErr:"", find:{q:"", asked:"", matches:null, busy:false, err:""},
     busy:"", asked:null, res:null, err:null, plan:null, libsErr:"", draft:null, drafted:null, draftErr:null, built:null, buildErr:"", tpl:freshTemplate(),
@@ -2852,7 +2880,7 @@ const askSuggestKey = sc => S.view==="snapshot" ? "snapshot" : S.view==="profile
 const pfLive = () => { const s=S.pf.status&&S.pf.status.statutory; return !!(s&&s.configured&&s.mapped); };
 const pfClaude = () => !!(S.pf.status&&S.pf.status.claude&&S.pf.status.claude.configured);
 const pfHasData = f => !!f && Array.isArray(f.years) && f.years.length>0;
-const pfHasTemplate = () => !!(S.pf.tpl.bytes || S.pf.tpl.info);
+const pfHasTemplate = () => true;   // there is always a template to build on: at worst the built-in plain one (see tplLevel)
 // Claude drafts when it is set up, the reader hasn't switched it off, today's limit isn't reached, and it isn't the sample
 const pfDraftWanted = () => pfClaude() && S.pf.draft!==false && !chatAtLimit(S.chatUse) && !!S.pf.res && !S.pf.res.facts.sample;
 const pfEntLabel = (kind, code) => `NAIC ${kind==="group"?"group":"company"} ${code}`;
@@ -2863,6 +2891,143 @@ function enterProfile(){
   const pf=S.pf;
   if(!pf.status && !pf.statusErr && !pf.loading) loadProfileStatus();
   if(!pf.tpl.checked && !pf.tpl.loading) checkTemplate();
+}
+/* ----- which template a deck is built on: three levels and a one-off, the first found is used -----
+   1. "once": a file chosen from this computer for the next deck only, never stored anywhere;
+   2. "own": the login's own template, "<their user id>/template.pptx" in the private bucket (migration 0008): only
+      they can read or change it, Corp Dev included, and nothing on the page lists who has one;
+   3. "std": the standard template.pptx that Corp Dev uploads for everyone (migration 0004);
+   4. "builtin": template-builtin.pptx beside this page (made by scripts/make-builtin-template.py), so a deck can be
+      built before anyone has uploaded anything.
+   The chosen template's bytes are kept in memory for the session only (never in browser storage); a change of
+   template drops them. */
+const TPL_OWN_MAX = 20*1024*1024, TPL_BUILTIN = "template-builtin.pptx";
+function freshTplMore(){ return {ownOn:null, own:null, ownBusy:"", ownErr:"", ownNote:"", once:null, onceBusy:"", onceErr:"", bytesKey:"", builtinErr:"", askRemove:false, used:null}; }
+const tplLevel = tp => tp.once ? "once" : tp.own ? "own" : tp.info ? "std" : "builtin";
+const tplKeyOf = tp => { const l=tplLevel(tp); return l==="own" ? "own:"+(tp.own.at||"") : l==="std" ? "std:"+(tp.info.at||"") : l; };
+const tplUid = () => { const u=S.session&&S.session.uid; return u && /^[A-Za-z0-9-]{1,64}$/.test(String(u)) ? String(u) : ""; };
+const tplOwnPath = () => tplUid()+"/"+TPL_PATH;
+// a file name for the page: no control or direction characters, at most 80 characters
+const tplFileName = n => String(n==null?"":n).replace(/[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g,"").trim().slice(0,80) || "the file you chose";
+const tplNext = tp => tp.own&&tplLevel(tp)!=="own" ? "your own template" : tp.info ? "the standard template" : "the built-in plain template";
+const TPL_BUILTIN_ERR = "The built-in plain template couldn't be loaded. Check your connection and try again, or upload a template to build on.";
+const tplOwnOffText = () => isCorpDev() ? "Templates of your own aren't switched on yet. Run migration 0008_own_templates.sql in the Supabase SQL editor (see the README), then reload this page."
+  : "Templates of your own aren't switched on yet. Ask Corp Dev to run migration 0008_own_templates.sql in Supabase (see the README).";
+function tplDropBytes(tp){ if(tp.bytes && tp.bytesKey!==tplKeyOf(tp)){ tp.bytes=null; tp.bytesKey=""; } }
+/* The built-in template, from beside this page. Throws an Error with TPL_BUILTIN_ERR, which the block also shows. */
+function builtinBytes(pf){
+  const tp=pf.tpl; if(tp.builtinP) return tp.builtinP;
+  return tp.builtinP=(async()=>{
+    let buf=null;
+    try{ const r=await fetch(TPL_BUILTIN, {cache:"no-cache"}); if(r.ok) buf=await r.arrayBuffer(); }catch{ buf=null; }
+    const u=buf&&buf.byteLength>4 ? new Uint8Array(buf, 0, 2) : null;
+    if(!u || u[0]!==0x50 || u[1]!==0x4B){ if(S.pf===pf){ tp.builtinErr=TPL_BUILTIN_ERR; render(); } throw new Error(TPL_BUILTIN_ERR); }   // a zip starts "PK"
+    if(S.pf===pf){ tp.builtinErr=""; if(tplLevel(tp)==="builtin"){ tp.bytes=buf; tp.bytesKey="builtin"; } }
+    return buf;
+  })().finally(()=>{ tp.builtinP=null; });
+}
+/* A file chosen for a template, checked here before anything is stored or built. Returns {bytes, r} or a message. */
+async function tplCheckFile(file, max, what){
+  if(!/\.pptx$/i.test(String(file.name||""))) return "Choose a PowerPoint file whose name ends in .pptx.";
+  if(+file.size>max) return `That file is ${(+file.size/1048576).toFixed(1)} MB. ${what} can be at most ${Math.round(max/1048576)} MB.`;
+  let bytes; try{ bytes=await file.arrayBuffer(); }catch{ return "Couldn't read that file. Choose it again."; }
+  try{ await loadProfileLibs(); }catch{ return "Couldn't load the template check. Check your connection and try again."; }
+  let r; try{ r=await window.SNLDeck.inspect(bytes); }catch{ r=null; }
+  if(!r || !r.ok) return r&&!blank(r.message) ? String(r.message) : "That file can't be used as a template. Choose a PowerPoint file.";
+  return {bytes, r};
+}
+const tplFound = r => `${plural(r.slides,"slide")}, ${isNum(r.widthIn)?(+r.widthIn).toFixed(2).replace(/\.?0+$/,""):"n/d"} x ${isNum(r.heightIn)?(+r.heightIn).toFixed(2).replace(/\.?0+$/,""):"n/d"} in`;
+/* Your own template: upload or replace it */
+function tplOwnPick(){
+  const tp=S.pf.tpl; tp.ownErr=""; tp.ownNote="";
+  if(tp.ownOn===false || !tplUid()){ tp.ownErr=tplOwnOffText(); render(); return; }
+  document.getElementById("pf_ownFile")?.click();
+}
+async function uploadOwnTemplate(file){
+  const pf=S.pf, tp=pf.tpl; if(!file || tp.ownBusy) return;
+  const stop=msg=>{ if(S.pf!==pf) return; tp.ownBusy=""; tp.ownErr=msg; render(); };
+  tp.ownErr=""; tp.ownNote="";
+  if(tp.ownOn===false || !tplUid()){ stop(tplOwnOffText()); return; }
+  tp.ownBusy="checking"; render();
+  const c=await tplCheckFile(file, TPL_OWN_MAX, "Your own template");
+  if(!S.session || S.pf!==pf) return;
+  if(typeof c==="string"){ stop(c); return; }
+  tp.ownBusy="uploading"; render();
+  const replaced=!!tp.own;
+  let error=null;
+  try{ ({error}=await S.sb.storage.from(TPL_BUCKET).upload(tplOwnPath(), file, {upsert:true, contentType:PPTX_TYPE, cacheControl:"60"})); }catch(e){ error=e; }
+  if(!S.session || S.pf!==pf) return;
+  if(error){ const k=tplErrKind(error);
+    stop(k==="refused"||k==="nobucket" ? tplOwnOffText() : k==="network" ? "Couldn't reach storage to upload your template. Check your connection and try again." : `Couldn't upload your template: ${(error&&error.message)||"unknown error"}. Try again.`); return; }
+  tp.ownBusy=""; tp.own={at:new Date().toISOString(), size:+file.size||null}; tplDropBytes(tp);
+  if(tplLevel(tp)==="own"){ tp.bytes=c.bytes; tp.bytesKey=tplKeyOf(tp); }
+  tp.ownNote=`Your own template is ${replaced?"replaced":"uploaded"}: ${tplFound(c.r)}. Your decks are built on it from now on, and nobody else can see it.`;
+  render();
+}
+async function removeOwnTemplate(){
+  const pf=S.pf, tp=pf.tpl; if(tp.ownBusy || !tp.own) return;
+  tp.ownBusy="removing"; tp.ownErr=""; tp.ownNote=""; render();
+  let error=null;
+  try{ ({error}=await S.sb.storage.from(TPL_BUCKET).remove([tplOwnPath()])); }catch(e){ error=e; }
+  if(!S.session || S.pf!==pf) return;
+  if(error){ tp.ownBusy=""; tp.ownErr=tplErrKind(error)==="network" ? "Couldn't reach storage to remove your template. Check your connection and try again." : `Couldn't remove your template: ${(error&&error.message)||"unknown error"}. Try again.`; render(); return; }
+  tp.own=null; tplDropBytes(tp);
+  await checkTemplate();   // what storage says now
+  if(!S.session || S.pf!==pf) return;
+  tp.ownBusy="";
+  if(tp.own) tp.ownErr="Your own template couldn't be removed. Try again, or ask Corp Dev to check that migration 0008_own_templates.sql has been run.";
+  else if(!tp.err) tp.ownNote=`Your own template is removed. Your next deck uses ${tplNext(tp)}.`;
+  render();
+}
+/* The standard template: Corp Dev removes it, after one question */
+async function removeStdTemplate(){
+  const pf=S.pf, tp=pf.tpl; if(tp.uploading || !isCorpDev()) return;
+  tp.uploading="removing"; tp.upErr=""; tp.upNote=""; render();
+  let error=null;
+  try{ ({error}=await S.sb.storage.from(TPL_BUCKET).remove([TPL_PATH])); }catch(e){ error=e; }
+  if(!S.session || S.pf!==pf) return;
+  if(error){ tp.uploading=""; tp.upErr=tplErrKind(error)==="network" ? "Couldn't reach storage to remove the standard template. Check your connection and try again." : `Couldn't remove the standard template: ${(error&&error.message)||"unknown error"}. Try again.`; render(); return; }
+  tp.info=null; tplDropBytes(tp);
+  await checkTemplate();
+  if(!S.session || S.pf!==pf) return;
+  tp.uploading=""; tp.askRemove=false;
+  if(tp.info) tp.upErr="The standard template couldn't be removed. Check that this login is a Corp Dev login and that migration 0004_profile_template.sql has been run.";
+  else if(!tp.err) tp.upNote="The standard template is removed. Everyone without a template of their own now builds on the built-in plain template, until a new standard template is uploaded.";
+  render();
+}
+/* Just this once: a file from this computer, checked, kept in memory for the next deck only */
+async function chooseOnceTemplate(file){
+  const pf=S.pf, tp=pf.tpl; if(!file || tp.onceBusy) return;
+  tp.onceErr=""; tp.onceBusy="checking"; render();
+  const c=await tplCheckFile(file, TPL_MAX, "A template");
+  if(!S.session || S.pf!==pf) return;
+  tp.onceBusy="";
+  if(typeof c==="string"){ tp.onceErr=c; render(); return; }
+  tp.once={name:tplFileName(file.name), size:+file.size||null, bytes:c.bytes, found:tplFound(c.r)};
+  render();
+}
+function tplOnceCancel(){ const tp=S.pf.tpl; tp.once=null; tp.onceErr=""; render(); }
+document.addEventListener("change", e=>{
+  if(e.target.id!=="pf_ownFile" && e.target.id!=="pf_onceFile") return;
+  const f=e.target.files&&e.target.files[0]; if(e.target.id==="pf_ownFile") uploadOwnTemplate(f); else chooseOnceTemplate(f); try{ e.target.value=""; }catch{}
+});
+/* For a built deck's "ready" message: the template it was built on, fixed the first time the message is drawn (right
+   after the build). A file used just this once has then been used, so it is let go. */
+function tplBuiltOnText(b){
+  if(!b) return "";
+  const tp=S.pf.tpl;
+  if(!b.tpl){ const u=tp.used; b.tpl=u ? {level:u.level, name:u.name||""} : {level:""}; if(u && u.level==="once" && u.ref && tp.once===u.ref) tp.once=null; }
+  const l=b.tpl.level;
+  return l==="once" ? ` Built on ${b.tpl.name}, a file used just this once.` : l==="own" ? " Built on your own template." : l==="std" ? " Built on the standard template." : l==="builtin" ? " Built on the built-in plain template." : "";
+}
+function pfTplNowHTML(tp){
+  const lv=tplLevel(tp);
+  if(lv==="once") return `<p id="pfTplState" class="tplnow"><span><b>${esc(tp.once.name)}</b>, a file from your computer, just this once <span class="t2">(${esc(tp.once.found)}). It isn't stored anywhere; the deck after it goes back to ${esc(tplNext(tp))}.</span></span><button type="button" class="btn sm" data-act="pf-once-cancel">Cancel, don't use it</button></p>`;
+  const line = lv==="own" ? `<b>Your own template</b>, uploaded ${esc(fmtAt(tp.own.at))}.`
+    : lv==="std" ? `<b>The standard template</b>, uploaded by Corp Dev on ${esc(fmtAt(tp.info.at))}.`
+    : `<b>The built-in plain template</b>: nobody has uploaded one yet.`;
+  const why = lv==="own" ? ` <span class="t2">Remove it to go back to ${tp.info?"the standard template":"the built-in plain template"}.</span>` : "";
+  return `<p id="pfTplState" class="tplnow"><span>${line}${why}</span></p>`;
 }
 async function loadProfileStatus(){
   const pf=S.pf; if(pf.loading) return;
@@ -2903,48 +3068,79 @@ function tplErrText(kind, e, upload){
   if(kind==="nofile") return isCorpDev() ? "There is no template yet. Upload your PowerPoint template first." : "There is no template yet. Ask Corp Dev to upload the template.";
   return `Couldn't ${what} the template: ${(e&&e.message)||"unknown error"}. Try again.`;
 }
-async function checkTemplate(){
-  const pf=S.pf, tp=pf.tpl; if(tp.loading) return;
+/* Which templates exist for this login: the standard one (a listing of the bucket), whether templates of your own are
+   switched on (migration 0008 lets logins see the bucket's settings; before it they can't), and this login's own (a
+   listing of its own folder, which only it can read). The three are asked at once. Returns a promise. */
+function checkTemplate(){
+  const pf=S.pf, tp=pf.tpl; if(tp.loading && tp.checking) return tp.checking;
   tp.loading=true; tp.err=""; tp.errKind=""; render();
-  let data=null, error=null;
-  try{ ({data, error}=await S.sb.storage.from(TPL_BUCKET).list("", {limit:100, search:TPL_PATH})); }catch(e){ error=e; }
-  if(!S.session || S.pf!==pf) return;
-  tp.loading=false; tp.checked=true;
-  if(error){ tp.errKind=tplErrKind(error); if(tp.errKind==="nofile") tp.info=null; else tp.err=tplErrText(tp.errKind, error, false); }
-  else { const o=(Array.isArray(data)?data:[]).find(x=>x && x.name===TPL_PATH), m=o&&o.metadata||{};
-    tp.info = o ? {at:o.updated_at||o.created_at||m.lastModified||null, size:isNum(m.size)?+m.size:null} : null; }
-  render();
+  const ask=f=>Promise.resolve().then(f).then(r=>r||{}, e=>({error:e}));
+  const st=S.sb.storage, uid=tplUid();
+  return tp.checking=(async()=>{
+    const [b, root, mine]=await Promise.all([ask(()=>typeof st.getBucket==="function" ? st.getBucket(TPL_BUCKET) : {error:{message:"Bucket not found"}}),
+      ask(()=>st.from(TPL_BUCKET).list("", {limit:100, search:TPL_PATH})), uid ? ask(()=>st.from(TPL_BUCKET).list(uid, {limit:100, search:TPL_PATH})) : {data:[]}]);
+    if(!S.session || S.pf!==pf) return;
+    tp.loading=false; tp.checked=true; tp.checking=null;
+    const {data, error}=root, find=d=>{ const o=(Array.isArray(d)?d:[]).find(x=>x && x.name===TPL_PATH), m=o&&o.metadata||{}; return o ? {at:o.updated_at||o.created_at||m.lastModified||null, size:isNum(m.size)?+m.size:null} : null; };
+    if(error){ tp.errKind=tplErrKind(error); if(tp.errKind==="nofile"||tp.errKind==="nobucket") tp.info=null; if(tp.errKind!=="nofile") tp.err=tplErrText(tp.errKind, error, false); }
+    else tp.info=find(data);
+    tp.ownOn = b.error ? (tplErrKind(b.error)==="network" ? null : false) : !!b.data;
+    tp.own = tp.ownOn && !mine.error ? find(mine.data) : null;
+    tplDropBytes(tp);   // a change of template drops the bytes kept
+    render();
+    if((!tp.err || tp.errKind==="nobucket") && tplLevel(tp)==="builtin" && !tp.bytes) builtinBytes(pf).catch(()=>{});   // early, so a failure shows in the block
+  })();
 }
-/* The template's bytes: from memory after the first time. Throws an Error with a message for the page. */
+/* The bytes of the template the next deck is built on: from memory when they are the same template as last time.
+   Records which template it was (tp.used) for the "ready" message. Throws an Error with a message for the page. */
 async function templateBytes(pf){
-  const tp=pf.tpl; if(tp.bytes) return tp.bytes;
-  let data=null, error=null;
-  try{ ({data, error}=await S.sb.storage.from(TPL_BUCKET).download(TPL_PATH)); }catch(e){ error=e; }
-  if(error || !data){ const k=error?tplErrKind(error):"other"; if(k==="nofile"){ tp.info=null; tp.checked=true; } throw new Error(tplErrText(k, error, false)); }
-  let buf; try{ buf=await data.arrayBuffer(); }catch{ throw new Error(tplErrText("network", null, false)); }
-  if(S.pf===pf) tp.bytes=buf;
+  const tp=pf.tpl;
+  if(tp.once){ tp.used={level:"once", name:tp.once.name, ref:tp.once}; return tp.once.bytes; }
+  if(!tp.checked || tp.loading || (tp.err && tp.errKind!=="nobucket")){
+    await checkTemplate();
+    if(!S.session || S.pf!==pf) throw new Error("Your session has ended. Sign in again.");
+    if(tp.err && tp.errKind!=="nobucket") throw new Error(tp.err);
+    if(tp.once) return templateBytes(pf);
+  }
+  const lv=tplLevel(tp), key=tplKeyOf(tp);
+  if(tp.bytes && tp.bytesKey===key){ tp.used={level:lv}; return tp.bytes; }
+  let buf;
+  if(lv==="builtin") buf=await builtinBytes(pf);
+  else {
+    let data=null, error=null;
+    try{ ({data, error}=await S.sb.storage.from(TPL_BUCKET).download(lv==="own"?tplOwnPath():TPL_PATH)); }catch(e){ error=e; }
+    if(error || !data){ const k=error?tplErrKind(error):"other";
+      if(k==="nofile" && S.pf===pf){
+        if(lv==="own") tp.own=null; else tp.info=null;
+        tplDropBytes(tp);
+        throw new Error(`${lv==="own"?"Your own template":"The standard template"} has been removed since this page checked. Choose Try again to build on ${tplNext(tp)}.`); }
+      throw new Error(tplErrText(k, error, false)); }
+    try{ buf=await data.arrayBuffer(); }catch{ throw new Error(tplErrText("network", null, false)); }
+  }
+  if(S.pf===pf && tplKeyOf(tp)===key){ tp.bytes=buf; tp.bytesKey=key; }
+  tp.used={level:lv};
   return buf;
 }
 async function uploadTemplate(file){
   const pf=S.pf, tp=pf.tpl; if(!file || tp.uploading || !isCorpDev()) return;
   const stop=msg=>{ if(S.pf!==pf) return; tp.uploading=""; tp.upErr=msg; render(); };
-  tp.upErr=""; tp.upNote="";
+  tp.upErr=""; tp.upNote=""; tp.askRemove=false;
   if(!/\.pptx$/i.test(String(file.name||""))){ stop("Choose a PowerPoint file whose name ends in .pptx."); return; }
-  if(+file.size>TPL_MAX){ stop(`That file is ${(+file.size/1048576).toFixed(1)} MB. The template can be at most 50 MB.`); return; }
+  if(+file.size>TPL_MAX){ stop(`That file is ${(+file.size/1048576).toFixed(1)} MB. The standard template can be at most 50 MB.`); return; }
   tp.uploading="checking"; render();
-  let bytes; try{ bytes=await file.arrayBuffer(); }catch{ stop("Couldn't read that file. Choose it again."); return; }
-  try{ await loadProfileLibs(); }catch{ stop("Couldn't load the template check. Check your connection and try again."); return; }
-  let r; try{ r=await window.SNLDeck.inspect(bytes); }catch{ r=null; }
+  const c=await tplCheckFile(file, TPL_MAX, "The standard template");
   if(!S.session || S.pf!==pf) return;
-  if(!r || !r.ok){ stop(r&&!blank(r.message) ? String(r.message) : "That file can't be used as the template. Choose a PowerPoint file."); return; }
+  if(typeof c==="string"){ stop(c); return; }
+  const {bytes, r}=c;
   tp.uploading="uploading"; render();
   const replaced=!!tp.info;
   let error=null;
   try{ ({error}=await S.sb.storage.from(TPL_BUCKET).upload(TPL_PATH, file, {upsert:true, contentType:PPTX_TYPE, cacheControl:"60"})); }catch(e){ error=e; }
   if(!S.session || S.pf!==pf) return;
   if(error){ stop(tplErrText(tplErrKind(error), error, true)); return; }
-  tp.uploading=""; tp.bytes=bytes; tp.info={at:new Date().toISOString(), size:+file.size||null}; tp.checked=true; tp.err=""; tp.errKind="";
-  tp.upNote=`Template ${replaced?"replaced":"uploaded"}: ${plural(r.slides,"slide")}, ${isNum(r.widthIn)?(+r.widthIn).toFixed(2).replace(/\.?0+$/,""):"n/d"} x ${isNum(r.heightIn)?(+r.heightIn).toFixed(2).replace(/\.?0+$/,""):"n/d"} in. Every profile from now on is built on it.`;
+  tp.uploading=""; tp.info={at:new Date().toISOString(), size:+file.size||null}; tp.checked=true; tp.err=""; tp.errKind=""; tplDropBytes(tp);
+  if(tplLevel(tp)==="std"){ tp.bytes=bytes; tp.bytesKey=tplKeyOf(tp); }
+  tp.upNote=`Standard template ${replaced?"replaced":"uploaded"}: ${tplFound(r)}. Everyone without a template of their own builds on it from now on.${tp.own?" Your own decks still use your own template.":""}`;
   render();
 }
 document.addEventListener("change", e=>{
@@ -3155,7 +3351,7 @@ function pfOutHTML(){
     h+=`<div class="${calm?"info":"banner"}" id="pfDraftErr" role="${calm?"status":"alert"}"><span>${esc(pfDraftErrText(r))}</span><span class="inline"><button type="button" class="btn sm primary" data-act="pf-build-plain" ${pf.busy?"disabled":""}>Build with plain text</button>${r.err==="busy"||!calm?`<button type="button" class="btn sm" data-act="pf-build">Try the draft again</button>`:""}</span></div>`; }
   if(pf.drafted && pf.drafted.text.by!=="claude" && !blank(pf.drafted.text.note) && pfDraftWanted()) h+=`<div class="info" id="pfNote" role="status"><span><b>The slides use plain text.</b> ${esc(pf.drafted.text.note)}</span></div>`;
   if(pf.buildErr) h+=`<div class="banner" id="pfBuildErr" role="alert"><span>${esc(pf.buildErr)}</span>${pfHasTemplate()?`<button type="button" class="btn sm" data-act="pf-build">Try again</button>`:""}</div>`;
-  if(pf.built && !pf.busy) h+=`<div class="info" id="pfBuilt" role="status"><span><b>Your profile is ready.</b> ${esc(pf.built.name)} was saved to your downloads. It was made in this browser and isn't stored or sent anywhere.</span><button type="button" class="btn sm" data-act="pf-again">Download again</button></div>`;
+  if(pf.built && !pf.busy) h+=`<div class="info" id="pfBuilt" role="status"><span><b>Your profile is ready.</b> ${esc(pf.built.name)} was saved to your downloads. It was made in this browser and isn't stored or sent anywhere.${esc(tplBuiltOnText(pf.built))}</span><button type="button" class="btn sm" data-act="pf-again">Download again</button></div>`;
   const tpl=pfHasTemplate(), label=pfDraftWanted()&&!pf.drafted ? "Draft with Claude and build" : pf.built ? "Build again" : "Build the PowerPoint file";
   if(!tpl) h+=`<p class="t2" id="pfNoTplNote">${isCorpDev()?"Upload your PowerPoint template below to build the file.":"The file can be built once Corp Dev uploads the template."}</p>`;
   if(!pf.draftErr) h+=`<div class="toolbar"><button type="button" class="btn primary" id="pf_buildBtn" data-act="pf-build" ${pf.busy||!tpl?"disabled":""}>${label}</button></div>`;
@@ -3163,16 +3359,39 @@ function pfOutHTML(){
 }
 function pfTemplateHTML(){
   const pf=S.pf, tp=pf.tpl, cd=isCorpDev(), fnOk=!(pf.statusErr&&pf.statusErr.err==="not_deployed");
-  let h=`<section class="tcard" id="pfTpl" aria-label="PowerPoint template"><div><h3>PowerPoint template</h3><p class="t2">Every profile is built on your team's own template, kept privately for this site's logins.</p></div>`;
-  if(tp.loading && !tp.checked) h+=`<p class="t2" id="pfTplState" role="status">Checking for the template…</p>`;
-  else if(tp.err) h+= tp.errKind==="nobucket" ? `<div class="info" id="pfTplState" role="status"><span>${esc(tp.err)}</span><button type="button" class="btn sm" data-act="pf-tpl-retry">Check again</button></div>` : `<div class="banner" id="pfTplState" role="alert"><span>${esc(tp.err)}</span><button type="button" class="btn sm" data-act="pf-tpl-retry">Try again</button></div>`;
-  else if(tp.info) h+=`<p id="pfTplState" style="margin:0"><b>The template is uploaded.</b> <span class="t2">${tp.info.at?`Last changed ${esc(whenAt(tp.info.at))}`:"Ready to use"}${isNum(tp.info.size)?`, ${+tp.info.size<104858?"under 0.1":(+tp.info.size/1048576).toFixed(1)} MB`:""}.</span></p>`;
-  else h+=`<p id="pfTplState" style="margin:0"><b>No template yet.</b> <span class="t2">${cd?"Upload your team's PowerPoint template (.pptx, up to 50 MB). Profiles can be built once it is here.":"Ask Corp Dev to upload the template. Until then you can get the figures, but not build the file."}</span></p>`;
-  if(cd && tp.errKind!=="nobucket"){
-    const up=tp.uploading;
-    h+=`<div class="toolbar"><input type="file" id="pf_tplFile" class="sr" tabindex="-1" aria-hidden="true" accept=".pptx,${PPTX_TYPE}">
-      <button type="button" class="btn" data-act="pf-tpl-pick" ${up||tp.loading?"disabled":""}>${up==="checking"?"Checking the file…":up==="uploading"?"Uploading…":tp.info?"Replace template":"Upload template"}</button>
-      <span class="t2 grow">The file is checked here first: it must be a PowerPoint file with the cover and content layouts the builder uses.</span></div>`;
+  let h=`<section class="tcard" id="pfTpl" aria-label="PowerPoint template"><div><h3>PowerPoint template</h3><p class="t2">Your next deck is built on your own template if you have one, otherwise on the standard template Corp Dev uploads for everyone, otherwise on the built-in plain template.</p></div>`;
+  const hard=tp.err && tp.errKind!=="nobucket", busy=tp.loading||!!tp.ownBusy||!!tp.onceBusy||!!tp.uploading;
+  if(tp.loading && !tp.checked) h+=`<p class="t2" id="pfTplState" role="status">Checking which template your next deck will use…</p>`;
+  else if(hard) h+=`<div class="banner" id="pfTplState" role="alert"><span>${esc(tp.err)}</span><button type="button" class="btn sm" data-act="pf-tpl-retry">Try again</button></div>`;
+  else {
+    h+=`<div class="tplnowbox" role="status"><span class="t2">Your next deck will use</span>${pfTplNowHTML(tp)}</div>`;
+    if(tp.errKind==="nobucket") h+=`<div class="info" id="pfTplSetup" role="status"><span>${esc(tp.err)}</span><button type="button" class="btn sm" data-act="pf-tpl-retry">Check again</button></div>`;
+    if(tp.builtinErr && tplLevel(tp)==="builtin") h+=`<div class="banner" id="pfTplBuiltinErr" role="alert"><span>${esc(tp.builtinErr)}</span><button type="button" class="btn sm" data-act="pf-builtin-retry">Try again</button></div>`;
+  }
+  if(!hard && tp.checked){
+    const ob=tp.ownBusy, store=tp.errKind!=="nobucket";
+    // your own: any login
+    if(store) h+=`<div class="tplrow" id="pfTplOwn"><div><b>Your own template</b><p class="t2">A template of your own is private to you: nobody else can see it or build on it, Corp Dev included. A .pptx file of up to ${Math.round(TPL_OWN_MAX/1048576)} MB.</p></div>
+      <div class="inline"><input type="file" id="pf_ownFile" class="sr" tabindex="-1" aria-hidden="true" accept=".pptx,${PPTX_TYPE}">
+        <button type="button" class="btn" data-act="pf-own-pick" ${busy?"disabled":""}>${ob==="checking"?"Checking the file…":ob==="uploading"?"Uploading…":tp.own?"Replace your own":"Upload your own"}</button>
+        ${tp.own?`<button type="button" class="btn ghost" data-act="pf-own-remove" ${busy?"disabled":""}>${ob==="removing"?"Removing…":"Remove your own"}</button>`:""}</div></div>`;
+    if(tp.ownErr) h+=`<p class="err" id="pfTplOwnErr" role="alert">${esc(tp.ownErr)}</p>`;
+    if(tp.ownNote) h+=`<div class="info" id="pfTplOwnDone" role="status"><span>${esc(tp.ownNote)}</span></div>`;
+    // just this once: any login, nothing stored
+    h+=`<div class="tplrow" id="pfTplOnce"><div><b>A different file just this once</b><p class="t2">Builds your next deck on a file from your computer without storing it anywhere.</p></div>
+      <div class="inline"><input type="file" id="pf_onceFile" class="sr" tabindex="-1" aria-hidden="true" accept=".pptx,${PPTX_TYPE}">
+        <button type="button" class="btn" data-act="pf-once-pick" ${busy?"disabled":""}>${tp.onceBusy?"Checking the file…":tp.once?"Choose a different file":"Use a different file just this once"}</button></div></div>`;
+    if(tp.onceErr) h+=`<p class="err" id="pfTplOnceErr" role="alert">${esc(tp.onceErr)}</p>`;
+    // the standard template: Corp Dev
+    if(cd && store){
+      const up=tp.uploading;
+      h+=`<div class="tplrow" id="pfTplStd"><div><b>The standard template, for everyone</b><p class="t2">Used by everyone without a template of their own. Every file is checked here first: it must be a widescreen PowerPoint file with the cover and content layouts the builder uses.</p></div>
+        <div class="inline"><input type="file" id="pf_tplFile" class="sr" tabindex="-1" aria-hidden="true" accept=".pptx,${PPTX_TYPE}">
+          <button type="button" class="btn" data-act="pf-tpl-pick" ${busy||tp.askRemove?"disabled":""}>${up==="checking"?"Checking the file…":up==="uploading"?"Uploading…":tp.info?"Replace the standard template":"Upload the standard template"}</button>
+          ${tp.info&&!tp.askRemove?`<button type="button" class="btn ghost" data-act="pf-std-remove" ${busy?"disabled":""}>Remove the standard template</button>`:""}</div></div>`;
+      if(tp.askRemove && tp.info) h+=`<div class="libbox" id="pfTplConfirm" role="group" aria-label="Remove the standard template"><p style="margin:0"><b>Remove the standard template?</b> Everyone without a template of their own will build on the built-in plain template until a new standard template is uploaded. Templates of your own are private, so the page can't tell how many people that is.</p>
+        <div class="inline"><button type="button" class="btn primary sm" data-act="pf-std-remove-yes" ${up?"disabled":""}>${up==="removing"?"Removing…":"Yes, remove it"}</button><button type="button" class="btn sm ghost" data-act="pf-std-remove-no" ${up?"disabled":""}>Keep it</button></div></div>`;
+    }
   }
   if(tp.upErr) h+=`<p class="err" id="pfTplErr" role="alert">${esc(tp.upErr)}</p>`;
   if(tp.upNote) h+=`<div class="info" id="pfTplDone" role="status"><span>${esc(tp.upNote)}</span></div>`;
@@ -3214,7 +3433,8 @@ function renderProfile(){
 const FP_YEARS = [1,3,5];
 const FP_MAX_SP_REQUESTS = 60, FP_MAX_PLANNED = 50, FP_OVERHEAD = 3;   // the same in supabase/functions/_shared/profile.ts
 const FP_WINDOW_DAYS = 365;
-function freshFp(){ return {find:{q:"", asked:"", matches:null, groups:null, busy:false, err:""}, pick:null, years:3, formErr:"", busy:"", asked:null, res:null, err:null, plan:null, libsErr:"", draft:null, drafted:null, draftErr:null, built:null, buildErr:""}; }
+function freshFp(){ return {find:{q:"", asked:"", matches:null, groups:null, busy:false, err:""}, pick:null, years:3, formErr:"", busy:"", asked:null, res:null, err:null, plan:null, libsErr:"", draft:null, drafted:null, draftErr:null, built:null, buildErr:"",
+  cand:null, nRate:null, nForm:null, dst:null, dErr:null, mk:null, refreshErr:null}; }
 // which profile the view shows: the reader's choice, else the full one once statutory data is ready, else filings
 const pfMode = () => S.pf.mode || (pfLive() ? "full" : "filings");
 const fpFilingsOff = () => { const s=S.pf.status&&S.pf.status.filings; return !!s && s.configured===false; };
@@ -3285,11 +3505,12 @@ async function fpFacts(){
   else if(r.err!=="signin") fp.err = r.data ? {err:"bad_answer", msg:"The profile function sent back something the page can't read. Try again."} : r;
   render();
 }
-function fpTake(fp, data){ fp.res={facts:data.facts, text:data.text, search:data.search&&typeof data.search==="object"?data.search:null, spRequests:isNum(data.spRequests)?+data.spRequests:null}; fp.plan=null; fp.libsErr=""; fpPlan(fp); }
+function fpTake(fp, data){ fp.res={facts:data.facts, text:data.text, search:data.search&&typeof data.search==="object"?data.search:null, spRequests:isNum(data.spRequests)?+data.spRequests:null}; fp.plan=null; fp.libsErr=""; fpPlan(fp);
+  fp.cand=fpCandOf(data.candidates); if(!data.facts.sample && !fp.dst && !fp.dErr) fpDigestStatus(fp); }
 async function fpPlan(fp){
   try{ await loadProfileLibs(); }catch{ if(S.pf.fp===fp){ fp.libsErr=PF_LIBS_ERR; render(); } return; }
   if(S.pf.fp!==fp || !fp.res) return;
-  let plan=null; try{ plan=typeof window.SNLProfile.filingsPlan==="function" ? window.SNLProfile.filingsPlan(fp.res.facts) : null; }catch{}
+  let plan=null; try{ plan=typeof window.SNLProfile.filingsPlan==="function" ? window.SNLProfile.filingsPlan(fp.res.facts, {usMap:US_MAP}) : null; }catch{}
   if(!Array.isArray(plan)){ fp.libsErr="Couldn't work out which slides these filings fill. Reload the page and try again."; render(); return; }
   fp.plan=plan.filter(s=>s&&typeof s==="object"); fp.libsErr=""; render();
 }
@@ -3329,7 +3550,7 @@ async function fpMake(fp){
   if(!S.session || S.pf.fp!==fp) return;
   try{ await loadProfileLibs(); }catch{ fail(PF_LIBS_ERR); return; }
   if(!S.session || S.pf.fp!==fp) return;
-  let spec; try{ spec=window.SNLProfile.filingsSpec(use.facts, use.text); }catch(e){ fail("Couldn't lay out the slides from these filings. "+((e&&e.message)||"")); return; }
+  let spec; try{ spec=window.SNLProfile.filingsSpec(use.facts, use.text, {usMap:US_MAP}); }catch(e){ fail("Couldn't lay out the slides from these filings. "+((e&&e.message)||"")); return; }
   let out; try{ out=await window.SNLDeck.build(bytes.slice(0), spec); }catch(e){ fail("Couldn't build the PowerPoint file. "+((e&&e.message)||"Try again.")); return; }
   if(!S.session || S.pf.fp!==fp) return;
   fp.busy=""; fp.built={blob:new Blob([out],{type:PPTX_TYPE}), name:pfFileName(spec), by:use.text&&use.text.by==="claude"?"claude":"plain"};
@@ -3415,6 +3636,7 @@ function fpOutHTML(){
   else h+=`<div class="pftiles" id="fpHead"><div class="pftile" data-k="filings"><span class="t2">Filings</span><b>${count(T.filings)}</b></div><div class="pftile" data-k="rate"><span class="t2">Rate filings</span><b>${count(T.rate)}</b></div><div class="pftile" data-k="states"><span class="t2">States with filings</span><b>${count(T.states)}</b></div></div>`;
   if(sh.capped) h+=`<div class="banner" id="fpCapped" role="alert"><span><b>The search stopped early,</b> so these filings may be incomplete and the slides say so. Choose a shorter period or one company for a complete profile.</span></div>`;
   h+=fpPlanHTML(fp);
+  h+=fpSumHTML(fp);
   const used=fp.res.spRequests;
   h+=`<p class="source" id="fpSource">Source: S&amp;P Global Market Intelligence, SNL Insurance Product Filings. Rate impacts are S&amp;P's overall figure for each filing, not weighted by premium; for a filing that isn't approved it may be the change asked for.${sh.fromStore?` From the saved search${sh.fetchedAt?` of ${esc(whenAt(sh.fetchedAt))}`:""}: no new S&amp;P requests.`:isNum(used)?` ${plural(used,"S&amp;P request")} used.`:""}</p></section>`;
   h+=`<section class="tcard" id="fpBuild" aria-label="Build the PowerPoint file">${fpDraftHTML(fp)}`;
@@ -3425,10 +3647,10 @@ function fpOutHTML(){
   if(fp.drafted && fp.drafted.text.by!=="claude" && !blank(fp.drafted.text.note) && fpDraftWanted()) h+=`<div class="info" id="fpNote" role="status"><span><b>The slides use plain text.</b> ${esc(fp.drafted.text.note)}</span></div>`;
   else if(fp.drafted && fp.drafted.text.by==="claude" && !blank(fp.drafted.text.note) && fpDraftWanted()) h+=`<div class="info" id="fpNote" role="status"><span><b>Some slides use plain text.</b> ${esc(fp.drafted.text.note)}</span></div>`;
   if(fp.buildErr) h+=`<div class="banner" id="fpBuildErr" role="alert"><span>${esc(fp.buildErr)}</span>${pfHasTemplate()?`<button type="button" class="btn sm" data-act="fp-build">Try again</button>`:""}</div>`;
-  if(fp.built && !fp.busy) h+=`<div class="info" id="fpBuilt" role="status"><span><b>Your filings profile is ready.</b> ${esc(fp.built.name)} was saved to your downloads. It was made in this browser and isn't stored or sent anywhere.</span><button type="button" class="btn sm" data-act="fp-again">Download again</button></div>`;
+  if(fp.built && !fp.busy) h+=`<div class="info" id="fpBuilt" role="status"><span><b>Your filings profile is ready.</b> ${esc(fp.built.name)} was saved to your downloads. It was made in this browser and isn't stored or sent anywhere.${esc(tplBuiltOnText(fp.built))}</span><button type="button" class="btn sm" data-act="fp-again">Download again</button></div>`;
   const tpl=pfHasTemplate(), label=fpDraftWanted()&&!fp.drafted ? "Draft with Claude and build" : fp.built ? "Build again" : "Build the PowerPoint file";
   if(!tpl) h+=`<p class="t2" id="fpNoTplNote">${isCorpDev()?"Upload your PowerPoint template below to build the file.":"The file can be built once Corp Dev uploads the template."}</p>`;
-  if(!fp.draftErr) h+=`<div class="toolbar"><button type="button" class="btn primary" id="fp_buildBtn" data-act="fp-build" ${fp.busy||!tpl||!fp.plan?"disabled":""}>${label}</button></div>`;
+  if(!fp.draftErr) h+=`<div class="toolbar"><button type="button" class="btn primary" id="fp_buildBtn" data-act="fp-build" ${fp.busy||!tpl||!fp.plan||(fp.mk&&fp.mk.busy)?"disabled":""}>${label}</button></div>`;
   return h+`</section>`;
 }
 function fpRender(){
@@ -3451,6 +3673,121 @@ function fpSampleHTML(){
   const pf=S.pf, fnOk=!(pf.statusErr&&pf.statusErr.err==="not_deployed"), fp=pf.fp;
   return `<div class="pfsample" id="fpSampleBox"><div><b>Check the template with a sample filings profile</b><p class="t2" id="fpSampleNote">Made-up filings for a made-up group. It works before S&amp;P filings are set up.</p></div>
     <button type="button" class="btn" data-act="fp-sample" ${fp.busy||pf.busy||!fnOk?"disabled":""}>${fp.busy==="sample"||(fp.busy==="build"&&fp.res&&fp.res.facts.sample)?"Building the sample…":"Build a sample filings profile"}</button></div>`;
+}
+
+/* ----- saved filing summaries: what the profile has, and summarising more before building, only when chosen -----
+   The profile function reads the saved summaries of the company's filings for free and says which rate and form
+   filings have none (candidates, newest first). Making one is the summaries function's "make": 1 S&P request and one
+   Claude read of up to 150 pages, and one of the day's questions, so nothing is made until the reader chooses how
+   many, with the cost stated first. Then the figures are worked out again from the saved search (no new S&P search).
+   Uses the Programs and forms page's helpers (fcEstimate, fcUsd, fcWhy) when they are there. */
+const FP_SUM_MAX = 10, FP_SUM_RATE = 5, FP_SUM_FORM = 3;
+function fpCandOf(c){
+  const ok=x=>x&&typeof x==="object"&&!Array.isArray(x)&&x.row&&typeof x.row==="object"&&!Array.isArray(x.row);
+  const list=v=>(Array.isArray(v)?v:[]).filter(ok).slice(0, 25);
+  return c&&typeof c==="object" ? {rate:list(c.rate), form:list(c.form)} : {rate:[], form:[]};
+}
+function fpSumNs(fp){
+  const c=fp.cand||{rate:[],form:[]}, n=(v, max, d)=>{ const k=v===null||v===undefined||v==="" ? d : Math.round(+v); return Number.isFinite(k)&&k>=0 ? Math.min(k, max) : Math.min(d, max); };
+  return {r:n(fp.nRate, Math.min(FP_SUM_MAX, c.rate.length), FP_SUM_RATE), f:n(fp.nForm, Math.min(FP_SUM_MAX, c.form.length), FP_SUM_FORM)};
+}
+function fpSumQueue(fp){ const c=fp.cand||{rate:[],form:[]}, n=fpSumNs(fp); return [...c.rate.slice(0,n.r), ...c.form.slice(0,n.f)]; }
+function fpSumEstimate(q){
+  const shaped=q.map(c=>({f:{r:{pages:isNum(c.pages)?+c.pages:null}}}));
+  if(typeof fcEstimate==="function"){ try{ return fcEstimate(shaped); }catch{} }
+  const pages=q.reduce((a,c)=>a+(isNum(c.pages)&&+c.pages>0?Math.min(+c.pages,150):150),0);
+  return {pages, lo:pages*2.30/150, hi:pages*3.50/150, unknown:q.filter(c=>!(isNum(c.pages)&&+c.pages>0)).length};
+}
+const fpUsd = v => typeof fcUsd==="function" ? fcUsd(v) : "$"+(+v).toLocaleString("en-US",{minimumFractionDigits:2, maximumFractionDigits:2});
+async function fpDigestStatus(fp){
+  const r=await callFn("snl-digest",{action:"status"});
+  if(!S.session || S.pf.fp!==fp) return;
+  if(r.data){ fp.dst=r.data; fp.dErr=null; } else if(r.err!=="signin") fp.dErr=r;
+  render();
+}
+function fpSumOff(fp){
+  const d=fp.dst, e=fp.dErr;
+  if(e && e.err==="not_deployed") return "Summaries can't be made here: the summaries function isn't on this site"+(isCorpDev()?" (deploy snl-digest; see the README).":".");
+  if(e && e.err==="no_tables") return "Summaries can't be made yet: their table isn't in the database (migration 0005).";
+  if(d && d.claude && d.claude.configured===false) return "New summaries can't be made yet: Claude isn't set up on this site.";
+  if(d && d.filings && d.filings.configured===false) return "New summaries can't be made yet: S&P isn't set up on this site.";
+  if(chatAtLimit(S.chatUse)) return "Today's limit on questions is reached, so no summary can be made until midnight UTC.";
+  return "";
+}
+function fpSumHTML(fp){
+  const f=fp.res.facts, U=f.summaries;
+  if(f.sample) return `<p class="t2" id="fpSumSample">The sample's filing summaries are made up, so none are made or saved.</p>`;
+  if(!U || typeof U!=="object") return "";
+  const c=k=>U[k]&&typeof U[k]==="object"?U[k]:{filings:0, summarised:0, older:0, withDocument:0};
+  const R=c("rate"), F=c("form"), older=(+R.older||0)+(+F.older||0);
+  let h=`<section class="fpsum" id="fpSum" aria-labelledby="fpSumH"><div class="f"><span id="fpSumH">Filing summaries <em>what the exposure, rate adequacy and programs slides rest on</em></span></div>`;
+  if(!U.checked){ h+=`<p class="t2" id="fpSumHave">${esc(blank(U.note)?"Saved summaries weren't looked up for this profile.":U.note)}</p>`; return h+`</section>`; }
+  h+=`<p style="margin:0" id="fpSumHave"><b>Saved summaries:</b> ${count(R.summarised)} of ${plural(R.filings,"rate filing")} and ${count(F.summarised)} of ${plural(F.filings,"form filing")}${older?`; ${plural(older,"was","were")} made before the newer rate figures (loss costs, indicated change, assumptions) were read, and can be made again`:""}. Saved summaries cost nothing to use.</p>`;
+  const mk=fp.mk;
+  if(fp.busy==="refresh") h+=`<div class="info" id="fpRefreshing" role="status"><span><b>Working out the figures again with the new summaries…</b> From the saved search: no new S&amp;P search.</span></div>`;
+  if(fp.refreshErr) h+=`<div class="banner" id="fpRefreshErr" role="alert"><span><b>The new summaries are saved, but the figures couldn't be worked out again.</b> ${esc(errText(fp.refreshErr))}</span><button type="button" class="btn sm" data-act="fp-refresh-retry">Try again</button></div>`;
+  if(mk && mk.busy){
+    const cur=mk.cur&&mk.cur.c;
+    return h+`<div class="banner" id="fpSumMaking" role="status"><span><b>Summarising ${count(mk.i)} of ${count(mk.n)}:</b> ${esc(cur?`${cur.filingNo||"a filing"} (${[cur.state, cur.toi].filter(Boolean).join(", ")||"n/d"})`:"")}… Each takes a minute or two. Keep this tab open.</span><button type="button" class="btn sm" data-act="fp-sum-stop" ${mk.stop?"disabled":""}>${mk.stop?"Stopping after this one…":"Stop"}</button></div></section>`;
+  }
+  if(fp.dErr && !["not_deployed","no_tables","signin"].includes(fp.dErr.err)) h+=`<div class="banner" id="fpSumErr" role="alert"><span><b>Couldn't check whether summaries can be made.</b> ${esc(errText(fp.dErr))}</span><button type="button" class="btn sm" data-act="fp-sum-retry">Try again</button></div>`;
+  const cand=fp.cand||{rate:[],form:[]}, n=fpSumNs(fp), q=fpSumQueue(fp), off=fpSumOff(fp);
+  if(!cand.rate.length && !cand.form.length){ h+=`<p class="t2" id="fpSumNone">Every rate and form filing with a document already has a current summary${R.withDocument<R.filings||F.withDocument<F.filings?", or has no document to summarise":""}.</p>`; return h+(mk?fpSumMadeHTML(mk):"")+`</section>`; }
+  const opts=(max, cur)=>Array.from({length:max+1},(_,i)=>`<option value="${i}" ${cur===i?"selected":""}>${i}</option>`).join("");
+  h+=`<div class="inline fpsumpick"><label for="fp_nRate" class="t2"><b>Summarise the latest</b></label><select id="fp_nRate" data-bind="pf.fp.nRate" data-live style="width:auto" ${fp.busy?"disabled":""}>${opts(Math.min(FP_SUM_MAX, cand.rate.length), n.r)}</select><label for="fp_nForm" class="t2"><b>rate filings and the latest</b></label><select id="fp_nForm" data-bind="pf.fp.nForm" data-live style="width:auto" ${fp.busy?"disabled":""}>${opts(Math.min(FP_SUM_MAX, cand.form.length), n.f)}</select><span class="t2"><b>form filings</b></span></div>`;
+  h+=`<p class="t2" id="fpSumWhich" style="margin:0">${plural(cand.rate.length,"rate filing")} and ${plural(cand.form.length,"form filing")} have no current summary${cand.rate.some(x=>x.older)||cand.form.some(x=>x.older)?" (older summaries are made again)":""}; the newest are taken first.</p>`;
+  if(q.length){
+    const est=fpSumEstimate(q), cu=S.chatUse, left = cu && isNum(cu.dailyLimit) && isNum(cu.askedToday) ? Math.max(0, +cu.dailyLimit - +cu.askedToday) : null;
+    h+=`<p style="margin:0" id="fpSumCost"><b>${plural(q.length,"new summary","new summaries")}: ${plural(q.length,"S&amp;P request")}, roughly ${fpUsd(est.lo)} to ${fpUsd(est.hi)} of Claude reading, and ${plural(q.length,"of today's questions","of today's questions")}.</b> <span class="t2">An estimate: up to the first 150 pages of each filing (${count(est.pages)} pages in all${est.unknown?`, counting ${plural(est.unknown,"filing")} with no page count as 150`:""}). What it really cost shows when it is done. Summaries are saved for everyone, so nobody pays to read these filings again.</span></p>`;
+    if(left!==null && left<q.length) h+=`<p class="t2 bigwarn" id="fpSumDaily" style="margin:0">Only ${plural(left,"question is","questions are")} left today, so at most ${count(left)} of these can be made today; the rest will say why.</p>`;
+  } else h+=`<p class="t2" id="fpSumCost" style="margin:0">Nothing chosen: the profile is built from the summaries already saved.</p>`;
+  if(off) h+=`<p class="t2" id="fpSumOff" style="margin:0">${esc(off)}</p>`;
+  h+=`<div class="toolbar"><button type="button" class="btn" id="fp_sumMake" data-act="fp-sum-make" ${!q.length||off||fp.busy?"disabled":""}>Summarise ${plural(q.length,"filing")}</button><span class="t2 grow">Then the figures are worked out again from the saved search. ${fp.drafted?"Claude's slide text is drafted again for them when you build.":""}</span></div>`;
+  return h+(mk?fpSumMadeHTML(mk):"")+`</section>`;
+}
+function fpSumMadeHTML(mk){
+  const made=mk.items.filter(x=>x.state==="made"), bad=mk.items.filter(x=>x.state!=="made");
+  const name=x=>`${esc(x.c.filingNo||"A filing")} (${esc([x.c.state, x.c.toi].filter(Boolean).join(", ")||"n/d")})`;
+  const spent=[mk.usdKnown?`cost ${costText(mk.usd)}`:"", mk.sp?`used ${plural(mk.sp,"S&amp;P request")}`:""].filter(Boolean).join(" and ");
+  return `<div class="${bad.length?"banner":"info"}" id="fpSumMade" role="status" style="display:block"><b>${made.length===mk.items.length?`All ${plural(made.length,"summary","summaries")} made`:`${count(made.length)} of ${plural(mk.items.length,"summary","summaries")} made`}.</b>${spent?` These ${spent}.`:""}
+    <ul class="fcres" id="fpSumList">${mk.items.map(x=>x.state==="made"?`<li>${name(x)}: summarised.</li>`:x.state==="failed"?`<li class="no">${name(x)}: not summarised: ${esc(x.why)}</li>`:`<li class="no">${name(x)}: not started: ${esc(x.why||"")}</li>`).join("")}</ul></div>`;
+}
+async function fpSumMake(){
+  const fp=S.pf.fp; if(fp.busy || (fp.mk&&fp.mk.busy) || !fp.res || fp.res.facts.sample || fpSumOff(fp)) return;
+  const q=fpSumQueue(fp); if(!q.length) return;
+  const mk=fp.mk={busy:true, stop:false, halt:"", n:q.length, i:0, cur:null, items:q.map(c=>({c, state:"queued", why:""})), made:0, usd:0, usdKnown:false, sp:0};
+  fp.refreshErr=null; render();
+  for(let i=0;i<mk.items.length;i++){
+    const x=mk.items[i];
+    if(mk.stop || mk.halt){ x.state="skipped"; x.why=mk.halt||"you pressed Stop."; continue; }
+    mk.i=i+1; mk.cur=x; x.state="running"; render();
+    const r=await callFn("snl-digest",{action:"make", filing:x.c.row, ...(x.c.older?{refresh:true}:{})});
+    if(!S.session || S.pf.fp!==fp) return;   // the session ended: everything here was forgotten with it
+    if(r.data && r.data.digest && typeof r.data.digest==="object"){
+      x.state="made"; mk.made++;
+      const u=r.data.usage&&typeof r.data.usage==="object"?r.data.usage:{};
+      if(isNum(u.costUsd)){ mk.usd+=+u.costUsd; mk.usdKnown=true; } if(isNum(u.spRequests)) mk.sp+=+u.spRequests;
+    } else {
+      const res=r.data ? {err:"bad_answer", msg:"The summaries function sent back something the page can't read."} : r;
+      x.state="failed"; x.why=typeof fcWhy==="function" ? fcWhy(res) : errText(res);
+      if(["limit","daily_limit"].includes(res.err)) mk.halt="today's limit on questions was reached.";
+      if(["not_configured","not_deployed","no_tables"].includes(res.err)){ mk.halt="summaries aren't set up yet."; fp.dErr=res; }
+    }
+  }
+  mk.busy=false; mk.cur=null; render();
+  pfChatUse(); loadStatus();
+  if(mk.made) await fpRefresh(fp);
+}
+/* The figures again, after new summaries: the same company and period, from the saved search (no new S&P search). */
+async function fpRefresh(fp){
+  if(!fp.asked || fp.busy) return;
+  fp.busy="refresh"; fp.refreshErr=null; render();
+  const r=await callFn("snl-profile", fpBody("filings_facts", fp.asked.pick, fp.asked.years));
+  if(!S.session || S.pf.fp!==fp) return;
+  fp.busy="";
+  if(r.data && r.data.facts && typeof r.data.facts==="object" && r.data.text){ const keep=fp.mk; fpTake(fp, r.data); fp.mk=keep; fp.drafted=null; fp.built=null; fp.nRate=null; fp.nForm=null; }
+  else if(r.err!=="signin") fp.refreshErr = r.data ? {err:"bad_answer", msg:"The profile function sent back something the page can't read. Try again."} : r;
+  render();
 }
 
 /* ---------- Snapshot: one company or group over 1, 3 or 5 years, on one page ----------
@@ -4359,6 +4696,7 @@ function fcRateText(rt){
   const day=v=>typeof v==="string"&&parseDay(v)?fmtDay(v):fcStr(v,30);
   if(!blank(rt.effectiveNew)&&day(rt.effectiveNew)) bits.push(`effective for new business ${day(rt.effectiveNew)}`);
   if(!blank(rt.effectiveRenewal)&&day(rt.effectiveRenewal)) bits.push(`for renewals ${day(rt.effectiveRenewal)}`);
+  if(typeof dgRateMoreList==="function") for(const x of dgRateMoreList(rt)) bits.push(`${x.label.toLowerCase()} ${x.text}${x.page&&x.page!==rt.page?` (page ${x.page})`:""}`);
   const s=bits.join("; "); return s ? s[0].toUpperCase()+s.slice(1)+"." : "";
 }
 function fcNotesHTML(c){
@@ -5499,6 +5837,7 @@ function render(){
   document.getElementById("tabs").hidden=!on;
   document.getElementById("signoutBtn").hidden=!on;
   document.getElementById("pwBtn").hidden=!on;
+  if(CF_SIGNON) cfHeader();   // no password to change: Cloudflare signs people in
   document.getElementById("strip").hidden=!on;
   const wn=document.getElementById("whoName"); wn.textContent=on?S.session.name:""; wn.title=on?`${S.session.username||""} · ${ROLES[S.session.role]||""}`:"";
   document.getElementById("whoMenuName").innerHTML=on?`<b>${esc(S.session.name)}</b><span>${esc(S.session.username||"")} · ${esc(ROLES[S.session.role]||"")}</span>`:"";
@@ -5859,6 +6198,8 @@ document.addEventListener("click", e=>{
   switch(a){
     case "who-menu": setMenu(!S.menuOpen); break;
     case "signout": signOut(); break;
+    case "cf-reload": location.reload(); break;
+    case "cf-retry": cfBoot(); break;
     case "change-pw": S.lastFocusEl=t.closest("#whoMenu")?document.getElementById("whoDot"):t; S.drawer={kind:"password"}; renderDrawer(); break;
     case "close": closeDrawer(); break;
     case "save-pw": savePassword(); break;
@@ -5968,6 +6309,14 @@ document.addEventListener("click", e=>{
     case "pf-sample": pfSample(); break;
     case "pf-tpl-pick": document.getElementById("pf_tplFile")?.click(); break;
     case "pf-tpl-retry": S.pf.tpl.checked=false; checkTemplate(); break;
+    case "pf-own-pick": tplOwnPick(); break;
+    case "pf-own-remove": removeOwnTemplate(); break;
+    case "pf-once-pick": S.pf.tpl.onceErr=""; document.getElementById("pf_onceFile")?.click(); break;
+    case "pf-once-cancel": tplOnceCancel(); break;
+    case "pf-std-remove": S.pf.tpl.askRemove=true; S.pf.tpl.upErr=""; S.pf.tpl.upNote=""; render(); break;
+    case "pf-std-remove-yes": removeStdTemplate(); break;
+    case "pf-std-remove-no": S.pf.tpl.askRemove=false; render(); break;
+    case "pf-builtin-retry": S.pf.tpl.builtinErr=""; render(); builtinBytes(S.pf).catch(()=>{}); break;
     case "pf-mode": S.pf.mode=t.dataset.m==="full"?"full":"filings"; render(); break;
     case "fp-find": fpLookup(); break;
     case "fp-co": fpChooseCompany(+t.dataset.i); break;
@@ -5981,6 +6330,10 @@ document.addEventListener("click", e=>{
     case "fp-build-plain": fpBuild(true); break;
     case "fp-again": { const b=S.pf.fp.built; if(b) saveBlob(b.blob, b.name); } break;
     case "fp-sample": fpSample(); break;
+    case "fp-sum-make": fpSumMake(); break;
+    case "fp-sum-stop": if(S.pf.fp.mk && S.pf.fp.mk.busy){ S.pf.fp.mk.stop=true; render(); } break;
+    case "fp-sum-retry": S.pf.fp.dErr=null; S.pf.fp.dst=null; fpDigestStatus(S.pf.fp); break;
+    case "fp-refresh-retry": fpRefresh(S.pf.fp); break;
 
     case "snap-find": snapLookup(); break;
     case "snap-co": snapChooseCompany(+t.dataset.i); break;
@@ -6152,17 +6505,20 @@ async function doLogin(){
   await onSignedIn(data.session);
 }
 async function signOut(){
+  if(CF_SIGNON){ cfSignOut(); return; }
   S.leaving=true; try{ await S.sb.auth.signOut(); }catch{} S.leaving=false;
   resetState(); S.loginErr=""; history.replaceState(null,"",location.pathname); render();
 }
 /* A function said the login is no longer good: back to the sign-in form, with its message. */
 async function sessionEnded(msg){
+  if(CF_SIGNON){ if(S.session) cfEnded("ended", CF_ENDED); return; }
   if(!S.session) return;
   resetState(); S.loginErr=msg||"Sign in again."; render();
   S.leaving=true; try{ await S.sb.auth.signOut(); }catch{} S.leaving=false;
 }
 function loginHTML(){
   const wrap = inner => `<div class="login" role="region" aria-label="Sign in">${inner}</div>`;
+  if(CF_SIGNON) return wrap(cfLoginHTML());
   if(S.configMissing) return wrap(`<h2>Not connected yet</h2>
     <p>This site doesn't know which Supabase project to use.</p>
     <p><b>On GitHub Pages:</b> add the repository variables <code>SUPABASE_URL</code> and <code>SUPABASE_PUBLISHABLE_KEY</code>, then run the deploy again.</p>
@@ -6177,8 +6533,126 @@ function loginHTML(){
       <div class="inline"><button class="btn primary" ${S.loginBusy?"disabled":""}>${S.loginBusy?"Signing in…":"Sign in"}</button></div>
     </form><p class="source">Forgot your password? Ask the site owner to reset it. Logins are created by the owner; there is no sign-up.</p>`);
 }
+/* ---------- Cloudflare sign-on ----------
+   When config.js says signOn "cloudflare", the site is served by the Cloudflare Worker (worker/index.js) behind
+   Cloudflare Access, and there is no username and password here: Cloudflare has already signed the person in. The
+   Worker's /auth/session turns that sign-in into a short Supabase session (the access token only, never a refresh
+   token). The Supabase client is given that token for every table read, storage call and function call; it is
+   renewed quietly a few minutes before it ends, and once when Supabase answers 401. Sign out goes through Access's
+   own logout. Without the marker, the username and password sign-in above is used as before. */
+const CF_TIMING = {before:300000, retry:30000, soon:60000};   // renew this long before the end; retry a failed renewal; renew first when the token ends sooner than this
+S.cf=null;        // {token, exp: when it ends on this computer's clock, timer, renewing}
+S.cfState=null;   // why no one is signed in: {kind:"loading"|"notset"|"unreachable"|"ended"|"leaving", msg}
+const CF_ENDED = "Cloudflare sign-ins last a set time, and the site owner may have changed who can use the site. Reload the page to sign in again through Cloudflare.";
+/* Asks the Worker for a session. {ok:true, data} or {kind, msg}. A redirect means Access wants a fresh sign-in. */
+async function cfAsk(){
+  let res;
+  try{ res=await fetch("/auth/session", {method:"POST", credentials:"same-origin", redirect:"manual", cache:"no-store", headers:{"Content-Type":"application/json"}, body:'{"action":"session"}'}); }
+  catch{ return {kind:"unreachable", msg:"The sign-in service can't be reached. Check your connection and try again."}; }
+  if(res.type==="opaqueredirect" || res.status===0) return {kind:"ended", msg:CF_ENDED};
+  let body=null; try{ body=await res.json(); }catch{}
+  if(res.ok && body && typeof body.accessToken==="string" && body.accessToken && body.profile && ROLES[body.profile.role]) return {ok:true, data:body};
+  const msg=body && typeof body.message==="string" && body.message ? body.message : "";
+  if(body && body.error==="not_configured") return {kind:"notset", msg:msg||"Cloudflare let you in, but the site isn't set up yet. Ask the site owner."};
+  if(res.status===401 || res.status===403) return {kind:"ended", msg:msg||CF_ENDED};
+  return {kind:"unreachable", msg:msg||"The sign-in service can't be reached. Try again in a minute."};
+}
+function cfTake(d){
+  const now=Date.now(), life=Number(d.expiresIn)>0 ? Number(d.expiresIn)*1000 : Math.max(0, Number(d.expiresAt)*1000-now);
+  if(S.cf) clearTimeout(S.cf.timer);
+  S.cf={token:d.accessToken, exp:now+life, timer:null, renewing:null};
+  const p=d.profile, name=String(p.displayName||p.username||p.email||"").trim()||"Signed in";
+  const next={username:String(p.email||p.username||""), name, role:p.role, uid:String(p.id||"")};
+  const changed=!S.session || S.session.role!==next.role || S.session.name!==next.name;
+  S.session=S.session ? Object.assign(S.session, next) : next;
+  cfSchedule();
+  return changed;
+}
+function cfSchedule(delay){
+  if(!S.cf) return;
+  clearTimeout(S.cf.timer);
+  const left=S.cf.exp-Date.now();
+  if(delay===undefined) delay=Math.max(left/2, left-CF_TIMING.before);   // a few minutes before the end (halfway for a short token)
+  S.cf.timer=setTimeout(()=>{ cfRenew(); }, Math.max(1000, delay));
+}
+/* Renews the token. One renewal at a time; everyone waiting gets the same answer. */
+function cfRenew(){
+  if(!S.cf) return Promise.resolve(false);
+  if(S.cf.renewing) return S.cf.renewing;
+  const mine=S.cf;
+  mine.renewing=(async()=>{
+    const r=await cfAsk();
+    if(S.cf!==mine) return false;   // signed out meanwhile
+    mine.renewing=null;
+    if(r.ok){ if(cfTake(r.data) && S.session) render(); return true; }
+    if(r.kind==="unreachable" && mine.exp-Date.now()>10000){ cfSchedule(CF_TIMING.retry); return false; }   // still good for now: try again shortly
+    cfEnded(r.kind, r.kind==="unreachable" ? "The sign-in service can't be reached, so your session couldn't be renewed. Check your connection and try again." : r.msg);
+    return false;
+  })();
+  return mine.renewing;
+}
+/* The token for the next request (supabase-js asks before each one), renewed first when it is about to end. */
+async function cfToken(){
+  if(S.cf && S.cf.exp-Date.now()<CF_TIMING.soon) await cfRenew();
+  return S.cf ? S.cf.token : null;
+}
+async function cfSessionNow(){ const t=await cfToken(); return t ? {access_token:t} : null; }
+/* fetch for everything sent to Supabase: on a 401, renew the token once and send the same request again. */
+async function cfFetch(input, init){
+  const res=await fetch(input, init);
+  const url=typeof input==="string" ? input : input instanceof URL ? input.href : (input && input.url) || "";
+  if(res.status!==401 || !S.cf || !CFG.supabaseUrl || !url.startsWith(CFG.supabaseUrl) || (init && init.body && typeof init.body.getReader==="function")) return res;
+  const h=new Headers((init && init.headers) || (input && input.headers) || {}), was=(h.get("Authorization")||"").replace(/^Bearer\s+/i,"");
+  if(S.cf.token===was && !(await cfRenew())) return res;
+  if(!S.cf || S.cf.token===was) return res;
+  h.set("Authorization", "Bearer "+S.cf.token);
+  return fetch(input, {...(init||{}), headers:h});
+}
+function cfEnded(kind, msg){
+  if(S.cf) clearTimeout(S.cf.timer);
+  S.cf=null;
+  if(S.session) resetState();
+  S.cfState={kind, msg}; S.authChecked=true; render();
+}
+async function cfSignOut(){
+  const t=S.cf && S.cf.token;
+  cfEnded("leaving", "");
+  // End this Supabase session too (best effort), then let Access sign the browser out.
+  if(t && CFG.supabaseUrl){ try{ await Promise.race([fetch(CFG.supabaseUrl+"/auth/v1/logout?scope=local", {method:"POST", headers:{"Authorization":"Bearer "+t, "apikey":CFG.supabaseAnonKey}}), new Promise(r=>setTimeout(r, 3000))]); }catch{} }
+  location.assign("/auth/signout");
+}
+function cfHeader(){
+  document.getElementById("pwBtn").hidden=true;
+  document.querySelectorAll('#whoMenu [data-act="change-pw"]').forEach(b=>{ b.hidden=true; });
+}
+function cfLoginHTML(){
+  const st=S.cfState||{kind:"loading"};
+  const box=(h, p, btn) => `<div class="kicker">Strategy and corporate development</div><h2>${esc(h)}</h2><p role="${st.kind==="loading"||st.kind==="leaving"?"status":"alert"}">${esc(p)}</p>${btn||""}`;
+  if(st.kind==="notset") return box("Not set up yet", st.msg)+`<p class="source">The README has the steps (Cloudflare sign-on).</p>`;
+  if(st.kind==="unreachable") return box("Can't reach the sign-in service", st.msg, `<div class="inline"><button class="btn primary" data-act="cf-retry">Try again</button></div>`);
+  if(st.kind==="ended") return box("Your sign-in has ended", st.msg, `<div class="inline"><button class="btn primary" data-act="cf-reload">Reload</button></div>`);
+  if(st.kind==="leaving") return box("Signing you out", "One moment…");
+  return box("SNL lookup", "Signing you in…");
+}
+async function cfBoot(){
+  S.cfState={kind:"loading"}; render();
+  if(!CFG.supabaseUrl || !CFG.supabaseAnonKey){
+    S.cfState={kind:"notset", msg: CFG.configProblem==="secret_key"
+      ? "Cloudflare let you in, but the site isn't set up yet: the Worker's SUPABASE_PUBLISHABLE_KEY setting holds a secret key, which is never sent to browsers. Ask the site owner to set the publishable key (sb_publishable_...) instead."
+      : "Cloudflare let you in, but the site isn't set up yet: the Worker doesn't know which Supabase project to use. Ask the site owner to set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY on the Worker."};
+    render(); return;
+  }
+  if(!window.supabase){ S.cfState={kind:"unreachable", msg:"Part of the page couldn't load. Check your connection and try again."}; render(); return; }
+  const r=await cfAsk();
+  if(!r.ok){ S.cfState={kind:r.kind, msg:r.msg}; render(); return; }
+  if(!S.sb) S.sb=window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, {accessToken:cfToken, global:{fetch:cfFetch}});
+  cfTake(r.data); S.cfState=null; S.authChecked=true; S.loginErr="";
+  route(); loadStatus(); loadPast(false);
+}
+
 async function boot(){
   S.f=freshFilings(); S.st=freshStat();
+  if(CF_SIGNON){ cfBoot(); return; }
   if(!CFG.supabaseUrl || !CFG.supabaseAnonKey || !window.supabase){ S.configMissing=true; render(); return; }
   S.sb=window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
   render();

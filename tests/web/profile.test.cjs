@@ -64,6 +64,7 @@ const TPL={text:"PK made-up template", updated_at:"2026-11-05T09:30:00Z"};
         return J(400,{error:"bad",message:"Unknown action."}); }
       if(u===JSZIP_URL){ t.loads.push("jszip"); return t.libFail.jszip ? r.fulfill({status:404,body:""}) : r.fulfill({contentType:"application/javascript",body:FAKE_JSZIP}); }
       if(u===BASE+"deck.js"){ t.loads.push("deck"); return t.libFail.deck ? r.fulfill({status:404,body:""}) : r.fulfill({contentType:"application/javascript",body:FAKE_DECK}); }
+      if(u===BASE+"template-builtin.pptx"){ t.builtinLoads=(t.builtinLoads||0)+1; return t.libFail.builtin ? r.fulfill({status:404,body:""}) : r.fulfill({contentType:PPTX,body:fs.readFileSync(WEB+"/template-builtin.pptx")}); }
       if(u===BASE+"profile-slides.js"){ t.loads.push("slides"); return r.fulfill({contentType:"application/javascript",body:FAKE_SLIDES}); }
       if(/supabase\.js/.test(u)) return r.fulfill({contentType:"application/javascript",body:MOCK});
       if(/config\.js/.test(u)) return r.fulfill({contentType:"application/javascript",body:CONFIG});
@@ -90,9 +91,9 @@ const TPL={text:"PK made-up template", updated_at:"2026-11-05T09:30:00Z"};
   ok("a view of its own in the nav, and it is the one open", same(await t.list("nav.tabs a"),["Filings","Snapshot","Compare","Market","Statutory","Profile"]) && (await p.getAttribute('nav.tabs a[data-view="profile"]',"aria-current"))==="page" && (await t.txt(".action-title"))==="Company profile as a PowerPoint file");
   ok("the status strip and the Ask Claude button stay over it", await p.isVisible("#s_usage") && await p.isVisible("#askFab"));
   ok("the profile function is asked for its status once", same(t.of("status").map(c=>c.body),[{action:"status"}]));
-  ok("the template is looked for once, by listing, not downloaded yet", same(await p.evaluate(()=>__mock.storage.calls),[{op:"list",bucket:"snl-template",path:"",opts:{limit:100,search:"template.pptx"}}]));
-  ok("says the template is uploaded, and when", (await t.txt("#pfTplState"))==="The template is uploaded. Last changed 5 Nov at 09:30, under 0.1 MB.", await t.txt("#pfTplState"));
-  ok("Corp Dev can replace it", (await t.txt('[data-act="pf-tpl-pick"]'))==="Replace template" && !!(await p.$("#pf_tplFile")));
+  ok("the template is looked for once, by listing, not downloaded yet", same(await p.evaluate(()=>__mock.storage.calls),[{op:"getBucket",bucket:"snl-template",path:null,opts:null},{op:"list",bucket:"snl-template",path:"",opts:{limit:100,search:"template.pptx"}},{op:"list",bucket:"snl-template",path:"u1",opts:{limit:100,search:"template.pptx"}}]));
+  ok("says the standard template is used, and when it was uploaded", (await t.txt("#pfTplState"))==="The standard template, uploaded by Corp Dev on 5 Nov.", await t.txt("#pfTplState"));
+  ok("Corp Dev can replace it", (await t.txt('[data-act="pf-tpl-pick"]'))==="Replace the standard template" && !!(await p.$("#pf_tplFile")));
   ok("the sample is offered, and says its figures are made up", (await t.txt('[data-act="pf-sample"]'))==="Build a sample profile" && (await t.txt("#pfSampleNote")).includes("made-up figures"));
   ok("nothing about the profile before figures are asked for", !(await p.$("#pfContents")) && !(await p.$("#pf_buildBtn")) && t.loads.length===0);
   await p.click("#pf_get"); await p.waitForTimeout(150);
@@ -126,14 +127,14 @@ const TPL={text:"PK made-up template", updated_at:"2026-11-05T09:30:00Z"};
   ok("the file downloads with the name the slides script gives it", dl.name==="Calloway-Insurance-Co-profile-2026-11-13.pptx" && dl.text==="PPTX for Calloway-Insurance-Co-profile-2026-11-13.pptx", dl);
   ok("as a PowerPoint file", same(await p.evaluate(()=>__blobs.map(x=>x.type)),[PPTX]));
   let deck=await t.deck();
-  ok("the template is downloaded once and handed to the builder as bytes", same(await t.st(),["list","download"]) && deck.build.length===1 && deck.build[0].tpl==="PK made-up template" && deck.build[0].ab, deck.build);
+  ok("the template is downloaded once and handed to the builder as bytes", same(await t.st(),["getBucket","list","list","download"]) && deck.build.length===1 && deck.build[0].tpl==="PK made-up template" && deck.build[0].ab, deck.build);
   ok("the builder gets the spec from SNLProfile.spec(facts, Claude's text)", same(await t.specs(),[{code:"90001",sample:false,by:"claude",title:"A growing Florida homeowners writer"}]) && same(deck.build[0].spec,{fileName:"Calloway-Insurance-Co-profile-2026-11-13.pptx",slides:[{layout:"Title White"}]}));
-  ok("built: says so, and that the file went nowhere", (await t.txt("#pfBuilt"))==="Your profile is ready. Calloway-Insurance-Co-profile-2026-11-13.pptx was saved to your downloads. It was made in this browser and isn't stored or sent anywhere.Download again", await t.txt("#pfBuilt"));
+  ok("built: says so, and that the file went nowhere", (await t.txt("#pfBuilt"))==="Your profile is ready. Calloway-Insurance-Co-profile-2026-11-13.pptx was saved to your downloads. It was made in this browser and isn't stored or sent anywhere. Built on the standard template.Download again", await t.txt("#pfBuilt"));
   ok("the draft's cost is shown and today's count is asked again", (await t.txt("#pfDrafted"))==="Claude has drafted the text for these figures. It cost about $0.12 (18,400 tokens read, 2,100 written)." && t.calls.filter(c=>c.fn==="snl-chat"&&c.body.action==="status").length===chatBefore+1 && (await t.txt("#pfDraftCost")).includes("4 of 20"), await t.txt("#pfDrafted"));
   dl=await t.download(()=>p.click('[data-act="pf-again"]'));
   ok("Download again: the same file, not built again", dl.name==="Calloway-Insurance-Co-profile-2026-11-13.pptx" && (await t.deck()).build.length===1);
   dl=await t.download(()=>p.click("#pf_buildBtn")); await p.waitForTimeout(150);
-  ok("Build again: no second draft, no second template download", (await t.deck()).build.length===2 && t.of("draft").length===1 && same(await t.st(),["list","download"]) && (await t.specs())[1].by==="claude");
+  ok("Build again: no second draft, no second template download", (await t.deck()).build.length===2 && t.of("draft").length===1 && same(await t.st(),["getBucket","list","list","download"]) && (await t.specs())[1].by==="claude");
   await p.click("#pf_draft"); await p.waitForTimeout(100);
   dl=await t.download(()=>p.click("#pf_buildBtn")); await p.waitForTimeout(150);
   ok("draft switched off: the plain text is used", (await t.specs())[2].by==="plain" && t.of("draft").length===1);
@@ -194,23 +195,23 @@ const TPL={text:"PK made-up template", updated_at:"2026-11-05T09:30:00Z"};
 
   // ----- a reader, no template yet -----
   t=await open({role:"reader"}); p=t.p;
-  ok("reader, no template: ask Corp Dev", (await t.txt("#pfTplState"))==="No template yet. Ask Corp Dev to upload the template. Until then you can get the figures, but not build the file." && !(await p.$("#pf_tplFile")) && !(await p.$('[data-act="pf-tpl-pick"]')));
+  ok("reader, no template: the built-in plain template, and no standard-template controls", (await t.txt("#pfTplState"))==="The built-in plain template: nobody has uploaded one yet." && !(await p.$("#pf_tplFile")) && !(await p.$('[data-act="pf-tpl-pick"]')));
   await t.figures("90001");
   ok("reader, no template: the figures still come", (await t.txt("#pfName"))==="Calloway Insurance Co" && (await p.$$("#pfPlan li")).length===5);
-  ok("reader, no template: building is off, and says why", await p.isDisabled("#pf_buildBtn") && (await t.txt("#pfNoTplNote"))==="The file can be built once Corp Dev uploads the template.");
+  ok("reader, no template: building is on, on the built-in template", !(await p.isDisabled("#pf_buildBtn")) && !(await p.$("#pfNoTplNote")));
   ok("reader: the missing figures point to Corp Dev", (await t.txt("#pfMissing")).endsWith("Ask Corp Dev to map them in the statutory field set-up.") && !(await p.$("#pfMissing a")));
-  await p.evaluate(()=>pfBuild(false)); await p.waitForTimeout(150);
-  ok("reader, no template: nothing is downloaded or built", same(await t.st(),["list"]) && !(await t.deck()).build.length);
+  await p.click("#pf_draft"); dl=await t.download(()=>p.click("#pf_buildBtn")); await p.waitForTimeout(150);
+  ok("reader, no template: built on the built-in template, nothing taken from storage", same(await t.st(),["getBucket","list","list"]) && (await t.deck()).build.length===1 && (await t.deck()).build[0].tpl.startsWith("PK") && (await t.txt("#pfBuilt")).endsWith("Built on the built-in plain template.Download again"), await t.txt("#pfBuilt"));
   await p.screenshot({path:OUTDIR+"/profile-reader-notemplate-1440.png",fullPage:true});
   await t.ctx.close();
 
   // ----- Corp Dev uploads the template -----
   t=await open({}); p=t.p;
-  ok("Corp Dev, no template: invited to upload one", (await t.txt("#pfTplState"))==="No template yet. Upload your team's PowerPoint template (.pptx, up to 50 MB). Profiles can be built once it is here." && (await t.txt('[data-act="pf-tpl-pick"]'))==="Upload template");
+  ok("Corp Dev, no template: the built-in one is used, and the standard one can be uploaded", (await t.txt("#pfTplState"))==="The built-in plain template: nobody has uploaded one yet." && (await t.txt('[data-act="pf-tpl-pick"]'))==="Upload the standard template");
   await p.setInputFiles("#pf_tplFile",{name:"template.potx", mimeType:"application/octet-stream", buffer:Buffer.from("PK potx")}); await p.waitForTimeout(250);
   ok("a file that isn't .pptx is refused before anything loads", (await t.txt("#pfTplErr"))==="Choose a PowerPoint file whose name ends in .pptx." && t.loads.length===0 && (await p.evaluate(()=>__mock.storage.uploads.length))===0);
   await p.evaluate(()=>uploadTemplate({name:"big.pptx", size:TPL_MAX+1, arrayBuffer:async()=>new ArrayBuffer(4)})); await p.waitForTimeout(150);
-  ok("a file over 50 MB is refused plainly", (await t.txt("#pfTplErr"))==="That file is 50.0 MB. The template can be at most 50 MB." && (await p.evaluate(()=>__mock.storage.uploads.length))===0, await t.txt("#pfTplErr"));
+  ok("a file over 50 MB is refused plainly", (await t.txt("#pfTplErr"))==="That file is 50.0 MB. The standard template can be at most 50 MB." && (await p.evaluate(()=>__mock.storage.uploads.length))===0, await t.txt("#pfTplErr"));
   await p.setInputFiles("#pf_tplFile",{name:"notes.pptx", mimeType:PPTX, buffer:Buffer.from("NOT A ZIP")}); await p.waitForTimeout(400);
   ok("checked in the browser first: refused with the checker's own message", (await t.txt("#pfTplErr"))==="That file isn't a PowerPoint file. Choose a .pptx file." && same((await t.deck()).inspect,[{ab:true, head:"NOT A ZIP"}]) && (await p.evaluate(()=>__mock.storage.uploads.length))===0);
   ok("the checker loaded the zip library and deck.js in order", same(t.loads.slice(0,2),["jszip","deck"]));
@@ -220,13 +221,13 @@ const TPL={text:"PK made-up template", updated_at:"2026-11-05T09:30:00Z"};
   await p.waitForTimeout(450); await p.evaluate(()=>{ __mock.storage.delay=0; });
   const ups=await p.evaluate(()=>__mock.storage.uploads);
   ok("uploaded to the private bucket, replacing any earlier one", same(ups.map(u=>({...u, size:undefined})),[{bucket:"snl-template",path:"template.pptx",type:PPTX,opts:{upsert:true,contentType:PPTX,cacheControl:"60"},text:"PK new team template"}]), ups);
-  ok("says it worked, and what the checker found", (await t.txt("#pfTplDone"))==="Template uploaded: 14 slides, 13.33 x 7.5 in. Every profile from now on is built on it." && (await t.txt("#pfTplState")).startsWith("The template is uploaded. Last changed 13 Nov at 12:00") && (await t.txt('[data-act="pf-tpl-pick"]'))==="Replace template" && !(await p.$("#pfTplErr")), await t.txt("#pfTplDone"));
+  ok("says it worked, and what the checker found", (await t.txt("#pfTplDone"))==="Standard template uploaded: 14 slides, 13.33 x 7.5 in. Everyone without a template of their own builds on it from now on." && (await t.txt("#pfTplState"))==="The standard template, uploaded by Corp Dev on 13 Nov." && (await t.txt('[data-act="pf-tpl-pick"]'))==="Replace the standard template" && !(await p.$("#pfTplErr")), await t.txt("#pfTplDone"));
   await t.figures("90001"); await p.click("#pf_draft"); await p.waitForTimeout(100);
   ok("draft off: the button just builds", (await t.txt("#pf_buildBtn"))==="Build the PowerPoint file");
   dl=await t.download(()=>p.click("#pf_buildBtn")); await p.waitForTimeout(150);
   ok("the uploaded template is used from memory, not downloaded again", (await t.deck()).build[0].tpl==="PK new team template" && !(await t.st()).includes("download") && t.of("draft").length===0);
   await p.setInputFiles("#pf_tplFile",{name:"v2.pptx", mimeType:PPTX, buffer:Buffer.from("PK second")}); await p.waitForTimeout(400);
-  ok("replacing says so", (await t.txt("#pfTplDone")).startsWith("Template replaced: 14 slides"));
+  ok("replacing says so", (await t.txt("#pfTplDone")).startsWith("Standard template replaced: 14 slides"));
   await p.evaluate(()=>{ __mock.storage.refuse=true; });
   await p.setInputFiles("#pf_tplFile",{name:"v3.pptx", mimeType:PPTX, buffer:Buffer.from("PK third")}); await p.waitForTimeout(400);
   ok("upload refused by the storage rules: said plainly", (await t.txt("#pfTplErr"))==="Only Corp Dev logins can upload the template. If this is a Corp Dev login, check that migration 0004_profile_template.sql has been run (see the README).");
@@ -245,18 +246,18 @@ const TPL={text:"PK made-up template", updated_at:"2026-11-05T09:30:00Z"};
 
   // ----- storage not set up, or out of reach -----
   t=await open({noBucket:true}); p=t.p;
-  ok("no bucket: Corp Dev is told to run the migration", (await t.txt("#pfTplState"))==="The place the template is kept isn't set up yet. Run migration 0004_profile_template.sql in Supabase (see the README), then try again.Check again" && (await p.getAttribute("#pfTplState","role"))==="status" && !(await p.$("#pf_tplFile")));
-  await p.evaluate(()=>{ __mock.storage.noBucket=false; }); await p.click('#pfTplState [data-act="pf-tpl-retry"]'); await p.waitForTimeout(250);
-  ok("Check again after the migration: the upload is offered", (await t.txt("#pfTplState")).startsWith("No template yet.") && !!(await p.$("#pf_tplFile")));
+  ok("no bucket: Corp Dev is told to run the migration, and the built-in template is used meanwhile", (await t.txt("#pfTplSetup"))==="The place the template is kept isn't set up yet. Run migration 0004_profile_template.sql in Supabase (see the README), then try again.Check again" && (await p.getAttribute("#pfTplSetup","role"))==="status" && !(await p.$("#pf_tplFile")) && (await t.txt("#pfTplState"))==="The built-in plain template: nobody has uploaded one yet.");
+  await p.evaluate(()=>{ __mock.storage.noBucket=false; }); await p.click('#pfTplSetup [data-act="pf-tpl-retry"]'); await p.waitForTimeout(250);
+  ok("Check again after the migration: the upload is offered", (await t.txt("#pfTplState")).startsWith("The built-in plain template") && !(await p.$("#pfTplSetup")) && !!(await p.$("#pf_tplFile")));
   await t.ctx.close();
   t=await open({role:"reader", noBucket:true}); p=t.p;
-  ok("no bucket, reader: ask Corp Dev", (await t.txt("#pfTplState span"))==="The place the template is kept isn't set up yet. Ask Corp Dev to finish the set-up.");
+  ok("no bucket, reader: ask Corp Dev", (await t.txt("#pfTplSetup span"))==="The place the template is kept isn't set up yet. Ask Corp Dev to finish the set-up.");
   await t.ctx.close();
   t=await open({template:TPL}, {hash:"#filings"}); p=t.p;
   await p.evaluate(()=>{ __mock.storage.netFail=true; }); await p.click('nav.tabs a[data-view="profile"]'); await p.waitForTimeout(300);
   ok("storage out of reach: a problem, with Try again", (await t.txt("#pfTplState span"))==="Couldn't reach storage to get the template. Check your connection and try again." && (await p.getAttribute("#pfTplState","role"))==="alert");
   await p.evaluate(()=>{ __mock.storage.netFail=false; }); await p.click('#pfTplState [data-act="pf-tpl-retry"]'); await p.waitForTimeout(250);
-  ok("…and Try again finds it", (await t.txt("#pfTplState")).startsWith("The template is uploaded."));
+  ok("…and Try again finds it", (await t.txt("#pfTplState")).startsWith("The standard template, uploaded"));
   await t.figures("90001"); await p.click("#pf_draft");
   await p.evaluate(()=>{ __mock.storage.netFail=true; }); await p.click("#pf_buildBtn"); await p.waitForTimeout(300);
   ok("template download fails at build: said plainly, with Try again", (await t.txt("#pfBuildErr"))==="Couldn't reach storage to get the template. Check your connection and try again.Try again" && !(await t.deck()).build.length);
@@ -264,11 +265,11 @@ const TPL={text:"PK made-up template", updated_at:"2026-11-05T09:30:00Z"};
   dl=await t.download(()=>p.click('#pfBuildErr [data-act="pf-build"]'));
   ok("…and Try again builds it", dl.name.endsWith(".pptx") && !(await p.$("#pfBuildErr")));
   await t.ctx.close();
-  // the template was deleted since the page looked: building says there is none
+  // the template was deleted since the page looked: building says so, and Try again uses the built-in one
   t=await open({template:TPL}); p=t.p;
   await t.figures("90001"); await p.click("#pf_draft");
   await p.evaluate(()=>{ delete __mock.storage.buckets["snl-template"]["template.pptx"]; }); await p.click("#pf_buildBtn"); await p.waitForTimeout(300);
-  ok("template gone by the time of building: says so, and the block follows", (await t.txt("#pfBuildErr"))==="There is no template yet. Upload your PowerPoint template first." && (await t.txt("#pfTplState")).startsWith("No template yet.") && await p.isDisabled("#pf_buildBtn"));
+  ok("template gone by the time of building: says so, and the block follows", (await t.txt("#pfBuildErr"))==="The standard template has been removed since this page checked. Choose Try again to build on the built-in plain template.Try again" && (await t.txt("#pfTplState")).startsWith("The built-in plain template") && !(await p.isDisabled("#pf_buildBtn")), await t.txt("#pfBuildErr"));
   await t.ctx.close();
 
   // ----- the slide builder: fails to load, rejects the build -----
@@ -305,10 +306,10 @@ const TPL={text:"PK made-up template", updated_at:"2026-11-05T09:30:00Z"};
   ok("phone: no sideways scroll with the sample", await t.noScroll());
   await p.screenshot({path:OUTDIR+"/profile-sample-390.png",fullPage:true});
   await t.ctx.close();
-  // the sample with no template: shown, not built
+  // the sample with no template: built on the built-in plain template
   t=await open({}, {pstatus:()=>PSTATUS({statutory:{configured:false, mapped:false, fields:[]}})}); p=t.p;
-  await p.click('[data-act="pf-sample"]'); await p.waitForTimeout(400);
-  ok("the sample with no template: shows what it holds, can't build yet", (await t.txt("#pfName"))==="Nonesuch Sample Insurance Co" && await p.isDisabled("#pf_buildBtn") && (await t.txt("#pfNoTplNote"))==="Upload your PowerPoint template below to build the file." && (await p.evaluate(()=>__blobs.length))===0);
+  dl=await t.download(()=>p.click('[data-act="pf-sample"]')); await p.waitForTimeout(200);
+  ok("the sample with no template: built on the built-in plain template", (await t.txt("#pfName"))==="Nonesuch Sample Insurance Co" && dl.name.endsWith(".pptx") && (await t.txt("#pfBuilt")).endsWith("Built on the built-in plain template.Download again") && !(await p.$("#pfNoTplNote")), await t.txt("#pfBuilt"));
   await t.ctx.close();
 
   // ----- set up but not mapped -----
@@ -324,7 +325,7 @@ const TPL={text:"PK made-up template", updated_at:"2026-11-05T09:30:00Z"};
   // ----- the profile function isn't deployed -----
   t=await open({template:TPL}, {all:()=>({status:404, empty:true})}); p=t.p;
   ok("not deployed, Corp Dev: the deploy command", (await t.txt("#pfOff"))==="The profile function isn't deployed yet. Run: supabase functions deploy snl-profile --no-verify-jwt (see the README)." && (await p.getAttribute("#pfOff","role"))==="status");
-  ok("not deployed: no sample to build, the template block still works", await p.isDisabled('[data-act="pf-sample"]') && (await t.txt("#pfTplState")).startsWith("The template is uploaded."));
+  ok("not deployed: no sample to build, the template block still works", await p.isDisabled('[data-act="pf-sample"]') && (await t.txt("#pfTplState")).startsWith("The standard template, uploaded"));
   await t.ctx.close();
   t=await open({role:"reader"}, {all:()=>({status:404, empty:true})}); p=t.p;
   ok("not deployed, reader: ask Corp Dev", (await t.txt("#pfOff"))==="This part of the site isn't set up yet. Ask Corp Dev.");

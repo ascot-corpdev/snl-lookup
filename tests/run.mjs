@@ -22,6 +22,8 @@ const suites = [
   ...ls("functions").filter((f) => f.endsWith(".ts")).filter(pick).map((f) => ({ name: "functions/" + f, cmd: deno, args: ["run", "-A", "--node-modules-dir=none", join(here, "functions", f)], deno: true })),
   ...ls("web").filter((f) => f.endsWith(".test.cjs")).filter(pick).map((f) => ({ name: "web/" + f, cmd: process.execPath, args: [join(here, "web", f)] })),
   ...ls("scripts").filter((f) => f.endsWith(".test.mjs")).filter(pick).map((f) => ({ name: "scripts/" + f, cmd: process.execPath, args: [join(here, "scripts", f)] })),
+  // The Cloudflare Worker (worker/index.js), run under Node with stand-ins for its static files and outside calls.
+  ...ls("worker").filter((f) => f.endsWith(".test.mjs")).filter(pick).map((f) => ({ name: "worker/" + f, cmd: process.execPath, args: [join(here, "worker", f)] })),
 ];
 
 let failed = 0, passed = 0;

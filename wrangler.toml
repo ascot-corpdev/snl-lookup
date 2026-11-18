@@ -1,0 +1,23 @@
+# The Cloudflare Worker that serves SNL lookup behind Cloudflare Access (README, Cloudflare sign-on).
+# Deploy from the repository root with: npx wrangler deploy
+# The site is then at https://snl-lookup.<your workers.dev subdomain>.workers.dev
+#
+# Its settings (TEAM_DOMAIN, POLICY_AUD, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, optional ORG_NAME) are not in this
+# file, because the repository is public: set each with `npx wrangler secret put NAME`. A deploy never removes them.
+name = "snl-lookup"
+main = "worker/index.js"
+compatibility_date = "2025-11-01"
+
+# The workers.dev address is the site. Version URLs (previously called preview URLs) are switched off, so no other
+# address serves this Worker; the Worker refuses any request without a valid Access sign-in in any case.
+workers_dev = true
+preview_urls = false
+
+# Variables set in the Cloudflare dashboard survive a deploy (otherwise wrangler deploy replaces them).
+keep_vars = true
+
+[assets]
+directory = "./web"
+binding = "ASSETS"
+# The Worker runs first for every request, so nothing is served before the sign-in is checked.
+run_worker_first = true
