@@ -77,7 +77,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
 
   // ----- the button, and the panel it opens -----
   let t=await open({}, {}, {panel:false}); let p=t.p;
-  ok("Ask is a button on the page, not a tab", same(await t.all("nav.tabs a"),["Filings","Snapshot","Statutory","Profile"]) && same(await t.fab(),{text:"Ask Claude",cls:"",hidden:false,expanded:"false"}) && !(await p.$("#askPanel")), await t.fab());
+  ok("Ask is a button on the page, not a tab", same(await t.all("nav.tabs a"),["Filings","Snapshot","Compare","Statutory","Profile"]) && same(await t.fab(),{text:"Ask Claude",cls:"",hidden:false,expanded:"false"}) && !(await p.$("#askPanel")), await t.fab());
   ok("the button is fixed at the bottom right", await p.evaluate(()=>{ const r=document.getElementById("askFab").getBoundingClientRect(); return getComputedStyle(document.getElementById("askFab")).position==="fixed" && Math.round(innerWidth-r.right)===16 && Math.round(innerHeight-r.bottom)===16; }));
   await p.evaluate(()=>window.scrollTo(0, document.documentElement.scrollHeight)); await p.waitForTimeout(80);
   ok("scrolled to the foot, the button sits below the last thing on the page", await p.evaluate(()=>{ const f=[...document.querySelectorAll("footer.foot span")].pop().getBoundingClientRect(), a=document.getElementById("askFab").getBoundingClientRect(); return f.bottom<=a.top; }));
