@@ -86,7 +86,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
 
   // ----- signed in: nav, strip, remembered view -----
   t=await open(); p=t.p;
-  ok("four views in the nav, and Ask Claude as a button beside them", (await p.$$eval("nav.tabs a",a=>a.map(x=>x.textContent.trim()))).join("|")==="Filings|Snapshot|Statutory|Profile" && (await t.txt("#askFab"))==="Ask Claude" && await p.isVisible("#askFab"));
+  ok("five views in the nav, and Ask Claude as a button beside them", (await p.$$eval("nav.tabs a",a=>a.map(x=>x.textContent.trim()))).join("|")==="Filings|Snapshot|Compare|Statutory|Profile" && (await t.txt("#askFab"))==="Ask Claude" && await p.isVisible("#askFab"));
   const st0=t.calls.find(c=>c.body.action==="status");
   ok("status asked once after sign-in, with the login's token and the publishable key", t.calls.filter(c=>c.fn==="snl-filings"&&c.body.action==="status").length===1 && st0.auth==="Bearer t" && st0.apikey==="sb_publishable_k", t.calls.map(c=>c.fn+":"+c.body.action));
   const strip=async()=>(await p.$$eval("#stripIn .s-i",e=>e.map(x=>x.textContent.replace(/\s+/g," ").trim())));

@@ -1,0 +1,164 @@
+{
+ "_about": "Made-up company-list rows for the Compare page tests, in the shape the snl-filings function answers {action: \"resolve\"} with. Keys are what the test types; tarrowGroup answers the look-up of the group's own name, with the whole group as the function lists it.",
+ "calloway": {
+  "query": "Calloway",
+  "matches": [
+   {
+    "companyId": null,
+    "companyName": "Calloway Insurance Co",
+    "naicCompanyCode": null,
+    "institutionId": "5000001",
+    "spStatEntityId": null,
+    "naicGroupCode": null,
+    "naicGroupName": "Calloway Group (SNL P&C Group)"
+   },
+   {
+    "companyId": null,
+    "companyName": "Calloway Home Co",
+    "naicCompanyCode": null,
+    "institutionId": "5000002",
+    "spStatEntityId": null,
+    "naicGroupCode": null,
+    "naicGroupName": "Calloway Group (SNL P&C Group)"
+   },
+   {
+    "companyId": null,
+    "companyName": "Calloway Re Co",
+    "naicCompanyCode": null,
+    "institutionId": null,
+    "spStatEntityId": null,
+    "naicGroupCode": null,
+    "naicGroupName": "Calloway Group (SNL P&C Group)"
+   }
+  ],
+  "note": null,
+  "groups": [],
+  "groupNote": null
+ },
+ "tarrow": {
+  "query": "Tarrow",
+  "matches": [
+   {
+    "companyId": null,
+    "companyName": "Tarrow Mutual Insurance Co",
+    "naicCompanyCode": null,
+    "institutionId": "5100001",
+    "spStatEntityId": null,
+    "naicGroupCode": null,
+    "naicGroupName": "Tarrow Group (SNL P&C Group)"
+   },
+   {
+    "companyId": null,
+    "companyName": "Tarrow Specialty Co",
+    "naicCompanyCode": null,
+    "institutionId": "5100002",
+    "spStatEntityId": null,
+    "naicGroupCode": null,
+    "naicGroupName": "Tarrow Group (SNL P&C Group)"
+   },
+   {
+    "companyId": null,
+    "companyName": "Tarrow Re Co",
+    "naicCompanyCode": null,
+    "institutionId": null,
+    "spStatEntityId": null,
+    "naicGroupCode": null,
+    "naicGroupName": "Tarrow Group (SNL P&C Group)"
+   }
+  ],
+  "note": null,
+  "groups": [],
+  "groupNote": null
+ },
+ "tarrowGroup": {
+  "query": "Tarrow Group",
+  "matches": [
+   {
+    "companyId": null,
+    "companyName": "Tarrow Mutual Insurance Co",
+    "naicCompanyCode": null,
+    "institutionId": "5100001",
+    "spStatEntityId": null,
+    "naicGroupCode": null,
+    "naicGroupName": "Tarrow Group (SNL P&C Group)"
+   },
+   {
+    "companyId": null,
+    "companyName": "Tarrow Specialty Co",
+    "naicCompanyCode": null,
+    "institutionId": "5100002",
+    "spStatEntityId": null,
+    "naicGroupCode": null,
+    "naicGroupName": "Tarrow Group (SNL P&C Group)"
+   },
+   {
+    "companyId": null,
+    "companyName": "Tarrow Re Co",
+    "naicCompanyCode": null,
+    "institutionId": null,
+    "spStatEntityId": null,
+    "naicGroupCode": null,
+    "naicGroupName": "Tarrow Group (SNL P&C Group)"
+   }
+  ],
+  "note": null,
+  "groups": [
+   {
+    "name": "Tarrow Group (SNL P&C Group)",
+    "code": null,
+    "companies": 3,
+    "searchable": 2,
+    "tooBig": false,
+    "requestsPerYear": 1,
+    "members": [
+     {
+      "companyName": "Tarrow Mutual Insurance Co",
+      "companyId": null,
+      "institutionId": "5100001"
+     },
+     {
+      "companyName": "Tarrow Specialty Co",
+      "companyId": null,
+      "institutionId": "5100002"
+     }
+    ]
+   }
+  ],
+  "groupNote": null
+ },
+ "nonesuch": {
+  "query": "Nonesuch",
+  "matches": [
+   {
+    "companyId": null,
+    "companyName": "Nonesuch Coastal Co",
+    "naicCompanyCode": null,
+    "institutionId": "5200001",
+    "spStatEntityId": null,
+    "naicGroupCode": null,
+    "naicGroupName": null
+   },
+   {
+    "companyId": null,
+    "companyName": "Nonesuch Quiet Co",
+    "naicCompanyCode": null,
+    "institutionId": "5300001",
+    "spStatEntityId": null,
+    "naicGroupCode": null,
+    "naicGroupName": null
+   },
+   {
+    "companyId": null,
+    "companyName": "Nonesuch Paper Co",
+    "naicCompanyCode": null,
+    "institutionId": null,
+    "spStatEntityId": null,
+    "naicGroupCode": null,
+    "naicGroupName": null
+   }
+  ],
+  "note": null,
+  "groups": [],
+  "groupNote": null
+ }
+}
