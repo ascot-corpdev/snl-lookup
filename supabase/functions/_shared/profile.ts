@@ -21,7 +21,8 @@ import Anthropic from "npm:@anthropic-ai/sdk@1.8.0";
 import type { Db, Entity } from "./db.ts";
 import { canSearchFilings } from "./db.ts";
 import { type Filing, filingNumberText, getReference, MAX_WINDOW_DAYS, savedOrFreshSearch, type SearchAnswer, type SearchParams } from "./filings.ts";
-import { groupChoices, MAX_IDS, planSearch, resolveEntity } from "./filings.ts";
+import { groupChoices, MAX_IDS, parseDocRef, planSearch, resolveEntity } from "./filings.ts";
+import { flagFiling, LARGE_RATE_CHANGE_PCT } from "./watch.ts";
 import type { Env } from "./http.ts";
 import type { Snowflake } from "./snowflake.ts";
 import { type Spgmi, SpgmiError } from "./spgmi.ts";
@@ -968,12 +969,50 @@ export function fpKinds(type: unknown): { rate: boolean; rule: boolean; form: bo
 }
 /** UNCONFIRMED, as on the Snapshot view (snapApproved): only a status that says "approved" counts as approved. */
 export const fpApproved = (s: unknown) => /approv/i.test(String(s ?? "")) && !/disapprov|not approv/i.test(String(s ?? ""));
+/** UNCONFIRMED, the same way: a status's outcome from its words. S&P's statuses seen so far read like "Closed -
+    Approved", "Pending" and "Withdrawn"; anything else is "other". */
+export function fpOutcome(s: unknown): FpOutcome["outcome"] {
+  const t = String(s ?? "");
+  if (/disapprov|not approv|denied|reject/i.test(t)) return "disapproved";
+  if (/withdr[ae]w/i.test(t)) return "withdrawn";
+  if (fpApproved(t)) return "approved";
+  if (/pending|open|review|submitted|received|filed|objection|in progress/i.test(t)) return "pending";
+  return "other";
+}
+const pagesOf = (v: unknown): number | null => {
+  const n = typeof v === "string" && /^\d{1,6}$/.test(v.trim()) ? Number(v) : v;
+  return typeof n === "number" && Number.isInteger(n) && n > 0 && n < 100_000 ? n : null;
+};
+/** A filing at this overall rate impact or more, up or down, counts as a large rate change (as on the watchlist). */
+export const FP_LARGE_PCT = LARGE_RATE_CHANGE_PCT;
+/** The thresholds of the red, amber and green signals: the app's own judgement, said on the slide. */
+export const FP_SIGNAL = {
+  largeRed: 20, largeRedCount: 3,         // red: a change of 20% or more, or 3 or more of 10% or more
+  disapprovedRed: 2,                      // red: 2 or more disapproved rate filings; amber: 1
+  withdrawnRed: 3,                        // red: 3 or more withdrawals or possible exits; amber: 1 or 2
+  daysAmber: 60, daysRed: 120,            // median days from submitted to published
+  topAmber: 50, topRed: 75,               // the top state's share of filings (%)
+  cumAmber: 15, cumRed: 30,               // compounded approved change of one state and type of insurance (%)
+};
+export const FP_READABLE = 5;             // the rate filings a profile offers to summarise
 
 /** One filing's overall rate impact, as S&P gives it (rateImpactOf): not weighted by premium; for a filing that isn't
     approved it may be the change asked for. */
 export type FpRate = { date: string | null; state: string | null; toi: string | null; rate: number; status: string | null; approved: boolean };
 export type FpLatestRow = { company: string | null; state: string | null; toi: string | null; type: string | null; status: string | null; published: string | null; filingNo: string | null };
 export type FpDays = { state: string | null; n: number; median: number; lo: number; hi: number };
+/** One type of insurance: its filings split into rate filings (rate types, or any filing with a rate impact), form and
+    rule filings that aren't rate filings, and the rest, so the three add up to n. */
+export type FpLine = { toi: string | null; n: number; rate: number; formRule: number; other: number; states: number; approved: number; withImpact: number; lo: number | null; hi: number | null };
+/** Rate filings by outcome, as S&P's status reads: approved, in progress, disapproved, withdrawn, or other. */
+export type FpOutcome = { outcome: "approved" | "pending" | "disapproved" | "withdrawn" | "other"; n: number; withImpact: number; lo: number | null; hi: number | null };
+/** Approved overall rate impacts of one state and type of insurance compounded in date order, since the start of the
+    period: total to the end of the period, and to the end of each year of years. Derived; not weighted by premium. */
+export type FpCumulative = { state: string | null; toi: string | null; n: number; first: string; last: string; total: number; byYear: number[] };
+/** A red, amber or green read of one thing in the filings, with the evidence in words. A screen, not a finding. */
+export type FpSignal = { id: string; level: "red" | "amber" | "green"; title: string; evidence: string };
+/** A rate filing the page may offer to summarise (snl-digest "make"), in the fields that call takes. */
+export type FpReadable = { documentId: number | null; filingVersionId: string | null; filingNo: string | null; companyName: string | null; state: string | null; typeOfInsurance: string | null; filingType: string | null; status: string | null; published: string | null; pages: number | null; rate: number | null; approved: boolean };
 export type FilingsFacts = {
   version: 1; profile: "filings"; sample: boolean; asOf: string;
   entity: { kind: "company" | "group"; name: string; groupName: string | null; companies: number; noId: number };
@@ -985,10 +1024,16 @@ export type FilingsFacts = {
   approval: { rateFilings: number; approved: number; share: number | null };
   rates: { filings: number; withImpact: number; notApproved: number; noDate: number; lo: number | null; hi: number | null; points: FpRate[]; pointsTotal: number;
     rows: { state: string | null; toi: string | null; n: number; withRate: number; lo: number | null; hi: number | null; latest: FpRate | null }[]; rowsTotal: number };
-  states: { rows: { state: string; n: number; rate: number; latest: FpRate | null }[]; noState: number };
+  /** latest: the newest overall rate impact of any status; approved: the newest approved one */
+  states: { rows: { state: string; n: number; rate: number; latest: FpRate | null; approved: FpRate | null }[]; noState: number };
   years: { years: number[]; types: string[]; counts: number[][]; totals: number[]; byType: number[] };
   latest: { rows: FpLatestRow[]; total: number };
   regulator: { rows: FpDays[]; all: FpDays | null; left: number };
+  lines: { rows: FpLine[]; total: number };
+  outcomes: FpOutcome[];
+  history: { years: number[]; rows: FpCumulative[]; total: number };
+  signals: FpSignal[];
+  readable: FpReadable[];
 };
 
 const day = (v: unknown): string | null => {
@@ -1019,9 +1064,15 @@ export function filingsFactsFrom(t: Pick<FpTarget, "kind" | "name" | "groupName"
   });
   const fs = [...byKey.values()].map(({ r, names }) => {
     const type = clean(r.serffFilingType, 80), st = clean(r.serffFilingStateId, 4)?.toUpperCase() ?? null, status = clean(r.filingStatus, 80);
+    const toi = clean(r.typeOfInsurance, 120), rate = rateImpactOf(r), ref = { ...parseDocRef({ documentId: r.documentId }), ...parseDocRef({ filingVersionId: r.filingVersionId }) };
+    // the watchlist's marks (watch.ts), read from S&P's type, status and wording; only which marks, never the words
+    const marks = flagFiling({ filing_type: type, filing_status: status, type_of_insurance: toi, sub_type_of_insurance: clean(r.subTypeOfInsurance, 120),
+      description: clean(r.filingDescription, 600), rate_impact: null }).map((m) => m.kind);
     return {
-      type, k: fpKinds(type), state: st && /^[A-Z]{2}$/.test(st) ? st : null, toi: clean(r.typeOfInsurance, 120), status, approved: fpApproved(status),
-      date: day(r.publishDate), submitted: day(r.dateSubmitted), rate: rateImpactOf(r), filingNo: filingNumberText(r),
+      type, k: fpKinds(type), state: st && /^[A-Z]{2}$/.test(st) ? st : null, toi, status, approved: fpApproved(status), outcome: fpOutcome(status),
+      date: day(r.publishDate), submitted: day(r.dateSubmitted), rate, filingNo: filingNumberText(r), marks,
+      documentId: ref.documentId ?? null, filingVersionId: ref.filingVersionId ?? null, pages: pagesOf(r.pages),
+      first: names[0] ?? null,
       company: names.length === 0 ? null : names.length === 1 ? names[0] : names.length === 2 ? `${names[0]} and ${names[1]}` : `${names[0]} and ${names.length - 1} more`,
     };
   });
@@ -1049,7 +1100,7 @@ export function filingsFactsFrom(t: Pick<FpTarget, "kind" | "name" | "groupName"
   // by state: states with filings, the most first
   const st = new Map<string, F[]>();
   for (const f of fs) if (f.state) st.set(f.state, [...(st.get(f.state) ?? []), f]);
-  const stateRows = [...st.entries()].map(([state, list]) => ({ state, n: list.length, rate: list.filter((f) => f.k.rate || f.rate !== null).length, latest: latestRate(list) }))
+  const stateRows = [...st.entries()].map(([state, list]) => ({ state, n: list.length, rate: list.filter((f) => f.k.rate || f.rate !== null).length, latest: latestRate(list), approved: latestRate(list.filter((f) => f.approved && f.rate !== null)) }))
     .sort((x, y) => y.n - x.n || x.state.localeCompare(y.state));
 
   // by year published and filing type: the period's calendar years; the four most used types, then the rest together
@@ -1079,6 +1130,40 @@ export function filingsFactsFrom(t: Pick<FpTarget, "kind" | "name" | "groupName"
   const dg = new Map<string, number[]>();
   for (const x of days) { const k = x.f.state ?? ""; dg.set(k, [...(dg.get(k) ?? []), x.d]); }
   const dayRows = [...dg.entries()].map(([s, a]) => dayRow(s || null, a)).sort((x, y) => y.n - x.n || (x.state ?? "~").localeCompare(y.state ?? "~"));
+  const allDays = days.length ? dayRow(null, days.map((x) => x.d)) : null;
+
+  // by type of insurance: rate filings, form and rule filings that aren't rate filings, and the rest
+  const isRate = (f: F) => f.k.rate || f.rate !== null;
+  const lg = new Map<string, F[]>();
+  for (const f of fs) { const k = f.toi ?? ""; lg.set(k, [...(lg.get(k) ?? []), f]); }
+  const lineRows: FpLine[] = [...lg.values()].map((list) => {
+    const rate = list.filter(isRate).length, formRule = list.filter((f) => !isRate(f) && (f.k.form || f.k.rule)).length;
+    return { toi: list[0].toi, n: list.length, rate, formRule, other: list.length - rate - formRule, states: new Set(list.map((f) => f.state).filter(Boolean)).size,
+      approved: list.filter((f) => isRate(f) && f.approved).length, withImpact: list.filter((f) => f.rate !== null).length, ...range(list) };
+  }).sort((x, y) => y.n - x.n || Number(x.toi === null) - Number(y.toi === null) || (x.toi ?? "").localeCompare(y.toi ?? ""));
+
+  // rate filings by outcome
+  const OUTCOMES: FpOutcome["outcome"][] = ["approved", "pending", "disapproved", "withdrawn", "other"];
+  const outcomes: FpOutcome[] = OUTCOMES.map((o) => { const list = rateFs.filter((f) => f.outcome === o); return { outcome: o, n: list.length, withImpact: list.filter((f) => f.rate !== null).length, ...range(list) }; })
+    .filter((o) => o.n > 0);
+
+  // approved overall rate impacts compounded in date order, by state and type of insurance (derived, unweighted)
+  const cg = new Map<string, F[]>();
+  for (const f of rateFs) if (f.approved && f.rate !== null && f.date) { const k = `${f.state ?? ""}|${f.toi ?? ""}`; cg.set(k, [...(cg.get(k) ?? []), f]); }
+  const compound = (list: F[]) => (list.reduce((m, f) => m * (1 + f.rate! / 100), 1) - 1) * 100;
+  const cumRows: FpCumulative[] = [...cg.values()].map((list) => {
+    const s = [...list].sort((x, y) => x.date!.localeCompare(y.date!));
+    return { state: s[0].state, toi: s[0].toi, n: s.length, first: s[0].date!, last: s[s.length - 1].date!, total: round(compound(s), 1)!,
+      byYear: years.map((y) => round(compound(s.filter((f) => Number(f.date!.slice(0, 4)) <= y)), 1)!) };
+  }).sort((x, y) => y.n - x.n || Math.abs(y.total) - Math.abs(x.total) || (x.state ?? "~").localeCompare(y.state ?? "~") || (x.toi ?? "~").localeCompare(y.toi ?? "~"));
+
+  // rate filings the page may offer to summarise: the largest overall rate impacts first, then the newest
+  const readable: FpReadable[] = rateFs.filter((f) => f.documentId !== null || f.filingVersionId)
+    .sort((x, y) => (y.rate === null ? -1 : Math.abs(y.rate)) - (x.rate === null ? -1 : Math.abs(x.rate)) || (y.date ?? "").localeCompare(x.date ?? ""))
+    .slice(0, FP_READABLE).map((f) => ({ documentId: f.documentId, filingVersionId: f.filingVersionId, filingNo: f.filingNo, companyName: f.first, state: f.state, typeOfInsurance: f.toi,
+      filingType: f.type, status: f.status, published: f.date, pages: f.pages, rate: f.rate, approved: f.approved }));
+
+  const signals = fpSignals({ fs, rateFs, stateRows, allDays, cumRows, capped: a.capped, asOf: o.asOf });
 
   return {
     version: 1, profile: "filings", sample: o.sample === true, asOf: o.asOf,
@@ -1094,8 +1179,75 @@ export function filingsFactsFrom(t: Pick<FpTarget, "kind" | "name" | "groupName"
     states: { rows: stateRows.slice(0, FP_ROWS), noState: fs.filter((f) => !f.state).length },
     years: { years, types, counts, totals: counts.map((row) => row.reduce((s, n) => s + n, 0)), byType },
     latest: { rows: fr.slice(0, FP_LATEST).map((f) => ({ company: f.company, state: f.state, toi: f.toi, type: f.type, status: f.status, published: f.date, filingNo: f.filingNo })), total: fr.length },
-    regulator: { rows: dayRows.slice(0, FP_ROWS), all: days.length ? dayRow(null, days.map((x) => x.d)) : null, left: fs.length - days.length },
+    regulator: { rows: dayRows.slice(0, FP_ROWS), all: allDays, left: fs.length - days.length },
+    lines: { rows: lineRows.slice(0, FP_LINES), total: lineRows.length },
+    outcomes,
+    history: { years, rows: cumRows.slice(0, FP_LINES), total: cumRows.length },
+    signals,
+    readable,
   };
+}
+
+const FP_LINES = 12;   // the most types of insurance, and states and types of insurance compounded, kept
+const outcomeWord: Record<FpOutcome["outcome"], string> = { approved: "approved", pending: "in progress", disapproved: "disapproved", withdrawn: "withdrawn", other: "other" };
+export const OUTCOME_LABEL: Record<FpOutcome["outcome"], string> = { approved: "Approved", pending: "In progress", disapproved: "Disapproved", withdrawn: "Withdrawn", other: "Other or n/d" };
+
+/** The red, amber and green signals: large rate changes, disapprovals, withdrawals and exits, rate filings in
+    progress, time with the regulator, state concentration, compounded approved changes, possible new programs or
+    states, and a search that stopped early. Reds first. Each says the figures it rests on; thresholds in FP_SIGNAL.
+    Every figure in the evidence is one the facts also hold, so Claude may repeat it. */
+function fpSignals(x: {
+  fs: { state: string | null; toi: string | null; status: string | null; approved: boolean; outcome: FpOutcome["outcome"]; date: string | null; rate: number | null; k: { rate: boolean }; marks: string[] }[];
+  rateFs: { state: string | null; toi: string | null; status: string | null; approved: boolean; outcome: FpOutcome["outcome"]; date: string | null; rate: number | null }[];
+  stateRows: { state: string; n: number }[]; allDays: FpDays | null; cumRows: FpCumulative[]; capped: boolean; asOf: string;
+}): FpSignal[] {
+  const out: FpSignal[] = [], T = FP_SIGNAL, d = (s: string | null) => fmt.date(s, x.asOf), n = x.fs.length;
+  if (!n) return out;
+  const where = (f: { state: string | null; toi: string | null }) => `${f.state ?? "a state n/d"}${f.toi ? ` (${f.toi})` : ""}`;
+  const add = (id: string, level: FpSignal["level"], title: string, evidence: string) => out.push({ id, level, title, evidence: fit(evidence, 200) });
+
+  const withRate = x.rateFs.filter((f) => f.rate !== null);
+  if (withRate.length) {
+    const large = withRate.filter((f) => Math.abs(f.rate!) >= FP_LARGE_PCT).sort((p, q) => Math.abs(q.rate!) - Math.abs(p.rate!) || (q.date ?? "").localeCompare(p.date ?? ""));
+    const top = large[0];
+    if (!top) add("large", "green", "Large rate changes", `No filing has an overall rate impact of ${fmt.pct(FP_LARGE_PCT)} or more either way; ${many(withRate.length, "filing")} with one.`);
+    else add("large", Math.abs(top.rate!) >= T.largeRed || large.length >= T.largeRedCount ? "red" : "amber", "Large rate changes",
+      `${many(large.length, "filing")} at ${fmt.pct(FP_LARGE_PCT)} or more either way; the largest ${fmt.pct(top.rate)} in ${where(top)}, ${d(top.date)}, ${outcomeWord[top.outcome]}.`);
+  }
+  const rf = x.rateFs.length;
+  if (rf) {
+    const dis = x.rateFs.filter((f) => f.outcome === "disapproved");
+    add("disapproved", dis.length >= T.disapprovedRed ? "red" : dis.length ? "amber" : "green", "Disapproved rate filings",
+      dis.length ? `${cnt(dis.length)} of ${many(rf, "rate filing")} ${dis.length === 1 ? "shows" : "show"} a disapproved status; the latest in ${where([...dis].sort(newestFirst)[0])}, ${d([...dis].sort(newestFirst)[0].date)}.` : `None of ${many(rf, "rate filing")} shows a disapproved status.`);
+  }
+  const wd = x.fs.filter((f) => f.outcome === "withdrawn" || f.marks.includes("withdrawal"));
+  add("withdrawn", wd.length >= T.withdrawnRed ? "red" : wd.length ? "amber" : "green", "Withdrawals and exits",
+    wd.length ? `${cnt(wd.length)} of ${many(n, "filing")} withdrawn or may be leaving a market (from S&P's status, type or wording); the latest in ${where([...wd].sort(newestFirst)[0])}, ${d([...wd].sort(newestFirst)[0].date)}.` : `None of ${many(n, "filing")} shows a withdrawal in S&P's status, type or wording.`);
+  if (rf) {
+    const pend = x.rateFs.filter((f) => f.outcome === "pending");
+    const big = [...pend].filter((f) => f.rate !== null).sort((p, q) => Math.abs(q.rate!) - Math.abs(p.rate!))[0];
+    add("pending", pend.length ? "amber" : "green", "Rate filings in progress", pend.length ? `${many(pend.length, "rate filing")} in progress${big ? `; the largest ${fmt.pct(big.rate)} in ${where(big)}, which may be the change asked for` : ""}.` : "No rate filing shows an in-progress status.");
+  }
+  if (x.allDays) {
+    const m = x.allDays.median;
+    add("regulator", m >= T.daysRed ? "red" : m >= T.daysAmber ? "amber" : "green", "Time with the regulator", `About ${many(m, "day")} from submitted to published, the median over ${many(x.allDays.n, "filing")} (approximate).`);
+  }
+  const top = x.stateRows[0];
+  if (top) {
+    const share = round(top.n / n * 100, 1)!;
+    add("concentration", share >= T.topRed ? "red" : share >= T.topAmber ? "amber" : "green", "State concentration",
+      `${top.state}: ${cnt(top.n)} of ${many(n, "filing")} (${fmt.pct(share)} of filings, not of premium); filings in ${many(x.stateRows.length, "state")}.`);
+  }
+  const cum = [...x.cumRows].sort((p, q) => Math.abs(q.total) - Math.abs(p.total))[0];
+  if (cum) add("cumulative", Math.abs(cum.total) >= T.cumRed ? "red" : Math.abs(cum.total) >= T.cumAmber ? "amber" : "green", "Compounded rate changes",
+    `${fmt.pct(cum.total)} in ${where(cum)} from ${many(cum.n, "approved filing")}, ${cum.first === cum.last ? d(cum.first) : `${d(cum.first)} to ${d(cum.last)}`} (derived, not weighted by premium).`);
+  const fresh = x.fs.filter((f) => f.marks.includes("new_program") || f.marks.includes("new_state"));
+  add("new", fresh.length ? "amber" : "green", "New programs or states", fresh.length
+    ? `${many(fresh.length, "filing")} may be a new program or a new state (from S&P's type or wording, a hint); the latest in ${where([...fresh].sort(newestFirst)[0])}, ${d([...fresh].sort(newestFirst)[0].date)}.`
+    : "None marked as a new program or state from S&P's type or wording; S&P's rows often carry little wording.");
+  if (x.capped) add("capped", "amber", "Search incomplete", "The search stopped before S&P sent every filing, so counts may be low.");
+  const order = { red: 0, amber: 1, green: 2 };
+  return out.map((s, i) => ({ s, i })).sort((p, q) => order[p.s.level] - order[q.s.level] || p.i - q.i).map((p) => p.s);
 }
 
 export type FpCtx = { db: Db; api: Spgmi | null; now: () => number; start: number; deadline: number };
@@ -1132,8 +1284,12 @@ export type FpText = {
   by: "plain" | "claude"; note: string | null;
   cover: { subtitle: string };
   summary: Section; rates: Section; states: Section; years: Section; forms: Section; regulator: Section;
+  /** Written by code only (Claude's draft leaves them as they are): the slides of the rate map, the compounded rate
+      changes and the types of insurance. */
+  ratemap?: Section; history?: Section; lines?: Section;
   questions: { title: string; items: { title: string; text: string }[] };
 };
+export const FP_PLAIN_SECTIONS = ["ratemap", "history", "lines"] as const;
 const cnt = (n: number) => n.toLocaleString("en-US");
 const many = (n: number, one: string, more = one + "s") => `${cnt(n)} ${n === 1 ? one : more}`;
 /** A status as S&P gives it, lower case inside a sentence when it is a plain word or two ("approved"). */
@@ -1208,10 +1364,35 @@ export function filingsPlainText(f: FilingsFacts): FpText {
     ...(f.regulator.left ? [p("Left out", `${many(f.regulator.left, "filing doesn't", "filings don't")} have both dates and ${f.regulator.left === 1 ? "is" : "are"} left out.`)] : []),
   ] : [p("Dates", "None of these filings has both a submitted date and a publish date in S&P's data.")]);
 
+  // the rate map: the newest approved overall rate impact in each state
+  const ap = f.states.rows.filter((x) => x.approved);
+  const up = ap.filter((x) => x.approved!.rate > 0).sort((x, y) => y.approved!.rate - x.approved!.rate), down = ap.filter((x) => x.approved!.rate < 0).sort((x, y) => x.approved!.rate - y.approved!.rate);
+  const ratemap = sec(ap.length ? `Latest approved change up in ${many(up.length, "state")}, down in ${cnt(down.length)}` : "Latest approved rate change by state", ap.length ? [
+    p("Up", up.length ? up.slice(0, 5).map((x) => `${x.state} ${fmt.pct(x.approved!.rate)}`).join(", ") + "." : "No state's latest approved change is an increase."),
+    p("Down", down.length ? down.slice(0, 5).map((x) => `${x.state} ${fmt.pct(x.approved!.rate)}`).join(", ") + "." : "No state's latest approved change is a decrease."),
+    p("What it shows", "The newest approved overall rate impact in each state, of any type of insurance; not weighted by premium."),
+  ] : [p("Approved changes", "No approved filing in this search carries an overall rate impact in S&P's data.")]);
+
+  // compounded approved changes, by state and type of insurance
+  const H = f.history ?? { years: [], rows: [], total: 0 }, hTop = [...H.rows].sort((x, y) => Math.abs(y.total) - Math.abs(x.total))[0];
+  const history = sec(hTop ? fit(hTop.n > 1 ? `Approved changes compound to ${fmt.pct(hTop.total)} in ${where(hTop)}` : `Largest approved change ${fmt.pct(hTop.total)} in ${where(hTop)}`, LIMITS.title) : "Approved rate changes compounded", hTop ? [
+    p("Largest", hTop.n === 1 ? `${where(hTop)}: one approved change, ${fmt.pct(hTop.total)}, published ${d(hTop.first)}.` : `${where(hTop)}: ${many(hTop.n, "approved change")} from ${d(hTop.first)} to ${d(hTop.last)} compound to ${fmt.pct(hTop.total)} (derived).`),
+    ...(H.rows[0] && H.rows[0] !== hTop ? [p("Most changes", `${where(H.rows[0])}: ${many(H.rows[0].n, "approved change")}, ${fmt.pct(H.rows[0].total)} compounded (derived).`)] : []),
+    p("Method", "Approved overall rate impacts multiplied together in date order since the start of the period; not weighted by premium; filings not approved are left out."),
+  ] : [p("Approved changes", "No approved filing in this search carries an overall rate impact with a publish date in S&P's data.")]);
+
+  // types of insurance and the outcomes of rate filings
+  const Ln = f.lines ?? { rows: [], total: 0 }, l0 = Ln.rows[0], O = f.outcomes ?? [];
+  const lines = sec(l0 ? fit(`Most filings in ${l0.toi ?? "type n/d"}: ${cnt(l0.n)} of ${cnt(T.filings)}`, LIMITS.title) : "Filings by type of insurance", l0 ? [
+    p("Types of insurance", Ln.rows.slice(0, 4).map((x) => `${x.toi ?? "type n/d"} ${cnt(x.n)}`).join(", ") + (Ln.total > 4 ? `, and ${many(Ln.total - 4, "more type")}` : "") + "."),
+    p("Rate filings", `${cnt(l0.rate)} of the ${cnt(l0.n)} filings in ${l0.toi ?? "type n/d"} are rate filings; ${cnt(l0.approved)} of them approved.`),
+    ...(O.length ? [p("Outcomes", O.map((x) => `${cnt(x.n)} ${outcomeWord[x.outcome]}`).join(", ") + " (rate filings, by S&P's status).")] : []),
+  ] : [p("Types of insurance", "Types of insurance n/d.")]);
+
   const subtitle = f.entity.kind === "group" ? `${many(f.entity.companies, "company", "companies")} in the group; ${many(T.filings, "filing")} published ${period}` : `${many(T.filings, "filing")} published ${period}`;
   return {
     by: "plain", note: null, cover: { subtitle: fit(subtitle, LIMITS.subtitle) },
-    summary: sec(`${many(T.filings, "filing")} in ${many(T.states, "state")} over ${over}`, summary.slice(0, 6)), rates, states, years, forms, regulator,
+    summary: sec(`${many(T.filings, "filing")} in ${many(T.states, "state")} over ${over}`, summary.slice(0, 6)), rates, states, years, forms, regulator, ratemap, history, lines,
     questions: { title: "Key diligence questions", items: fpQuestions(f).map((q) => ({ title: fit(q.title, LIMITS.qTitle), text: fit(q.text, LIMITS.qText) })) },
   };
 }
@@ -1220,17 +1401,24 @@ export function filingsPlainText(f: FilingsFacts): FpText {
     depends on a filing's description. */
 export function fpQuestions(f: FilingsFacts): { title: string; text: string }[] {
   const out: { title: string; text: string }[] = [], T = f.totals, R = f.rates, d = (s: string | null) => fmt.date(s, f.asOf);
+  if (f.search.capped) out.push({ title: "Complete filing record", text: "The search stopped before S&P sent every filing. Can management provide a full list of filings for the period?" });
   if (!T.filings) out.push({ title: "Filings S&P doesn't show", text: `S&P returned nothing for this search over ${yearsWords(f.period.years)}. Which rate, rule and form filings has the company made, and where?` });
   const pend = [...R.points].filter((x) => !x.approved).sort((x, y) => Math.abs(y.rate) - Math.abs(x.rate))[0];
   if (pend) out.push({ title: "Rate requests in progress", text: `${many(R.notApproved, "filing with a rate impact isn't", "filings with a rate impact aren't")} approved, the largest ${fmt.pct(pend.rate)} in ${pend.state ?? "a state n/d"}. What outcome and timing does management expect?` });
+  const sig = (id: string) => (f.signals ?? []).find((s) => s.id === id && s.level !== "green");
+  const dis = (f.outcomes ?? []).find((o) => o.outcome === "disapproved");
+  if (sig("disapproved") && dis) out.push({ title: "Disapproved filings", text: `${many(dis.n, "rate filing")} ${dis.n === 1 ? "shows" : "show"} a disapproved status. What did the regulator object to, and what was refiled?` });
+  if (sig("withdrawn")) out.push({ title: "Withdrawals and exits", text: "Some filings were withdrawn or may mark a market exit. Which states or programs is the company leaving or refiling, and why?" });
   const big = f.largest;
   if (big && big.approved && big.rate >= 10) out.push({ title: "Rate adequacy", text: `An approved overall rate change of ${fmt.pct(big.rate)} in ${big.state ?? "a state n/d"} (${d(big.date)}). What loss trend drove it, and is more needed?` });
+  const cum = sig("cumulative") ? [...(f.history?.rows ?? [])].sort((x, y) => Math.abs(y.total) - Math.abs(x.total))[0] : null;
+  if (cum) out.push({ title: "Compounded rate changes", text: `Approved changes in ${cum.state ?? "a state n/d"}${cum.toi ? ` (${cum.toi})` : ""} compound to ${fmt.pct(cum.total)} (derived). What were the indicated changes, and how much is still to earn in?` });
   const top = f.states.rows[0];
   if (top && T.states > 1 && top.n * 2 >= T.filings) out.push({ title: "State concentration", text: `${top.state} had ${cnt(top.n)} of the ${many(T.filings, "filing")}. How exposed is the book to that state's regulator and weather?` });
   if (f.latest.total) out.push({ title: "Product changes", text: `${many(f.latest.total, "form or rule filing", "form and rule filings")} in the period. Which programs are new or changing, and why?` });
   const slow = f.regulator.rows.filter((x) => x.state && x.n >= 2).sort((x, y) => y.median - x.median)[0];
   if (slow && slow.median >= 90) out.push({ title: "Regulatory timing", text: `Filings in ${slow.state} took about ${many(slow.median, "day")} from submitted to published (median, approximate). How does that delay affect rate adequacy?` });
-  if (f.search.capped) out.push({ title: "Complete filing record", text: "The search stopped before S&P sent every filing. Can management provide a full list of filings for the period?" });
+  if (sig("new")) out.push({ title: "New programs and states", text: "Some filings may be new programs or new states. Which are live, what premium is planned, and who underwrites them?" });
   out.push(
     { title: "Rate plan", text: "What rate changes are planned for the coming year, by state and line, and what loss trend do they assume?" },
     { title: "Premium behind the rates", text: "How much premium do these rate filings cover? S&P's overall figure for each filing isn't weighted by premium." },
@@ -1290,11 +1478,22 @@ export function fpAllowedFigures(f: FilingsFacts): Record<FpFigure["kind"], numb
   for (const x of f.latest.rows) dt(x.published);
   for (const x of [...f.regulator.rows, ...(f.regulator.all ? [f.regulator.all] : [])]) n(x.n, x.median, x.lo, x.hi);
   n(f.regulator.left);
+  for (const x of f.states.rows) rate(x.approved ?? null);
+  for (const x of f.lines?.rows ?? []) { n(x.n, x.rate, x.formRule, x.other, x.states, x.approved, x.withImpact); pc(x.lo, x.hi); }
+  n(f.lines?.total);
+  for (const x of f.outcomes ?? []) { n(x.n, x.withImpact); pc(x.lo, x.hi); }
+  for (const x of f.history?.rows ?? []) { n(x.n); pc(x.total, ...x.byYear); dt(x.first, x.last); }
+  n(f.history?.total);
+  // the signals' evidence is written from the facts; its figures (shares, thresholds) may be repeated too
+  const sigDates: number[] = [];
+  for (const s of f.signals ?? []) for (const g of fpFiguresIn(s.evidence)) {
+    if (g.kind === "pct") pc(g.value); else if (g.kind === "num") n(g.value); else if (g.kind === "year") years.add(g.value); else if (g.kind === "date") sigDates.push(g.value);
+  }
   for (const s of dates) years.add(Number(s.slice(0, 4)));
   const ds = [...dates];
   return {
     usd: [], mult: [], pct: [...pct], num: [...num], year: [...years],
-    date: ds.map((s) => Number(s.slice(5, 7)) * 100 + Number(s.slice(8, 10))), month: ds.map((s) => Number(s.slice(0, 4)) * 100 + Number(s.slice(5, 7))),
+    date: [...ds.map((s) => Number(s.slice(5, 7)) * 100 + Number(s.slice(8, 10))), ...sigDates], month: ds.map((s) => Number(s.slice(0, 4)) * 100 + Number(s.slice(5, 7))),
   };
 }
 export function fpUnmatched(text: string, allowed: Record<FpFigure["kind"], number[]>): FpFigure[] {
@@ -1325,6 +1524,7 @@ Figures
 - Take every number from the facts only: every count, number of days, percentage, date and year you write must be in the facts as shown. Write counts and days as digits. Don't work out new figures (no sums, differences, shares or averages that aren't already in the facts).
 - Rate impacts (rate, lo, hi) are S&P's overall figure for each filing, in percentage points (4.5 means 4.5%). They aren't weighted by premium. For a filing whose status isn't approved (approved is false) the figure may be the change asked for: say so whenever you cite one. Never average rate impacts, and never put approved and unapproved figures together as one figure.
 - Days with the regulator are from submitted to published by S&P, so they are approximate: say so.
+- history holds approved rate impacts compounded by the app (derived): mark any you cite "(derived)". signals are the app's red, amber and green screen of the filings, from thresholds it chose; a signal is a prompt for a question, not a finding.
 - Write percentages to one decimal (4.5%), negatives in parentheses ((1.5%)), dates like "5 Nov" (with the year when it isn't the year of asOf), and "n/d" for anything missing.
 - An empty result means S&P returned nothing for the search. It doesn't show that nothing was filed.
 - The facts have no filing descriptions. Don't say what a filing changes or why it was made; you can't know.
@@ -1436,6 +1636,7 @@ export function filingsSampleRows(today: string): Filing[] {
       serffFilingStateId: pick(states), typeOfInsurance: pick(tois), serffFilingType: type, filingStatus: statusName,
       publishDate: pub, dateSubmitted: sub, overallRateImpact: impact, dispOverallRateImpact: null,
       filingDescription: null, trackingNumber: i % 9 === 0 ? `CALL-${String(i + 1).padStart(4, "0")}` : null, sfcNumber: `CAL${String(1000000 + i * 7919).slice(0, 7)}`,
+      documentId: 72000000 + i, pages: 12 + ((i * 37) % 380), subTypeOfInsurance: i === 7 || i === 41 ? "Initial program" : null,
     });
   }
   // one version S&P sent twice, once for each company on it: it counts once

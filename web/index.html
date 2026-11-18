@@ -1793,7 +1793,9 @@ function dgDigestHTML(d, key){
       const act=[f.action?esc(String(f.action)[0].toUpperCase()+String(f.action).slice(1)):"", f.replaces?`replaces ${esc(f.replaces)}`:"", !blank(f.program)?`program ${esc(f.program)}`:""].filter(Boolean).join(", ");
       return `<tr><td><b>${esc(f.number)}</b>${f.edition?`<div class="t2">Edition ${esc(f.edition)}</div>`:""}</td><td>${blank(f.title)?"n/d":esc(f.title)}${act?`<div class="t2">${act}</div>`:""}</td><td class="c-pg">${dgPageBtn(key, f.page)||"n/d"}</td></tr>`; }).join("")}</tbody></table>`:`<p class="t2">${none}</p>`}</section>`;
   const money=v=>isNum(v)?usdM(v):"n/d", rates=[["Overall rate change", isNum(rate.overallPct)?pct(rate.overallPct):"n/d"],["Requested", isNum(rate.requestedPct)?pct(rate.requestedPct):"n/d"],["Approved", isNum(rate.approvedPct)?pct(rate.approvedPct):"n/d"],
-    ["Written premium affected", money(rate.premium)],["Policyholders affected", count(rate.policyholders)],["Effective, new business", fmtDay(rate.effectiveNew)],["Effective, renewals", fmtDay(rate.effectiveRenewal)]];
+    ["Written premium affected", money(rate.premium)],["Policyholders affected", count(rate.policyholders)],["Effective, new business", fmtDay(rate.effectiveNew)],["Effective, renewals", fmtDay(rate.effectiveRenewal)],
+    // the rate drivers, shown when the summary has any (summaries made before they were asked for have none)
+    ...(["indicatedPct","lcm","trendPct","expensePct"].some(k=>isNum(rate[k])) ? [["Indicated change", isNum(rate.indicatedPct)?pct(rate.indicatedPct):"n/d"],["Loss cost multiplier", isNum(rate.lcm)?(+rate.lcm).toFixed(3):"n/d"],["Annual loss trend", isNum(rate.trendPct)?pct(rate.trendPct):"n/d"],["Expense provision", isNum(rate.expensePct)?pct(rate.expensePct):"n/d"]] : [])];
   h+=`<section id="dgRate"><h3>Rate figures</h3>${isNum(rate.page)?`<div class="rate">${rates.map(([k,v])=>`<span>${k}</span><b>${esc(v)}</b>`).join("")}</div><p class="t2" style="margin-top:4px">From ${dgPageBtn(key, rate.page)}.</p>`:`<p class="t2">No rate figures were found on the pages read.</p>`}</section>`;
   h+=`<section id="dgElig"><h3>Eligibility</h3>${dgListHTML(elig, key, none, e=>esc(e.text))}</section>`;
   h+=`<section id="dgNotable"><h3>Notable points</h3>${dgListHTML(notable, key, none, n=>esc(n.text))}</section>`;
@@ -3214,7 +3216,7 @@ function renderProfile(){
 const FP_YEARS = [1,3,5];
 const FP_MAX_SP_REQUESTS = 60, FP_MAX_PLANNED = 50, FP_OVERHEAD = 3;   // the same in supabase/functions/_shared/profile.ts
 const FP_WINDOW_DAYS = 365;
-function freshFp(){ return {find:{q:"", asked:"", matches:null, groups:null, busy:false, err:""}, pick:null, years:3, formErr:"", busy:"", asked:null, res:null, err:null, plan:null, libsErr:"", draft:null, drafted:null, draftErr:null, built:null, buildErr:""}; }
+function freshFp(){ return {find:{q:"", asked:"", matches:null, groups:null, busy:false, err:""}, pick:null, years:3, formErr:"", busy:"", asked:null, res:null, err:null, plan:null, libsErr:"", draft:null, drafted:null, draftErr:null, built:null, buildErr:"", read:null}; }
 // which profile the view shows: the reader's choice, else the full one once statutory data is ready, else filings
 const pfMode = () => S.pf.mode || (pfLive() ? "full" : "filings");
 const fpFilingsOff = () => { const s=S.pf.status&&S.pf.status.filings; return !!s && s.configured===false; };
@@ -3272,7 +3274,7 @@ function fpBody(action, pick, years){
 }
 
 /* ----- the figures, Claude's draft and the file ----- */
-function fpReset(fp){ fp.res=null; fp.err=null; fp.plan=null; fp.libsErr=""; fp.drafted=null; fp.draftErr=null; fp.built=null; fp.buildErr=""; }
+function fpReset(fp){ fp.res=null; fp.err=null; fp.plan=null; fp.libsErr=""; fp.drafted=null; fp.draftErr=null; fp.built=null; fp.buildErr=""; fp.read=null; }
 async function fpFacts(){
   const fp=S.pf.fp; if(fp.busy) return;
   if(!fp.pick){ fp.formErr="Choose a company or a group first: find it by name above."; render(); return; }
@@ -3285,11 +3287,11 @@ async function fpFacts(){
   else if(r.err!=="signin") fp.err = r.data ? {err:"bad_answer", msg:"The profile function sent back something the page can't read. Try again."} : r;
   render();
 }
-function fpTake(fp, data){ fp.res={facts:data.facts, text:data.text, search:data.search&&typeof data.search==="object"?data.search:null, spRequests:isNum(data.spRequests)?+data.spRequests:null}; fp.plan=null; fp.libsErr=""; fpPlan(fp); }
+function fpTake(fp, data){ fp.res={facts:data.facts, text:data.text, search:data.search&&typeof data.search==="object"?data.search:null, spRequests:isNum(data.spRequests)?+data.spRequests:null}; fp.plan=null; fp.libsErr=""; fp.read=null; fpPlan(fp); fpReadGet(fp); }
 async function fpPlan(fp){
   try{ await loadProfileLibs(); }catch{ if(S.pf.fp===fp){ fp.libsErr=PF_LIBS_ERR; render(); } return; }
   if(S.pf.fp!==fp || !fp.res) return;
-  let plan=null; try{ plan=typeof window.SNLProfile.filingsPlan==="function" ? window.SNLProfile.filingsPlan(fp.res.facts) : null; }catch{}
+  let plan=null; try{ plan=typeof window.SNLProfile.filingsPlan==="function" ? window.SNLProfile.filingsPlan(fp.res.facts, fpExtra(fp)) : null; }catch{}
   if(!Array.isArray(plan)){ fp.libsErr="Couldn't work out which slides these filings fill. Reload the page and try again."; render(); return; }
   fp.plan=plan.filter(s=>s&&typeof s==="object"); fp.libsErr=""; render();
 }
@@ -3329,11 +3331,80 @@ async function fpMake(fp){
   if(!S.session || S.pf.fp!==fp) return;
   try{ await loadProfileLibs(); }catch{ fail(PF_LIBS_ERR); return; }
   if(!S.session || S.pf.fp!==fp) return;
-  let spec; try{ spec=window.SNLProfile.filingsSpec(use.facts, use.text); }catch(e){ fail("Couldn't lay out the slides from these filings. "+((e&&e.message)||"")); return; }
+  let spec; try{ spec=window.SNLProfile.filingsSpec(use.facts, use.text, fpExtra(fp)); }catch(e){ fail("Couldn't lay out the slides from these filings. "+((e&&e.message)||"")); return; }
   let out; try{ out=await window.SNLDeck.build(bytes.slice(0), spec); }catch(e){ fail("Couldn't build the PowerPoint file. "+((e&&e.message)||"Try again.")); return; }
   if(!S.session || S.pf.fp!==fp) return;
   fp.busy=""; fp.built={blob:new Blob([out],{type:PPTX_TYPE}), name:pfFileName(spec), by:use.text&&use.text.by==="claude"?"claude":"plain"};
   render(); saveBlob(fp.built.blob, fp.built.name);
+}
+/* ----- the largest rate filings read by Claude (optional) -----
+   The facts name up to five rate filings, the largest overall rate impacts first. Their saved summaries (snl-digest
+   "get") are free and fetched as soon as the figures arrive; summarising the rest is the reader's choice, priced first,
+   one filing a call (snl-digest "make": 1 S&P request and one of the day's questions each). The summaries go to the
+   slide builder, which adds a slide of requested, approved and indicated changes and the rate drivers. */
+const fpExtra = fp => ({digests: fp.read && Array.isArray(fp.read.digests) ? fp.read.digests : []});
+function fpReadable(fp){
+  const f=fp.res&&fp.res.facts;
+  return f && !f.sample && Array.isArray(f.readable) ? f.readable.filter(r=>r&&typeof r==="object"&&(isNum(r.documentId)||!blank(r.filingVersionId))).slice(0,5) : [];
+}
+const fpHave = (R, x) => (isNum(x.documentId) && R.have["d:"+x.documentId]) || (!blank(x.filingVersionId) && R.have["v:"+x.filingVersionId]) || null;
+const fpReadMissing = fp => fp.read ? fpReadable(fp).filter(x=>!fpHave(fp.read, x)) : [];
+function fpReadTake(fp, ds){
+  const R=fp.read;
+  for(const d of ds){ if(!d || typeof d!=="object") continue; if(isNum(d.documentId)) R.have["d:"+d.documentId]=d; if(!blank(d.filingVersionId)) R.have["v:"+d.filingVersionId]=d; }
+  const seen=new Set(); R.digests=[];
+  for(const x of fpReadable(fp)){ const d=fpHave(R, x); if(d && !seen.has(d)){ seen.add(d); R.digests.push(d); } }
+}
+async function fpReadGet(fp){
+  const list=fpReadable(fp); if(!list.length) return;
+  const R=fp.read={busy:"get", have:{}, digests:[], err:null, done:0, total:0, cost:0}; render();
+  const r=await callFn("snl-digest",{action:"get", filings:list.map(x=>isNum(x.documentId)?{documentId:+x.documentId}:{filingVersionId:String(x.filingVersionId)})});
+  if(!S.session || S.pf.fp!==fp || fp.read!==R) return;
+  R.busy="";
+  if(r.err){ if(r.err!=="signin"){ R.err=r; R.errFrom="get"; } }
+  else fpReadTake(fp, Array.isArray(r.data.digests)?r.data.digests:[]);
+  if(fp.plan) fpPlan(fp); else render();
+}
+function fpReadBody(x){
+  const v=k=>blank(x[k])?null:String(x[k]);
+  return {documentId:isNum(x.documentId)?+x.documentId:null, filingVersionId:v("filingVersionId"), filingNo:v("filingNo"), companyName:v("companyName"), serffFilingStateId:v("state"),
+    typeOfInsurance:v("typeOfInsurance"), serffFilingType:v("filingType"), filingStatus:v("status"), publishDate:v("published"), pages:isNum(x.pages)?+x.pages:null};
+}
+async function fpReadMake(){
+  const fp=S.pf.fp, R=fp.read; if(!R || R.busy || fp.busy) return;
+  const todo=fpReadMissing(fp); if(!todo.length) return;
+  R.busy="make"; R.err=null; R.errFrom=""; R.total=todo.length; R.done=0; render();
+  for(const x of todo){
+    const r=await callFn("snl-digest",{action:"make", filing:fpReadBody(x)});
+    if(!S.session || S.pf.fp!==fp || fp.read!==R) return;
+    if(r.err){ if(r.err!=="signin"){ R.err=r; R.errFrom="make"; } break; }
+    if(r.data && r.data.digest){ fpReadTake(fp, [r.data.digest]); if(r.data.usage && isNum(r.data.usage.costUsd)) R.cost+=+r.data.usage.costUsd; }
+    R.done++; render();
+  }
+  R.busy=""; S.chatUseAt=0; loadStatus(); fpPlan(fp);
+}
+function fpReadCost(list){
+  let usd=0, unknown=false;
+  for(const x of list){ const known=isNum(x.pages)&&+x.pages>0, pages=known?Math.min(+x.pages, DG_PAGES):DG_PAGES; if(!known) unknown=true; usd+=pages*DG_TOKENS_PER_PAGE*DG_USD_PER_MTOK_IN/1e6+DG_OUT_USD; }
+  return {usd, unknown};
+}
+function fpReadHTML(fp){
+  const list=fpReadable(fp), R=fp.read; if(!list.length || !R) return "";
+  let h=`<div class="f" id="fpRead"><span>The largest rate filings, read by Claude <em>optional: adds the requested, approved and indicated changes, loss cost multipliers, loss trend and expense provisions to the deck</em></span>`;
+  if(R.busy==="get") return h+`<p class="t2" role="status">Looking for saved summaries of the largest rate filings…</p></div>`;
+  if(R.err && ["not_deployed","no_tables"].includes(R.err.err) && !R.digests.length) return h+`<p class="t2" id="fpReadOff">Filing summaries aren't set up, so this step is skipped (README, step 11).</p></div>`;
+  h+=`<ul class="pfplan" id="fpReadList">${list.map(x=>{ const d=fpHave(R, x);
+    const what=[x.state||"State n/d", x.typeOfInsurance||"type n/d", isNum(x.rate)?pct(+x.rate):"rate n/d", x.status||"status n/d", x.published?fmtDay(x.published):""].filter(Boolean).join(" · ");
+    return `<li class="${d?"in":"out"}"><span class="t1">${esc(what)}</span>${d?`<span class="pill in">Saved summary</span>`:`<span class="pfwhy">Not read yet</span>`}</li>`; }).join("")}</ul>`;
+  const miss=fpReadMissing(fp);
+  if(R.busy==="make") h+=`<div class="info" id="fpReading" role="status"><span><b>Claude is reading filing ${count(Math.min(R.done+1, R.total))} of ${count(R.total)}…</b> Each takes up to two minutes. Keep this tab open.</span></div>`;
+  else if(miss.length){
+    const c=fpReadCost(miss), off=!pfClaude() ? "Claude isn't set up, so new summaries can't be made." : chatAtLimit(S.chatUse) ? "You've reached today's limit of questions, so new summaries can't be made today." : "";
+    h+=`<p class="t2" id="fpReadCost">Summarising ${plural(miss.length,"filing")} reads up to the first ${DG_PAGES} pages of each with Claude. It uses ${plural(miss.length,"S&amp;P request")}, ${c.unknown?"up to ":""}${costText(c.usd)} of Claude's time in all, and ${count(miss.length)} of your questions today. The summaries are saved for everyone, so nobody pays to read these pages again.</p>`;
+    h+= off ? `<p class="t2" id="fpReadOffNote">${esc(off)}</p>` : `<div class="toolbar"><button type="button" class="btn" id="fp_read" data-act="fp-read" ${fp.busy?"disabled":""}>Summarise ${miss.length===1?"this filing":`these ${count(miss.length)} filings`}</button></div>`;
+  } else h+=`<p class="t2" id="fpReadDone">Every one has a saved summary${R.cost?`; the new ones cost ${costText(R.cost)}`:""}. The deck adds a slide of their rate figures.</p>`;
+  if(R.err && !["not_deployed","no_tables"].includes(R.err.err)) h+=`<div id="fpReadErr">${problemHTML(R.err, R.errFrom==="get" ? "Couldn't look for saved summaries, so each filing shows as not read." : "Couldn't summarise every filing.", R.errFrom==="make"&&miss.length?"fp-read":"")}</div>`;
+  return h+`</div>`;
 }
 /* What Ask Claude is told from this view in filings mode: the search behind the profile, as the Filings view says it. */
 function fpScreen(){
@@ -3415,6 +3486,7 @@ function fpOutHTML(){
   else h+=`<div class="pftiles" id="fpHead"><div class="pftile" data-k="filings"><span class="t2">Filings</span><b>${count(T.filings)}</b></div><div class="pftile" data-k="rate"><span class="t2">Rate filings</span><b>${count(T.rate)}</b></div><div class="pftile" data-k="states"><span class="t2">States with filings</span><b>${count(T.states)}</b></div></div>`;
   if(sh.capped) h+=`<div class="banner" id="fpCapped" role="alert"><span><b>The search stopped early,</b> so these filings may be incomplete and the slides say so. Choose a shorter period or one company for a complete profile.</span></div>`;
   h+=fpPlanHTML(fp);
+  h+=fpReadHTML(fp);
   const used=fp.res.spRequests;
   h+=`<p class="source" id="fpSource">Source: S&amp;P Global Market Intelligence, SNL Insurance Product Filings. Rate impacts are S&amp;P's overall figure for each filing, not weighted by premium; for a filing that isn't approved it may be the change asked for.${sh.fromStore?` From the saved search${sh.fetchedAt?` of ${esc(whenAt(sh.fetchedAt))}`:""}: no new S&amp;P requests.`:isNum(used)?` ${plural(used,"S&amp;P request")} used.`:""}</p></section>`;
   h+=`<section class="tcard" id="fpBuild" aria-label="Build the PowerPoint file">${fpDraftHTML(fp)}`;
@@ -5981,6 +6053,7 @@ document.addEventListener("click", e=>{
     case "fp-build-plain": fpBuild(true); break;
     case "fp-again": { const b=S.pf.fp.built; if(b) saveBlob(b.blob, b.name); } break;
     case "fp-sample": fpSample(); break;
+    case "fp-read": fpReadMake(); break;
 
     case "snap-find": snapLookup(); break;
     case "snap-co": snapChooseCompany(+t.dataset.i); break;

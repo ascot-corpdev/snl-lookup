@@ -491,14 +491,18 @@
   // =================================================================================================================
   // ---------- the filings profile: a deck from S&P filings alone (facts from filingsFactsFrom in profile.ts) ----------
   // =================================================================================================================
-  //   SNLProfile.filingsPlan(facts)        -> [{id, label, included, reason}] in deck order
-  //   SNLProfile.filingsSpec(facts, text)  -> {fileName, slides} for SNLDeck.build
+  //   SNLProfile.filingsPlan(facts, extra)        -> [{id, label, included, reason}] in deck order
+  //   SNLProfile.filingsSpec(facts, text, extra)  -> {fileName, slides} for SNLDeck.build
+  //   extra: {digests} (optional), saved summaries of the facts' readable rate filings, from snl-digest, for the slide of
+  //   rate figures read by Claude
   // Every figure is the function's; nothing here adds or averages rate impacts. Columns that would be empty on every
   // row are left out, and a filing's description is never used (real rows often have none).
   var TEAL = "00857C", PURPLE = "944599";
   var FP_SLIDES = [
-    ["cover", "Cover"], ["summary", "Summary"], ["rates", "Rate changes"], ["states", "Where it files"], ["years", "Filings by year and type"],
-    ["forms", "Latest form and rule filings"], ["regulator", "Time with the regulator"], ["questions", "Key diligence questions"]
+    ["cover", "Cover"], ["summary", "Summary"], ["signals", "Filing signals (red, amber, green)"], ["states", "Where it files (map)"],
+    ["ratemap", "Latest approved rate change by state (map)"], ["rates", "Rate changes"], ["history", "Approved rate changes compounded"],
+    ["lines", "Types of insurance and outcomes"], ["read", "Rate filings read by Claude"], ["exposure", "Premium and exposure by state"],
+    ["years", "Filings by year and type"], ["forms", "Latest form and rule filings"], ["regulator", "Time with the regulator"], ["questions", "Key diligence questions"]
   ];
   var LX2 = 8.42, LW = 7.4, RW = R - LX2;                 // two columns: left x 0.52 w 7.4, right x 8.42 w 4.38
   var FP_CHART_COLS = 20;                                 // the most filings drawn as columns on the rate chart
@@ -507,11 +511,30 @@
   function arr(a) { return Array.isArray(a) ? a : []; }
   function cnt(n) { return num(n) ? commas(String(Math.round(n))) : "n/d"; }
   function fpRows(f, k) { return arr(f[k] && f[k].rows).filter(function (r) { return r && typeof r === "object"; }); }
-  function fpPlan(facts) {
+  var OLDER = "These figures came from an older version of the profile function, which doesn't work them out. Deploy snl-profile again (README, step 10).";
+  var EXPOSURE = "A filings profile has no premium or exposure figures: they need statutory data (S&P on Snowflake). Filing counts aren't exposure. The full profile shows premium by state once statutory data is set up.";
+  // the summaries of rate filings the page passes in (extra.digests): those with a rate figure, in the order given
+  function readRows(extra) {
+    return arr(extra && extra.digests).filter(function (d) {
+      var r = d && d.rate; return r && typeof r === "object" && ["overallPct", "requestedPct", "approvedPct", "indicatedPct", "lcm", "trendPct", "expensePct", "premium"].some(function (k) { return num(r[k]); });
+    }).slice(0, 8);
+  }
+  function fpPlan(facts, extra) {
     var f = facts || {}, T = f.totals || {}, R = f.rates || {}, Y = f.years || {};
     var rows = FP_SLIDES.map(function (s) { return { id: s[0], label: s[1], included: true, reason: "" }; });
     var out = function (id, reason) { rows.forEach(function (r) { if (r.id === id) { r.included = false; r.reason = reason; } }); };
-    if (!num(T.filings) || T.filings <= 0) { ["rates", "states", "years", "forms", "regulator"].forEach(function (id) { out(id, NOTHING); }); return rows; }
+    out("exposure", EXPOSURE);
+    if (!num(T.filings) || T.filings <= 0) { ["signals", "states", "ratemap", "rates", "history", "lines", "read", "years", "forms", "regulator"].forEach(function (id) { out(id, NOTHING); }); return rows; }
+    if (!Array.isArray(f.signals)) out("signals", OLDER); else if (!f.signals.length) out("signals", "There are no filings to screen.");
+    if (!fpRows(f, "states").length) out("ratemap", "None of the filings names a state in S&P's data.");
+    else if (!fpRows(f, "states").some(function (r) { return "approved" in r; })) out("ratemap", OLDER);
+    else if (!fpRows(f, "states").some(function (r) { return r.approved && num(r.approved.rate); })) out("ratemap", "No approved filing carries an overall rate impact in S&P's data, so there is nothing to colour the rate map by.");
+    if (!f.history) out("history", OLDER);
+    else if (!fpRows(f, "history").length) out("history", "No approved filing carries an overall rate impact and a publish date in S&P's data, so there is nothing to compound.");
+    if (!f.lines) out("lines", OLDER); else if (!fpRows(f, "lines").length) out("lines", "None of the filings names a type of insurance in S&P's data.");
+    if (!readRows(extra).length) out("read", arr(extra && extra.digests).length
+      ? "The saved summaries of these rate filings carry no rate figures."
+      : "No rate filing in this profile has a saved summary yet. Summarise the largest rate filings to add the requested, approved and indicated changes.");
     if (!R.filings) out("rates", "S&P returned no rate filings for this search, so there are no rate changes to show.");
     else if (!R.withImpact) out("rates", "No filing carried an overall rate impact in S&P's data, so there are no rate changes to chart.");
     else if (!arr(R.points).length) out("rates", "None of the filings with a rate impact has a publish date, so they can't be put in date order.");
@@ -537,7 +560,7 @@
     for (var i = 0; i < tries.length; i++) {
       var lv = tries[i][1], parts = ["Source: " + FILINGS_SOURCE + ", " + tries[i][0] + "."];
       if (capped) parts.push(lv > 2 ? "Incomplete." : lv ? "Search incomplete." : "The search stopped early, so figures may be incomplete.");
-      notes.forEach(function (n) { parts.push(typeof n === "string" ? n : n[Math.min(lv, n.length - 1)]); });
+      notes.forEach(function (n) { var x = typeof n === "string" ? n : n[Math.min(lv, n.length - 1)]; if (x) parts.push(x); });
       if (claude) parts.push(lv > 2 ? "Claude's text: check it." : lv ? "Text drafted by Claude: check it." : "Text drafted by Claude from these figures: check it before use.");
       if (f.sample) parts.push(lv > 2 ? "Made-up." : lv > 1 ? "Made-up figures." : "Sample: made-up figures.");
       var s = parts.join(" ");
@@ -628,25 +651,332 @@
     return content(t, "rates", "Rate changes", items);
   }
 
+  // ---------- the map of the United States ----------
+  // The state outlines are the page's own (US_MAP in index.html: us-atlas 3.0.1, ISC licence, copyright 2013-2019
+  // Michael Bostock, made from the US Census Bureau's public cartographic boundary files, simplified), copied here so
+  // the slide builder needs no other file; tests/web/deckfilings.test.cjs checks that the two copies are the same. Each
+  // is [SVG path, name, label x, label y] on a 975 x 610 drawing (Albers USA: Alaska and Hawaii sit bottom left). On a
+  // slide each state is its own editable outline (a freeform shape), and the map is one group.
+  var US_MAP = {
+AK:["M99 570l4 -5l2 4l-4 1zM93 575l6 -4h4l2 2l-6 5l-2 -1l-2 3zM44 547l2 1l4 -1l1 4l-3 1l-4 -3zM31 601l3 -1l4 -4l2 2l-3 3zM51 505l8 -4l7 -1l-1 4l6 1l3 -1l-3 -4l2 -2l-3 -1l-3 -1l-1 -4l-3 -4l-4 -4l3 -3h5l3 -2l2 -4l3 -4h3l4 -3h5l2 -3l4 1l-1 3l2 -3l1 3l4 -1l2 1v1l3 2l5 -1l5 2h5l4 1l3 -2l7 2l14 73h4l4 -2v2l7 5l2 3l3 -3v-4l2 -2l3 1l4 5l5 2l9 8l2 4l1 -1l7 2l3 6l-2 5l-3 -3l-5 -1l-1 -3l-3 -1l1 -2l-2 -3l-5 -2l-1 -3l-4 -3h-2l-5 -6l4 7l-2 -1l-5 2l-6 -3l-2 -2l-7 -2v-3l-2 2l-5 -1h-5l-6 2l-6 -3l-4 2l3 -3l-2 -1l-2 -2l-5 2l2 6l-2 1h-5l-3 5l-1 -2l-1 3h-4l4 -4l-2 1l-2 -1l2 -4v-3l4 -3l1 1v-3h-3l-3 2l-4 7l-2 4l-4 3v2l4 2l-4 3v2l-6 3l-4 4v2l-4 1l-2 3l-3 1l2 1l-2 2h-6l-4 3h-4v-1l-2 3l-5 1l-3 2l-6 1l2 -3l8 -2l5 -5h4l5 -4l4 -2l6 -6l1 -7l2 -3l-4 2l-2 -2l-2 3l-3 -4l-2 -1l-6 3l-1 -6l2 -1l-2 -6l-1 1l-5 1l-5 -6l1 -2v-4l-1 1l-2 -4l2 -2l1 -2l3 -4l2 -3l2 -1l3 2l3 -3h4l2 -2l-1 -6l2 -1l-1 -2l-5 3l-7 -2l-2 1l-4 -2l-1 -5h2l-4 -2zM25 603l4 -4l2 1zM34 518h5l3 3l3 1l-4 2l-2 -3zM-6 601h5l-1 2zM-15 601l2 -2l2 2zM-58 571l3 1l1 2l-2 -1zM185 573v-3h2l7 6l2 4l-6 -2l-1 -2zM180 567l2 -2l3 -1l4 3l-3 2h-2v3h-1zM175 556l1 1h2l3 6l-1 3l-1 -3zM174 565l1 -2h2l3 5l1 5l-5 -5l-1 -3zM169 561l3 -3l3 1l2 4l-3 -1v3z","Alaska",102,521],
+AL:["M642 384l24 -2l23 -2l13 47l3 5l3 4l-1 3l3 1l-3 3v3l-1 4l1 3l2 4l-1 8l3 4l-17 2l-33 3l-1 3l5 4v4l1 1l-2 4l-6 2l1 -2l-3 -2l-1 -6h-2l-1 4v4l-3 -1h-3l-4 -34l1 -42l1 -27z","Alabama",672,433],
+AR:["M523 355h27l36 -2l18 -1l1 2v3l-2 2l-3 5l12 -1l2 2l-3 1l2 1l-5 2l2 3l-3 2l-2 4h2l-2 3l2 2l-2 1l-2 3l1 2l-6 4l2 1l-2 2l1 4l-4 2l-1 5l-2 1l1 1l-3 2l2 4h-3l1 3h-3l2 2h-1v3l1 2l2 5l-2 1v2l-20 1l-34 1v-12l-3 -1l-3 1l-3 -2l1 -40z","Arkansas",564,391],
+AZ:["M145 407h4l2 -3l-1 -3l-3 -1l1 -5v-3l2 -1l2 -2l2 -3v-6l3 -3l3 -1l3 -2l-3 -4l-2 -7l-2 -4l1 -3l2 -3l-1 -8l1 -3v-4l1 -7h3h4l1 4h2l3 -4l3 -18l27 5l36 6l26 4l-14 96l-4 32l-39 -6l-36 -21l-30 -17l1 -3z","Arizona",208,382],
+CA:["M77 374l4 3v3l-2 -2v-2zM75 384l3 6l-2 -1zM57 355l6 4l-6 -2zM50 355h4l1 3h-3zM33 160l13 4l16 4l22 7l16 4l-17 67l74 110l-1 3l2 4l2 7l3 4l-3 2l-3 1l-3 3v6l-2 3l-2 2l-2 1v3l-1 5l3 1l1 3l-2 3h-4l-46 -5l1 -2l-2 -2l1 -4v-6l-2 -6l-5 -6l-6 -6l-1 1l-3 -2l1 -2l-1 -5h-6l-6 -5l-1 -3l-4 -5l-6 -1l-4 -3l-6 -1l-3 -4l3 -5l-1 -2l2 -5l-4 -3l1 -4l-2 -2l-2 -4l-1 -2l-5 -13l-2 -4v-4l1 -3h2l2 -3l-2 -5h-3l-4 -7l2 -3l-1 -4l1 -6h2v5l3 4l1 -5l-3 -3l1 -3l-1 -2l3 -1l-1 -3l-2 1v3l-3 3l-4 -5l-3 -2l2 -3l-1 -7l-3 -3l-1 -4l-3 -7l2 -2l-1 -8l3 -3v-7l-2 -7l-4 -5l1 -4l8 -9l1 -5l3 -6l1 -7l-2 -2z","California",78,294],
+CO:["M277 237l24 3l32 4l28 3l34 2l-1 23l-4 69l-18 -2l-23 -1l-34 -4l-36 -4l-14 -2l3 -26v-3l3 -19z","Colorado",332,290],
+CT:["M871 184l28 -6l3 13v2h-2l-7 4l-6 1h-2l-3 5l-4 2l-4 3l-2 -2l4 -3l-2 -2z","Connecticut"],
+DC:["M826 267l1 -2l3 2l-2 3z","District of Columbia"],
+DE:["M845 245l2 -3l4 -1l-1 3l-2 3l1 2l4 3l2 6l5 5h1l3 7l-11 3z","Delaware"],
+FL:["M794 604l1 -2l5 -4l5 2l-9 4zM711 469l3 6l52 -4l1 5h3v-5l-1 -5l1 -1l5 1h5l3 10l4 10l8 14l11 14l-1 3l2 5l5 7l3 8l5 7l2 5l1 5l1 21l-2 -1l-1 6l1 3v4l-3 2l1 -3h-2l-4 2l-7 2l-2 -2v-3l-4 -7l-3 -2l-5 -2l-1 1l-3 -4l-1 -5l-3 -3l-3 -2l-2 -2l1 -4l-1 -3l-1 1l1 3l-2 1l-5 -6l-4 -5l-3 -3l5 -10l-6 -3l-1 2l3 2v3h-2l-3 -4v-6l2 -6v-4l-3 -5l1 -2l-3 -5h-4l-1 1l-1 -3h-2l-1 -3l-4 -2l-1 -3l-2 -1l-3 -3l-8 -4h-5l-1 3v2h-3l-7 5l-4 1l2 3l-4 -2l-3 1l1 -3l-2 -3l-10 -6l-7 -2h-8l-13 3l-4 1l2 -4l-1 -1v-4l-5 -4l1 -3l33 -3z","Florida",789,539],
+GA:["M689 380l24 -3l13 -2l9 -1v1l-3 4v3l3 1l3 2h3l3 6l4 5l7 4l1 2l3 1l3 3v2l2 1l2 3l5 2l2 4l1 5l3 1l4 6v3l5 2l1 1l-4 6l-1 5l-1 4v3l-1 2l-2 4l2 1v5h-5l-5 -1l-1 1l1 5v5h-3l-1 -5l-52 4l-3 -6l-3 -4l1 -8l-2 -4l-1 -3l1 -4v-3l3 -3l-3 -1l1 -3l-3 -4l-3 -5z","Georgia",736,428],
+HI:["M305 584l3 -2l2 -4l-1 -3l1 -2l5 3l7 2l4 4v2h2v3l4 2l-3 4l-4 2h-3l-5 3l-3 5l-5 -3l-1 -1l1 -5l-1 -4zM292 558l2 -3l2 4l4 -2l6 4l-1 3l-6 2l-2 -1v-4l-4 -1zM292 567l2 -2l1 2zM284 558h3l2 2l-3 2zM279 554l1 -3l11 2l-3 2l-5 -1zM258 543h3l4 -3l2 4v2l4 3l-3 1l-2 -1h-4zM226 533l1 -3l4 -2l4 1l2 1l-1 4l-3 2h-3zM216 537l4 -4v3l-3 2z","Hawaii"],
+IA:["M491 195h25l33 -1l27 -1l1 3l2 3l-2 3l1 5l2 4l6 1l1 3l3 3l2 4l4 2v7l-2 2l-1 3l-5 3l-6 2l-1 4l3 3v4l-3 3v3l-4 1l-1 6l-5 -5l-26 1l-24 1h-19l-2 -3l1 -4l-2 -10v-3l-3 -2l1 -6l-3 -4l-3 -12l-3 -6l1 -2l1 -4l1 -2l-3 -4l1 -2l-1 -3z","Iowa",540,227],
+ID:["M171 102v-4l-1 -4l1 -2l7 -33l6 -23l14 3l-5 23l4 7l-1 3l1 2h-2l3 4l3 2l1 2l3 6v2l3 3l1 3h4l-2 6l-3 7l1 5l-3 1v2l-1 3l3 3l4 -2l3 -3l2 3l-1 2l1 4l2 5l1 2l-1 5l2 2l3 1l1 7l2 3l1 -3l7 2l2 -3l2 2h4l7 1v-3h3l1 3l2 3l-9 56l-47 -8l-2 -1l-38 -8l-11 -2l9 -41l4 -7l-1 -2l-3 -1l-1 -3l5 -7l2 -1l3 -3v-2l2 -2l2 -4l5 -6l-1 -3l-3 -2z","Idaho",199,165],
+IL:["M576 265l1 -6l4 -1v-3l3 -3v-4l-3 -3l1 -4l6 -2l5 -3l1 -3l2 -2v-7l-4 -2l-2 -4l-3 -3l31 -1l16 -2v5l3 5l3 8l5 54l-2 4l3 5l1 5l-2 2v3l-3 6l-3 1l1 2l-2 5l1 3l-2 3l2 4l-7 3v2l2 3l-2 2l-8 -3l-3 4v2l-2 -2v2l-5 -7l1 -1l-2 -4l1 -2l-2 -2l-5 -4l-1 1l-8 -8v-4l2 -6l-1 -2l2 -3l-6 -2l-2 2l-2 -1l-1 -7l-6 -4l-1 -2l-5 -4l-2 -7l-1 -5z","Illinois",615,270],
+IN:["M640 230l2 1h5l5 -3l17 -2l17 -2v1l2 22l5 37l-2 2l3 6h-3l-3 3l-3 -1l-2 1l1 3l-3 3l-1 3l-3 1l-1 7l-2 1l-4 -2l-1 -2l-3 3v2l-4 1l-1 -2l-4 3l-2 3l-4 -3l-3 1l-1 -2v3l-2 -1l-6 3l-1 -3l2 -5l-1 -2l3 -1l3 -6v-3l2 -2l-1 -5l-3 -5l2 -4z","Indiana",665,269],
+KS:["M394 272l28 1l21 1l22 1h30h15l2 2l4 1l1 3h-1l-2 5l3 3l2 4l3 2l1 49h-34h-30l-26 -1l-43 -2z","Kansas",456,309],
+KY:["M621 340v-2l3 -4l8 3l2 -2l-2 -3v-2l7 -3l-2 -4l2 -3l6 -3l2 1v-3l1 2l3 -1l4 3l2 -3l4 -3l1 2l4 -1v-2l3 -3l1 2l4 2l2 -1l1 -7l3 -1l1 -3l3 -3l-1 -3l2 -1l3 1l3 -3h3l-3 -6l2 -2l1 -1l2 2l3 -2l2 2l3 5h6l4 3l2 -2l5 1h2l2 -3l2 -1l1 4h3l2 3l1 3v4l2 4l4 3l1 2l3 2h3l-6 7l-6 5v1l-2 2v2l-3 2l-1 2l-9 5l-16 2h-12l-11 2h-9l-27 3l-4 -1v5l-22 1h-2v-2h3l2 -9z","Kentucky",694,323],
+LA:["M629 498l2 -3l1 3zM577 511h3l3 1l-3 2zM535 435l34 -1l20 -1l2 3l-1 3h2l-2 2l3 1l-2 3l2 1l1 2h1l-5 3l3 2l-1 2l-2 2l-3 4l-1 5l-2 1l1 3h-2l2 3h-3l2 5l-1 1l23 -1l13 -1l-1 8l3 4l1 4l3 2l-6 4v2h2l1 2l2 -1v-2l2 -2l2 3l2 -2l1 3l-3 1l-1 4l-4 1v2l3 3l6 1l3 4l-1 4l-2 -2l-3 4l2 -5l-7 -3l-4 -1l-7 6l-3 -5l-2 -1l-3 3l-4 5l-3 -3h-3l-5 -3l2 -1l3 2l-1 -2l-2 -2l-2 1v-2l-2 1l-2 -4h-2v-2l-5 1v-3l-5 2h-1l2 3l-4 2l-6 -1l-11 -4h-6l-6 1l-1 1l-2 -3l4 -5v-9l-1 -3l4 -6v-4l-1 -4l-3 -7l-2 -2v-4l-5 -5z","Louisiana",568,480],
+MA:["M928 187l5 -1l-2 2zM918 188l3 -4l4 3zM871 168l13 -3l19 -4l3 -5l3 -1l2 4l3 -1l-5 8l1 3l2 -2l5 4v3h2l3 4l3 -1l4 -2l-1 -4l3 6l-6 3l-2 2l-3 1l-2 -4v3l-3 1v2l-2 1l-2 -3l-1 -1l-2 -1l-3 -5l-6 2l-28 6v-1z","Massachusetts"],
+MD:["M782 257l34 -6l29 -6l8 28l11 -3l-1 10l-7 3l-1 1l-3 1l-1 -3l-3 -6v3h-2l-5 -5l1 -3h4l-6 -3l2 -2l-1 -2l-2 2v-4l2 1l1 -3l-3 -1l1 -4l2 -2l1 -4l-2 1l1 2l-3 2h-2l1 3l-2 2l2 4l-2 6l2 5l3 3l-1 2l3 3l1 2l-3 -1l-3 -2l-3 1l-4 -2l-1 -2l-3 2l-2 -2l2 -4l1 -4l2 -3l-3 -2l-1 2l-4 -2l-4 -1l1 -2l-2 -2h-3l-3 -4v-2l-3 1l-3 -2l-3 2l-2 3l-3 1l-3 -2l-2 5l-2 -1l-3 5l-3 3z","Maryland"],
+ME:["M931 119l2 -2l1 2l-2 2zM910 150l-2 -1l-1 -2l-2 -2l-10 -31l-4 -12l1 -1l3 2l-1 -4h3l-2 -3l2 -4l2 -2l-1 -1l2 -3l-2 -3v-7l2 -2l-1 -7l7 -19h3l1 3l2 1l5 -3l3 -1v-2h3l7 4l7 24l2 6l3 1l3 -1v3l1 1v3l3 3l3 -2l5 7l-2 4h-2l-3 7l-3 -2l-1 3l-2 1v2h-3v3l-2 1l-2 -4l-2 1l2 4l-1 3l-1 -3l-3 -1l-1 -4l-1 4l-1 6l1 3l-4 3l-2 2l-3 1l-1 3l-2 -1l-3 3v3l-2 1v4l-2 1z","Maine",919,93],
+MI:["M677 131l5 1l-2 1zM662 139l1 -4l2 3zM652 228l3 -4l2 -5l2 -3l1 -6v-5l-1 -7l-3 -7l-4 -7l2 -4l-2 -5l3 -7v-8l2 -1v-4l4 -1l3 -6l1 3l-1 5l1 1l1 -5v6l2 -5l-1 -7l3 -3l4 -1l-2 -1l-2 -3l3 -4l2 -1l6 2h4l2 3h3l5 2h2l4 7l-2 -1v3l2 1l1 4v8l-3 4v3l-4 2l-1 6l1 2l4 1l6 -9l5 -3l3 1l2 3l3 9l1 5l3 5l-1 9l-2 2v-3h-3l-1 8l-3 3l1 3l-3 4l-2 5l-22 3v-1l-17 2zM601 92l1 -1l8 -5l4 -2l-4 5l-5 2l-2 2zM585 123l6 -3l3 -3l7 -1l4 -4h2l1 -3l5 -3l2 -3l4 -2l5 -1l2 1l-4 1l-4 6l-3 4l1 5l3 -5h5l4 2l5 7h11l-1 -2l2 2l2 -3l5 -3l10 -1l3 -2l5 -1l-1 2l1 5h3l3 -1v1l3 -2l4 -1l1 6l-2 2l4 1l1 2h3v-2h3l2 2l-1 2l-9 -1l-4 2l-5 -2l-1 2l1 2h-2l-3 -3l-5 -1h-3l-2 3l-4 2l-4 -1l-2 2l-1 2l-5 4l3 -5l-4 1l-1 3l-5 2l-6 13l-2 -2l1 -3l-4 -1l1 -3v-4l-3 -2l-3 -1l1 -2l-11 -1l-5 -3l-17 -3l-2 -4z","Michigan",690,199],
+MN:["M479 71h32v-9h3l2 2l2 9v3l2 1h4l1 1l6 1l1 2l4 -1v-1l4 -1l4 1l4 1v2h3l2 5l2 -3h3l1 2l4 1l3 4l5 -1l4 -4h2l1 3l10 -1l4 3l2 -1l2 1l-6 3l-8 4l-3 1l-6 7l-3 3l-5 5l-6 5l1 2l-1 -1l-3 2v14v1l-5 2l-3 5v3h1l2 3l-1 4v8l-1 4l5 4h3l2 3l5 2l1 3l5 4h2l4 5l-1 4l1 2l-27 1l-33 1h-25v-41l-4 -2l-3 -5l5 -5v-2v-9l-2 -3l-1 -5v-5l-1 -1v-15l-4 -13v-2v-6v-3z","Minnesota",519,136],
+MO:["M502 262h19l24 -1l26 -1l5 5l-1 3l1 5l2 7l5 4l1 2l6 4l1 7l2 1l2 -2l6 2l-2 3l1 2l-2 6v4l8 8l1 -1l5 4l2 2l-1 2l2 4l-1 1l5 7v-2l2 2h1l-2 9h-3v2h-1l-1 1v2l-3 4l2 2l-2 3l-12 1l3 -5l2 -2v-3l-1 -2l-18 1l-36 2h-27v-11l-1 -49l-3 -2l-2 -4l-3 -3l2 -5h1l-1 -3l-4 -1l-2 -2l-2 -1l-1 -4l-2 -2z","Missouri",560,312],
+MS:["M589 433v-2l2 -1l-2 -5l-1 -2v-3h1l-2 -2h3l-1 -3h3l-2 -4l3 -2l-1 -1l2 -1l1 -5l4 -2l-1 -4l2 -2l-2 -1l6 -4l-1 -2l16 -1l23 -2l2 2l-1 27l-1 42l4 34l-2 2l-8 -1l-3 1l-6 3l-2 1l-3 -2l-1 -4l-3 -4l1 -8l-13 1l-23 1l1 -1l-2 -5h3l-2 -3h2l-1 -3l2 -1l1 -5l3 -4l2 -2l1 -2l-3 -2l5 -3h-1l-1 -2l-2 -1l2 -3l-3 -1l2 -2h-2l1 -3z","Mississippi",618,437],
+MT:["M198 39l12 3l23 4l32 6l38 5l23 3l14 2l24 3l13 1l-6 68l-2 22l-30 -3l-41 -5l-35 -5l-5 -1l-2 12l-2 -3l-1 -3h-3v3l-7 -1h-4l-2 -2l-2 3l-7 -2l-1 3l-2 -3l-1 -7l-3 -1l-2 -2l1 -5l-1 -2l-2 -5l-1 -4l1 -2l-2 -3l-3 3l-4 2l-3 -3l1 -3v-2l3 -1l-1 -5l3 -7l2 -6h-4l-1 -3l-3 -3v-2l-3 -6l-1 -2l-3 -2l-3 -4h2l-1 -2l1 -3l-4 -7z","Montana",287,100],
+NC:["M863 350l1 -2l7 -5v1l-4 2zM756 334l24 -3l32 -5l28 -6l19 -4l2 4l5 8h-2l-4 -9l-4 -2l3 3l3 5l-3 -2l-1 2l-4 -2l3 3l-4 2l-2 2h-4v3l5 -2h1l3 -1h3v2l1 4v-6l3 -1l3 6l-1 2l-2 1l-3 6l-7 1l-2 -3l1 3l-9 -2l11 4l-1 5l-3 3l-4 -2v2l4 1l5 -3l4 1l-2 2l-1 4l6 -10h1l-5 7l-2 5v-1h-5l-7 4l-6 5l-4 7l-1 7l-4 -1l-6 3l-25 -18l-20 3l-1 -2l-3 -4l-2 2v-2l-23 2l-3 1l-11 6l-9 1l-13 2v-6l4 -2v-3l4 -3l5 -1l7 -6h2l3 -6l2 -2l1 3l2 -2l1 -2l3 -2l4 1l1 -5l3 -3z","North Carolina",801,350],
+ND:["M377 66l27 2l17 1l24 1l34 1l2 7v3v6v2l4 13v15l1 1v5l1 5l2 3v9l-29 -1h-17l-31 -2l-20 -1l-21 -2z","North Dakota",429,104],
+NE:["M365 201l39 3l30 1l23 1v1l9 5l1 -2h3h6l3 2h3l5 3l1 3h3l3 12l3 4l-1 6l3 2v3l2 10l-1 4l2 3l3 6l2 2l1 4l2 1h-15h-30l-22 -1l-21 -1l-28 -1l1 -23l-34 -2z","Nebraska",434,239],
+NH:["M886 111l1 -6l1 -2l3 1v-2l4 12l10 31l2 2l1 2l2 1l-1 5l-3 1l-3 5l-19 4l-2 -2v-5l-1 -12l2 -13l-1 -5l3 -2l3 -4v-3l-2 -2l1 -4z","New Hampshire"],
+NJ:["M849 246l1 -2l1 -3l4 -2v-2l6 -6l-7 -5l-1 -2l-2 -1l-1 -2l2 -5l-2 -2l3 -5v-3l2 -2l15 5l-1 7v1l-2 1v3v1h4l1 3l1 12l-3 10l-3 4l-2 6l-2 2v-5l-3 -1l-1 1l-7 -4h-2z","New Jersey"],
+NM:["M265 328l14 2l36 4l34 4l23 1v12h-1l-4 57l-2 22l-2 23l-24 -2l-21 -2l-23 -2l-1 2l2 3l-32 -4l-1 10l-16 -2l4 -32z","New Mexico",311,393],
+NV:["M100 179l22 6l27 6l11 2l38 8l-22 110v2l-3 18l-3 4h-2l-1 -4h-4h-3l-1 7v4l-1 3l1 8l-2 3l-74 -110z","Nevada",142,252],
+NY:["M869 217l-1 3l-1 1v-3zM768 200l8 -8l2 -3l2 -3l-2 -4h-1l-2 -6l9 -4l8 -2h4l4 2l2 -1l7 -2l4 -2l4 -5l2 -1v-3l-2 -4l2 -2l-4 -2v-4l5 -5l2 -3l7 -10l3 -4l13 -3l13 -3l1 4v5l2 2l1 5l-1 6l3 5v4l2 -1l1 2l3 16l1 2v15v1l3 17l2 2l-4 3l2 2v3l3 -3h5l1 -1l8 -3l4 -4l5 2l3 -3l-7 7l-10 7l-8 4l-4 1l-2 1l-3 -3l1 -7l-15 -5l-1 -1l-4 -1l-3 -5l-2 -3l-2 1l-2 -3l-16 4l-25 5l-31 5z","New York",842,172],
+OH:["M686 225l22 -3l7 2l3 1l1 -1l4 3h3l7 -4h5l4 -5l6 -5l8 -4l5 30l-2 2l1 2l1 4l-2 5l1 4l-2 7l-4 6l-2 2l-2 -2l-2 4h-2l-1 5l1 3l-2 2l-3 -3l-2 5l1 5h-2v3l-5 2l-2 -3h-3l-1 -4l-2 1l-2 3h-2l-5 -1l-2 2l-4 -3h-6l-3 -5l-2 -2l-3 2l-2 -2l-1 1l-5 -37z","Ohio",724,253],
+OK:["M372 339l18 2l43 2l26 1h30h34v11l4 26l-1 40l-6 -3l-3 -2l-5 -3l-1 2h-4l-1 -1l-5 2l-2 -1l-6 3l-1 2l-2 -2l-5 -3l-1 2l-3 -3l-5 5l-1 -5l-3 3l-1 -2l-4 -2l-4 3l-2 -1l1 -2l-3 -1l-1 -2l-4 -1l-2 2l-2 -2h-3l-4 -2h-4l-1 -3l-3 -3v2l-3 -1l-3 1l-3 -4l-2 -1l2 -44l-30 -2l-24 -1z","Oklahoma",485,378],
+OR:["M71 70l3 4h3l3 3v3l-1 7l7 4l8 -1l4 1l5 2v2l9 -1l2 1l4 1l5 -1h8l5 1l3 -1l32 7l1 5l3 2l1 3l-5 6l-2 4l-2 2v2l-3 3l-2 1l-5 7l1 3l3 1l1 2l-4 7l-9 41l-27 -6l-22 -6l-16 -4l-22 -7l-16 -4l-13 -4l-2 -3l1 -8l2 -3l-1 -6l2 -3l3 -6l5 -5l2 -5l8 -18l1 -4l3 -7l4 -11l1 -6l2 -1v-5l1 2z","Oregon",103,134],
+PA:["M756 209l3 -2l9 -7l1 6l31 -5l25 -5l16 -4l2 3l2 -1l2 3l3 5l4 1l1 1l-2 2v3l-3 5l2 2l-2 5l1 2l2 1l1 2l7 5l-6 6v2l-4 2l-4 1l-2 3l-29 6l-34 6l-17 3l-4 -21z","Pennsylvania",806,226],
+RI:["M911 183l2 3l-4 2zM902 193v-2l-3 -13l6 -2l3 5l2 1l-3 -1l1 7v3z","Rhode Island"],
+SC:["M735 374l11 -6l3 -1l23 -2v2l2 -2l3 4l1 2l20 -3l25 18l-3 2l-4 4l-3 7l1 5l-3 2v2h-3l-1 3l-4 4l-2 4l-4 2l-2 2l-3 1l1 3l-3 2l-4 4v2l-5 -2v-3l-4 -6l-3 -1l-1 -5l-2 -4l-5 -2l-2 -3l-2 -1v-2l-3 -3l-3 -1l-1 -2l-7 -4l-4 -5l-3 -6h-3l-3 -2l-3 -1v-3l3 -4z","South Carolina",779,392],
+SD:["M369 156l2 -22l21 2l20 1l31 2h17l29 1v2l-5 5l3 5l4 2v41h-3l1 3l-1 2l3 4l-1 2l-1 4l-1 2l3 6h-3l-1 -3l-5 -3h-3l-3 -2h-6h-3l-1 2l-9 -5v-1l-23 -1l-30 -1l-39 -3z","South Dakota",430,172],
+TN:["M612 363l2 -3l-2 -2l3 -4v-2l1 -1h1h2l22 -1v-5l4 1l27 -3h9l11 -2h12l16 -2l7 -1l29 -4l-1 4l-3 3l-1 5l-4 -1l-3 2l-1 2l-2 2l-1 -3l-2 2l-3 6h-2l-7 6l-5 1l-4 3v3l-4 2v6l-24 3l-23 2l-24 2l-23 2l-16 1l2 -3l2 -1l-2 -2l2 -3h-2l2 -4l3 -2l-2 -3l5 -2l-2 -1l3 -1z","Tennessee",673,361],
+TX:["M372 351l24 1l30 2l-2 44l2 1l3 4l3 -1l3 1v-2l3 3l1 3h4l4 2h3l2 2l2 -2l4 1l1 2l3 1l-1 2l2 1l4 -3l4 2l1 2l3 -3l1 5l5 -5l3 3l1 -2l5 3l2 2l1 -2l6 -3l2 1l5 -2l1 1h4l1 -2l5 3l3 2l6 3l3 2l3 -1l3 1v12v23l5 5v4l2 2l3 7l1 4v4l-4 6l1 3v9l-4 5l2 3l-6 1l-13 6l5 -4l-5 1l2 -5h-3l-1 2h-2l-1 3l3 1v4l-4 4l-1 1l7 -6l1 1l-6 4l-7 7l-18 9l-3 3l-4 2l-5 4l-5 7l-3 7l-2 4v8l3 13l1 5l-2 -10l-2 -6v-7l2 -9l3 -6l5 -8l6 -4l3 -1v-1l-5 2l-2 -2v4l-3 2l-2 -1l-3 2h3l-3 6l-1 -1h-4l1 3l3 1l-4 8l-2 1v-2l-2 3h4l-1 10l1 7l3 5l-1 4l3 1v2l-4 1v2l-3 -1l-3 -4h-3h-7l-2 -1l-5 -3l-4 -1l-3 -3l-6 -1l-3 -10l-3 -4v-3l-1 -3l1 -5l-3 -3l-2 -1l-3 -3l-1 -4l-3 -4l-4 -3l-2 -7l-4 -8l-1 -4l-2 -3l-4 -3l-1 -3l-4 -2l-1 -2l-3 -3h-4l-3 -1h-5l-5 -2l-1 2l-2 -1l-4 1l-2 5l-3 7h-2l-2 5l-4 -1l-2 -1l-3 -3l-3 -1l-2 -2l-3 -1l-3 -2l-2 -3h-1l-4 -4l-2 -6v-6l-3 -5v-4l-2 -3l-7 -5l-4 -5l-3 -2l-3 -5l-4 -3l-3 -6l-3 -2l-2 -3l1 -2l23 2l21 2l24 2l2 -23l2 -22l4 -57z","Texas",434,469],
+UT:["M198 201l2 1l47 8l-3 22l9 2l24 3l-6 43l-3 19v3l-3 26l-26 -4l-36 -6l-27 -5v-2z","Utah",227,269],
+VA:["M855 284l1 -1l7 -3l-2 4l-1 1l-2 3l1 4l-2 9l-2 3l-2 -3v-9l3 -6zM747 313v2l3 4l3 1h2l3 -4l3 2l6 -3v-2l2 1l4 -4l1 2l3 -3l1 -3l-2 -1l1 -3l3 -5v-3l4 -7v-4l3 2l3 1l2 -3l2 -8l3 2l6 -11v-7l10 6l1 -5h3l2 2l-1 2l4 1l4 2l2 3l-1 4l-2 1v4l1 2l4 -2l2 4h6l2 2l6 2l-1 2l1 4l-4 1l-2 -3l-2 -1l4 5h4l2 4v1l-3 -1l1 4l3 2l-2 4l-4 -3l-1 -2l-2 1l6 5h3v-2h6l4 8l-19 4l-28 6l-32 5l-24 3l-29 4l-7 1l9 -5l1 -2l3 -2v-2l2 -2v-1l6 -5z","Virginia",809,311],
+VT:["M858 118l16 -4l12 -3l1 2l-1 4l2 2v3l-3 4l-3 2l1 5l-2 13l1 12v5l2 2l-13 3l-1 -2l-3 -16l-1 -2l-2 1v-4l-3 -5l1 -6l-1 -5l-2 -2v-5z","Vermont"],
+WA:["M95 31l4 -3v3l-3 1l1 1v4l1 -2l2 2l-2 2l-2 -3l1 -3zM91 21l5 -1l2 2l-2 5l-4 -3zM184 36l-6 23l-7 33l-1 2l1 4v4l-32 -7l-3 1l-5 -1h-8l-5 1l-4 -1l-2 -1l-9 1v-2l-5 -2l-4 -1l-8 1l-7 -4l1 -7v-3l-3 -3h-3l-3 -4l-2 -1h-3l-2 -4l2 -5v3h2l-1 -3l3 -1l-4 -2l1 -2l4 -1l-4 -3v-6v-2l1 -9l-2 -4v-7l2 -2l2 -1l7 7l4 1l6 3h2l1 2h5l-1 2l1 3l-3 3l-4 3l4 -1v-1l5 -3l-2 7l-1 1l-2 5h4v-5l2 -5l4 -4l-1 -5l-3 1l1 -2l2 -1l-3 -6l3 2l1 -6l-3 -2v-4l1 -1l15 5l25 6l26 7z","Washington",124,59],
+WI:["M579 113h4l-2 2zM560 121h3l5 -1l8 -5l4 1l-2 3l-1 4l3 -3l5 3l3 1l2 4l17 3l5 3l11 1l-1 2l3 1l3 2v4l-1 3l4 1l-1 3l2 2v3l-3 1l-2 5l-1 4h2l3 -3l2 -4l3 -2l2 -6l4 -3l-1 4l-2 3l-4 10v5v4l-2 2l-1 5l1 4l-1 3l-1 7l1 6l2 5v6l-16 2l-31 1l-1 -3l-6 -1l-2 -4l-1 -5l2 -3l-2 -3l-1 -3l-1 -2l1 -4l-4 -5h-2l-5 -4l-1 -3l-5 -2l-2 -3h-3l-5 -4l1 -4v-8l1 -4l-2 -3h-1v-3l3 -5l5 -2v-1v-14l3 -2z","Wisconsin",595,167],
+WV:["M733 295l5 -2v-3h2l-1 -5l2 -5l3 3l2 -2l-1 -3l1 -5h2l2 -4l2 2l2 -2l4 -6l2 -7l-1 -4l2 -5l-1 -4l-1 -2l2 -2l4 21l17 -3l2 12l3 -3l3 -5l2 1l2 -5l3 2l3 -1l2 -3l3 -2l3 2l3 -1v2l3 4l-1 5l-10 -6v7l-6 11l-3 -2l-2 8l-2 3l-3 -1l-3 -2v4l-4 7v3l-3 5l-1 3l2 1l-1 3l-3 3l-1 -2l-4 4l-2 -1v2l-6 3l-3 -2l-3 4h-2l-3 -1l-3 -4v-2h-3l-3 -2l-1 -2l-4 -3l-2 -4v-4z","West Virginia",763,291],
+WY:["M369 156l-4 45l-4 46l-28 -3l-32 -4l-24 -3l-24 -3l-9 -2l3 -22l9 -56l2 -12l5 1l35 5l41 5z","Wyoming",308,195]
+};
+  var MAP_W = 975, MAP_H = 610, OUTLINE = "8C8FA3", WHITE = "FFFFFF", TILE = "EEEEF5", NO_RATE = "F5F5FA";
+  var COUNT_FILL = ["D6E6F3", "9CC3E3", "4F95CC", "00539E"], DARK = { "4F95CC": 1, "00539E": 1, "00857C": 1, "EB008C": 1 };
+  // the rate map's colours: the Snapshot view's
+  var RATE_BINS = [
+    { fill: "00857C", label: "Down 5.0% or more", has: function (v) { return v <= -5; } },
+    { fill: "8CCBC6", label: "Down less than 5.0%", has: function (v) { return v < 0; } },
+    { fill: "C9CBD6", label: "No change", has: function (v) { return v === 0; } },
+    { fill: "F5A3D0", label: "Up less than 5.0%", has: function (v) { return v < 5; } },
+    { fill: "EB008C", label: "Up 5.0% or more", has: function () { return true; } }];
+  var SHAPES = null;
+  // an SVG path of M, L, H and V commands (either case) and Z, as closed polygons of [x, y]
+  function polysOf(d) {
+    var out = [], cur = null, x = 0, y = 0, cmd = "", toks = String(d).match(/[MLHVZmlhvz]|-?\d*\.?\d+/g) || [], i = 0;
+    var take = function () { return +toks[i++]; };
+    var end = function () { if (cur && cur.length >= 3) out.push(cur); cur = null; };
+    while (i < toks.length) {
+      if (/[A-Za-z]/.test(toks[i])) { cmd = toks[i++]; if (cmd === "z" || cmd === "Z") end(); continue; }
+      if (cmd === "M" || cmd === "m") { end(); if (cmd === "M") { x = take(); y = take(); } else { x += take(); y += take(); } cur = [[x, y]]; cmd = cmd === "M" ? "L" : "l"; continue; }
+      if (!cur) cur = [[x, y]];
+      if (cmd === "L") { x = take(); y = take(); } else if (cmd === "l") { x += take(); y += take(); }
+      else if (cmd === "H") x = take(); else if (cmd === "h") x += take();
+      else if (cmd === "V") y = take(); else if (cmd === "v") y += take();
+      else { i++; continue; }
+      cur.push([x, y]);
+    }
+    end();
+    return out;
+  }
+  function shapes() {
+    if (SHAPES) return SHAPES;
+    SHAPES = {};
+    Object.keys(US_MAP).forEach(function (c) {
+      // points outside the 975 x 610 drawing (Alaska's far islands) are drawn at its edge, as the page's map clips them
+      var e = US_MAP[c], ps = polysOf(e[0]).map(function (p) { return p.map(function (pt) { return [Math.max(0, Math.min(MAP_W, pt[0])), Math.max(0, Math.min(MAP_H, pt[1]))]; }); }), xs = [], ys = [];
+      ps.forEach(function (p) { p.forEach(function (pt) { xs.push(pt[0]); ys.push(pt[1]); }); });
+      SHAPES[c] = { polys: ps, name: e[1], lx: num(e[2]) ? e[2] : null, ly: num(e[3]) ? e[3] : null,
+        box: { x0: Math.min.apply(null, xs), y0: Math.min.apply(null, ys), x1: Math.max.apply(null, xs), y1: Math.max.apply(null, ys) } };
+    });
+    return SHAPES;
+  }
+  function onMap(code) { return !!US_MAP[code]; }
+  function stateName(code) { return US_MAP[code] ? US_MAP[code][1] : flat(code) || "n/d"; }
+  // where a state's callout points: its label, or the middle of its outline
+  function anchorOf(code) { var s = shapes()[code]; return s.lx !== null ? [s.lx, s.ly, true] : [(s.box.x0 + s.box.x1) / 2, (s.box.y0 + s.box.y1) / 2, false]; }
+  // the map as one group: every state an outline filled by look(code) -> {fill, none, line}, then the state codes
+  // where the page's map puts them. States S&P returned nothing for are drawn last, so their dashed outline shows.
+  function mapGroup(x, y, w, look, name) {
+    var k = w / MAP_W, S = shapes(), parts = [], last = [], labels = [];
+    Object.keys(US_MAP).forEach(function (c) {
+      var sh = S[c], lk = look(c), b = sh.box;
+      var it = { type: "freeform", name: "State " + c, x: x + b.x0 * k, y: y + b.y0 * k, w: Math.max(0.01, (b.x1 - b.x0) * k), h: Math.max(0.01, (b.y1 - b.y0) * k),
+        pathW: b.x1 - b.x0, pathH: b.y1 - b.y0, fill: lk.fill,
+        paths: sh.polys.map(function (p) { return p.map(function (pt) { return [pt[0] - b.x0, pt[1] - b.y0]; }); }),
+        line: lk.none ? { color: OUTLINE, width: 0.75, dash: true } : lk.line || { color: WHITE, width: 0.75 } };
+      (lk.none ? last : parts).push(it);
+      if (sh.lx !== null) labels.push({ type: "text", name: "Label " + c, x: x + sh.lx * k - 0.22, y: y + sh.ly * k - 0.1, w: 0.44, h: 0.2, margin: 0, anchor: "ctr", autofit: false,
+        paras: [{ align: "ctr", runs: [{ text: c, size: 10, bold: true, color: DARK[lk.fill] ? WHITE : NAVY }] }] });
+    });
+    return { type: "group", name: name, items: parts.concat(last, labels) };
+  }
+  // the key under a map: a swatch and a label for each colour, perRow to a row
+  function mapKey(x, y, w, keys, perRow) {
+    var out = [], cw = w / perRow;
+    keys.forEach(function (it, i) {
+      var cx = x + (i % perRow) * cw, cy = y + Math.floor(i / perRow) * 0.27;
+      out.push({ type: "box", name: "Key " + it.label, x: cx, y: cy + 0.05, w: 0.24, h: 0.16, fill: it.fill, paras: [{ runs: [] }],
+        line: { color: it.dash || it.fill === WHITE || it.fill === NO_RATE ? OUTLINE : it.fill, width: 0.75, dash: !!it.dash } });
+      out.push({ type: "text", name: "Key text " + it.label, x: cx + 0.3, y: cy, w: cw - 0.34, h: 0.26, margin: 0, anchor: "ctr", autofit: false,
+        paras: [{ runs: [{ text: fitText(it.label, 10, cw - 0.36, false), size: 10, color: NAVY }] }] });
+    });
+    return { type: "group", name: "Map key", items: out };
+  }
+  // up to four keys on one row, more on two
+  function keyPerRow(n) { return Math.max(1, n <= 4 ? n : Math.ceil(n / 2)); }
+  // callouts for a few states: a magenta dot on the state, a thin line to a box in the column to the right of the map,
+  // the boxes in the order of the states from top to bottom
+  function callouts(mx, my, mw, list, cx, cw, top, bottom) {
+    var k = mw / MAP_W, items = [], bh = 0.58, gap = 0.12;
+    var pts = list.filter(function (c) { return onMap(c.code); }).map(function (c) { var a = anchorOf(c.code); return Object.assign({ ax: mx + a[0] * k + (a[2] ? 0.2 : 0), ay: my + a[1] * k }, c); })
+      .sort(function (a, b) { return a.ay - b.ay; });
+    if (!pts.length) return [];
+    var total = pts.length * bh + (pts.length - 1) * gap, mid = pts.reduce(function (s, c) { return s + c.ay; }, 0) / pts.length;
+    var y0 = Math.max(top, Math.min(bottom - total, mid - total / 2));
+    pts.forEach(function (c, i) {
+      var by = y0 + i * (bh + gap);
+      items.push({ type: "line", name: "Leader " + c.code, x1: c.ax, y1: c.ay, x2: cx, y2: by + bh / 2, color: "666666", width: 0.5 });
+      items.push({ type: "box", shape: "ellipse", name: "Dot " + c.code, x: c.ax - 0.045, y: c.ay - 0.045, w: 0.09, h: 0.09, fill: MAG, line: { color: WHITE, width: 0.5 }, paras: [{ runs: [] }] });
+      items.push({ type: "box", name: "Callout " + c.code, x: cx, y: by, w: cw, h: bh, fill: TILE, margins: [0.08, 0.06, 0.03, 0.03], anchor: "ctr",
+        paras: [{ after: 1, runs: [{ text: fitText(c.title, 12, cw - 0.16, true), size: 12, bold: true, color: c.color || NAVY }] }, { runs: [{ text: fitText(c.text, 10, cw - 0.16, false), size: 10, color: NAVY }] }] });
+    });
+    return [{ type: "group", name: "Callouts", items: items }];
+  }
+  // filings-count classes: one a count up to 4, else four equal steps (as on the Snapshot view)
+  function countBins(max) {
+    if (!(max > 0)) return [];
+    var bins = [];
+    if (max <= 4) for (var i = 1; i <= max; i++) bins.push({ lo: i, hi: i });
+    else { var st = Math.ceil(max / 4); for (var j = 0; j < 4; j++) if (j * st + 1 <= max) bins.push({ lo: j * st + 1, hi: Math.min(max, (j + 1) * st) }); }
+    return bins.map(function (b, i) { return { lo: b.lo, hi: b.hi, fill: COUNT_FILL[COUNT_FILL.length - bins.length + i], label: b.lo === b.hi ? cnt(b.lo) + (b.lo === 1 ? " filing" : " filings") : cnt(b.lo) + " to " + cnt(b.hi) + " filings" }; });
+  }
+  var MAP_X = L, MAP_Y = TOP + HDR + 0.05, MAP_WIDTH = 5.75, MAP_HEIGHT = MAP_WIDTH * MAP_H / MAP_W, CALL_X = MAP_X + MAP_WIDTH + 0.15, CALL_W = L + LW - CALL_X;
+  // the right-hand column of a map slide: a small table, then the takeaways under it
+  function mapSide(title, head, rows, widths, aligns, pts) {
+    var items = [header(title, LX2, TOP, RW)], n = Math.min(rows.length, 8);
+    items.push({ type: "table", x: LX2, y: TOP + HDR, colW: widths, rowH: 0.25, size: 11, name: "Table " + title, aligns: aligns, rows: [head].concat(rows.slice(0, n)) });
+    var y2 = TOP + HDR + (n + 1) * 0.25 + 0.3;
+    if (BOTTOM - y2 >= 1.2) items = items.concat(takeaways(pts, LX2, y2, RW, BOTTOM - y2));
+    return items;
+  }
+
   function fpStates(f, t) {
-    var rows = fpRows(f, "states"), T = f.totals || {}, items = [];
-    var tableRows = rows.slice(0, Math.floor((BOTTOM - TOP - HDR) / 0.25) - 1), bars = rows.slice(0, 12), star = false;
-    items.push(header("Filings by state" + (rows.length > bars.length ? " (top " + bars.length + " of " + rows.length + ")" : ""), L, TOP, LW));
-    var ch = Math.min(BOTTOM - TOP - HDR, 0.45 + bars.length * 0.3);
-    items.push({ type: "chart", kind: "bar", x: L, y: TOP + HDR, w: LW, h: ch, legend: "none", gap: 50, categories: bars.map(function (r) { return r.state; }),
-      series: [ser("Filings", bars.map(function (r) { return r.n; }), NAVY, { pointColors: { 0: MAG } })], labels: { format: "#,##0" }, catSize: 11, name: "Chart states" });
-    var y2 = TOP + HDR + ch + 0.25;
-    if (BOTTOM - y2 >= 1.3) items = items.concat(takeaways(pointsOf(t, "states"), L, y2, LW, BOTTOM - y2));
-    var tr = tableRows.map(function (r) {
+    var rows = fpRows(f, "states"), by = {}, items = [], star = false;
+    rows.forEach(function (r) { by[r.state] = r; });
+    var bins = countBins(Math.max.apply(null, [0].concat(rows.map(function (r) { return num(r.n) ? r.n : 0; }))));
+    var binOf = function (n) { return bins.filter(function (b) { return n >= b.lo && n <= b.hi; })[0] || bins[bins.length - 1]; };
+    items.push(header("Number of filings by state (not premium or exposure)", L, TOP, LW));
+    items.push(mapGroup(MAP_X, MAP_Y, MAP_WIDTH, function (c) { var r = by[c]; return r && r.n > 0 ? { fill: binOf(r.n).fill } : { fill: WHITE, none: true }; }, "Map of filings by state"));
+    items = items.concat(callouts(MAP_X, MAP_Y, MAP_WIDTH, rows.filter(function (r) { return onMap(r.state); }).slice(0, 4).map(function (r, i) {
+      return { code: r.state, title: stateName(r.state), text: cnt(r.n) + (r.n === 1 ? " filing, " : " filings, ") + cnt(r.rate) + " rate", color: i ? NAVY : MAG };
+    }), CALL_X, CALL_W, MAP_Y, MAP_Y + MAP_HEIGHT));
+    var keys = bins.map(function (b) { return { fill: b.fill, label: b.label }; }).concat([{ fill: WHITE, dash: true, label: "Nothing returned" }]);
+    items.push(mapKey(L, MAP_Y + MAP_HEIGHT + 0.15, LW, keys, keyPerRow(keys.length)));
+    var tr = rows.map(function (r) {
       var l = r.latest; if (l && !l.approved) star = true;
       return [r.state, cnt(r.n), cnt(r.rate), l ? pctCell(l.rate) + (l.approved ? "" : "*") : "n/d"];
     });
-    items.push(header("By state" + (rows.length > tableRows.length ? " (" + tableRows.length + " of " + rows.length + ")" : ""), LX2, TOP, RW));
-    items.push({ type: "table", x: LX2, y: TOP + HDR, colW: [0.7, 0.9, 1.15, 1.63], rowH: 0.25, size: 11, name: "Table states", aligns: ["l", "r", "r", "r"],
-      rows: [["State", "Filings", "Rate filings", "Latest rate (%)"]].concat(tr) });
-    items.push(fpSource(f, t, [star ? ["* Not approved: the figure may be the change asked for. Rate impacts are S&P's overall figure, not weighted by premium.", "* Not approved: may be the change asked for. Rate impacts unweighted.", "* Not approved: may be as asked."]
-      : ["Latest rate: S&P's overall figure for the newest filing with one, not weighted by premium.", "Latest rate: overall, not premium-weighted."], f.states && f.states.noState ? cnt(f.states.noState) + " with no state left out." : ""]));
-    return content(t, "states", T.states ? "Where it files" : "Where it files", items);
+    items = items.concat(mapSide("Most filings" + (rows.length > 8 ? " (8 of " + rows.length + ")" : ""), ["State", "Filings", "Rate filings", "Latest rate (%)"], tr, [0.7, 0.9, 1.15, 1.63], ["l", "r", "r", "r"], pointsOf(t, "states")));
+    var off = rows.filter(function (r) { return !onMap(r.state); }).length;
+    items.push(fpSource(f, t, [["Counts of filings, not premium or exposure.", ""],
+      star ? ["* Not approved: the figure may be the change asked for. Rate impacts are S&P's overall figure, not weighted by premium.", "* Not approved: may be the change asked for. Rate impacts unweighted.", "* Not approved: may be as asked."]
+        : ["Latest rate: S&P's overall figure for the newest filing with one, not weighted by premium.", "Latest rate: overall, not premium-weighted."],
+      f.states && f.states.noState ? cnt(f.states.noState) + " with no state left out." : "", off ? cnt(off) + " not on the map (territories)." : ""]));
+    return content(t, "states", "Where it files", items);
+  }
+
+  function fpRateMap(f, t) {
+    var rows = fpRows(f, "states"), by = {}, items = [];
+    rows.forEach(function (r) { by[r.state] = r; });
+    var used = {};
+    items.push(header("Latest approved overall rate change by state", L, TOP, LW));
+    items.push(mapGroup(MAP_X, MAP_Y, MAP_WIDTH, function (c) {
+      var r = by[c];
+      if (!r || !(r.n > 0)) { used.none = true; return { fill: WHITE, none: true }; }
+      if (!r.approved || !num(r.approved.rate)) { used.nrate = true; return { fill: NO_RATE, line: { color: OUTLINE, width: 0.75 } }; }
+      var b = RATE_BINS.filter(function (x) { return x.has(r.approved.rate); })[0]; used[b.fill] = true; return { fill: b.fill };
+    }, "Map of the latest approved rate change by state"));
+    var ap = rows.filter(function (r) { return r.approved && num(r.approved.rate); }).sort(function (a, b) { return Math.abs(b.approved.rate) - Math.abs(a.approved.rate) || (b.approved.date || "").localeCompare(a.approved.date || ""); });
+    items = items.concat(callouts(MAP_X, MAP_Y, MAP_WIDTH, ap.filter(function (r) { return onMap(r.state); }).slice(0, 4).map(function (r) {
+      return { code: r.state, title: stateName(r.state), text: pct(r.approved.rate) + ", " + fpDate(f, r.approved.date), color: r.approved.rate > 0 ? MAG : r.approved.rate < 0 ? TEAL : NAVY };
+    }), CALL_X, CALL_W, MAP_Y, MAP_Y + MAP_HEIGHT));
+    var keys = RATE_BINS.filter(function (b) { return used[b.fill]; }).map(function (b) { return { fill: b.fill, label: b.label }; });
+    if (used.nrate) keys.push({ fill: NO_RATE, label: "No approved rate" });
+    if (used.none) keys.push({ fill: WHITE, dash: true, label: "Nothing returned" });
+    items.push(mapKey(L, MAP_Y + MAP_HEIGHT + 0.15, LW, keys, keyPerRow(keys.length)));
+    var tr = ap.map(function (r) { return [r.state, pctCell(r.approved.rate), fpDate(f, r.approved.date), cellText(r.approved.toi, 1.7)]; });
+    items = items.concat(mapSide("Largest latest changes" + (ap.length > 8 ? " (8 of " + ap.length + ")" : ""), ["State", "Change (%)", "Published", "Type of insurance"], tr, [0.6, 1.0, 1.08, 1.7], ["l", "r", "r", "l"], pointsOf(t, "ratemap")));
+    items.push(fpSource(f, t, [["Each state's newest approved filing with an overall rate impact, any type of insurance; S&P's overall figure, not weighted by premium.", "Newest approved overall impact per state, not weighted by premium.", "Newest approved impact, unweighted."]]));
+    return content(t, "ratemap", "Latest approved rate change by state", items);
+  }
+
+  // ---------- the red, amber and green screen ----------
+  var LEVEL = { red: { word: "Red", fill: MAG }, amber: { word: "Amber", fill: "C46A1B" }, green: { word: "Green", fill: TEAL } };
+  // text cut to two lines of a cell
+  function twoLines(s, pt, w) { s = flat(s) || "n/d"; var inner = w - 0.26; return lineCount([{ text: s }], pt, inner) <= 2 ? s : fitText(s, pt, inner * 2 - 0.5, false); }
+  function fpSignals(f, t) {
+    var list = arr(f.signals).filter(function (s) { return s && LEVEL[s.level]; }).slice(0, 10), items = [];
+    var n = { red: 0, amber: 0, green: 0 }; list.forEach(function (s) { n[s.level]++; });
+    items.push(header("Screen of the filings: " + cnt(n.red) + " red, " + cnt(n.amber) + " amber, " + cnt(n.green) + " green", L, TOP, W));
+    var cw = [2.6, 0.95, W - 3.55], rowH = [0.3];
+    var rows = list.map(function (s) {
+      rowH.push(lineCount([{ text: twoLines(s.evidence, 11, cw[2]) }], 11, cw[2] - 0.26) > 1 || lineCount([{ text: flat(s.title), bold: true }], 11, cw[0] - 0.26) > 1 ? 0.46 : 0.3);
+      return [{ text: cellText(s.title, cw[0], true), bold: true }, { text: LEVEL[s.level].word, bold: true, color: "FFFFFF", fill: LEVEL[s.level].fill }, twoLines(s.evidence, 11, cw[2])];
+    });
+    items.push({ type: "table", x: L, y: TOP + HDR, colW: cw, rowH: rowH, size: 11, name: "Table signals", aligns: ["l", "ctr", "l"], rows: [["Signal", "Rating", "Evidence in S&P's filings"]].concat(rows) });
+    var y2 = TOP + HDR + rowH.reduce(function (a, b) { return a + b; }, 0) + 0.25;
+    if (BOTTOM - y2 >= 0.75) items.push({ type: "box", name: "How to read it", x: L, y: y2, w: W, h: Math.min(0.75, BOTTOM - y2), fill: TILE, margins: [0.15, 0.15, 0.08, 0.08], anchor: "ctr",
+      paras: [{ runs: [{ text: "How to read it: ", size: 12, bold: true, color: NAVY }, { text: "a screen of S&P's filing data against the app's own thresholds (inferred). A red or amber signal is a question to ask, not a finding; green means nothing in these filings tripped the test, not that all is well.", size: 12, color: NAVY }] }] });
+    items.push(fpSource(f, t, [["Thresholds: rate changes of 10% or more (red at 20%, or 3 or more); 2 or more disapprovals; 3 or more withdrawals; 60 and 120 days; 50% and 75% in one state; 15% and 30% compounded.",
+      "Thresholds are the app's own (inferred); see the README.", "Thresholds: the app's own."]]));
+    var title = n.red || n.amber ? (n.red ? cnt(n.red) + " red" + (n.amber ? " and " + cnt(n.amber) + " amber" : "") : cnt(n.amber) + " amber") + " signals in the filings" : "No red or amber signals in the filings";
+    return content(t, "signals", title, items);
+  }
+
+  // ---------- approved rate changes compounded ----------
+  var LINE_COLORS = [NAVY, MAG, BLUE, TEAL];
+  function comboName(r) { return (flat(r.state) || "n/d") + " " + (flat(r.toi) || "type n/d"); }
+  function fpHistory(f, t) {
+    var H = f.history || {}, rows = fpRows(f, "history"), yrs = arr(H.years).map(String);
+    var lines = rows.slice(0, 4), big = rows.slice().sort(function (a, b) { return Math.abs(b.total) - Math.abs(a.total); }).slice(0, 8);
+    var lineChart = chartBlock("Compounded since the period began, by year end (%)", { kind: "line", categories: yrs, legend: "top", labels: false, catSize: 10, catLabels: "low",
+      valueAxis: { format: "0;(0)" }, name: "Chart compounded by year",
+      series: lines.map(function (r, i) { return ser(fitText(comboName(r), 10, 2.4, false), yrs.map(function (_, yi) { var v = arr(r.byYear)[yi]; return num(v) ? v : null; }), LINE_COLORS[i], { labelLast: true }); }) });
+    var maxI = 0; big.forEach(function (r, i) { if (Math.abs(r.total) > Math.abs(big[maxI].total)) maxI = i; });
+    var pc = {}; big.forEach(function (r, i) { if (r.total < 0) pc[i] = TEAL; }); pc[maxI] = MAG;
+    var barChart = chartBlock("Compounded to date, largest " + big.length + (rows.length > big.length ? " of " + cnt(H.total) : "") + " (%)", { kind: "bar", legend: "none", gap: 50, catSize: 10,
+      categories: big.map(function (r) { return fitText(comboName(r), 10, 2.1, false); }), series: [ser("Compounded (%)", big.map(function (r) { return r.total; }), NAVY, { pointColors: pc })],
+      labels: { format: "0.0;(0.0);0.0" }, name: "Chart compounded to date" });
+    var table = function (x, y, w, h) {
+      var max = Math.max(1, Math.floor((h - HDR) / 0.25) - 1), shown = rows.slice(0, max);
+      var tr = shown.map(function (r) { return [flat(r.state) || "n/d", flat(r.toi) || "n/d", cnt(r.n), fpDate(f, r.last), pctCell(r.total)]; });
+      return [header("Approved changes by state and type" + (num(H.total) && H.total > shown.length ? " (" + shown.length + " of " + cnt(H.total) + ")" : ""), x, y, w),
+        fpTable("Table compounded", x, y + HDR, w, ["State", "Type of insurance", "Approved", "Latest", "Compounded (%)"], tr, [0.6, 1.9, 1.0, 1.15, 1.26], ["l", "l", "r", "r", "r"], [0, 2, 4], { fit: [1] })];
+    };
+    var items = quads([lineChart, barChart, table], pointsOf(t, "history"));
+    items.push(fpSource(f, t, [["Compounded: approved overall rate impacts multiplied together in date order since the period began (derived); not weighted by premium.", "Compounded approved impacts (derived), not weighted by premium.", "Derived; unweighted."]]));
+    return content(t, "history", "Approved rate changes compounded", items);
+  }
+
+  // ---------- types of insurance and outcomes ----------
+  var OUTCOME_LABEL = { approved: "Approved", pending: "In progress", disapproved: "Disapproved", withdrawn: "Withdrawn", other: "Other or n/d" };
+  function fpLines(f, t) {
+    var Ln = f.lines || {}, rows = fpRows(f, "lines"), bars = rows.slice(0, 8), outs = arr(f.outcomes).filter(function (o) { return o && OUTCOME_LABEL[o.outcome]; });
+    var parts = [["Rate filings", "rate", NAVY], ["Form and rule filings", "formRule", MAG], ["Other filings", "other", BLUE]].filter(function (p) { return bars.some(function (r) { return r[p[1]] > 0; }); });
+    var chart = chartBlock("Filings by type of insurance" + (rows.length > bars.length ? " (top " + bars.length + " of " + cnt(Ln.total) + ")" : ""), { kind: "stackedBar", legend: "top", gap: 50, overlap: 100, catSize: 10,
+      categories: bars.map(function (r) { return fitText(flat(r.toi) || "Type n/d", 10, 2.1, false); }), series: parts.map(function (p) { return ser(p[0], bars.map(function (r) { return num(r[p[1]]) ? r[p[1]] : 0; }), p[2]); }),
+      labels: { format: "0;;;", position: "ctr", color: "FFFFFF", size: 10 }, name: "Chart types of insurance" });
+    var range = function (o) { return !num(o.lo) ? "n/d" : o.lo === o.hi ? pctCell(o.lo) : pctCell(o.lo) + " to " + pctCell(o.hi); };
+    var outcomes = function (x, y, w) {
+      var tr = outs.map(function (o) { return [OUTCOME_LABEL[o.outcome], cnt(o.n), cnt(o.withImpact), range(o) + (o.outcome !== "approved" && num(o.lo) ? "*" : "")]; });
+      return [header("Rate filings by outcome", x, y, w), fpTable("Table outcomes", x, y + HDR, w, ["Outcome", "Rate filings", "With a rate impact", "Range (%)"], tr, [1.5, 1.2, 1.6, 1.6], ["l", "r", "r", "r"], [0, 1, 2, 3])];
+    };
+    var table = function (x, y, w, h) {
+      var max = Math.max(1, Math.floor((h - HDR) / 0.25) - 1), shown = rows.slice(0, max);
+      var tr = shown.map(function (r) { return [flat(r.toi) || "n/d", cnt(r.n), cnt(r.states), cnt(r.rate), cnt(r.approved), range(r)]; });
+      return [header("By type of insurance" + (num(Ln.total) && Ln.total > shown.length ? " (" + shown.length + " of " + cnt(Ln.total) + ")" : ""), x, y, w),
+        fpTable("Table types of insurance", x, y + HDR, w, ["Type of insurance", "Filings", "States", "Rate", "Approved", "Range (%)"], tr, [2.0, 0.75, 0.7, 0.65, 0.95, 1.2], ["l", "r", "r", "r", "r", "r"], [0, 1, 2, 3, 4, 5], { fit: [0] })];
+    };
+    var blocks = outs.length ? [chart, outcomes, table] : [chart, table];
+    var items = quads(blocks, pointsOf(t, "lines"));
+    items.push(fpSource(f, t, [["Rate filings: S&P's rate types or any filing with a rate impact. * Not approved: may be the change asked for.", "Rate filings: rate types or with an impact. * May be as asked.", "* May be as asked."],
+      ["Rate impacts are S&P's overall figure for each filing, not weighted by premium.", "Rate impacts unweighted.", "Unweighted."]]));
+    return content(t, "lines", "Types of insurance and outcomes", items);
+  }
+
+  // ---------- rate filings read by Claude (saved summaries) ----------
+  function fpRead(f, t, extra) {
+    var list = readRows(extra), items = [];
+    var lcm = function (v) { return num(v) ? v.toFixed(3) : "n/d"; };
+    var name = function (d) { return [flat(d.state), flat(d.typeOfInsurance), d.published ? fpDate(f, d.published) : ""].filter(Boolean).join(", "); };
+    var tr = list.map(function (d) {
+      var r = d.rate || {};
+      return [cellText(name(d), 2.75), cellText(d.status, 1.3), pctCell(r.overallPct), pctCell(r.requestedPct), pctCell(r.approvedPct), pctCell(r.indicatedPct), lcm(r.lcm), pctCell(r.trendPct), pctCell(r.expensePct), millions(r.premium), num(r.page) ? cnt(r.page) : "n/d"];
+    });
+    items.push(header("Rate figures from the filings' own documents", L, TOP, W));
+    var tbl = fpTable("Table rate filings read", L, TOP + HDR, W, ["Filing", "Status", "Overall (%)", "Requested (%)", "Approved (%)", "Indicated (%)", "LCM", "Loss trend (%)", "Expense (%)", "Premium ($M)", "Page"], tr,
+      [2.75, 1.3, 0.95, 1.1, 1.05, 1.05, 0.7, 1.05, 0.95, 1.05, 0.55], ["l", "l", "r", "r", "r", "r", "r", "r", "r", "r", "r"], [0, 1, 10]);
+    // the header row holds two lines where a heading wraps
+    var head = tbl.rows[0].some(function (h, j) { return textWidth(h, 11, true) > tbl.colW[j] - 0.2; }) ? 0.42 : 0.25;
+    tbl.rowH = [head].concat(tr.map(function () { return 0.25; }));
+    items.push(tbl);
+    var y2 = TOP + HDR + head + tr.length * 0.25 + 0.3, h2 = BOTTOM - y2;
+    // requested, approved and indicated side by side, for the filings that give two of them or more
+    var kinds = [["Requested", "requestedPct", NAVY], ["Approved", "approvedPct", MAG], ["Indicated", "indicatedPct", BLUE]];
+    var both = list.filter(function (d) { var r = d.rate || {}; return kinds.filter(function (k) { return num(r[k[1]]); }).length >= 2; });
+    var used = kinds.filter(function (k) { return both.some(function (d) { return num(d.rate[k[1]]); }); });
+    var pts = list.map(function (d) {
+      var read = arr(d.read).map(function (p) { return p && num(p.from) && num(p.to) ? (p.from === p.to ? String(p.from) : p.from + " to " + p.to) : ""; }).filter(Boolean).join(", ");
+      return { lead: (flat(d.state) || "n/d") + " " + (flat(d.typeOfInsurance) || ""), text: (flat(d.filingNo) || "Filing number n/d") + ": pages " + (read || "n/d") + (num(d.pages) ? " of " + cnt(d.pages) : "") + " read; summary made " + longDate(d.madeAt) + "." };
+    });
+    if (both.length && h2 >= 1.6) {
+      items = items.concat(chartBlock("Requested, approved and indicated changes (%)", { kind: "column", categories: both.map(function (d) { var y = ymd(d.published); return fitText([flat(d.state), flat(d.typeOfInsurance), y ? String(y.y) : ""].filter(Boolean).join(" "), 10, 2.6, false); }), legend: "top", gap: 80, overlap: -10, catSize: 10, catLabels: "low",
+        series: used.map(function (k) { return ser(k[0], both.map(function (d) { return num(d.rate[k[1]]) ? d.rate[k[1]] : null; }), k[2]); }), labels: { format: "0.0;(0.0);0.0", size: 10 }, name: "Chart requested and approved" })(L, y2, QW, h2));
+      items = items.concat([header("What was read", QX2, y2, QW), bullets(pts, QX2, y2 + HDR, QW, h2 - HDR, "What was read")]);
+    } else if (h2 >= 1.0) items = items.concat([header("What was read", L, y2, W), bullets(pts, L, y2 + HDR, W, h2 - HDR, "What was read")]);
+    items.push(fpSource(f, t, [["Rate figures read by Claude from each filing's document and checked against the words it quoted; n/d where the filing doesn't give one. LCM: loss cost multiplier.", "Read by Claude from the filings and checked; LCM: loss cost multiplier.", "Read by Claude; checked."]]));
+    var asked = list.filter(function (d) { return d.rate && num(d.rate.requestedPct) && num(d.rate.approvedPct); });
+    return content(t, "read", asked.length ? cnt(asked.length) + (asked.length === 1 ? " rate filing" : " rate filings") + " read with requested and approved changes" : "Rate filings read by Claude", items);
   }
 
   function fpYears(f, t) {
@@ -715,12 +1045,13 @@
     return { kind: "content", id: "questions", title: trimTitle(flat(t.questions && t.questions.title) || "Key diligence questions"), items: items };
   }
 
-  function fpSpec(facts, text) {
+  function fpSpec(facts, text, extra) {
     var f = facts || {}, t = text || {};
-    var included = {}; fpPlan(f).forEach(function (r) { included[r.id] = r.included; });
-    var make = { summary: fpSummary, rates: fpRates, states: fpStates, years: fpYears, forms: fpForms, regulator: fpRegulator, questions: fpQuestions };
+    var included = {}; fpPlan(f, extra).forEach(function (r) { included[r.id] = r.included; });
+    var make = { summary: fpSummary, signals: fpSignals, states: fpStates, ratemap: fpRateMap, rates: fpRates, history: fpHistory, lines: fpLines, read: fpRead,
+      years: fpYears, forms: fpForms, regulator: fpRegulator, questions: fpQuestions };
     var slides = [fpCover(f, t)];
-    FP_SLIDES.slice(1).forEach(function (s) { if (included[s[0]]) slides.push(make[s[0]](f, t)); });
+    FP_SLIDES.slice(1).forEach(function (s) { if (included[s[0]] && make[s[0]]) slides.push(make[s[0]](f, t, extra)); });
     var day = ymd(f.asOf) ? String(f.asOf).slice(0, 10) : "";
     return { fileName: (slug(fpName(f)) || "filings") + "-filings-profile" + (f.sample ? "-sample" : "") + (day ? "-" + day : "") + ".pptx", slides: slides };
   }
@@ -737,6 +1068,6 @@
     return { fileName: name + "-profile" + (f.sample ? "-sample" : "") + (day ? "-" + day : "") + ".pptx", slides: slides };
   }
 
-  window.SNLProfile = { plan: plan, spec: spec, filingsPlan: fpPlan, filingsSpec: fpSpec,
+  window.SNLProfile = { plan: plan, spec: spec, filingsPlan: fpPlan, filingsSpec: fpSpec, _usMap: US_MAP,
     format: { money: money, millions: millions, pct: pct, pctCell: pctCell, mult: mult, shortDate: shortDate, monthYear: monthYear, trimTitle: trimTitle } };
 })();

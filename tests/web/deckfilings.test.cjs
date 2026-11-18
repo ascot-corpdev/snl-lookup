@@ -4,7 +4,11 @@
 // returned, no rate impact, no form or rule filings, no dates); a group; rows with no tracking number or type of
 // insurance (no empty column); rate impacts never averaged and the unapproved marked; the source line on every slide
 // and on one line; everything inside the content area; hostile text; and a real build of the made-up sample
-// (tests/fixtures/deckfilings_sample_answer.json) on the stand-in template, opened and checked.
+// (tests/fixtures/deckfilings_sample_answer.json) on the stand-in template, opened and checked. Also the slides added
+// for depth: the red, amber and green signals, the two maps of the United States drawn as editable state outlines (the
+// same outlines as the page's map), the compounded approved rate changes, types of insurance and outcomes, the rate
+// filings read by Claude (from saved summaries the page passes in), and premium and exposure left out for want of
+// statutory data.
 const { chromium } = require("playwright"); const fs = require("fs"); const path = require("path");
 const JSZip = require("jszip");
 const ROOT = path.join(__dirname, "../..");
@@ -15,7 +19,16 @@ const copy = o => JSON.parse(JSON.stringify(o));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else { fail++; console.log("FAIL " + n + "  " + JSON.stringify(x === undefined ? "" : x).slice(0, 700)); } };
 const NAVY = "262166", MAG = "EB008C", TEAL = "00857C", PURPLE = "944599";
-const IDS = ["cover", "summary", "rates", "states", "years", "forms", "regulator", "questions"];
+const IDS = ["cover", "summary", "signals", "states", "ratemap", "rates", "history", "lines", "read", "exposure", "years", "forms", "regulator", "questions"];
+const BUILT = ["cover", "summary", "signals", "states", "ratemap", "rates", "history", "lines", "years", "forms", "regulator", "questions"];
+const AMBER = "C46A1B", LABELS = ["Cover", "Summary", "Filing signals (red, amber, green)", "Where it files (map)", "Latest approved rate change by state (map)", "Rate changes", "Approved rate changes compounded",
+  "Types of insurance and outcomes", "Rate filings read by Claude", "Premium and exposure by state", "Filings by year and type", "Latest form and rule filings", "Time with the regulator", "Key diligence questions"];
+const INDEX = fs.readFileSync(path.join(ROOT, "web/index.html"), "utf8");
+// made-up saved summaries of two of the hand-worked rate filings, as snl-digest gives them
+const DIG = (r, rate) => ({ filingVersionId: r.filingVersionId, documentId: r.documentId, filingNo: r.filingNo, company: r.companyName, companies: [r.companyName], state: r.state, typeOfInsurance: r.typeOfInsurance,
+  filingType: r.filingType, status: r.status, published: r.published, pages: r.pages, read: [{ from: 1, to: 10 }], madeAt: "2026-11-18T05:00:00.000Z", by: "claude", summary: "Made-up.", programs: [], forms: [], eligibility: [], notable: [],
+  rate: Object.assign({ overallPct: null, requestedPct: null, approvedPct: null, premium: null, policyholders: null, effectiveNew: null, effectiveRenewal: null, indicatedPct: null, lcm: null, trendPct: null, expensePct: null, page: 4 }, rate) });
+const DIGESTS = () => [DIG(BASE.facts.readable[0], { overallPct: 9.8, requestedPct: 12.5, indicatedPct: 16.2, trendPct: 6.5 }), DIG(BASE.facts.readable[1], { overallPct: 4.5, requestedPct: 6.0, approvedPct: 4.5, lcm: 1.185, premium: 2400000 })];
 const SRC = "Source: S&P Global Market Intelligence, SNL Insurance Product Filings, 20 Nov 2023 to 18 Nov 2026.";
 // Arial advance widths, as profile-slides.js estimates them: the source line must fit 11.7 in at 10pt
 const W = (() => { const w = {}, set = (c, v) => { for (const ch of c) w[ch] = v; };
@@ -30,7 +43,8 @@ function nothing() { const v = copy(BASE); const f = v.facts;
   f.years.counts = f.years.counts.map(r => r.map(() => 0)); f.years.totals = f.years.totals.map(() => 0); f.years.byType = f.years.byType.map(() => 0);
   f.latest = { rows: [], total: 0 }; f.regulator = { rows: [], all: null, left: 0 }; return v; }
 function noImpact() { const v = copy(BASE); const f = v.facts; f.largest = null; Object.assign(f.rates, { withImpact: 0, notApproved: 0, lo: null, hi: null, points: [], pointsTotal: 0 });
-  f.rates.rows.forEach(r => { r.withRate = 0; r.lo = null; r.hi = null; r.latest = null; }); f.states.rows.forEach(s => { s.latest = null; }); return v; }
+  f.rates.rows.forEach(r => { r.withRate = 0; r.lo = null; r.hi = null; r.latest = null; }); f.states.rows.forEach(s => { s.latest = null; s.approved = null; }); f.history = { years: f.history.years, rows: [], total: 0 }; return v; }
+function older() { const v = copy(BASE); const f = v.facts; delete f.signals; delete f.lines; delete f.history; delete f.outcomes; delete f.readable; f.states.rows.forEach(s => { delete s.approved; }); ["ratemap", "history", "lines"].forEach(k => delete v.text[k]); return v; }
 function noRate() { const v = noImpact(); Object.assign(v.facts.rates, { filings: 0, rows: [], rowsTotal: 0 }); return v; }
 function noForms() { const v = copy(BASE); v.facts.latest = { rows: [], total: 0 }; return v; }
 function noDays() { const v = copy(BASE); v.facts.regulator = { rows: [], all: null, left: 7 }; return v; }
@@ -44,12 +58,16 @@ function crowded() {   // 30 rate points and 30 states: the chart and the tables
   f.rates.points.sort((a, b) => a.date.localeCompare(b.date)); f.rates.pointsTotal = 41; f.rates.withImpact = 41;
   f.rates.rows = codes.map((c, i) => ({ state: c, toi: "Commercial property", n: 30 - i, withRate: 1, lo: -1, hi: 2, latest: f.rates.points[i] })); f.rates.rowsTotal = 30;
   f.states.rows = codes.map((c, i) => ({ state: c, n: 40 - i, rate: 3, latest: f.rates.points[i] }));
-  f.regulator.rows = codes.map((c, i) => ({ state: c, n: 30 - i, median: 40 + i, lo: 10, hi: 200 + i })); return v;
+  f.regulator.rows = codes.map((c, i) => ({ state: c, n: 30 - i, median: 40 + i, lo: 10, hi: 200 + i }));
+  f.states.rows.forEach((s, i) => { s.approved = i % 3 ? f.rates.points[i] : null; });
+  f.history.rows = codes.slice(0, 12).map((c, i) => ({ state: c, toi: i % 2 ? "Commercial property" : "Homeowners", n: 12 - i, first: "2024-01-01", last: "2026-06-01", total: i % 4 ? 3.5 * i : -2.5, byYear: [0, 1.5, 2.5 * i, 3.5 * i] })); f.history.total = 30;
+  f.lines.rows = Array.from({ length: 12 }, (_, i) => ({ toi: "Made-up type of insurance number " + (i + 1), n: 40 - i, rate: 20 - i, formRule: 10, other: 10 + i - i, states: 5, approved: 9, withImpact: 9, lo: -2, hi: 8 })); f.lines.total = 15;
+  f.signals = f.signals.concat([{ id: "capped", level: "red", title: "A made-up signal with a long title that runs on", evidence: LONG(200).slice(0, 200) }]); return v;
 }
 const LONG = n => { let s = "", i = 0; const w = ["Florida", "homeowners", "rate", "filings", "pending", "approved", "regulator", "programs"]; while (s.length < n) s += (s ? " " : "") + w[i++ % w.length]; return s; };
 function maxText() {
   const v = claude(); v.facts.sample = true; v.text.cover.subtitle = LONG(110).slice(0, 110); v.facts.entity.name = LONG(120).slice(0, 120);
-  ["summary", "rates", "states", "years", "forms", "regulator"].forEach(k => { v.text[k].title = LONG(65).slice(0, 65); v.text[k].points = Array.from({ length: k === "summary" ? 6 : 3 }, (_, i) => ({ lead: "Lead number " + (i + 1) + " is long", text: LONG(220).slice(0, 220) })); });
+  ["summary", "rates", "states", "years", "forms", "regulator", "ratemap", "history", "lines"].forEach(k => { v.text[k].title = LONG(65).slice(0, 65); v.text[k].points = Array.from({ length: k === "summary" ? 6 : 3 }, (_, i) => ({ lead: "Lead number " + (i + 1) + " is long", text: LONG(220).slice(0, 220) })); });
   v.text.questions.items = Array.from({ length: 4 }, () => ({ title: LONG(60).slice(0, 60), text: LONG(260).slice(0, 260) }));
   v.facts.latest.rows.forEach(r => { r.company = LONG(120).slice(0, 120); r.toi = LONG(120).slice(0, 120); r.status = LONG(80).slice(0, 80); });
   return v;
@@ -64,47 +82,58 @@ function hostile() { const v = copy(BASE); v.facts.entity.name = "Calloway <b>In
   await p.addScriptTag({ path: path.join(ROOT, "node_modules/jszip/dist/jszip.min.js") });
   await p.addScriptTag({ path: path.join(ROOT, "web/deck.js") });
   await p.addScriptTag({ path: path.join(ROOT, "web/profile-slides.js") });
-  const plan = v => p.evaluate(f => SNLProfile.filingsPlan(f), v.facts);
-  const spec = v => p.evaluate(([f, t]) => SNLProfile.filingsSpec(f, t), [v.facts, v.text]);
+  const plan = (v, x) => p.evaluate(([f, x]) => SNLProfile.filingsPlan(f, x), [v.facts, x || null]);
+  const spec = (v, x) => p.evaluate(([f, t, x]) => SNLProfile.filingsSpec(f, t, x), [v.facts, v.text, x || null]);
   const slide = (s, id) => s.slides.find(x => x.id === id);
   const items = (s, id, type) => slide(s, id).items.filter(i => i.type === type);
   const one = (s, id, type, name) => items(s, id, type).find(i => !name || i.name === name);
   const src = (s, id) => one(s, id, "source").text;
   const cells = t => t.rows.map(r => r.map(c => c && typeof c === "object" ? c.text : c));
-  const bottom = it => it.type === "table" ? it.y + (Array.isArray(it.rowH) ? it.rowH.reduce((a, c) => a + c, 0) : it.rowH * it.rows.length) : it.type === "header" ? it.y + 0.32 : it.type === "line" ? Math.max(it.y1, it.y2) : it.y + (it.h || 0);
-  const right = it => it.type === "table" ? it.x + it.colW.reduce((a, c) => a + c, 0) : it.type === "line" ? Math.max(it.x1, it.x2) : it.x + it.w;
+  const bottom = it => it.type === "group" ? Math.max(...it.items.map(bottom)) : it.type === "table" ? it.y + (Array.isArray(it.rowH) ? it.rowH.reduce((a, c) => a + c, 0) : it.rowH * it.rows.length) : it.type === "header" ? it.y + 0.32 : it.type === "line" ? Math.max(it.y1, it.y2) : it.y + (it.h || 0);
+  const right = it => it.type === "group" ? Math.max(...it.items.map(right)) : it.type === "table" ? it.x + it.colW.reduce((a, c) => a + c, 0) : it.type === "line" ? Math.max(it.x1, it.x2) : it.x + it.w;
+  const left = it => it.type === "group" ? Math.min(...it.items.map(left)) : it.type === "line" ? Math.min(it.x1, it.x2) : it.x;
+  const topOf = it => it.type === "group" ? Math.min(...it.items.map(topOf)) : it.type === "line" ? Math.min(it.y1, it.y2) : it.y;
+  const grp = (s, id, name) => items(s, id, "group").find(g => g.name === name);
+  const shapesIn = g => g.items.filter(i => i.type === "freeform");
 
   // ----- the plan -----
   let pl = await plan(BASE);
-  ok("plan: eight slides in deck order, all filled from these filings", same(pl.map(r => r.id), IDS) && pl.every(r => r.included && r.reason === "") && same(pl.map(r => r.label), ["Cover", "Summary", "Rate changes", "Where it files", "Filings by year and type", "Latest form and rule filings", "Time with the regulator", "Key diligence questions"]), pl);
   const why = (pl, id) => pl.find(r => r.id === id);
+  ok("plan: fourteen slides in deck order; all but two filled from these filings", same(pl.map(r => r.id), IDS) && same(pl.map(r => r.label), LABELS) && pl.filter(r => r.included).map(r => r.id).join() === BUILT.join(), pl);
+  ok("plan: premium and exposure by state left out, saying they need statutory data and that filing counts aren't exposure", !why(pl, "exposure").included && /need statutory data \(S&P on Snowflake\)/.test(why(pl, "exposure").reason) && /Filing counts aren't exposure/.test(why(pl, "exposure").reason));
+  ok("plan: the rate filings read by Claude wait for a saved summary, saying how to add one", !why(pl, "read").included && why(pl, "read").reason === "No rate filing in this profile has a saved summary yet. Summarise the largest rate filings to add the requested, approved and indicated changes.");
+  ok("plan: with saved summaries that carry rate figures, that slide is in", why(await plan(BASE, { digests: DIGESTS() }), "read").included && !why(await plan(BASE, { digests: [DIG(BASE.facts.readable[0], {})] }), "read").included);
+  pl = await plan(older());
+  ok("plan, figures from an older function: the new slides are left out, saying to deploy it again; the rest still build", ["signals", "ratemap", "history", "lines"].every(id => !why(pl, id).included && /older version of the profile function/.test(why(pl, id).reason)) && why(pl, "states").included && why(pl, "rates").included);
   pl = await plan(nothing());
   ok("plan, nothing returned: cover, summary and questions stay; the rest are left out because S&P returned nothing for this search",
-    why(pl, "cover").included && why(pl, "summary").included && why(pl, "questions").included && ["rates", "states", "years", "forms", "regulator"].every(id => !why(pl, id).included && why(pl, id).reason === "S&P returned nothing for this search, so there are no filings to show. That doesn't prove nothing was filed."), pl);
+    why(pl, "cover").included && why(pl, "summary").included && why(pl, "questions").included && ["signals", "states", "ratemap", "rates", "history", "lines", "read", "years", "forms", "regulator"].every(id => !why(pl, id).included && why(pl, id).reason === "S&P returned nothing for this search, so there are no filings to show. That doesn't prove nothing was filed."), pl);
   pl = await plan(noImpact());
-  ok("plan, no rate impact: the rate slide is left out, saying no filing carried one", !why(pl, "rates").included && why(pl, "rates").reason === "No filing carried an overall rate impact in S&P's data, so there are no rate changes to chart." && pl.filter(r => !r.included).length === 1);
+  ok("plan, no rate impact: the rate slide, the rate map and the compounded changes are left out, each saying why", !why(pl, "rates").included && why(pl, "rates").reason === "No filing carried an overall rate impact in S&P's data, so there are no rate changes to chart."
+    && /nothing to colour the rate map by/.test(why(pl, "ratemap").reason) && /nothing to compound/.test(why(pl, "history").reason) && same(pl.filter(r => !r.included).map(r => r.id), ["ratemap", "rates", "history", "read", "exposure"]), pl.filter(r => !r.included));
   pl = await plan(noRate());
   ok("plan, no rate filings: said as S&P's answer", why(pl, "rates").reason === "S&P returned no rate filings for this search, so there are no rate changes to show.");
   pl = await plan(noForms());
   ok("plan, no form or rule filings: that slide is left out", !why(pl, "forms").included && why(pl, "forms").reason === "S&P returned no form or rule filings for this search.");
   pl = await plan(noDays());
   ok("plan, no filing with both dates: the regulator slide is left out", !why(pl, "regulator").included && /both a submitted date and a publish date/.test(why(pl, "regulator").reason));
-  ok("plan: reasons are plain sentences, no ids, no em dashes", (await Promise.all([nothing(), noImpact(), noRate(), noForms(), noDays()].map(plan))).flat().every(r => !/_/.test(r.reason) && !r.reason.includes("—") && (r.reason === "" || /^[A-Z].*\.$/.test(r.reason))));
+  ok("plan: reasons are plain sentences, no ids, no em dashes", (await Promise.all([nothing(), noImpact(), noRate(), noForms(), noDays(), older()].map(v => plan(v)))).flat().every(r => !/_/.test(r.reason) && !r.reason.includes("—") && (r.reason === "" || /^[A-Z].*\.$/.test(r.reason))));
 
   // ----- the spec: cover, order, file name, sources -----
   let s = await spec(BASE);
-  ok("spec: eight slides, cover first", s.slides.length === 8 && s.slides[0].kind === "cover" && same(s.slides.slice(1).map(x => x.id), IDS.slice(1)));
+  ok("spec: twelve slides, cover first", s.slides.length === 12 && s.slides[0].kind === "cover" && same(s.slides.slice(1).map(x => x.id), BUILT.slice(1)));
   ok("spec: the file is named after the company, the kind of profile and the day", s.fileName === "Calloway-Insurance-Co-filings-profile-2026-11-18.pptx", s.fileName);
   ok("cover: \"<company>: filings profile\", kicker with month and year, the one-line descriptor", same(s.slides[0], { kind: "cover", kicker: "Corporate development | November 2026", title: "Calloway Insurance Co: filings profile", subtitle: "7 filings published 20 Nov 2023 to 18 Nov 2026" }), s.slides[0]);
-  ok("titles: the text's action titles", same(s.slides.slice(1).map(x => x.title), ["7 filings in 3 states over the last 3 years", "Overall rate changes from (3.5%) to 9.8%", "Most filings in FL: 3 of 7", "Most filings in 2026: 2 of 7", "4 form and rule filings; latest 15 Jun 2025", "About 70 days with the regulator (median)", "Key diligence questions"]), s.slides.map(x => x.title));
+  ok("titles: the text's action titles, and the signals' count", same(s.slides.slice(1).map(x => x.title), ["7 filings in 3 states over the last 3 years", "4 amber signals in the filings", "Most filings in FL: 3 of 7", "Latest approved change up in 1 state, down in 1",
+    "Overall rate changes from (3.5%) to 9.8%", "Largest approved change 4.5% in FL (Homeowners)", "Most filings in Homeowners: 4 of 7", "Most filings in 2026: 2 of 7", "4 form and rule filings; latest 15 Jun 2025", "About 70 days with the regulator (median)", "Key diligence questions"]), s.slides.map(x => x.title));
   ok("every content slide ends with a source line naming S&P, SNL Insurance Product Filings and the period", s.slides.slice(1).every(x => { const l = x.items[x.items.length - 1]; return l.type === "source" && l.text.startsWith(SRC); }), s.slides.map(x => x.items && x.items.at(-1).text));
   ok("the rate slides' source lines say impacts aren't weighted by premium and may be the change asked for", /not by premium; if not approved, may be the change asked for\./.test(src(s, "rates")) && /if not approved, may be the change asked for/.test(src(s, "summary")));
   ok("the regulator's source line says the days are approximate; the forms' says what the filing number is", /approximate/.test(src(s, "regulator")) && /S&P no\./.test(src(s, "forms")) && /2 without both dates left out\./.test(src(s, "regulator")));
   ok("plain text: questions marked (inferred), no Claude note", /\(inferred\)/.test(src(s, "questions")) && !JSON.stringify(s).includes("Claude"));
   const c = await spec(claude());
   ok("Claude's text: the summary and questions source lines say so, other slides don't", /Text drafted by Claude/.test(src(c, "summary")) && /drafted by Claude/.test(src(c, "questions")) && !/Claude/.test(src(c, "rates")) && !/\(inferred\)/.test(src(c, "questions")));
-  for (const [name, v] of [["plain", BASE], ["Claude", claude()], ["sample and Claude", maxText()], ["crowded", crowded()], ["capped", capped()], ["group", group()], ["bare", bare()], ["nothing", nothing()]]) {
-    const sp = await spec(v), wide = sp.slides.slice(1).map(x => src(sp, x.id)).filter(t => width10(t) > 11.7);
+  for (const [name, v] of [["plain", BASE], ["Claude", claude()], ["sample and Claude", maxText()], ["crowded", crowded()], ["capped", capped()], ["group", group()], ["bare", bare()], ["nothing", nothing()], ["older", older()]]) {
+    const sp = await spec(v, { digests: DIGESTS() }), wide = sp.slides.slice(1).map(x => src(sp, x.id)).filter(t => width10(t) > 11.7);
     ok(`source lines fit on one line (${name})`, wide.length === 0, wide.map(t => [width10(t).toFixed(2), t]));
   }
   ok("no em dashes anywhere", !JSON.stringify(s).includes("—"));
@@ -134,12 +163,64 @@ function hostile() { const v = copy(BASE); v.facts.entity.name = "Calloway <b>In
   ok("crowded: the chart keeps the latest 20 filings and its header says of how many", crc.categories.length === 20 && same(crc.categories, crowded().facts.rates.points.slice(-20).map(x => x.state + " " + ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][+x.date.slice(5, 7) - 1] + " 2025")) && items(cr, "rates", "header").some(h => h.text === "Overall rate impact of each filing, in date order (%), latest 20 of 41"), [crc.categories[0], items(cr, "rates", "header").map(h => h.text)]);
   ok("crowded: the rate table keeps the rows with the most filings that fit, and says so", items(cr, "rates", "header").some(h => /^Rate filings by state and type of insurance \(7 of 30\)$/.test(h.text)) && cells(one(cr, "rates", "table")).length === 8);
 
-  // ----- 4. where it files -----
-  const sc = one(s, "states", "chart");
-  ok("states: a horizontal bar chart of filings by state, the top state in magenta (no map)", sc.kind === "bar" && same(sc.categories, ["FL", "TX", "GA"]) && same(sc.series[0].values, [3, 2, 1]) && same(sc.series[0].pointColors, { 0: MAG }) && !JSON.stringify(slide(s, "states")).includes("picture"));
+  // ----- 4. where it files: a map of the United States -----
+  const usIndex = (() => { const a = INDEX.indexOf("const US_MAP = {"), b = INDEX.indexOf("\n};", a); return eval("(" + INDEX.slice(a + "const US_MAP = ".length, b + 2) + ")"); })();
+  ok("the slides' state outlines are the page's own (US_MAP in index.html), all 51", same(await p.evaluate(() => SNLProfile._usMap), usIndex) && Object.keys(usIndex).length === 51);
+  const mp = grp(s, "states", "Map of filings by state"), byName = n => mp.items.find(i => i.name === n);
+  ok("states: a map drawn as 51 editable outlines in one group, with the codes the page's map labels", shapesIn(mp).length === 51 && mp.items.filter(i => i.type === "text").length === Object.values(usIndex).filter(v => typeof v[2] === "number").length && !JSON.stringify(slide(s, "states")).includes("picture"));
+  ok("states: shaded by filings (FL 3, TX 2, GA 1), the darkest the most; the rest white with a dashed outline, drawn last",
+    byName("State FL").fill === "00539E" && byName("State TX").fill === "4F95CC" && byName("State GA").fill === "9CC3E3" && byName("State CA").fill === "FFFFFF" && byName("State CA").line.dash === true && !byName("State FL").line.dash
+    && shapesIn(mp).slice(-48).every(i => i.line.dash) && byName("Label FL").paras[0].runs[0].color === "FFFFFF" && byName("Label CA").paras[0].runs[0].color === NAVY);
+  const fl = byName("State FL");
+  ok("each outline is a closed polygon in its own box, scaled to the map", fl.paths.length >= 1 && fl.paths.every(pg => pg.length >= 3 && pg.every(pt => pt[0] >= 0 && pt[1] >= 0 && pt[0] <= fl.pathW + 1e-9 && pt[1] <= fl.pathH + 1e-9)) && Math.abs(fl.w / fl.pathW - 5.75 / 975) < 1e-9);
+  const key = grp(s, "states", "Map key");
+  ok("states: a key for each shade and for nothing returned", same(key.items.filter(i => i.type === "text").map(i => i.paras[0].runs[0].text), ["1 filing", "2 filings", "3 filings", "Nothing returned"]));
+  const co = grp(s, "states", "Callouts");
+  ok("states: callouts for the top states, top to bottom, the largest in magenta, each with a dot and a line to the state", same(co.items.filter(i => /^Callout/.test(i.name)).map(i => [i.paras[0].runs[0].text, i.paras[1].runs[0].text, i.paras[0].runs[0].color]),
+    [["Georgia", "1 filing, 0 rate", NAVY], ["Texas", "2 filings, 2 rate", NAVY], ["Florida", "3 filings, 2 rate", MAG]]) && co.items.filter(i => i.shape === "ellipse").length === 3 && co.items.filter(i => i.type === "line").length === 3, co.items.map(i => i.name));
+  ok("states: counts of filings, not premium or exposure, said in the header", items(s, "states", "header")[0].text === "Number of filings by state (not premium or exposure)");
   ok("states table: state, filings, rate filings, latest rate impact; the unapproved starred", same(cells(one(s, "states", "table")), [["State", "Filings", "Rate filings", "Latest rate (%)"], ["FL", "3", "2", "9.8*"], ["TX", "2", "2", "(3.5)"], ["GA", "1", "0", "n/d"]]));
   ok("states: the star is explained on the source line, with the filing that has no state", /\* Not approved: (the figure )?may be (the change asked for|as asked)\./.test(src(s, "states")) && /1 with no state left out\./.test(src(s, "states")), src(s, "states"));
-  ok("crowded: 12 bars, 18 table rows, and the headers say of how many", one(cr, "states", "chart").categories.length === 12 && cells(one(cr, "states", "table")).length === 19 && items(cr, "states", "header").some(h => h.text === "By state (18 of 30)") && items(cr, "states", "header").some(h => h.text === "Filings by state (top 12 of 30)"));
+  ok("crowded: four callouts, eight table rows, and the header says of how many", grp(cr, "states", "Callouts").items.filter(i => /^Callout/.test(i.name)).length === 4 && cells(one(cr, "states", "table")).length === 9 && items(cr, "states", "header").some(h => h.text === "Most filings (8 of 30)"));
+  ok("crowded: four steps of 10 in the key, on two rows, and the states shaded by them", same(grp(cr, "states", "Map key").items.filter(i => i.type === "text").map(i => i.paras[0].runs[0].text), ["1 to 10 filings", "11 to 20 filings", "21 to 30 filings", "31 to 40 filings", "Nothing returned"])
+    && new Set(grp(cr, "states", "Map key").items.map(i => i.y)).size > 2 && new Set(shapesIn(grp(cr, "states", "Map of filings by state")).map(i => i.fill)).size === 4);
+
+  // ----- signals -----
+  const sg = one(s, "signals", "table");
+  ok("signals: a table of each signal, its rating in its colour with the word, and the evidence", same(cells(sg)[0], ["Signal", "Rating", "Evidence in S&P's filings"]) && same(cells(sg).slice(1).map(r => r[1]), ["Amber", "Amber", "Amber", "Amber", "Green", "Green", "Green", "Green"])
+    && sg.rows.slice(1, 5).every(r => r[1].fill === AMBER && r[1].color === "FFFFFF") && sg.rows.slice(5).every(r => r[1].fill === TEAL) && cells(sg)[1][2] === BASE.facts.signals[0].evidence && cells(sg)[1][0] === "Disapproved rate filings", cells(sg));
+  ok("signals: the header counts them; how to read it says a signal is a question, not a finding", items(s, "signals", "header")[0].text === "Screen of the filings: 0 red, 4 amber, 4 green" && /not a finding/.test(JSON.stringify(slide(s, "signals"))) && /Thresholds/.test(src(s, "signals")));
+  const rs = await spec(crowded());
+  ok("signals: a red one shows red (magenta); its long evidence runs to two lines in a taller row", one(rs, "signals", "table").rows.at(-1)[1].fill === MAG && one(rs, "signals", "table").rowH.at(-1) === 0.46);
+
+  // ----- the rate map -----
+  const rmp = grp(s, "ratemap", "Map of the latest approved rate change by state"), rb = n => rmp.items.find(i => i.name === n);
+  ok("rate map: each state by its newest approved change (FL up 4.5, TX down 3.5); GA has filings but none approved with a rate; the rest none",
+    rb("State FL").fill === "F5A3D0" && rb("State TX").fill === "8CCBC6" && rb("State GA").fill === "F5F5FA" && !rb("State GA").line.dash && rb("State NY").line.dash === true);
+  ok("rate map: a key of only the shades used", same(grp(s, "ratemap", "Map key").items.filter(i => i.type === "text").map(i => i.paras[0].runs[0].text), ["Down less than 5.0%", "Up less than 5.0%", "No approved rate", "Nothing returned"]));
+  ok("rate map: the table, largest change first, and callouts coloured up in magenta, down in teal", same(cells(one(s, "ratemap", "table")), [["State", "Change (%)", "Published", "Type of insurance"], ["FL", "4.5", "10 Oct", "Homeowners"], ["TX", "(3.5)", "1 Mar 2025", "Commercial property"]])
+    && same(grp(s, "ratemap", "Callouts").items.filter(i => /^Callout/.test(i.name)).map(i => [i.paras[1].runs[0].text, i.paras[0].runs[0].color]), [["(3.5%), 1 Mar 2025", TEAL], ["4.5%, 10 Oct", MAG]]));
+
+  // ----- compounded approved changes -----
+  const hl = items(s, "history", "chart").find(c => c.kind === "line"), hb = items(s, "history", "chart").find(c => c.kind === "bar");
+  ok("compounded: a line for each of the top states and types of insurance by year end, labelled at its last point", same(hl.categories, ["2023", "2024", "2025", "2026"]) && same(hl.series.map(x => [x.name, x.values, x.labelLast]), [["FL Homeowners", [0, 0, 0, 4.5], true], ["TX Commercial property", [0, 0, -3.5, -3.5], true]]) && hl.labels === false, hl.series);
+  ok("compounded: a bar for each to date, the largest in magenta, a fall in teal", same(hb.series[0].values, [4.5, -3.5]) && same(hb.series[0].pointColors, { 0: MAG, 1: TEAL }));
+  ok("compounded: the table, and (derived) on the source line", same(cells(one(s, "history", "table")), [["State", "Type of insurance", "Approved", "Latest", "Compounded (%)"], ["FL", "Homeowners", "1", "10 Oct", "4.5"], ["TX", "Commercial property", "1", "1 Mar 2025", "(3.5)"]]) && /derived/i.test(src(s, "history")) && /not weighted by premium|unweighted/i.test(src(s, "history")));
+
+  // ----- types of insurance and outcomes -----
+  const lc = one(s, "lines", "chart");
+  ok("types of insurance: stacked bars of rate filings and form and rule filings (no empty series)", lc.kind === "stackedBar" && same(lc.categories, ["Homeowners", "Commercial property", "Inland marine", "Type n/d"]) && same(lc.series.map(x => [x.name, x.values]), [["Rate filings", [3, 1, 0, 0]], ["Form and rule filings", [1, 0, 1, 1]]]), lc.series);
+  ok("outcomes: rate filings by S&P's status, the range of those not approved starred", same(cells(items(s, "lines", "table").find(x => x.name === "Table outcomes")), [["Outcome", "Rate filings", "With a rate impact", "Range (%)"], ["Approved", "2", "2", "(3.5) to 4.5"], ["In progress", "1", "1", "9.8*"], ["Disapproved", "1", "1", "2.0*"]]));
+  ok("types of insurance: the table", same(cells(items(s, "lines", "table").find(x => x.name === "Table types of insurance")), [["Type of insurance", "Filings", "States", "Rate", "Approved", "Range (%)"], ["Homeowners", "4", "2", "3", "1", "2.0 to 9.8"], ["Commercial property", "1", "1", "1", "1", "(3.5)"], ["Inland marine", "1", "1", "0", "0", "n/d"], ["n/d", "1", "0", "0", "0", "n/d"]]));
+
+  // ----- the rate filings read by Claude -----
+  const rr = await spec(BASE, { digests: DIGESTS() }), rt2 = one(rr, "read", "table");
+  ok("read: placed after types of insurance, titled by the filings with both requested and approved changes", same(rr.slides.map(x => x.id || x.kind).slice(7, 10), ["lines", "read", "years"]) && slide(rr, "read").title === "1 rate filing read with requested and approved changes");
+  ok("read: the summaries' figures, columns n/d on every row left out", same(cells(rt2), [["Filing", "Status", "Overall (%)", "Requested (%)", "Approved (%)", "Indicated (%)", "LCM", "Loss trend (%)", "Premium ($M)", "Page"],
+    ["FL, Homeowners, 5 Nov", "Pending", "9.8", "12.5", "n/d", "16.2", "n/d", "6.5", "n/d", "4"], ["FL, Homeowners, 10 Oct", "Approved", "4.5", "6.0", "4.5", "n/d", "1.185", "n/d", "2.4", "4"]]), cells(rt2));
+  const rc2 = one(rr, "read", "chart");
+  ok("read: requested, approved and indicated side by side for the filings with two or more", rc2.kind === "column" && same(rc2.categories, ["FL Homeowners 2026", "FL Homeowners 2026"]) && same(rc2.series.map(x => [x.name, x.values]), [["Requested", [12.5, 6]], ["Approved", [null, 4.5]], ["Indicated", [16.2, null]]]), rc2.series);
+  ok("read: what was read, page by page, and Claude named on the source line", one(rr, "read", "bullets").items[0].runs[1].text === "S&P no. CAL0000002: pages 1 to 10 of 10 read; summary made 18 Nov 2026." && /Read by Claude|read by Claude/.test(src(rr, "read")));
 
   // ----- 5. filings by year and type -----
   const yc = one(s, "years", "chart");
@@ -167,7 +248,7 @@ function hostile() { const v = copy(BASE); v.facts.entity.name = "Calloway <b>In
 
   // ----- 8. questions -----
   const qs = items(s, "questions", "numbered");
-  ok("questions: four numbered tiles in a 2x2 grid from the text", same(qs.map(q => [q.n, q.x, q.y, q.title]), [[1, 0.52, 1.35, "Rate requests in progress"], [2, 6.89, 1.35, "Product changes"], [3, 0.52, 3.8, "Regulatory timing"], [4, 6.89, 3.8, "Rate plan"]]), qs.map(q => q.title));
+  ok("questions: four numbered tiles in a 2x2 grid from the text", same(qs.map(q => [q.n, q.x, q.y, q.title]), [[1, 0.52, 1.35, "Rate requests in progress"], [2, 6.89, 1.35, "Disapproved filings"], [3, 0.52, 3.8, "Withdrawals and exits"], [4, 6.89, 3.8, "Product changes"]]), qs.map(q => q.title));
 
   // ----- missing data and other cases -----
   const n0 = await spec(nothing());
@@ -181,9 +262,9 @@ function hostile() { const v = copy(BASE); v.facts.entity.name = "Calloway <b>In
   ok("a very long name is cut on the cover", mt.slides[0].title.length < 80 && mt.slides[0].title.includes("…"));
 
   // ----- fit -----
-  for (const [name, v] of [["hand-worked", BASE], ["longest text", maxText()], ["crowded", crowded()], ["nothing", nothing()], ["no impact", noImpact()], ["bare", bare()], ["sample", SAMPLE]]) {
-    const sp = await spec(v), out = [];
-    sp.slides.slice(1).forEach(x => x.items.filter(i => i.type !== "source").forEach(i => { if (bottom(i) > 6.6 + 1e-9 || right(i) > 12.8 + 1e-9 || (i.x !== undefined && i.x < 0.52 - 1e-9) || (i.y !== undefined && i.y < 1.3 - 1e-9)) out.push([x.id, i.type, i.name || i.text, bottom(i), right(i)]); }));
+  for (const [name, v] of [["hand-worked", BASE], ["longest text", maxText()], ["crowded", crowded()], ["nothing", nothing()], ["no impact", noImpact()], ["bare", bare()], ["sample", SAMPLE], ["older", older()]]) {
+    const sp = await spec(v, { digests: DIGESTS() }), out = [];
+    sp.slides.slice(1).forEach(x => x.items.filter(i => i.type !== "source").forEach(i => { if (bottom(i) > 6.6 + 1e-9 || right(i) > 12.8 + 1e-9 || left(i) < 0.52 - 1e-9 || topOf(i) < 1.3 - 1e-9) out.push([x.id, i.type, i.name || i.text, bottom(i), right(i)]); }));
     ok("fit (" + name + "): every block inside x 0.52 to 12.80 and y 1.3 to 6.6, clear of the source line", out.length === 0, out);
     ok("fit (" + name + "): titles at most 65 characters", sp.slides.slice(1).every(x => x.title.length <= 65));
   }
@@ -205,10 +286,16 @@ function hostile() { const v = copy(BASE); v.facts.entity.name = "Calloway <b>In
   const names = Object.keys(z.files);
   const slides = await Promise.all(names.filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n)).sort((a, b) => +a.match(/\d+/)[0] - +b.match(/\d+/)[0]).map(n => z.file(n).async("string")));
   const charts = await Promise.all(names.filter(n => /^ppt\/charts\/chart\d+\.xml$/.test(n)).map(n => z.file(n).async("string")));
-  ok("sample build: eight slides; four native charts (rate changes, states, years, regulator), each with its workbook", slides.length === 8 && charts.length === 4 && names.filter(n => /\.xlsx$/.test(n)).length === 4, names.filter(n => /chart|xlsx/.test(n)));
+  ok("sample build: twelve slides; six native charts (rate changes, compounded by year and to date, types of insurance, years, regulator), each with its workbook", slides.length === 12 && charts.length === 6 && names.filter(n => /\.xlsx$/.test(n)).length === 6, names.filter(n => /chart|xlsx/.test(n)));
+  ok("sample build: two maps of 51 editable state outlines, each in a group", slides.filter(x => (x.match(/<a:custGeom>/g) || []).length === 51 && x.includes("<p:grpSp>")).length === 2);
+  ok("sample build: the compounded changes as a line chart with round markers", charts.some(x => x.includes("<c:lineChart>") && x.includes('<c:symbol val="circle"/>')));
+  ok("sample build: the signals' ratings filled in their colour", slides.some(x => x.includes("<a:t>Amber</a:t>") && x.includes('<a:srgbClr val="C46A1B"/>')));
   ok("sample build: the cover and the sample marker", slides[0].includes("Calloway Group: filings profile (sample)") && slides.slice(1).every(x => /made-up figures\./i.test(x)));
   ok("sample build: the rate chart is a column chart with its category labels at the bottom", charts.some(x => x.includes('<c:barDir val="col"/>') && x.includes('<c:tickLblPos val="low"/>') && x.includes("<c:v>Increase, approved</c:v>")));
-  ok("sample build: the state chart is a bar chart and no slide carries a picture", charts.some(x => x.includes('<c:barDir val="bar"/>') && x.includes("<c:v>Filings</c:v>")) && !slides.some(x => x.includes("<p:pic>")));
+  ok("sample build: bar charts where wanted, and no slide carries a picture", charts.some(x => x.includes('<c:barDir val="bar"/>') && x.includes("<c:v>Compounded (%)</c:v>")) && !slides.some(x => x.includes("<p:pic>")));
+  z = await JSZip.loadAsync(Buffer.from(await build(await spec(BASE, { digests: [DIG(BASE.facts.readable[0], { requestedPct: 12.5, approvedPct: 9.8 })].map(d => Object.assign(d, { typeOfInsurance: EVIL, filingNo: EVIL })) })), "base64"));
+  const rxml = (await Promise.all(Object.keys(z.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n)).map(n => z.file(n).async("string")))).join("");
+  ok("read: a summary's text is escaped in the built deck", rxml.includes("Rate figures from the filings&apos; own documents") && !rxml.includes("<script>") && rxml.includes("&lt;script&gt;"));
   ok("sample build: every content slide shows its slide number", slides.slice(1).every((x, i) => x.includes('type="slidenum"><a:rPr lang="en-US"/><a:t>' + (i + 2) + "</a:t>")));
 
   ok("no page errors", errs.length === 0, errs);

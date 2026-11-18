@@ -20,13 +20,13 @@ const quiet = async (work: () => Promise<unknown>): Promise<any> => { const keep
   ok("a well-supported answer passes with nothing dropped", !!fields && same(dropped, { shape: 0, pages: 0, unsupported: 0 }), dropped);
   ok("programs keep their name, segment, basis and page", same(fields.programs, [{ name: "Signature Home", segment: "private client", basis: "The Signature Home program is offered to owners of homes valued over $1,000,000.", page: 4 }]));
   ok("forms keep number, edition, title, action, replaces and page, and lose the quoted basis (not part of Contract B)", same(fields.forms[1], { number: "CHO 31 07", edition: "06 25", title: "Water backup endorsement", action: "replaced", replaces: "HO 04 95", page: 13, program: null }), fields.forms);
-  ok("rate figures supported by the basis are kept, in Contract B's names, with the page", same(fields.rate, { overallPct: 9.8, requestedPct: 9.8, approvedPct: null, premium: 1200000, policyholders: 4210, effectiveNew: "2027-01-01", effectiveRenewal: null, page: 3 }), fields.rate);
+  ok("rate figures supported by the basis are kept, in Contract B's names, with the page", same(fields.rate, { overallPct: 9.8, requestedPct: 9.8, approvedPct: null, premium: 1200000, policyholders: 4210, effectiveNew: "2027-01-01", effectiveRenewal: null, indicatedPct: null, lcm: null, trendPct: null, expensePct: null, page: 3 }), fields.rate);
   ok("eligibility and notable points keep their text and page", same(fields.eligibility, [{ text: "Homes valued at $1,000,000 or more.", page: 20 }]) && same(fields.notable, [{ text: "Uses a new wildfire score.", page: 31 }]));
   const meta = D.metaFrom({ trackingNumber: "", sfcNumber: "CAL1234567", companyName: "Calloway Home Co", serffFilingStateId: "FL", typeOfInsurance: "Homeowners", serffFilingType: "Form", filingStatus: "Approved", publishDate: "2026-10-10", pages: 624, documentId: 71000001, filingVersionId: "0B0B0B0B-0000-4000-8000-000000000001" });
   const d = D.buildDigest(meta, fields, READ, "2026-11-18T05:00:00.000Z");
   ok("a whole digest has exactly Contract B's fields, in its order", same(Object.keys(d), ["filingVersionId", "documentId", "filingNo", "company", "companies", "state", "typeOfInsurance", "filingType", "status", "published", "pages", "read", "madeAt", "by", "summary", "programs", "forms", "rate", "eligibility", "notable"]), Object.keys(d));
   ok("its filing number comes from filingNumberText: S&P's own number when there is no tracking number", d.filingNo === "S&P no. CAL1234567" && d.company === "Calloway Home Co" && same(d.companies, ["Calloway Home Co"]) && d.state === "FL" && d.published === "2026-10-10" && d.pages === 624 && d.by === "claude" && same(d.read, [{ from: 1, to: 150 }]));
-  ok("rate figures are in Contract B's keys", same(Object.keys(d.rate), ["overallPct", "requestedPct", "approvedPct", "premium", "policyholders", "effectiveNew", "effectiveRenewal", "page"]));
+  ok("rate figures are in Contract B's keys, with the rate drivers after them", same(Object.keys(d.rate), ["overallPct", "requestedPct", "approvedPct", "premium", "policyholders", "effectiveNew", "effectiveRenewal", "indicatedPct", "lcm", "trendPct", "expensePct", "page"]));
   ok("a saved digest read back is the same digest", same(D.cleanDigest(JSON.parse(JSON.stringify(d))), d), D.cleanDigest(d));
 }
 
@@ -36,7 +36,7 @@ const quiet = async (work: () => Promise<unknown>): Promise<any> => { const keep
   ok("an answer with empty lists passes, its rate all n/d with no page", !!fields && fields.programs.length === 0 && fields.forms.length === 0 && Object.values(fields.rate).every((v) => v === null) && same(dropped, { shape: 0, pages: 0, unsupported: 0 }), fields);
   ok("no summary: the answer can't be used", D.checkDigest({ ...goodRaw(), summary: "  " }, READ).fields === null && D.checkDigest({ ...goodRaw(), summary: 7 }, READ).fields === null);
   ok("not an object at all: unusable, nothing thrown", [null, "text", 5, [], undefined].every((x) => D.checkDigest(x, READ).fields === null));
-  ok("lists that aren't lists are empty", same(D.checkDigest({ summary: "S.", programs: "x", forms: {}, rate: "y", eligibility: 3, notable: null }, READ).fields, { summary: "S.", programs: [], forms: [], rate: { overallPct: null, requestedPct: null, approvedPct: null, premium: null, policyholders: null, effectiveNew: null, effectiveRenewal: null, page: null }, eligibility: [], notable: [] }));
+  ok("lists that aren't lists are empty", same(D.checkDigest({ summary: "S.", programs: "x", forms: {}, rate: "y", eligibility: 3, notable: null }, READ).fields, { summary: "S.", programs: [], forms: [], rate: { overallPct: null, requestedPct: null, approvedPct: null, premium: null, policyholders: null, effectiveNew: null, effectiveRenewal: null, indicatedPct: null, lcm: null, trendPct: null, expensePct: null, page: null }, eligibility: [], notable: [] }));
 }
 
 // ---------- page numbers inside the pages read ----------
@@ -76,11 +76,27 @@ const quiet = async (work: () => Promise<unknown>): Promise<any> => { const keep
   ok("an edition or a replaced form that isn't in the basis is left out, the form kept", same(fields.forms.find((f: any) => f.number === "cho-30-01"), { number: "cho-30-01", edition: null, title: "Homeowners policy", action: "new", replaces: null, page: 12, program: null }));
   ok("a form with no basis, or a number with no digit, is dropped", fields.forms.length === 1 && dropped.shape >= 2, { forms: fields.forms, dropped });
   ok("a program whose name isn't in its basis is dropped; one with no basis too; a plural or capitals still match", same(fields.programs.map((p: any) => p.name), ["Signature Homes"]), fields.programs);
-  ok("rate figures not in the basis are left out; those in it are kept, a negative one by its size; a date's year must be there", same(fields.rate, { overallPct: null, requestedPct: 9.8, approvedPct: -3.2, premium: null, policyholders: 4210, effectiveNew: "2027-01-01", effectiveRenewal: null, page: 3 }), fields.rate);
+  ok("rate figures not in the basis are left out; those in it are kept, a negative one by its size; a date's year must be there", same(fields.rate, { overallPct: null, requestedPct: 9.8, approvedPct: -3.2, premium: null, policyholders: 4210, effectiveNew: "2027-01-01", effectiveRenewal: null, indicatedPct: null, lcm: null, trendPct: null, expensePct: null, page: 3 }), fields.rate);
   ok("what was dropped for want of support is counted", dropped.unsupported === 5, dropped);
   ok("$1.2 million supports 1,200,000, and 9.8% supports 9.8 but not 9.9", D.numbersIn("$1.2 million").includes(1200000) && D.checkDigest(goodRaw({ rate: { ...goodRaw().rate, overallPct: 9.9 } }), READ).fields.rate.overallPct === null);
   const odd = D.checkDigest(goodRaw({ rate: { ...goodRaw().rate, overallPct: "9.8", policyholders: 4210.5, effectiveNew: "2027-13-01", premium: -5 } }), READ).fields.rate;
   ok("figures of the wrong type or shape are left out: text, a fraction of a policyholder, an impossible date, a negative amount", odd.overallPct === null && odd.policyholders === null && odd.effectiveNew === null && odd.premium === null, odd);
+  // the rate drivers: kept only when the quoted exhibit has them, a loss cost multiplier to three decimals
+  const drv = (r: Record<string, unknown>) => D.checkDigest(goodRaw({ rate: { ...goodRaw().rate, ...r } }), READ);
+  const exhibit = "Overall rate change 9.8%. Indicated change 14.2%. Selected loss cost multiplier 1.250. Annual loss trend 6.5%. Total expense provision 31.4%. Written premium affected $1.2 million. 4,210 policyholders. Effective 01/01/2027.";
+  let dv = drv({ basis: exhibit, indicatedPct: 14.2, lcm: 1.25, trendPct: 6.5, expensePct: 31.4 });
+  ok("rate drivers in the quoted exhibit are kept: indicated change, loss cost multiplier, loss trend and expense provision",
+    dv.fields!.rate.indicatedPct === 14.2 && dv.fields!.rate.lcm === 1.25 && dv.fields!.rate.trendPct === 6.5 && dv.fields!.rate.expensePct === 31.4 && dv.dropped.unsupported === 0, dv);
+  dv = drv({ basis: exhibit, indicatedPct: 15.0, lcm: 1.26, trendPct: 6.5, expensePct: null });
+  ok("…and those not in it are left out: an indication of 15.0% and a multiplier of 1.26 against 1.250", dv.fields!.rate.indicatedPct === null && dv.fields!.rate.lcm === null && dv.fields!.rate.trendPct === 6.5 && dv.dropped.unsupported === 2, dv);
+  dv = drv({ basis: exhibit + " LCM 0 and 99% expense.", lcm: 0, expensePct: -31.4, trendPct: 250 });
+  ok("drivers of an impossible size are left out: a multiplier of 0, a negative expense provision, a trend over 100%", dv.fields!.rate.lcm === null && dv.fields!.rate.expensePct === null && dv.fields!.rate.trendPct === null && dv.dropped.shape >= 3, dv);
+  const withDrivers = D.buildDigest(D.metaFrom({ documentId: 71000009 }), drv({ basis: exhibit, indicatedPct: 14.2, lcm: 1.25 }).fields!, READ, "2026-11-18T05:00:00.000Z");
+  ok("a saved digest keeps its drivers, and an answer reading it sees them", same(D.cleanDigest(JSON.parse(JSON.stringify(withDrivers)))!.rate, withDrivers.rate)
+    && D.summaryDocument(withDrivers).blocks.some((b) => b.includes("indicated 14.2%, loss cost multiplier 1.25")));
+  const older = JSON.parse(JSON.stringify(withDrivers)); for (const k of ["indicatedPct", "lcm", "trendPct", "expensePct"]) delete older.rate[k];
+  ok("a digest saved before the drivers reads back with them n/d", (["indicatedPct", "lcm", "trendPct", "expensePct"] as const).every((k) => D.cleanDigest(older)!.rate[k] === null));
+  ok("the instructions ask for the drivers only when the filing gives them", /indicatedPct/.test(D.DIGEST_RULES) && /loss cost multiplier/.test(D.DIGEST_RULES) && /when the filing's rate exhibits give them/.test(D.DIGEST_RULES));
 }
 
 // ---------- a form's program ----------

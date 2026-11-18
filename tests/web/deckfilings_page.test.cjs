@@ -3,7 +3,9 @@
 // and what it costs in S&P requests, the refusal of a profile over the cap with what to choose instead, the figures and
 // the slides in or out, Claude's draft (on by default, kept, partly replaced, refused, limit, busy), building the real
 // deck on the stand-in template and opening the file, the sample, errors said plainly, nothing returned, a search that
-// stopped early, what Ask Claude is told, hostile text, and the 1440px and 390px layouts. The page runs with the real
+// stopped early, what Ask Claude is told, hostile text, the largest rate filings read by Claude (saved summaries found
+// free, the rest summarised only when asked, priced first, one at a time, and their figures on a slide of the deck), and
+// the 1440px and 390px layouts. The page runs with the real
 // zip library, deck.js and profile-slides.js; the functions are stand-ins. Nothing touches the network.
 const OUTDIR = require("path").join(__dirname, "../out"); require("fs").mkdirSync(OUTDIR, { recursive: true });
 const { chromium } = require("playwright"); const fs = require("fs"); const path = require("path"); const JSZip = require("jszip");
@@ -36,6 +38,11 @@ const SEARCH = { companyIds: [9100002], institutionIds: [], states: ["FL", "GA",
 const FACTS_ANS = () => ({ status: 200, body: { facts: copy(FACTS.facts), text: copy(FACTS.text), spRequests: 6, search: copy(SEARCH) } });
 const CLAUDE = () => { const t = copy(FACTS.text); t.by = "claude"; t.summary.title = "Seven filings; the largest change 9.8%, pending"; return t; };
 const DRAFT_ANS = () => ({ status: 200, body: { facts: copy(FACTS.facts), text: CLAUDE(), usage: { inputTokens: 9100, outputTokens: 1800, costUsd: 0.08 }, jobId: "job-fp-1", spRequests: 0, search: copy(SEARCH) } });
+// a summary of one of the facts' readable rate filings, in the shape snl-digest gives (made up)
+const DIGEST = (f, rate = {}) => ({ filingVersionId: f.filingVersionId, documentId: f.documentId, filingNo: f.filingNo, company: f.companyName, companies: [f.companyName], state: f.serffFilingStateId ?? f.state,
+  typeOfInsurance: f.typeOfInsurance, filingType: f.serffFilingType ?? f.filingType, status: f.filingStatus ?? f.status, published: f.publishDate ?? f.published, pages: f.pages, read: [{ from: 1, to: 10 }], madeAt: "2026-11-18T05:00:00.000Z", by: "claude",
+  summary: "Made-up summary.", programs: [], forms: [], eligibility: [], notable: [],
+  rate: { overallPct: 9.8, requestedPct: 12.5, approvedPct: null, premium: 2400000, policyholders: null, effectiveNew: null, effectiveRenewal: null, indicatedPct: 16.2, lcm: null, trendPct: 6.5, expensePct: 30.1, page: 4, ...rate } });
 const PSTATUS = (over = {}) => ({ statutory: { configured: false, mapped: false, fields: [] }, claude: { configured: true }, filings: { configured: true }, ...over });
 
 (async () => {
@@ -44,7 +51,8 @@ const PSTATUS = (over = {}) => ({ statutory: { configured: false, mapped: false,
     const width = over.width || 1440;
     const ctx = await b.newContext({ viewport: { width, height: width < 500 ? 844 : 900 }, timezoneId: "UTC", acceptDownloads: true }); const p = await ctx.newPage(); p.on("pageerror", e => errs.push(String(e)));
     await p.clock.setFixedTime(new Date("2026-11-18T12:00:00Z"));
-    const t = { p, ctx, calls: [], delay: {}, asked: 2, pstatus: () => PSTATUS(), facts: FACTS_ANS, draft: DRAFT_ANS, sample: () => ({ status: 200, body: copy(SAMPLE) }), ...over };
+    const t = { p, ctx, calls: [], delay: {}, asked: 2, pstatus: () => PSTATUS(), facts: FACTS_ANS, draft: DRAFT_ANS, sample: () => ({ status: 200, body: copy(SAMPLE) }),
+      dget: () => ({ status: 200, body: { digests: [], missing: [] } }), dmake: body => ({ status: 200, body: { digest: DIGEST(body.filing, { approvedPct: body.filing.filingStatus === "Approved" ? 4.5 : null }), usage: { costUsd: 0.1 }, fromStore: false } }), ...over };
     await p.route("**/*", async r => { const req = r.request(), u = req.url();
       if (u.startsWith(FNS)) { const fn = u.slice(FNS.length), body = JSON.parse(req.postData() || "{}"); t.calls.push({ fn, body });
         const J = (status, o) => r.fulfill({ status, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(o) }).catch(() => {});
@@ -53,6 +61,8 @@ const PSTATUS = (over = {}) => ({ statutory: { configured: false, mapped: false,
           const a = body.action === "status" ? { status: 200, body: t.pstatus() } : body.action === "filings_facts" ? t.facts(body) : body.action === "filings_draft" ? t.draft(body) : body.action === "filings_sample" ? t.sample(body) : { status: 400, body: { error: "bad", message: "Unknown action." } };
           if (body.action === "filings_draft" && a.status === 200) t.asked++;
           return J(a.status, a.body); }
+        if (fn === "snl-digest") { if (t.delay.digest) await new Promise(res => setTimeout(res, t.delay.digest));
+          const a = body.action === "get" ? t.dget(body) : body.action === "make" ? t.dmake(body) : { status: 400, body: { error: "bad", message: "Unknown action." } }; return J(a.status, a.body); }
         if (fn === "snl-chat" && body.action === "status") return J(200, { configured: true, askedToday: t.asked, dailyLimit: 20, costToday: 0.1 * t.asked, resetsAt: "2026-11-19T00:00:00Z" });
         if (fn === "snl-filings" && body.action === "status") return J(200, { ...copy(STATUS), role: opts.role || "corpdev" });
         if (fn === "snl-filings" && body.action === "reference") return J(200, REFS);
@@ -70,6 +80,7 @@ const PSTATUS = (over = {}) => ({ statutory: { configured: false, mapped: false,
     t.list = async sel => p.$$eval(sel, e => e.map(x => x.textContent.replace(/\s+/g, " ").trim()));
     t.noScroll = async () => p.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
     t.of = a => t.calls.filter(c => c.fn === "snl-profile" && c.body.action === a);
+    t.dg = a => t.calls.filter(c => c.fn === "snl-digest" && c.body.action === a);
     t.find = async q => { await p.fill("#fp_find", q); await p.press("#fp_find", "Enter"); await p.waitForTimeout(250); };
     t.download = async click => { const [d] = await Promise.all([p.waitForEvent("download", { timeout: 20000 }), click()]); return { name: d.suggestedFilename(), zip: await JSZip.loadAsync(fs.readFileSync(await d.path())) }; };
     return t;
@@ -77,7 +88,8 @@ const PSTATUS = (over = {}) => ({ statutory: { configured: false, mapped: false,
   const slidesOf = async zip => Promise.all(Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n)).sort((a, b) => +a.match(/\d+/)[0] - +b.match(/\d+/)[0]).map(n => zip.file(n).async("string")));
 
   // ----- Corp Dev, statutory data not ready, S&P and Claude set up, a template uploaded -----
-  let t = await open({ template: { text: "PK", updated_at: "2026-11-05T09:30:00Z" } }); let p = t.p;
+  const READ = FACTS.facts.readable;
+  let t = await open({ template: { text: "PK", updated_at: "2026-11-05T09:30:00Z" } }, { dget: () => ({ status: 200, body: { digests: [DIGEST({ ...READ[0], filingStatus: READ[0].status })], missing: READ.slice(1).map(r => ({ documentId: r.documentId })) } }) }); let p = t.p;
   ok("the filings profile shows first while statutory data isn't ready", (await p.getAttribute('[data-act="pf-mode"][data-m="filings"]', "aria-pressed")) === "true" && !!(await p.$("#fpForm")) && !(await p.$("#pfForm")) && (await t.txt(".action-title")) === "Company profile as a PowerPoint file");
   ok("the switch names both kinds of profile", same(await t.list('[data-act="pf-mode"]'), ["Filings profile", "Full profile (needs statutory data)"]));
   ok("both samples are offered on the template card", (await t.txt('[data-act="pf-sample"]')) === "Build a sample profile" && (await t.txt('[data-act="fp-sample"]')) === "Build a sample filings profile");
@@ -116,7 +128,19 @@ const PSTATUS = (over = {}) => ({ statutory: { configured: false, mapped: false,
   await p.waitForTimeout(1200); t.delay.filings_facts = 0;
   ok("asks for the company by its S&P id and the period: no figures, no NAIC code", same(t.of("filings_facts").map(c => c.body), [{ action: "filings_facts", kind: "company", years: 3, companyId: "9100002" }]), t.of("filings_facts").map(c => c.body));
   ok("the name, what it covers and the headline counts", (await t.txt("#fpName")) === "Calloway Insurance Co" && (await t.txt("#fpMeta")) === "Company · filings published 20 Nov 2023 to 18 Nov" && same(await p.$$eval("#fpHead .pftile", e => e.map(x => [x.querySelector("span").textContent, x.querySelector("b").textContent])), [["Filings", "7"], ["Rate filings", "4"], ["States with filings", "3"]]), await t.txt("#fpMeta"));
-  ok("the slides: all eight filled from these filings", same(await t.list("#fpPlan li"), ["CoverIncluded", "SummaryIncluded", "Rate changesIncluded", "Where it filesIncluded", "Filings by year and typeIncluded", "Latest form and rule filingsIncluded", "Time with the regulatorIncluded", "Key diligence questionsIncluded"]), await t.list("#fpPlan li"));
+  const EXPO = "Premium and exposure by stateLeft out: A filings profile has no premium or exposure figures: they need statutory data (S&P on Snowflake). Filing counts aren't exposure. The full profile shows premium by state once statutory data is set up.";
+  ok("the slides: thirteen of fourteen filled from these filings and the one saved summary; premium and exposure left out, saying they need statutory data", same(await t.list("#fpPlan li"), ["CoverIncluded", "SummaryIncluded", "Filing signals (red, amber, green)Included", "Where it files (map)Included",
+    "Latest approved rate change by state (map)Included", "Rate changesIncluded", "Approved rate changes compoundedIncluded", "Types of insurance and outcomesIncluded", "Rate filings read by ClaudeIncluded", EXPO,
+    "Filings by year and typeIncluded", "Latest form and rule filingsIncluded", "Time with the regulatorIncluded", "Key diligence questionsIncluded"]), await t.list("#fpPlan li"));
+  ok("the largest rate filings: their saved summaries looked up once, free, by document id, the largest impact first", same(t.dg("get").map(c => c.body), [{ action: "get", filings: READ.map(r => ({ documentId: r.documentId })) }]) && t.dg("make").length === 0, t.dg("get").map(c => c.body));
+  ok("…each listed with whether it has a saved summary", same(await t.list("#fpReadList li"), ["FL · Homeowners · 9.8% · Pending · 5 NovSaved summary", "FL · Homeowners · 4.5% · Approved · 10 OctNot read yet", "TX · Commercial property · (3.5%) · Approved · 1 Mar 2025Not read yet", "TX · Homeowners · 2.0% · Disapproved · 20 Aug 2024Not read yet"]), await t.list("#fpReadList li"));
+  ok("…and what reading the other three costs, before anything is asked", (await t.txt("#fpReadCost")) === "Summarising 3 filings reads up to the first 150 pages of each with Claude. It uses 3 S&P requests, about $0.84 of Claude's time in all, and 3 of your questions today. The summaries are saved for everyone, so nobody pays to read these pages again." && (await t.txt("#fp_read")) === "Summarise these 3 filings", await t.txt("#fpReadCost"));
+  t.delay.digest = 300;
+  await p.click("#fp_read"); await p.waitForTimeout(150);
+  ok("summarising: one filing at a time, said as it goes", (await t.txt("#fpReading")) === "Claude is reading filing 1 of 3… Each takes up to two minutes. Keep this tab open." && await p.isDisabled("#fp_buildBtn") === false);
+  await p.waitForTimeout(1300); t.delay.digest = 0;
+  ok("…each sent as the search row snl-digest takes, the largest first, never the one already saved", same(t.dg("make").map(c => c.body.filing.documentId), [71000001, 71000003, 71000006]) && same(t.dg("make")[0].body, { action: "make", filing: { documentId: 71000001, filingVersionId: READ[1].filingVersionId, filingNo: "CALL-FL-1", companyName: "Calloway Insurance Co", serffFilingStateId: "FL", typeOfInsurance: "Homeowners", serffFilingType: "Rate", filingStatus: "Approved", publishDate: "2026-10-10", pages: 10 } }), t.dg("make").map(c => c.body));
+  ok("…then every one shows a saved summary, with what the new ones cost", (await t.list("#fpReadList li")).every(x => x.endsWith("Saved summary")) && (await t.txt("#fpReadDone")) === "Every one has a saved summary; the new ones cost about $0.30. The deck adds a slide of their rate figures." && !(await p.$("#fp_read")), await t.txt("#fpReadDone"));
   ok("the source, what rate impacts are, and the S&P requests used", (await t.txt("#fpSource")) === "Source: S&P Global Market Intelligence, SNL Insurance Product Filings. Rate impacts are S&P's overall figure for each filing, not weighted by premium; for a filing that isn't approved it may be the change asked for. 6 S&P requests used.", await t.txt("#fpSource"));
   ok("Claude's draft is on by default, counted as one of today's questions", await p.isChecked("#fp_draft") && (await t.txt("#fpDraftCost")).startsWith("Counts as one of today's questions to Claude. You've asked 2 of 20 questions today") && (await t.txt("#fp_buildBtn")) === "Draft with Claude and build");
   ok("Ask Claude is told the search behind the profile", same(await p.evaluate(() => askScreen()), { view: "filings", search: { companyIds: [9100002], institutionIds: [], states: ["FL", "GA", "TX"], from: "2023-11-20", to: "2026-11-18", typeOfInsuranceIds: [], filingTypeIds: [], filingStatusIds: [] }, total: 7, companies: ["Calloway Insurance Co"] }));
@@ -130,7 +154,10 @@ const PSTATUS = (over = {}) => ({ statutory: { configured: false, mapped: false,
   ok("the draft is saved as a past answer and counted as seen", (await p.evaluate(() => localStorage.getItem("snl.seenAnswer"))) === "job-fp-1");
   ok("the file: named after the company, the kind of profile and the day", dl.name === "Calloway-Insurance-Co-filings-profile-2026-11-18.pptx", dl.name);
   let sl = await slidesOf(dl.zip);
-  ok("a real PowerPoint file of eight slides with Claude's title and the source on each", sl.length === 8 && sl[0].includes("Calloway Insurance Co: filings profile") && sl[1].includes("Seven filings; the largest change 9.8%, pending") && sl.slice(1).every(x => x.includes("SNL Insurance Product Filings")) && sl.some(x => x.includes("S&amp;P no. ABC1234567")));
+  ok("a real PowerPoint file of thirteen slides with Claude's title and the source on each", sl.length === 13 && sl[0].includes("Calloway Insurance Co: filings profile") && sl[1].includes("Seven filings; the largest change 9.8%, pending") && sl.slice(1).every(x => x.includes("SNL Insurance Product Filings")) && sl.some(x => x.includes("S&amp;P no. ABC1234567")), sl.length);
+  const rd = sl.find(x => x.includes("Rate figures from the filings&apos; own documents")) || "";
+  ok("the summaries' figures are on a slide of their own: requested, approved and indicated changes, trend and expense, with the page", !!rd && rd.includes("Requested (%)") && rd.includes("<a:t>12.5</a:t>") && rd.includes("<a:t>16.2</a:t>") && rd.includes("Loss trend (%)") && rd.includes("<a:t>30.1</a:t>") && rd.includes("<a:t>4.5</a:t>"));
+  ok("the map is drawn as editable state outlines, not a picture", sl.some(x => (x.match(/<a:custGeom>/g) || []).length === 51 && x.includes('name="Map of filings by state"')) && !sl.some(x => x.includes("<p:pic>")));
   ok("built: says so, and that the file went nowhere; the draft's cost is shown", (await t.txt("#fpBuilt")) === "Your filings profile is ready. Calloway-Insurance-Co-filings-profile-2026-11-18.pptx was saved to your downloads. It was made in this browser and isn't stored or sent anywhere.Download again" && (await t.txt("#fpDrafted")) === "Claude has drafted the text for these filings. It cost about $0.08 (9,100 tokens read, 1,800 written).", await t.txt("#fpDrafted"));
   dl = await t.download(() => p.click('[data-act="fp-again"]'));
   ok("Download again: the same file, no new draft", dl.name === "Calloway-Insurance-Co-filings-profile-2026-11-18.pptx" && t.of("filings_draft").length === 1);
@@ -191,17 +218,33 @@ const PSTATUS = (over = {}) => ({ statutory: { configured: false, mapped: false,
   t = await open({ template: { text: "PK" } }, { facts: nothing }); p = t.p;
   await t.find("Calloway"); await p.click('[data-act="fp-co"][data-i="0"]'); await p.waitForTimeout(100); await p.click("#fp_get"); await p.waitForTimeout(800);
   ok("nothing returned: S&P returned nothing for this search, never that nothing was filed", (await t.txt("#fpNothing")) === "S&P returned nothing for this search. No filings came back for Calloway Insurance Co in any state over the last 3 years. That doesn't prove nothing was filed. Check the choice, or try a longer period." && !/no filings exist/i.test(await t.txt("#fpOut")));
-  ok("…and the slides that need filings are left out, saying why", (await t.list("#fpPlan li")).filter(x => x.includes("Left out: S&P returned nothing for this search")).length === 5);
+  ok("…and the slides that need filings are left out, saying why", (await t.list("#fpPlan li")).filter(x => x.includes("Left out: S&P returned nothing for this search")).length === 10);
   await t.ctx.close();
   t = await open({ template: { text: "PK" } }, { facts: () => { const a = FACTS_ANS(); a.body.facts.search.capped = true; a.body.spRequests = 60; return a; } }); p = t.p;
   await t.find("Calloway"); await p.click('[data-act="fp-co"][data-i="0"]'); await p.waitForTimeout(100); await p.click("#fp_get"); await p.waitForTimeout(800);
   ok("a search that stopped early: said, with what to do", (await t.txt("#fpCapped")) === "The search stopped early, so these filings may be incomplete and the slides say so. Choose a shorter period or one company for a complete profile." && (await t.txt("#fpSource")).endsWith("60 S&P requests used."));
   await t.ctx.close();
 
+  // ----- reading the largest rate filings: refused part way, summaries not set up -----
+  t = await open({ template: { text: "PK" } }, { dmake: body => body.filing.documentId === 71000001 ? { status: 429, body: { error: "limit", message: "You've asked 20 questions today, and the limit is 20 a day for each login. Making a summary counts as a question." } } : { status: 200, body: { digest: DIGEST(body.filing), usage: { costUsd: 0.1 }, fromStore: false } } }); p = t.p;
+  await t.find("Calloway"); await p.click('[data-act="fp-co"][data-i="0"]'); await p.waitForTimeout(100); await p.click("#fp_get"); await p.waitForTimeout(800);
+  ok("no saved summary: all four offered, and the slide waits for them", (await t.txt("#fp_read")) === "Summarise these 4 filings" && (await t.list("#fpPlan li")).some(x => x === "Rate filings read by ClaudeLeft out: No rate filing in this profile has a saved summary yet. Summarise the largest rate filings to add the requested, approved and indicated changes."));
+  await p.click("#fp_read"); await p.waitForTimeout(600);
+  ok("refused part way (the daily limit): stops there, keeps what was made, says why, offers to try again", same(t.dg("make").map(c => c.body.filing.documentId), [71000002, 71000001]) && (await t.txt("#fpReadErr")).startsWith("Couldn't summarise every filing. You've asked 20 questions today")
+    && (await t.list("#fpReadList li")).filter(x => x.endsWith("Saved summary")).length === 1 && (await t.list("#fpPlan li")).includes("Rate filings read by ClaudeIncluded"), await t.txt("#fpReadErr"));
+  await t.ctx.close();
+  t = await open({ template: { text: "PK" } }, { dget: () => ({ status: 503, body: { error: "no_tables", message: "Saved summaries aren't set up yet." } }) }); p = t.p;
+  await t.find("Calloway"); await p.click('[data-act="fp-co"][data-i="0"]'); await p.waitForTimeout(100); await p.click("#fp_get"); await p.waitForTimeout(800);
+  ok("summaries not set up: the step says so and offers nothing; the deck builds without it", (await t.txt("#fpReadOff")) === "Filing summaries aren't set up, so this step is skipped (README, step 11)." && !(await p.$("#fp_read")) && !(await p.isDisabled("#fp_buildBtn")));
+  await p.setViewportSize({ width: 390, height: 844 }); await p.waitForTimeout(150);
+  ok("phone: no sideways scroll with the reading step shown", await t.noScroll());
+  await t.ctx.close();
+
   // ----- the sample, statutory ready, S&P not set up, Claude not set up, no template -----
   t = await open({ template: { text: "PK" } }); p = t.p;
   dl = await t.download(() => p.click('[data-act="fp-sample"]')); await p.waitForTimeout(200);
-  ok("the sample filings profile: asked for and built in one click", same(t.of("filings_sample").map(c => c.body), [{ action: "filings_sample" }]) && dl.name === "Calloway-Group-filings-profile-sample-2026-11-18.pptx" && (await slidesOf(dl.zip)).length === 8, dl.name);
+  ok("the sample filings profile: asked for and built in one click", same(t.of("filings_sample").map(c => c.body), [{ action: "filings_sample" }]) && dl.name === "Calloway-Group-filings-profile-sample-2026-11-18.pptx" && (await slidesOf(dl.zip)).length === 12, dl.name);
+  ok("the sample has no documents to read: no summaries looked up, none offered", t.dg("get").length === 0 && !(await p.$("#fpRead")));
   ok("the sample says it is made up, has no draft, and nothing is told to Claude", (await t.txt("#fpSample")).startsWith("This is a sample filings profile.") && (await t.txt("#fpDraftNote")) === "The sample uses plain text written from its figures." && (await p.evaluate(() => askScreen())) === null);
   await p.click('[data-act="pf-sample"]'); await p.waitForTimeout(400);
   ok("the full profile's sample switches to the full profile", (await p.getAttribute('[data-act="pf-mode"][data-m="full"]', "aria-pressed")) === "true");

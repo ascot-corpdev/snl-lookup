@@ -21,11 +21,16 @@
 //   {type:"line", x1,y1,x2,y2, color, width, dash}
 //   {type:"numbered", x,y,w,h, n, title, text, inset, badge, badgeColor, name}   (oval badge with the digit inside)
 //   {type:"table", x,y, colW:[], rowH: number|[], rows:[[cell]], header:true, aligns:["l"|"ctr"|"r"], size,
-//        rowStyles:{rowIndex:{bold,color}}, name}       cell = string | {text, bold, color}
-//   {type:"chart", kind:"column"|"stackedColumn"|"bar"|"stackedBar", x,y,w,h, categories:[], series:[{name, values,
-//        color, pointColors:{i:color}, labelColor}], labels:{format, position, color, size} | false, legend:"top"|"none",
+//        rowStyles:{rowIndex:{bold,color}}, name}       cell = string | {text, bold, color, fill}
+//   {type:"chart", kind:"column"|"stackedColumn"|"bar"|"stackedBar"|"line", x,y,w,h, categories:[], series:[{name, values,
+//        color, pointColors:{i:color}, labelColor, labelLast}], labels:{format, position, color, size} | false, legend:"top"|"none",
 //        valueAxis:{max, min, major, format} | null, gap, overlap, catSize, catLabels:"low"|"nextTo", name}
-//        (catLabels "low" puts the category labels at the bottom, clear of columns below zero)
+//        (catLabels "low" puts the category labels at the bottom, clear of columns below zero; a line chart draws each
+//        series as a line with round markers, and labelLast labels only its last point)
+//   {type:"freeform", x,y,w,h, pathW, pathH, paths:[[[x,y], ...], ...], fill, line:{color,width}, paras, anchor, name}
+//        (an editable outline: each path is a closed polygon in a pathW x pathH space stretched over the box)
+//   {type:"group", items:[item], name}                                 (freeform, text, box, tile and line items moved
+//        and resized together in PowerPoint)
 (function () {
   "use strict";
   var NS = {
@@ -383,7 +388,7 @@
     var id = s.id(), name = it.name || ((txBox ? "TextBox " : "Shape ") + (id - 1));
     var geom = '<a:prstGeom prst="' + (it.shape === "ellipse" ? "ellipse" : "rect") + '"><a:avLst/></a:prstGeom>';
     var fill = it.fill ? '<a:solidFill><a:srgbClr val="' + color(it.fill) + '"/></a:solidFill>' : "<a:noFill/>";
-    var line = txBox ? "" : (it.line ? '<a:ln w="' + Math.round((num(it.line.width) ? it.line.width : 1) * 12700) + '"><a:solidFill><a:srgbClr val="' + color(it.line.color) + '"/></a:solidFill></a:ln>' : "<a:ln><a:noFill/></a:ln>");
+    var line = txBox ? "" : (it.line ? '<a:ln w="' + Math.round((num(it.line.width) ? it.line.width : 1) * 12700) + '"><a:solidFill><a:srgbClr val="' + color(it.line.color) + '"/></a:solidFill>' + (it.line.dash ? '<a:prstDash val="dash"/>' : "") + "</a:ln>" : "<a:ln><a:noFill/></a:ln>");
     var paras = (it.paras && it.paras.length ? it.paras : [{ runs: [] }]).map(function (p) { return para(p); }).join("");
     s.xml.push('<p:sp><p:nvSpPr><p:cNvPr id="' + id + '" name="' + esc(oneLine(name)) + '"/><p:cNvSpPr' + (txBox ? ' txBox="1"' : "") + "/><p:nvPr/></p:nvSpPr>" +
       "<p:spPr>" + xfrm(it.x, it.y, it.w, it.h) + geom + fill + line + "</p:spPr>" +
@@ -437,6 +442,47 @@
     textShape(s, { shape: "ellipse", x: it.x + (inset - badge) / 2, y: it.y + 0.2, w: badge, h: badge, fill: it.badgeColor || MAG, margins: [0, 0, 0, 0], anchor: "ctr",
       name: "Badge " + it.n, paras: [{ align: "ctr", runs: [{ text: String(it.n), size: 20, bold: true, color: WHITE }] }] });
   }
+  // an outline (a state on a map): closed polygons in a pathW x pathH space, stretched over the box; text optional
+  function freeformShape(s, it, where) {
+    needBox(it, where);
+    var pw = num(it.pathW) && it.pathW > 0 ? it.pathW : it.w, ph = num(it.pathH) && it.pathH > 0 ? it.pathH : it.h;
+    var k = 100, rnd = function (v) { return Math.round(v * k); };   // whole numbers in a space 100 times finer
+    var polys = (it.paths || []).filter(function (p) { return Array.isArray(p) && p.length >= 3; });
+    if (!polys.length) fail("The slide plan has a problem: " + where + " is an outline with no points.");
+    var path = polys.map(function (p) {
+      return p.map(function (pt, i) {
+        if (!Array.isArray(pt) || !num(pt[0]) || !num(pt[1])) fail("The slide plan has a problem: " + where + " has an outline point that isn't a number.");
+        var xy = '<a:pt x="' + rnd(Math.max(0, Math.min(pw, pt[0]))) + '" y="' + rnd(Math.max(0, Math.min(ph, pt[1]))) + '"/>';
+        return i ? "<a:lnTo>" + xy + "</a:lnTo>" : "<a:moveTo>" + xy + "</a:moveTo>";
+      }).join("") + "<a:close/>";
+    }).join("");
+    var id = s.id(), fill = it.fill ? '<a:solidFill><a:srgbClr val="' + color(it.fill) + '"/></a:solidFill>' : "<a:noFill/>";
+    var line = it.line ? '<a:ln w="' + Math.round((num(it.line.width) ? it.line.width : 0.75) * 12700) + '"><a:solidFill><a:srgbClr val="' + color(it.line.color) + '"/></a:solidFill>' + (it.line.dash ? '<a:prstDash val="dash"/>' : "") + "</a:ln>" : "<a:ln><a:noFill/></a:ln>";
+    var paras = (it.paras && it.paras.length ? it.paras : [{ runs: [] }]).map(function (p) { return para(p); }).join("");
+    s.xml.push('<p:sp><p:nvSpPr><p:cNvPr id="' + id + '" name="' + esc(oneLine(it.name || "Freeform " + (id - 1))) + '"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>' +
+      "<p:spPr>" + xfrm(it.x, it.y, it.w, it.h) + '<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:rect l="0" t="0" r="r" b="b"/><a:pathLst>' +
+      '<a:path w="' + rnd(pw) + '" h="' + rnd(ph) + '">' + path + "</a:path></a:pathLst></a:custGeom>" + fill + line + "</p:spPr>" +
+      "<p:txBody>" + bodyPr({ margin: 0, anchor: it.anchor || "ctr" }) + "<a:lstStyle/>" + paras + "</p:txBody></p:sp>");
+  }
+  // the box around an item, for a group's frame
+  function boxOf(it) {
+    if (it.type === "line") return { x: Math.min(it.x1, it.x2), y: Math.min(it.y1, it.y2), r: Math.max(it.x1, it.x2), b: Math.max(it.y1, it.y2) };
+    return { x: it.x, y: it.y, r: it.x + it.w, b: it.y + it.h };
+  }
+  var GROUPABLE = { freeform: 1, text: 1, box: 1, tile: 1, line: 1 };
+  function groupShape(s, it, where) {
+    var list = (it.items || []).filter(Boolean);
+    if (!list.length) return;
+    list.forEach(function (c, k) { if (!GROUPABLE[c.type]) fail("The slide plan has a problem: " + where + " groups an item of a kind that can't be grouped (" + oneLine(c.type).slice(0, 20) + ")."); });
+    var outer = s.xml, id = s.id();
+    s.xml = [];
+    list.forEach(function (c, k) { drawItem(s, c, where + ", part " + (k + 1)); });
+    var inner = s.xml; s.xml = outer;
+    var bx = list.map(boxOf).reduce(function (a, b) { return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), r: Math.max(a.r, b.r), b: Math.max(a.b, b.b) }; });
+    var off = '<a:off x="' + emu(bx.x) + '" y="' + emu(bx.y) + '"/><a:ext cx="' + emu(bx.r - bx.x) + '" cy="' + emu(bx.b - bx.y) + '"/>';
+    s.xml.push('<p:grpSp><p:nvGrpSpPr><p:cNvPr id="' + id + '" name="' + esc(oneLine(it.name || "Group " + (id - 1))) + '"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>' +
+      "<p:grpSpPr><a:xfrm>" + off + off.replace("<a:off", "<a:chOff").replace("<a:ext", "<a:chExt") + "</a:xfrm></p:grpSpPr>" + inner.join("") + "</p:grpSp>");
+  }
   function border(tag) {
     return "<a:" + tag + ' w="6350" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:srgbClr val="' + GRID + '"/></a:solidFill><a:prstDash val="solid"/><a:round/>' +
       '<a:headEnd type="none" w="med" len="med"/><a:tailEnd type="none" w="med" len="med"/></a:' + tag + ">";
@@ -458,7 +504,7 @@
         var c = cell && typeof cell === "object" ? cell : { text: cell };
         var al = (it.aligns && it.aligns[j]) || (j === 0 ? "l" : "r");
         var col = head ? WHITE : color(c.color || st.color, NAVY), bold = head || !!c.bold || !!st.bold;
-        var fill = head ? NAVY : (i % 2 === 0 ? ALT : WHITE);
+        var fill = head ? NAVY : c.fill ? color(c.fill, ALT) : (i % 2 === 0 ? ALT : WHITE);
         return "<a:tc><a:txBody><a:bodyPr/><a:lstStyle/>" + para({ align: al, runs: [{ text: c.text == null ? "" : c.text, size: size, bold: bold, color: col }] }) + "</a:txBody>" +
           '<a:tcPr marL="' + emu(0.07) + '" marR="' + emu(0.07) + '" marT="' + emu(0.03) + '" marB="' + emu(0.03) + '" anchor="ctr">' +
           border("lnL") + border("lnR") + border("lnT") + border("lnB") + '<a:solidFill><a:srgbClr val="' + fill + '"/></a:solidFill></a:tcPr></a:tc>';
@@ -471,14 +517,14 @@
   }
   function chartShape(s, it, where) {
     needBox(it, where);
-    var kinds = { column: ["col", "clustered"], stackedColumn: ["col", "stacked"], bar: ["bar", "clustered"], stackedBar: ["bar", "stacked"] };
+    var kinds = { column: ["col", "clustered"], stackedColumn: ["col", "stacked"], bar: ["bar", "clustered"], stackedBar: ["bar", "stacked"], line: ["line", "standard"] };
     if (!kinds[it.kind]) fail("The slide plan has a problem: " + where + " asks for a chart type the builder doesn't make.");
     var cats = (it.categories || []).map(function (c) { return oneLine(c); });
     if (!cats.length) fail("The slide plan has a problem: " + where + " has a chart with no categories.");
     var series = (it.series || []).map(function (sr) {
       var vals = (sr.values || []).map(function (v) { return num(v) ? v : null; });
       if (vals.length !== cats.length) fail("The slide plan has a problem: " + where + " has a chart series whose values don't match its categories.");
-      return { name: oneLine(sr.name), values: vals, color: sr.color, pointColors: sr.pointColors || {}, labelColor: sr.labelColor, labels: sr.labels };
+      return { name: oneLine(sr.name), values: vals, color: sr.color, pointColors: sr.pointColors || {}, labelColor: sr.labelColor, labels: sr.labels, labelLast: !!sr.labelLast };
     });
     if (!series.length) fail("The slide plan has a problem: " + where + " has a chart with no series.");
     var rel = "rId" + (s.charts.length + 2), id = s.id();
@@ -494,7 +540,15 @@
     return '<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="' + Math.round(size * 100) + '"' + (extra || "") + ">" +
       (c ? '<a:solidFill><a:srgbClr val="' + color(c) + '"/></a:solidFill>' : "") + '<a:latin typeface="Arial"/></a:defRPr></a:pPr><a:endParaRPr lang="en-US"/></a:p></c:txPr>';
   }
-  var LBLPOS = { outEnd: "outEnd", inEnd: "inEnd", ctr: "ctr", center: "ctr", inBase: "inBase" };
+  var LBLPOS = { outEnd: "outEnd", inEnd: "inEnd", ctr: "ctr", center: "ctr", inBase: "inBase", t: "t", r: "r", b: "b", l: "l" };
+  var NOSHOW = '<c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/>';
+  // a line's label on its last point only, to the right of it, in the line's colour
+  function lastLabel(lb, i, c) {
+    lb = lb || {};
+    return '<c:dLbls><c:dLbl><c:idx val="' + i + '"/><c:numFmt formatCode="' + esc(lb.format || "#,##0.0;(#,##0.0)") + '" sourceLinked="0"/><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>' +
+      txPr(num(lb.size) ? lb.size : 10, c, ' b="1"') + '<c:dLblPos val="r"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbl>' +
+      NOSHOW + "</c:dLbls>";
+  }
   function dLbls(lb, stacked, fallbackColor) {
     if (lb === false) return '<c:dLbls><c:delete val="1"/></c:dLbls>';
     lb = lb || {};
@@ -516,6 +570,15 @@
       }).join("");
       var own = sr.labels === false ? dLbls(false) : (sr.labelColor ? dLbls(Object.assign({}, it.labels || {}, { color: sr.labelColor }), stacked) : "");
       if (it.labels === false && sr.labels !== true) own = "";
+      if (dir === "line") {
+        var last = -1; sr.values.forEach(function (v, i) { if (v != null) last = i; });
+        if (sr.labelLast && last >= 0) own = lastLabel(it.labels, last, fill);
+        return '<c:ser><c:idx val="' + k + '"/><c:order val="' + k + '"/><c:tx><c:strRef><c:f>Sheet1!$' + L + '$1</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>' + esc(sr.name) + "</c:v></c:pt></c:strCache></c:strRef></c:tx>" +
+          '<c:spPr><a:ln w="28575" cap="rnd"><a:solidFill><a:srgbClr val="' + fill + '"/></a:solidFill><a:round/></a:ln></c:spPr>' +
+          '<c:marker><c:symbol val="circle"/><c:size val="6"/><c:spPr><a:solidFill><a:srgbClr val="' + fill + '"/></a:solidFill><a:ln><a:noFill/></a:ln></c:spPr></c:marker>' + own + catXml +
+          '<c:val><c:numRef><c:f>Sheet1!$' + L + "$2:$" + L + "$" + (n + 1) + "</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val=\"" + n + '"/>' +
+          sr.values.map(function (v, i) { return v == null ? "" : '<c:pt idx="' + i + '"><c:v>' + String(v) + "</c:v></c:pt>"; }).join("") + '</c:numCache></c:numRef></c:val><c:smooth val="0"/></c:ser>';
+      }
       return '<c:ser><c:idx val="' + k + '"/><c:order val="' + k + '"/><c:tx><c:strRef><c:f>Sheet1!$' + L + '$1</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>' + esc(sr.name) + "</c:v></c:pt></c:strCache></c:strRef></c:tx>" +
         '<c:spPr><a:solidFill><a:srgbClr val="' + fill + '"/></a:solidFill><a:ln><a:noFill/></a:ln></c:spPr><c:invertIfNegative val="0"/>' + dpts + own + catXml +
         '<c:val><c:numRef><c:f>Sheet1!$' + L + "$2:$" + L + "$" + (n + 1) + "</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val=\"" + n + '"/>' +
@@ -536,10 +599,14 @@
       '<c:crossAx val="500000001"/><c:crosses val="' + (dir === "bar" ? "max" : "autoZero") + '"/><c:crossBetween val="between"/>' + (va && num(va.major) && va.major > 0 ? '<c:majorUnit val="' + va.major + '"/>' : "") + "</c:valAx>";
     var legend = it.legend === "none" || it.legend === false ? "" :
       '<c:legend><c:legendPos val="t"/><c:overlay val="0"/>' + txPr(11, "333333") + "</c:legend>";
+    var plot = dir === "line"
+      ? '<c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/>' + sers + (it.labels === false ? '<c:dLbls>' + NOSHOW + '</c:dLbls>' : dLbls(Object.assign({ position: "t" }, it.labels || {}), false)) +
+        '<c:marker val="1"/><c:axId val="500000001"/><c:axId val="500000002"/></c:lineChart>'
+      : '<c:barChart><c:barDir val="' + dir + '"/><c:grouping val="' + grouping + '"/><c:varyColors val="0"/>' + sers +
+        dLbls(it.labels, stacked) + '<c:gapWidth val="' + gap + '"/>' + (overlap != null ? '<c:overlap val="' + overlap + '"/>' : "") +
+        '<c:axId val="500000001"/><c:axId val="500000002"/></c:barChart>';
     return DECL + '<c:chartSpace xmlns:c="' + NS.c + '" xmlns:a="' + NS.a + '" xmlns:r="' + NS.r + '"><c:date1904 val="0"/><c:lang val="en-US"/><c:roundedCorners val="0"/>' +
-      '<c:chart><c:autoTitleDeleted val="1"/><c:plotArea><c:layout/><c:barChart><c:barDir val="' + dir + '"/><c:grouping val="' + grouping + '"/><c:varyColors val="0"/>' + sers +
-      dLbls(it.labels, stacked) + '<c:gapWidth val="' + gap + '"/>' + (overlap != null ? '<c:overlap val="' + overlap + '"/>' : "") +
-      '<c:axId val="500000001"/><c:axId val="500000002"/></c:barChart>' + catAx + valAx + '<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr></c:plotArea>' + legend +
+      '<c:chart><c:autoTitleDeleted val="1"/><c:plotArea><c:layout/>' + plot + catAx + valAx + '<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr></c:plotArea>' + legend +
       '<c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>' +
       txPr(10, "555555") + '<c:externalData r:id="rId1"><c:autoUpdate val="0"/></c:externalData></c:chartSpace>';
   }
@@ -608,24 +675,29 @@
     if (content.roles.number) phShape(s, content.roles.number, "", n);
     (spec.items || []).forEach(function (it, k) {
       where = "slide " + n + ", item " + (k + 1);
-      if (!it || typeof it !== "object") fail("The slide plan has a problem: " + where + " is empty.");
-      switch (it.type) {
-        case "text": needBox(it, where); textShape(s, Object.assign({ margin: 0.02, autofit: true }, it), true); break;
-        case "box": needBox(it, where); textShape(s, it, false); break;
-        case "bullets": needBox(it, where); bulletsShape(s, it); break;
-        case "tile": needBox(it, where); tileShape(s, it); break;
-        case "numbered": needBox(it, where); numberedShape(s, it); break;
-        case "header": headerShape(s, it); break;
-        case "source":
-          textShape(s, { x: 0.52, y: 6.66, w: 11.8, h: 0.3, margin: 0, anchor: "t", name: "Source", autofit: true,
-            paras: [{ runs: [{ text: it.text, size: 10, italic: true, color: GREY }] }] }, true); break;
-        case "line": lineShape(s, it); break;
-        case "table": tableShape(s, it); break;
-        case "chart": chartShape(s, it, where); break;
-        default: fail("The slide plan has a problem: " + where + " is of a kind the builder doesn't draw (" + oneLine(it.type).slice(0, 40) + ").");
-      }
+      drawItem(s, it, where);
     });
     return s;
+  }
+  function drawItem(s, it, where) {
+    if (!it || typeof it !== "object") fail("The slide plan has a problem: " + where + " is empty.");
+    switch (it.type) {
+      case "text": needBox(it, where); textShape(s, Object.assign({ margin: 0.02, autofit: true }, it), true); break;
+      case "box": needBox(it, where); textShape(s, it, false); break;
+      case "bullets": needBox(it, where); bulletsShape(s, it); break;
+      case "tile": needBox(it, where); tileShape(s, it); break;
+      case "numbered": needBox(it, where); numberedShape(s, it); break;
+      case "header": headerShape(s, it); break;
+      case "source":
+        textShape(s, { x: 0.52, y: 6.66, w: 11.8, h: 0.3, margin: 0, anchor: "t", name: "Source", autofit: true,
+          paras: [{ runs: [{ text: it.text, size: 10, italic: true, color: GREY }] }] }, true); break;
+      case "line": lineShape(s, it); break;
+      case "table": tableShape(s, it); break;
+      case "chart": chartShape(s, it, where); break;
+      case "freeform": freeformShape(s, it, where); break;
+      case "group": groupShape(s, it, where); break;
+      default: fail("The slide plan has a problem: " + where + " is of a kind the builder doesn't draw (" + oneLine(it.type).slice(0, 40) + ").");
+    }
   }
 
   function build(bytes, spec) {

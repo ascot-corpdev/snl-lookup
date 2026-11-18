@@ -154,6 +154,14 @@
       "rate": 9.8,
       "status": "Pending",
       "approved": false
+     },
+     "approved": {
+      "date": "2026-10-10",
+      "state": "FL",
+      "toi": "Homeowners",
+      "rate": 4.5,
+      "status": "Approved",
+      "approved": true
      }
     },
     {
@@ -167,13 +175,22 @@
       "rate": -3.5,
       "status": "Approved",
       "approved": true
+     },
+     "approved": {
+      "date": "2025-03-01",
+      "state": "TX",
+      "toi": "Commercial property",
+      "rate": -3.5,
+      "status": "Approved",
+      "approved": true
      }
     },
     {
      "state": "GA",
      "n": 1,
      "rate": 0,
-     "latest": null
+     "latest": null,
+     "approved": null
     }
    ],
    "noState": 1
@@ -296,7 +313,230 @@
     "hi": 90
    },
    "left": 2
-  }
+  },
+  "lines": {
+   "rows": [
+    {
+     "toi": "Homeowners",
+     "n": 4,
+     "rate": 3,
+     "formRule": 1,
+     "other": 0,
+     "states": 2,
+     "approved": 1,
+     "withImpact": 3,
+     "lo": 2,
+     "hi": 9.8
+    },
+    {
+     "toi": "Commercial property",
+     "n": 1,
+     "rate": 1,
+     "formRule": 0,
+     "other": 0,
+     "states": 1,
+     "approved": 1,
+     "withImpact": 1,
+     "lo": -3.5,
+     "hi": -3.5
+    },
+    {
+     "toi": "Inland marine",
+     "n": 1,
+     "rate": 0,
+     "formRule": 1,
+     "other": 0,
+     "states": 1,
+     "approved": 0,
+     "withImpact": 0,
+     "lo": null,
+     "hi": null
+    },
+    {
+     "toi": null,
+     "n": 1,
+     "rate": 0,
+     "formRule": 1,
+     "other": 0,
+     "states": 0,
+     "approved": 0,
+     "withImpact": 0,
+     "lo": null,
+     "hi": null
+    }
+   ],
+   "total": 4
+  },
+  "outcomes": [
+   {
+    "outcome": "approved",
+    "n": 2,
+    "withImpact": 2,
+    "lo": -3.5,
+    "hi": 4.5
+   },
+   {
+    "outcome": "pending",
+    "n": 1,
+    "withImpact": 1,
+    "lo": 9.8,
+    "hi": 9.8
+   },
+   {
+    "outcome": "disapproved",
+    "n": 1,
+    "withImpact": 1,
+    "lo": 2,
+    "hi": 2
+   }
+  ],
+  "history": {
+   "years": [
+    2023,
+    2024,
+    2025,
+    2026
+   ],
+   "rows": [
+    {
+     "state": "FL",
+     "toi": "Homeowners",
+     "n": 1,
+     "first": "2026-10-10",
+     "last": "2026-10-10",
+     "total": 4.5,
+     "byYear": [
+      0,
+      0,
+      0,
+      4.5
+     ]
+    },
+    {
+     "state": "TX",
+     "toi": "Commercial property",
+     "n": 1,
+     "first": "2025-03-01",
+     "last": "2025-03-01",
+     "total": -3.5,
+     "byYear": [
+      0,
+      0,
+      -3.5,
+      -3.5
+     ]
+    }
+   ],
+   "total": 2
+  },
+  "signals": [
+   {
+    "id": "disapproved",
+    "level": "amber",
+    "title": "Disapproved rate filings",
+    "evidence": "1 of 4 rate filings shows a disapproved status; the latest in TX (Homeowners), 20 Aug 2024."
+   },
+   {
+    "id": "withdrawn",
+    "level": "amber",
+    "title": "Withdrawals and exits",
+    "evidence": "1 of 7 filings withdrawn or may be leaving a market (from S&P's status, type or wording); the latest in GA (Inland marine), 10 Feb 2024."
+   },
+   {
+    "id": "pending",
+    "level": "amber",
+    "title": "Rate filings in progress",
+    "evidence": "1 rate filing in progress; the largest 9.8% in FL (Homeowners), which may be the change asked for."
+   },
+   {
+    "id": "regulator",
+    "level": "amber",
+    "title": "Time with the regulator",
+    "evidence": "About 70 days from submitted to published, the median over 5 filings (approximate)."
+   },
+   {
+    "id": "large",
+    "level": "green",
+    "title": "Large rate changes",
+    "evidence": "No filing has an overall rate impact of 10.0% or more either way; 4 filings with one."
+   },
+   {
+    "id": "concentration",
+    "level": "green",
+    "title": "State concentration",
+    "evidence": "FL: 3 of 7 filings (42.9% of filings, not of premium); filings in 3 states."
+   },
+   {
+    "id": "cumulative",
+    "level": "green",
+    "title": "Compounded rate changes",
+    "evidence": "4.5% in FL (Homeowners) from 1 approved filing, 10 Oct (derived, not weighted by premium)."
+   },
+   {
+    "id": "new",
+    "level": "green",
+    "title": "New programs or states",
+    "evidence": "None marked as a new program or state from S&P's type or wording; S&P's rows often carry little wording."
+   }
+  ],
+  "readable": [
+   {
+    "documentId": 71000002,
+    "filingVersionId": "0D0D0D0D-0000-4000-8000-000000000002",
+    "filingNo": "S&P no. CAL0000002",
+    "companyName": "Calloway Insurance Co",
+    "state": "FL",
+    "typeOfInsurance": "Homeowners",
+    "filingType": "Rate",
+    "status": "Pending",
+    "published": "2026-11-05",
+    "pages": 10,
+    "rate": 9.8,
+    "approved": false
+   },
+   {
+    "documentId": 71000001,
+    "filingVersionId": "0D0D0D0D-0000-4000-8000-000000000001",
+    "filingNo": "CALL-FL-1",
+    "companyName": "Calloway Insurance Co",
+    "state": "FL",
+    "typeOfInsurance": "Homeowners",
+    "filingType": "Rate",
+    "status": "Approved",
+    "published": "2026-10-10",
+    "pages": 10,
+    "rate": 4.5,
+    "approved": true
+   },
+   {
+    "documentId": 71000003,
+    "filingVersionId": "0D0D0D0D-0000-4000-8000-000000000003",
+    "filingNo": "S&P no. CAL0000003",
+    "companyName": "Calloway Insurance Co",
+    "state": "TX",
+    "typeOfInsurance": "Commercial property",
+    "filingType": "Rate/Rule",
+    "status": "Approved",
+    "published": "2025-03-01",
+    "pages": 10,
+    "rate": -3.5,
+    "approved": true
+   },
+   {
+    "documentId": 71000006,
+    "filingVersionId": "0D0D0D0D-0000-4000-8000-000000000006",
+    "filingNo": "S&P no. CAL0000006",
+    "companyName": "Calloway Insurance Co",
+    "state": "TX",
+    "typeOfInsurance": "Homeowners",
+    "filingType": "Rate",
+    "status": "Disapproved",
+    "published": "2024-08-20",
+    "pages": 10,
+    "rate": 2,
+    "approved": false
+   }
+  ]
  },
  "text": {
   "by": "plain",
@@ -414,6 +654,53 @@
     }
    ]
   },
+  "ratemap": {
+   "title": "Latest approved change up in 1 state, down in 1",
+   "points": [
+    {
+     "lead": "Up",
+     "text": "FL 4.5%."
+    },
+    {
+     "lead": "Down",
+     "text": "TX (3.5%)."
+    },
+    {
+     "lead": "What it shows",
+     "text": "The newest approved overall rate impact in each state, of any type of insurance; not weighted by premium."
+    }
+   ]
+  },
+  "history": {
+   "title": "Largest approved change 4.5% in FL (Homeowners)",
+   "points": [
+    {
+     "lead": "Largest",
+     "text": "FL (Homeowners): one approved change, 4.5%, published 10 Oct."
+    },
+    {
+     "lead": "Method",
+     "text": "Approved overall rate impacts multiplied together in date order since the start of the period; not weighted by premium; filings not approved are left out."
+    }
+   ]
+  },
+  "lines": {
+   "title": "Most filings in Homeowners: 4 of 7",
+   "points": [
+    {
+     "lead": "Types of insurance",
+     "text": "Homeowners 4, Commercial property 1, Inland marine 1, type n/d 1."
+    },
+    {
+     "lead": "Rate filings",
+     "text": "3 of the 4 filings in Homeowners are rate filings; 1 of them approved."
+    },
+    {
+     "lead": "Outcomes",
+     "text": "2 approved, 1 in progress, 1 disapproved (rate filings, by S&P's status)."
+    }
+   ]
+  },
   "questions": {
    "title": "Key diligence questions",
    "items": [
@@ -422,16 +709,16 @@
      "text": "2 filings with a rate impact aren't approved, the largest 9.8% in FL. What outcome and timing does management expect?"
     },
     {
+     "title": "Disapproved filings",
+     "text": "1 rate filing shows a disapproved status. What did the regulator object to, and what was refiled?"
+    },
+    {
+     "title": "Withdrawals and exits",
+     "text": "Some filings were withdrawn or may mark a market exit. Which states or programs is the company leaving or refiling, and why?"
+    },
+    {
      "title": "Product changes",
      "text": "4 form and rule filings in the period. Which programs are new or changing, and why?"
-    },
-    {
-     "title": "Regulatory timing",
-     "text": "Filings in TX took about 90 days from submitted to published (median, approximate). How does that delay affect rate adequacy?"
-    },
-    {
-     "title": "Rate plan",
-     "text": "What rate changes are planned for the coming year, by state and line, and what loss trend do they assume?"
     }
    ]
   }

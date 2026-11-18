@@ -233,6 +233,32 @@ const EVIL = '<script>alert(1)</script> & "q" \u0001\u0008\u000B ]]> \uFFFE <p:s
   r = await build(TEMPLATE, { slides: [{ kind: "picture" }] });
   ok("build: a slide of unknown kind is refused", !r.ok && /neither a cover nor a content slide/.test(r.message), r);
 
+  // outlines, groups, a cell's own fill and a line chart (the filings profile's maps, signals and compounded changes)
+  const MAPSPEC = { slides: [{ kind: "content", title: "Map", items: [
+    { type: "group", name: "Map of two shapes", items: [
+      { type: "freeform", name: "State AA", x: 1, y: 2, w: 2, h: 1, pathW: 20, pathH: 10, paths: [[[0, 0], [20, 0], [20, 10]], [[0, 10], [5, 10], [5, 5.5]]], fill: "00539E", line: { color: "FFFFFF", width: 0.75 } },
+      { type: "freeform", name: "State BB", x: 3.5, y: 2, w: 1, h: 1, pathW: 10, pathH: 10, paths: [[[0, 0], [10, 0], [10, 10], [0, 10]]], fill: "FFFFFF", line: { color: "8C8FA3", width: 0.75, dash: true } },
+      { type: "text", name: "Label AA", x: 1.5, y: 2.3, w: 0.4, h: 0.2, margin: 0, autofit: false, paras: [{ align: "ctr", runs: [{ text: "AA", size: 10, bold: true, color: "FFFFFF" }] }] },
+      { type: "line", name: "Leader", x1: 2, y1: 2.5, x2: 6, y2: 4.5, color: "666666", width: 0.5 }] },
+    { type: "box", name: "Key", x: 1, y: 5, w: 0.24, h: 0.16, fill: "FFFFFF", line: { color: "8C8FA3", width: 0.75, dash: true }, paras: [{ runs: [] }] },
+    { type: "table", x: 7, y: 2, colW: [1, 1], rowH: 0.3, rows: [["Signal", "Rating"], ["Large rate changes", { text: "Red", bold: true, color: "FFFFFF", fill: "EB008C" }]] },
+    { type: "chart", kind: "line", name: "Chart lines", x: 1, y: 5.3, w: 5, h: 1.2, categories: ["2024", "2025", "2026"], labels: false, legend: "top", valueAxis: { format: "0;(0)" },
+      series: [{ name: "FL Homeowners", values: [0, 4.5, 9.2], color: "262166", labelLast: true }, { name: "TX Homeowners", values: [0, null, -3.5], color: "EB008C" }] }] }] };
+  r = await build(TEMPLATE, MAPSPEC); z = await unzip(r);
+  const ms = (await slides(z))[0].xml, mc = await read(z, (await slides(z))[0].rels.find(x => /chart$/.test(x.type)).path);
+  ok("outlines: editable custom shapes, one path of closed polygons in a space 100 times finer, filled and outlined", r.ok && (ms.match(/<a:custGeom>/g) || []).length === 2
+    && ms.includes('<a:path w="2000" h="1000"><a:moveTo><a:pt x="0" y="0"/></a:moveTo><a:lnTo><a:pt x="2000" y="0"/></a:lnTo><a:lnTo><a:pt x="2000" y="1000"/></a:lnTo><a:close/><a:moveTo><a:pt x="0" y="1000"/></a:moveTo><a:lnTo><a:pt x="500" y="1000"/></a:lnTo><a:lnTo><a:pt x="500" y="550"/></a:lnTo><a:close/></a:path>')
+    && ms.includes('name="State BB"') && /name="State BB".*?<a:prstDash val="dash"\/>/.test(ms), ms.slice(0, 400));
+  ok("a group: its parts inside one group shape whose frame is their box, so they move together", (ms.match(/<p:grpSp>/g) || []).length === 1 && ms.includes('name="Map of two shapes"')
+    && ms.includes('<a:xfrm><a:off x="914400" y="1828800"/><a:ext cx="4572000" cy="2286000"/><a:chOff x="914400" y="1828800"/><a:chExt cx="4572000" cy="2286000"/></a:xfrm>') && /<p:grpSp>.*name="Label AA".*name="Leader".*<\/p:grpSp>/.test(ms));
+  ok("a box's outline can be dashed; a table cell can carry its own fill", /name="Key".*?<a:prstDash val="dash"\/>/.test(ms) && ms.includes('<a:t>Red</a:t>') && /<a:t>Red<\/a:t>.*?<a:srgbClr val="EB008C"\/><\/a:solidFill><\/a:tcPr>/.test(ms));
+  ok("a line chart: lines with round markers, a gap for a missing value, only the last point of a series labelled", mc.includes("<c:lineChart>") && (mc.match(/<c:symbol val="circle"\/>/g) || []).length === 2 && mc.includes('<c:dLbl><c:idx val="2"/>') && (mc.match(/<c:dLbl>/g) || []).length === 1
+    && !mc.includes("<c:barChart>") && mc.includes('<c:dispBlanksAs val="gap"/>') && (await packageProblems(z)).length === 0 && (await wellFormed([["chart", mc], ["slide", ms]])).length === 0);
+  r = await build(TEMPLATE, { slides: [{ kind: "content", title: "t", items: [{ type: "freeform", x: 1, y: 1, w: 1, h: 1, paths: [[[0, 0], [1, 1]]] }] }] });
+  ok("an outline with no polygon is refused", !r.ok && /outline with no points/.test(r.message), r);
+  r = await build(TEMPLATE, { slides: [{ kind: "content", title: "t", items: [{ type: "group", items: [{ type: "chart", kind: "bar", x: 1, y: 1, w: 1, h: 1, categories: ["a"], series: [{ name: "s", values: [1] }] }] }] }] });
+  ok("a group of something that can't be grouped is refused", !r.ok && /can't be grouped/.test(r.message), r);
+
   // a template saved as .potx becomes a presentation; a second build from the result also works
   const potx = await variant(async z => z.file("[Content_Types].xml", (await read(z, "[Content_Types].xml")).replace("presentation.main+xml", "template.main+xml")));
   r = await build(potx, { slides: SPEC.slides.slice(0, 1) });

@@ -30,7 +30,12 @@ export type Program = { name: string; segment: typeof SEGMENTS[number] | null; b
 /** program: the name of the program in the same digest the form belongs to, or null when the filing doesn't link them. */
 export type Form = { number: string; edition: string | null; title: string | null; action: typeof ACTIONS[number] | null; replaces: string | null; page: number; program: string | null };
 /** premium: written premium affected, a plain number of US dollars (not thousands); the page shows it in $M. */
-export type Rate = { overallPct: number | null; requestedPct: number | null; approvedPct: number | null; premium: number | null; policyholders: number | null; effectiveNew: string | null; effectiveRenewal: string | null; page: number | null };
+/** indicatedPct: the actuarially indicated overall change; lcm: the loss cost multiplier selected (a factor, 1.25);
+    trendPct: the annual loss trend selected; expensePct: the total expense provision as a share of premium. */
+export type Rate = { overallPct: number | null; requestedPct: number | null; approvedPct: number | null; premium: number | null; policyholders: number | null; effectiveNew: string | null; effectiveRenewal: string | null;
+  indicatedPct: number | null; lcm: number | null; trendPct: number | null; expensePct: number | null; page: number | null };
+/** The rate figures of a digest, in the order they are asked for and shown. */
+export const RATE_FIGURES = ["overallPct", "requestedPct", "approvedPct", "premium", "policyholders", "effectiveNew", "effectiveRenewal", "indicatedPct", "lcm", "trendPct", "expensePct"] as const;
 export type Point = { text: string; page: number };
 export type Digest = {
   filingVersionId: string | null; documentId: number | null; filingNo: string | null;
@@ -152,9 +157,9 @@ export function numbersIn(text: string): number[] {
 }
 /** Whether a figure appears among the numbers of a basis: within rounding for a percentage, within half a percent
     for an amount or a count. */
-function figureIn(v: number, basis: string, kind: "pct" | "amount"): boolean {
+function figureIn(v: number, basis: string, kind: "pct" | "amount" | "factor"): boolean {
   const n = numbersIn(basis), a = Math.abs(v);
-  return n.some((x) => (kind === "pct" ? Math.abs(x - a) <= 0.051 : Math.abs(x - a) <= Math.max(0.5, a * 0.005)));
+  return n.some((x) => (kind === "pct" ? Math.abs(x - a) <= 0.051 : kind === "factor" ? Math.abs(x - a) <= 0.0051 : Math.abs(x - a) <= Math.max(0.5, a * 0.005)));
 }
 /** The words of a name that must appear in its basis: those of four letters or more, without a final "s". */
 const keyWords = (s: string) => [...new Set(s.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4).map((w) => w.replace(/s$/, "")))];
@@ -209,17 +214,17 @@ export function checkDigest(raw: unknown, read: PageRange[]): { fields: Pick<Dig
     });
   }
 
-  const rate: Rate = { overallPct: null, requestedPct: null, approvedPct: null, premium: null, policyholders: null, effectiveNew: null, effectiveRenewal: null, page: null };
+  const rate: Rate = { overallPct: null, requestedPct: null, approvedPct: null, premium: null, policyholders: null, effectiveNew: null, effectiveRenewal: null, indicatedPct: null, lcm: null, trendPct: null, expensePct: null, page: null };
   const r = obj(d.rate);
   if (r) {
     const basis = typeof r.basis === "string" ? tidy(r.basis).slice(0, 2000) : "";
-    const anyGiven = ["overallPct", "requestedPct", "approvedPct", "premium", "policyholders", "effectiveNew", "effectiveRenewal"].some((k) => r[k] !== null && r[k] !== undefined);
+    const anyGiven = RATE_FIGURES.some((k) => r[k] !== null && r[k] !== undefined);
     if (anyGiven && !inRead(r.page, read)) dropped.pages++;
     else if (anyGiven) {
-      const num = (k: string, kind: "pct" | "amount", whole = false) => {
+      const num = (k: string, kind: "pct" | "amount" | "factor", whole = false, lo = -1000, hi = 1000) => {
         const v = r[k];
         if (v === null || v === undefined) return null;
-        if (typeof v !== "number" || !Number.isFinite(v) || (kind === "pct" ? Math.abs(v) > 1000 : v < 0 || v > 1e13) || (whole && !Number.isInteger(v))) { dropped.shape++; return null; }
+        if (typeof v !== "number" || !Number.isFinite(v) || (kind === "pct" ? v < lo || v > hi : kind === "factor" ? v <= 0 || v > 10 : v < 0 || v > 1e13) || (whole && !Number.isInteger(v))) { dropped.shape++; return null; }
         if (!figureIn(v, basis, kind)) { dropped.unsupported++; return null; }
         return v;
       };
@@ -230,7 +235,8 @@ export function checkDigest(raw: unknown, read: PageRange[]): { fields: Pick<Dig
         if (!basis.includes(v.slice(0, 4)) && !basis.includes(`/${v.slice(2, 4)}`)) { dropped.unsupported++; return null; }
         return v;
       };
-      Object.assign(rate, { overallPct: num("overallPct", "pct"), requestedPct: num("requestedPct", "pct"), approvedPct: num("approvedPct", "pct"), premium: num("premium", "amount"), policyholders: num("policyholders", "amount", true), effectiveNew: day("effectiveNew"), effectiveRenewal: day("effectiveRenewal") });
+      Object.assign(rate, { overallPct: num("overallPct", "pct"), requestedPct: num("requestedPct", "pct"), approvedPct: num("approvedPct", "pct"), premium: num("premium", "amount"), policyholders: num("policyholders", "amount", true), effectiveNew: day("effectiveNew"), effectiveRenewal: day("effectiveRenewal"),
+        indicatedPct: num("indicatedPct", "pct"), lcm: num("lcm", "factor"), trendPct: num("trendPct", "pct", false, -100, 100), expensePct: num("expensePct", "pct", false, 0, 100) });
       if (Object.entries(rate).some(([k, v]) => k !== "page" && v !== null)) rate.page = r.page as number;
     }
   }
@@ -271,7 +277,7 @@ export function cleanDigest(raw: unknown): Digest | null {
 function checkDigestStored(d: Record<string, unknown>, read: PageRange[]) {
   const forms = (Array.isArray(d.forms) ? d.forms : []).map((f) => ({ ...(f as object), basis: typeof (f as Form)?.number === "string" ? `${(f as Form).number} ${(f as Form).edition ?? ""} ${(f as Form).replaces ?? ""}` : "" }));
   const rate = d.rate && typeof d.rate === "object" ? d.rate as Record<string, unknown> : {};
-  const figures = ["overallPct", "requestedPct", "approvedPct", "premium", "policyholders", "effectiveNew", "effectiveRenewal"].map((k) => rate[k]).filter((v) => v !== null && v !== undefined).join(" ");
+  const figures = RATE_FIGURES.map((k) => rate[k]).filter((v) => v !== null && v !== undefined).join(" ");
   return checkDigest({ ...d, forms, rate: { ...rate, basis: figures } }, read);
 }
 
@@ -284,7 +290,7 @@ export const DIGEST_RULES = `What a summary holds
 - summary: two to four plain sentences on what the filing does (at most ${DIGEST.summary} characters).
 - programs: each product or program the filing names (for example a private client or high value homeowners program). segment is your judgement: one of ${SEG_WORDS}, or null when the filing doesn't show it. basis quotes, or closely paraphrases, the filing's words that show the program and its segment, and must contain the program's name.
 - forms: each form the filing lists, usually from its form schedule: number and edition as printed, title, action (one of ${ACT_WORDS}, or null), replaces (the number of the form it replaces, or null), program (the name, exactly as in programs, of the program the filing says the form belongs to, or null when the filing doesn't link them; don't guess), and basis: the line of the form schedule or text that lists it, copied as printed, containing the form number.
-- rate: the overall rate change (overallPct), the change requested and approved when the filing gives them, written premium affected (premium: a plain number of US dollars, not thousands), policyholders affected, and the effective dates for new and renewal business (yyyy-mm-dd). basis quotes the words or table cells the figures come from, with each figure as printed. Use null for anything the filing doesn't give.
+- rate: the overall rate change (overallPct), the change requested and approved when the filing gives them, written premium affected (premium: a plain number of US dollars, not thousands), policyholders affected, and the effective dates for new and renewal business (yyyy-mm-dd). Also, when the filing's rate exhibits give them: the actuarially indicated overall change (indicatedPct), the loss cost multiplier selected (lcm, a factor such as 1.25, for a loss cost filing), the annual loss trend selected (trendPct) and the total expense provision as a percentage of premium (expensePct). basis quotes the words or table cells the figures come from, with each figure as printed. Use null for anything the filing doesn't give.
 - eligibility: who and what the filing's rules let in or keep out, briefly.
 - notable: anything else a corporate development reader should know, briefly.
 Rules
@@ -303,8 +309,9 @@ const FIELDS_PROPS = {
   forms: ITEMS({ number: { type: "string" }, edition: NULLABLE("string"), title: NULLABLE("string"), action: { anyOf: [{ type: "string", enum: [...ACTIONS] }, { type: "null" }] }, replaces: NULLABLE("string"), program: NULLABLE("string"), basis: { type: "string" }, page: { type: "integer" } }),
   rate: {
     type: "object",
-    properties: { overallPct: NULLABLE("number"), requestedPct: NULLABLE("number"), approvedPct: NULLABLE("number"), premium: NULLABLE("number"), policyholders: NULLABLE("integer"), effectiveNew: NULLABLE("string"), effectiveRenewal: NULLABLE("string"), basis: NULLABLE("string"), page: NULLABLE("integer") },
-    required: ["overallPct", "requestedPct", "approvedPct", "premium", "policyholders", "effectiveNew", "effectiveRenewal", "basis", "page"], additionalProperties: false,
+    properties: { overallPct: NULLABLE("number"), requestedPct: NULLABLE("number"), approvedPct: NULLABLE("number"), premium: NULLABLE("number"), policyholders: NULLABLE("integer"), effectiveNew: NULLABLE("string"), effectiveRenewal: NULLABLE("string"),
+      indicatedPct: NULLABLE("number"), lcm: NULLABLE("number"), trendPct: NULLABLE("number"), expensePct: NULLABLE("number"), basis: NULLABLE("string"), page: NULLABLE("integer") },
+    required: [...RATE_FIGURES, "basis", "page"], additionalProperties: false,
   },
   eligibility: ITEMS({ text: { type: "string" }, page: { type: "integer" } }),
   notable: ITEMS({ text: { type: "string" }, page: { type: "integer" } }),
@@ -381,6 +388,8 @@ export async function saveDigest(db: Db, d: Digest, existing: Digest | null): Pr
 
 /** A saved digest as a document Claude can cite, one line a block, with the page each line rests on (null for the
     lines that rest on no one page). Citations of a block are mapped back to the filing's page (buildAnswer). */
+/** The rate drivers of a summary in words, when it has any: ", indicated 12%, loss cost multiplier 1.25, ...". */
+const drivers = (r: Rate) => [r.indicatedPct !== null ? `indicated ${r.indicatedPct}%` : "", r.lcm !== null ? `loss cost multiplier ${r.lcm}` : "", r.trendPct !== null ? `annual loss trend ${r.trendPct}%` : "", r.expensePct !== null ? `expense provision ${r.expensePct}% of premium` : ""].filter(Boolean).map((x) => ", " + x).join("");
 export function summaryDocument(d: Digest): { title: string; blocks: string[]; pages: (number | null)[] } {
   const name = d.filingNo ?? (d.documentId ? `document ${d.documentId}` : `version ${d.filingVersionId}`);
   const title = `Saved summary of filing ${[name, d.company, d.state, d.filingType].filter(Boolean).join(", ")}`;
@@ -389,7 +398,7 @@ export function summaryDocument(d: Digest): { title: string; blocks: string[]; p
     [`Summary: ${d.summary}`, null],
     ...d.programs.map((p): [string, number] => [`Program: ${p.name}. Segment: ${p.segment ?? "not shown"}. Based on: "${p.basis}". Page ${p.page}.`, p.page]),
     ...d.forms.map((f): [string, number] => [`Form ${f.number}${f.edition ? ` (${f.edition})` : ""}${f.title ? `, ${f.title}` : ""}${f.action ? `, ${f.action}` : ""}${f.replaces ? `, replaces ${f.replaces}` : ""}${f.program ? `, program ${f.program}` : ""}. Page ${f.page}.`, f.page]),
-    ...(d.rate.page !== null ? [[`Rate: overall ${d.rate.overallPct ?? "n/d"}%, requested ${d.rate.requestedPct ?? "n/d"}%, approved ${d.rate.approvedPct ?? "n/d"}%, written premium affected ${d.rate.premium ?? "n/d"} US dollars, policyholders affected ${d.rate.policyholders ?? "n/d"}, effective for new business ${d.rate.effectiveNew ?? "n/d"}, for renewals ${d.rate.effectiveRenewal ?? "n/d"}. Page ${d.rate.page}.`, d.rate.page] as [string, number]] : []),
+    ...(d.rate.page !== null ? [[`Rate: overall ${d.rate.overallPct ?? "n/d"}%, requested ${d.rate.requestedPct ?? "n/d"}%, approved ${d.rate.approvedPct ?? "n/d"}%, written premium affected ${d.rate.premium ?? "n/d"} US dollars, policyholders affected ${d.rate.policyholders ?? "n/d"}, effective for new business ${d.rate.effectiveNew ?? "n/d"}, for renewals ${d.rate.effectiveRenewal ?? "n/d"}${drivers(d.rate)}. Page ${d.rate.page}.`, d.rate.page] as [string, number]] : []),
     ...d.eligibility.map((e): [string, number] => [`Eligibility: ${e.text} Page ${e.page}.`, e.page]),
     ...d.notable.map((n): [string, number] => [`Notable: ${n.text} Page ${n.page}.`, n.page]),
   ];

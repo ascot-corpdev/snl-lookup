@@ -119,6 +119,46 @@ const F = P.filingsFactsFrom(T3, { rows: ROWS, capped: false, fromStore: false, 
   // days: A 70, B 60, D 30 (FL); C 90, F 90 (TX). FL median 60; all [30, 60, 70, 90, 90] median 70.
   ok("time with the regulator: FL median 60 (30 to 70), TX 90, all 70 days over 5 filings; 2 without both dates",
     same(F.regulator, { rows: [{ state: "FL", n: 3, median: 60, lo: 30, hi: 70 }, { state: "TX", n: 2, median: 90, lo: 90, hi: 90 }], all: { state: null, n: 5, median: 70, lo: 30, hi: 90 }, left: 2 }), F.regulator);
+  // types of insurance: homeowners A, B, F (rate) and D (form); commercial property C; inland marine E (rule); G none
+  ok("by type of insurance: rate filings, form and rule filings that aren't rate filings, and the rest add up; the unnamed type last",
+    same(F.lines.rows.map((r) => [r.toi, r.n, r.rate, r.formRule, r.other, r.states, r.approved, r.withImpact, r.lo, r.hi]), [
+      ["Homeowners", 4, 3, 1, 0, 2, 1, 3, 2, 9.8], ["Commercial property", 1, 1, 0, 0, 1, 1, 1, -3.5, -3.5], ["Inland marine", 1, 0, 1, 0, 1, 0, 0, null, null], [null, 1, 0, 1, 0, 0, 0, 0, null, null]]) && F.lines.total === 4, F.lines);
+  ok("rate filings by outcome: A and C approved, B in progress, F disapproved; no empty outcome listed",
+    same(F.outcomes, [{ outcome: "approved", n: 2, withImpact: 2, lo: -3.5, hi: 4.5 }, { outcome: "pending", n: 1, withImpact: 1, lo: 9.8, hi: 9.8 }, { outcome: "disapproved", n: 1, withImpact: 1, lo: 2, hi: 2 }]), F.outcomes);
+  ok("statuses read as outcomes", P.fpOutcome("Closed - Approved") === "approved" && P.fpOutcome("Disapproved") === "disapproved" && P.fpOutcome("Not approved") === "disapproved" && P.fpOutcome("Withdrawn") === "withdrawn"
+    && P.fpOutcome("Pending") === "pending" && P.fpOutcome("Under review") === "pending" && P.fpOutcome(null) === "other" && P.fpOutcome("Closed") === "other");
+  ok("compounded: only approved changes with a date (A and C), by state and type of insurance, to the end of each year since the period began",
+    same(F.history, { years: [2023, 2024, 2025, 2026], rows: [
+      { state: "FL", toi: "Homeowners", n: 1, first: "2026-10-10", last: "2026-10-10", total: 4.5, byYear: [0, 0, 0, 4.5] },
+      { state: "TX", toi: "Commercial property", n: 1, first: "2025-03-01", last: "2025-03-01", total: -3.5, byYear: [0, 0, -3.5, -3.5] }], total: 2 }), F.history);
+  const comp = P.filingsFactsFrom(T3, { rows: [10.0, -5.0, 8.0].map((r, i) => filing(20 + i, { ...base, filingVersionId: V(20 + i), serffFilingType: "Rate", filingStatus: "Approved", publishDate: `202${4 + i}-03-01`, overallRateImpact: r })) as any[], capped: false }, { asOf: ASOF, years: 3, ...per, statesSearched: 51 });
+  ok("compounding multiplies, never adds: +10%, (5%), +8% is 1.10 x 0.95 x 1.08 = 12.9%, step by step by year end",
+    comp.history.rows.length === 1 && comp.history.rows[0].total === 12.9 && same(comp.history.rows[0].byYear, [0, 10, 4.5, 12.9]), comp.history.rows);
+  ok("by state, the newest approved change too: FL is A (4.5), TX is C ((3.5)), GA has none",
+    same(F.states.rows.map((s) => [s.state, s.approved?.rate ?? null]), [["FL", 4.5], ["TX", -3.5], ["GA", null]]));
+  ok("signals: amber for the disapproval, the withdrawal, the filing in progress and 70 days; green for the rest; reds first, then ambers",
+    same(F.signals.map((s) => [s.id, s.level]), [["disapproved", "amber"], ["withdrawn", "amber"], ["pending", "amber"], ["regulator", "amber"], ["large", "green"], ["concentration", "green"], ["cumulative", "green"], ["new", "green"]]), F.signals.map((s) => [s.id, s.level]));
+  ok("each signal says the figures it rests on", same(F.signals.map((s) => s.evidence), [
+    "1 of 4 rate filings shows a disapproved status; the latest in TX (Homeowners), 20 Aug 2024.",
+    "1 of 7 filings withdrawn or may be leaving a market (from S&P's status, type or wording); the latest in GA (Inland marine), 10 Feb 2024.",
+    "1 rate filing in progress; the largest 9.8% in FL (Homeowners), which may be the change asked for.",
+    "About 70 days from submitted to published, the median over 5 filings (approximate).",
+    "No filing has an overall rate impact of 10.0% or more either way; 4 filings with one.",
+    "FL: 3 of 7 filings (42.9% of filings, not of premium); filings in 3 states.",
+    "4.5% in FL (Homeowners) from 1 approved filing, 10 Oct (derived, not weighted by premium).",
+    "None marked as a new program or state from S&P's type or wording; S&P's rows often carry little wording."]), F.signals.map((s) => s.evidence));
+  const loud = P.filingsFactsFrom(T3, { rows: [
+    ...[22, 12, 11].map((r, i) => filing(30 + i, { ...base, filingVersionId: V(30 + i), serffFilingType: "Rate", filingStatus: i ? "Disapproved" : "Approved", publishDate: `2026-0${i + 1}-15`, dateSubmitted: "2025-06-01", overallRateImpact: r })),
+    ...[0, 1, 2].map((i) => filing(40 + i, { ...base, filingVersionId: V(40 + i), serffFilingType: "Form", filingStatus: "Withdrawn", publishDate: "2026-04-0" + (i + 1), dateSubmitted: "2025-06-01" })),
+    filing(50, { ...base, filingVersionId: V(50), serffFilingType: "Form", filingStatus: "Approved", publishDate: "2026-05-01", dateSubmitted: "2025-06-01", filingDescription: "Introduces a new program for coastal homes." }),
+  ] as any[], capped: true }, { asOf: ASOF, years: 1, ...P.fpPeriod(ASOF, 1), statesSearched: 51 });
+  const lv = (id: string) => loud.signals.find((s) => s.id === id)?.level;
+  ok("red: a change of 20% or more, 2 disapprovals, 3 withdrawals, all in one state, 120 days or more; a new program from the wording is amber, as is a search that stopped early",
+    lv("large") === "red" && lv("disapproved") === "red" && lv("withdrawn") === "red" && lv("concentration") === "red" && lv("regulator") === "red" && lv("new") === "amber" && lv("capped") === "amber" && loud.signals[0].level === "red", loud.signals);
+  ok("…and the wording that marked it isn't carried into the facts", !JSON.stringify(loud).includes("coastal homes"));
+  ok("the rate filings the page may offer to summarise: the largest overall impacts first, with what snl-digest needs",
+    same(F.readable.map((r) => [r.state, r.rate, r.documentId, r.filingVersionId, r.approved]), [["FL", 9.8, 71000002, V(2), false], ["FL", 4.5, 71000001, V(1), true], ["TX", -3.5, 71000003, V(3), true], ["TX", 2, 71000006, V(6), false]])
+    && F.readable[1].companyName === "Calloway Insurance Co" && F.readable[0].pages === 10 && F.readable[0].filingNo === "S&P no. CAL0000002" && F.readable[0].typeOfInsurance === "Homeowners", F.readable);
   ok("the version sent twice names both companies", F.latest.rows.length === 4 && P.filingsFactsFrom(T3, { rows: [ROWS[0], ROWS[1]].map((r) => ({ ...r, serffFilingType: "Form" })), capped: false }, { asOf: ASOF, years: 3, ...per, statesSearched: 51 }).latest.rows[0].company === "Calloway Insurance Co and Calloway Home Co");
   ok("no description is carried into the facts", !JSON.stringify(F).includes("description") && !JSON.stringify(F).includes("Made-up filing"));
   const even = P.filingsFactsFrom(T3, { rows: [ROWS[2], ROWS[3]].map((r, i) => ({ ...r, overallRateImpact: i ? -9.8 : 9.8, dispOverallRateImpact: null })), capped: false }, { asOf: ASOF, years: 3, ...per, statesSearched: 51 });
@@ -158,9 +198,13 @@ const F = P.filingsFactsFrom(T3, { rows: ROWS, capped: false, fromStore: false, 
     "2 filings with a rate impact aren't approved; their figures may be the change asked for.", "9.8% in FL (Homeowners), published 5 Nov, pending."]) && !/average/i.test(JSON.stringify(t.rates)), t.rates.points);
   ok("cover: who and the period", t.cover.subtitle === "7 filings published 20 Nov 2023 to 18 Nov 2026");
   ok("every text within its limit, no em dashes", [t.summary, t.rates, t.states, t.years, t.forms, t.regulator].every((s) => s.title.length <= P.LIMITS.title && s.points.every((p) => p.lead.length <= P.LIMITS.lead && p.text.length <= P.LIMITS.point)) && !JSON.stringify(t).includes("—"));
-  ok("four questions, each from a figure where there is one", same(t.questions.items.map((q) => q.title), ["Rate requests in progress", "Product changes", "Regulatory timing", "Rate plan"]) && t.questions.items[0].text.startsWith("2 filings with a rate impact aren't approved, the largest 9.8% in FL."), t.questions.items);
+  ok("four questions, each from a figure or an amber or red signal, in order of weight", same(t.questions.items.map((q) => q.title), ["Rate requests in progress", "Disapproved filings", "Withdrawals and exits", "Product changes"]) && t.questions.items[0].text.startsWith("2 filings with a rate impact aren't approved, the largest 9.8% in FL.") && t.questions.items[1].text.startsWith("1 rate filing shows a disapproved status."), t.questions.items);
+  ok("the plain text of the map, compounded and types of insurance slides", t.ratemap?.title === "Latest approved change up in 1 state, down in 1" && t.ratemap.points[0].text === "FL 4.5%." && t.ratemap.points[1].text === "TX (3.5%)."
+    && t.history?.title === "Largest approved change 4.5% in FL (Homeowners)" && t.lines?.title === "Most filings in Homeowners: 4 of 7" && t.lines.points[2].text === "2 approved, 1 in progress, 1 disapproved (rate filings, by S&P's status).", [t.ratemap, t.history, t.lines]);
+  ok("Claude's draft leaves those as the code wrote them", same(P.checkFilingsDraft({}, F, t).text.history, t.history) && P.FP_PLAIN_SECTIONS.every((k) => !(P.FP_SECTIONS as readonly string[]).includes(k)));
   ok("no text depends on a description", !/description|describes/i.test(JSON.stringify(t)));
-  ok("the plain text passes its own figure check", P.FP_SECTIONS.every((s) => [t[s].title, ...t[s].points.map((p) => p.text)].every((x) => P.fpUnmatched(x, P.fpAllowedFigures(F)).length === 0))
+  ok("the plain text passes its own figure check", [...P.FP_SECTIONS, ...P.FP_PLAIN_SECTIONS].every((s) => [t[s]!.title, ...t[s]!.points.map((p) => p.text)].every((x) => P.fpUnmatched(x, P.fpAllowedFigures(F)).length === 0))
+    && F.signals.every((x) => P.fpUnmatched(x.evidence, P.fpAllowedFigures(F)).length === 0)
     && t.questions.items.every((q) => P.fpUnmatched(q.text, P.fpAllowedFigures(F)).length === 0), P.FP_SECTIONS.map((s) => t[s].points.map((p) => P.fpUnmatched(p.text, P.fpAllowedFigures(F)))));
   const group = P.filingsPlainText({ ...F, entity: { kind: "group", name: "Calloway Group", groupName: "Calloway Group", companies: 3, noId: 1 } });
   const conc = P.fpQuestions({ ...F, states: { ...F.states, rows: [{ ...F.states.rows[0], n: 4 }, ...F.states.rows.slice(1)] } });

@@ -597,6 +597,14 @@
       "rate": 2.3,
       "status": "Approved",
       "approved": true
+     },
+     "approved": {
+      "date": "2026-07-14",
+      "state": "FL",
+      "toi": "Inland marine",
+      "rate": 2.3,
+      "status": "Approved",
+      "approved": true
      }
     },
     {
@@ -604,6 +612,14 @@
      "n": 18,
      "rate": 12,
      "latest": {
+      "date": "2026-06-16",
+      "state": "TX",
+      "toi": "Commercial property",
+      "rate": -4.4,
+      "status": "Approved",
+      "approved": true
+     },
+     "approved": {
       "date": "2026-06-16",
       "state": "TX",
       "toi": "Commercial property",
@@ -623,19 +639,36 @@
       "rate": -4.9,
       "status": "Pending",
       "approved": false
+     },
+     "approved": {
+      "date": "2025-02-25",
+      "state": "SC",
+      "toi": "Homeowners",
+      "rate": 12.4,
+      "status": "Approved",
+      "approved": true
      }
     },
     {
      "state": "AL",
      "n": 5,
      "rate": 1,
-     "latest": null
+     "latest": null,
+     "approved": null
     },
     {
      "state": "GA",
      "n": 4,
      "rate": 3,
      "latest": {
+      "date": "2025-03-29",
+      "state": "GA",
+      "toi": "Commercial property",
+      "rate": 3.2,
+      "status": "Approved",
+      "approved": true
+     },
+     "approved": {
       "date": "2025-03-29",
       "state": "GA",
       "toi": "Commercial property",
@@ -655,6 +688,14 @@
       "rate": 7.7,
       "status": "Approved",
       "approved": true
+     },
+     "approved": {
+      "date": "2025-11-24",
+      "state": "NC",
+      "toi": "Homeowners",
+      "rate": 7.7,
+      "status": "Approved",
+      "approved": true
      }
     },
     {
@@ -668,6 +709,14 @@
       "rate": 13.8,
       "status": "Approved",
       "approved": true
+     },
+     "approved": {
+      "date": "2023-01-23",
+      "state": "LA",
+      "toi": "Homeowners",
+      "rate": 13.8,
+      "status": "Approved",
+      "approved": true
      }
     },
     {
@@ -675,6 +724,14 @@
      "n": 3,
      "rate": 2,
      "latest": {
+      "date": "2024-04-13",
+      "state": "MS",
+      "toi": "Inland marine",
+      "rate": 13.7,
+      "status": "Approved",
+      "approved": true
+     },
+     "approved": {
       "date": "2024-04-13",
       "state": "MS",
       "toi": "Inland marine",
@@ -934,7 +991,410 @@
     "hi": 161
    },
    "left": 0
-  }
+  },
+  "lines": {
+   "rows": [
+    {
+     "toi": "Homeowners",
+     "n": 29,
+     "rate": 17,
+     "formRule": 12,
+     "other": 0,
+     "states": 8,
+     "approved": 17,
+     "withImpact": 13,
+     "lo": -4.4,
+     "hi": 13.9
+    },
+    {
+     "toi": "Commercial property",
+     "n": 14,
+     "rate": 12,
+     "formRule": 2,
+     "other": 0,
+     "states": 5,
+     "approved": 10,
+     "withImpact": 12,
+     "lo": -4.4,
+     "hi": 10.1
+    },
+    {
+     "toi": "Inland marine",
+     "n": 12,
+     "rate": 7,
+     "formRule": 5,
+     "other": 0,
+     "states": 5,
+     "approved": 7,
+     "withImpact": 6,
+     "lo": -4.7,
+     "hi": 13.7
+    },
+    {
+     "toi": "Dwelling fire",
+     "n": 9,
+     "rate": 3,
+     "formRule": 6,
+     "other": 0,
+     "states": 6,
+     "approved": 2,
+     "withImpact": 1,
+     "lo": -4.9,
+     "hi": -4.9
+    }
+   ],
+   "total": 4
+  },
+  "outcomes": [
+   {
+    "outcome": "approved",
+    "n": 36,
+    "withImpact": 29,
+    "lo": -4.7,
+    "hi": 13.9
+   },
+   {
+    "outcome": "pending",
+    "n": 1,
+    "withImpact": 1,
+    "lo": -4.9,
+    "hi": -4.9
+   },
+   {
+    "outcome": "withdrawn",
+    "n": 2,
+    "withImpact": 2,
+    "lo": 7.5,
+    "hi": 10.1
+   }
+  ],
+  "history": {
+   "years": [
+    2021,
+    2022,
+    2023,
+    2024,
+    2025,
+    2026
+   ],
+   "rows": [
+    {
+     "state": "TX",
+     "toi": "Commercial property",
+     "n": 6,
+     "first": "2021-12-11",
+     "last": "2026-06-16",
+     "total": 1.6,
+     "byYear": [
+      5.5,
+      5.5,
+      10.5,
+      10.5,
+      6.9,
+      1.6
+     ]
+    },
+    {
+     "state": "TX",
+     "toi": "Homeowners",
+     "n": 4,
+     "first": "2022-01-15",
+     "last": "2026-03-25",
+     "total": 20.8,
+     "byYear": [
+      0,
+      8.3,
+      8.3,
+      8.3,
+      10.8,
+      20.8
+     ]
+    },
+    {
+     "state": "SC",
+     "toi": "Homeowners",
+     "n": 3,
+     "first": "2022-11-02",
+     "last": "2025-02-25",
+     "total": 29.6,
+     "byYear": [
+      0,
+      1.2,
+      1.2,
+      15.3,
+      29.6,
+      29.6
+     ]
+    },
+    {
+     "state": "FL",
+     "toi": "Inland marine",
+     "n": 3,
+     "first": "2022-02-12",
+     "last": "2026-07-14",
+     "total": -0.5,
+     "byYear": [
+      0,
+      -2.7,
+      -2.7,
+      -2.7,
+      -2.7,
+      -0.5
+     ]
+    },
+    {
+     "state": "FL",
+     "toi": "Homeowners",
+     "n": 2,
+     "first": "2023-06-22",
+     "last": "2024-02-18",
+     "total": 19,
+     "byYear": [
+      0,
+      0,
+      9,
+      19,
+      19,
+      19
+     ]
+    },
+    {
+     "state": "MS",
+     "toi": "Inland marine",
+     "n": 2,
+     "first": "2024-04-09",
+     "last": "2024-04-13",
+     "total": 8.4,
+     "byYear": [
+      0,
+      0,
+      0,
+      8.4,
+      8.4,
+      8.4
+     ]
+    },
+    {
+     "state": "GA",
+     "toi": "Homeowners",
+     "n": 2,
+     "first": "2022-01-24",
+     "last": "2024-10-06",
+     "total": 5.8,
+     "byYear": [
+      0,
+      10.7,
+      10.7,
+      5.8,
+      5.8,
+      5.8
+     ]
+    },
+    {
+     "state": "LA",
+     "toi": "Homeowners",
+     "n": 1,
+     "first": "2023-01-23",
+     "last": "2023-01-23",
+     "total": 13.8,
+     "byYear": [
+      0,
+      0,
+      13.8,
+      13.8,
+      13.8,
+      13.8
+     ]
+    },
+    {
+     "state": "SC",
+     "toi": "Commercial property",
+     "n": 1,
+     "first": "2024-03-12",
+     "last": "2024-03-12",
+     "total": 8.5,
+     "byYear": [
+      0,
+      0,
+      0,
+      8.5,
+      8.5,
+      8.5
+     ]
+    },
+    {
+     "state": "NC",
+     "toi": "Commercial property",
+     "n": 1,
+     "first": "2022-03-12",
+     "last": "2022-03-12",
+     "total": 8,
+     "byYear": [
+      0,
+      8,
+      8,
+      8,
+      8,
+      8
+     ]
+    },
+    {
+     "state": "NC",
+     "toi": "Homeowners",
+     "n": 1,
+     "first": "2025-11-24",
+     "last": "2025-11-24",
+     "total": 7.7,
+     "byYear": [
+      0,
+      0,
+      0,
+      0,
+      7.7,
+      7.7
+     ]
+    },
+    {
+     "state": "GA",
+     "toi": "Commercial property",
+     "n": 1,
+     "first": "2025-03-29",
+     "last": "2025-03-29",
+     "total": 3.2,
+     "byYear": [
+      0,
+      0,
+      0,
+      0,
+      3.2,
+      3.2
+     ]
+    }
+   ],
+   "total": 14
+  },
+  "signals": [
+   {
+    "id": "large",
+    "level": "red",
+    "title": "Large rate changes",
+    "evidence": "6 filings at 10.0% or more either way; the largest 13.9% in SC (Homeowners), 26 Oct 2024, approved."
+   },
+   {
+    "id": "withdrawn",
+    "level": "red",
+    "title": "Withdrawals and exits",
+    "evidence": "5 of 64 filings withdrawn or may be leaving a market (from S&P's status, type or wording); the latest in FL (Homeowners), 10 Oct."
+   },
+   {
+    "id": "pending",
+    "level": "amber",
+    "title": "Rate filings in progress",
+    "evidence": "1 rate filing in progress; the largest (4.9%) in SC (Dwelling fire), which may be the change asked for."
+   },
+   {
+    "id": "regulator",
+    "level": "amber",
+    "title": "Time with the regulator",
+    "evidence": "About 96 days from submitted to published, the median over 64 filings (approximate)."
+   },
+   {
+    "id": "cumulative",
+    "level": "amber",
+    "title": "Compounded rate changes",
+    "evidence": "29.6% in SC (Homeowners) from 3 approved filings, 2 Nov 2022 to 25 Feb 2025 (derived, not weighted by premium)."
+   },
+   {
+    "id": "new",
+    "level": "amber",
+    "title": "New programs or states",
+    "evidence": "2 filings may be a new program or a new state (from S&P's type or wording, a hint); the latest in FL (Inland marine), 14 Jul."
+   },
+   {
+    "id": "disapproved",
+    "level": "green",
+    "title": "Disapproved rate filings",
+    "evidence": "None of 39 rate filings shows a disapproved status."
+   },
+   {
+    "id": "concentration",
+    "level": "green",
+    "title": "State concentration",
+    "evidence": "FL: 19 of 64 filings (29.7% of filings, not of premium); filings in 8 states."
+   }
+  ],
+  "readable": [
+   {
+    "documentId": 72000062,
+    "filingVersionId": "0C0C0C0C-0000-4000-8000-000000000063",
+    "filingNo": "S&P no. CAL1490978",
+    "companyName": "Calloway Coastal Co",
+    "state": "SC",
+    "typeOfInsurance": "Homeowners",
+    "filingType": "Rate/Rule",
+    "status": "Approved",
+    "published": "2024-10-26",
+    "pages": 26,
+    "rate": 13.9,
+    "approved": true
+   },
+   {
+    "documentId": 72000057,
+    "filingVersionId": "0C0C0C0C-0000-4000-8000-000000000058",
+    "filingNo": "S&P no. CAL1451383",
+    "companyName": "Calloway Insurance Co",
+    "state": "LA",
+    "typeOfInsurance": "Homeowners",
+    "filingType": "Rate",
+    "status": "Approved",
+    "published": "2023-01-23",
+    "pages": 221,
+    "rate": 13.8,
+    "approved": true
+   },
+   {
+    "documentId": 72000017,
+    "filingVersionId": "0C0C0C0C-0000-4000-8000-000000000018",
+    "filingNo": "S&P no. CAL1134623",
+    "companyName": "Calloway Coastal Co",
+    "state": "MS",
+    "typeOfInsurance": "Inland marine",
+    "filingType": "Rate",
+    "status": "Approved",
+    "published": "2024-04-13",
+    "pages": 261,
+    "rate": 13.7,
+    "approved": true
+   },
+   {
+    "documentId": 72000023,
+    "filingVersionId": "0C0C0C0C-0000-4000-8000-000000000024",
+    "filingNo": "S&P no. CAL1182137",
+    "companyName": "Calloway Coastal Co",
+    "state": "SC",
+    "typeOfInsurance": "Homeowners",
+    "filingType": "Rate",
+    "status": "Approved",
+    "published": "2025-02-25",
+    "pages": 103,
+    "rate": 12.4,
+    "approved": true
+   },
+   {
+    "documentId": 72000030,
+    "filingVersionId": "0C0C0C0C-0000-4000-8000-000000000031",
+    "filingNo": "S&P no. CAL1237570",
+    "companyName": "Calloway Insurance Co",
+    "state": "GA",
+    "typeOfInsurance": "Homeowners",
+    "filingType": "Rate",
+    "status": "Approved",
+    "published": "2022-01-24",
+    "pages": 362,
+    "rate": 10.7,
+    "approved": true
+   }
+  ]
  },
  "text": {
   "by": "plain",
@@ -1048,6 +1508,57 @@
     }
    ]
   },
+  "ratemap": {
+   "title": "Latest approved change up in 6 states, down in 1",
+   "points": [
+    {
+     "lead": "Up",
+     "text": "LA 13.8%, MS 13.7%, SC 12.4%, NC 7.7%, GA 3.2%."
+    },
+    {
+     "lead": "Down",
+     "text": "TX (4.4%)."
+    },
+    {
+     "lead": "What it shows",
+     "text": "The newest approved overall rate impact in each state, of any type of insurance; not weighted by premium."
+    }
+   ]
+  },
+  "history": {
+   "title": "Approved changes compound to 29.6% in SC (Homeowners)",
+   "points": [
+    {
+     "lead": "Largest",
+     "text": "SC (Homeowners): 3 approved changes from 2 Nov 2022 to 25 Feb 2025 compound to 29.6% (derived)."
+    },
+    {
+     "lead": "Most changes",
+     "text": "TX (Commercial property): 6 approved changes, 1.6% compounded (derived)."
+    },
+    {
+     "lead": "Method",
+     "text": "Approved overall rate impacts multiplied together in date order since the start of the period; not weighted by premium; filings not approved are left out."
+    }
+   ]
+  },
+  "lines": {
+   "title": "Most filings in Homeowners: 29 of 64",
+   "points": [
+    {
+     "lead": "Types of insurance",
+     "text": "Homeowners 29, Commercial property 14, Inland marine 12, Dwelling fire 9."
+    },
+    {
+     "lead": "Rate filings",
+     "text": "17 of the 29 filings in Homeowners are rate filings; 17 of them approved."
+    },
+    {
+     "lead": "Outcomes",
+     "text": "36 approved, 1 in progress, 2 withdrawn (rate filings, by S&P's status)."
+    }
+   ]
+  },
   "questions": {
    "title": "Key diligence questions",
    "items": [
@@ -1056,16 +1567,16 @@
      "text": "3 filings with a rate impact aren't approved, the largest 10.1% in SC. What outcome and timing does management expect?"
     },
     {
+     "title": "Withdrawals and exits",
+     "text": "Some filings were withdrawn or may mark a market exit. Which states or programs is the company leaving or refiling, and why?"
+    },
+    {
      "title": "Rate adequacy",
      "text": "An approved overall rate change of 13.9% in SC (26 Oct 2024). What loss trend drove it, and is more needed?"
     },
     {
-     "title": "Product changes",
-     "text": "39 form and rule filings in the period. Which programs are new or changing, and why?"
-    },
-    {
-     "title": "Regulatory timing",
-     "text": "Filings in GA took about 137 days from submitted to published (median, approximate). How does that delay affect rate adequacy?"
+     "title": "Compounded rate changes",
+     "text": "Approved changes in SC (Homeowners) compound to 29.6% (derived). What were the indicated changes, and how much is still to earn in?"
     }
    ]
   }
