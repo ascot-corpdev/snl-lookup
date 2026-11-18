@@ -1245,9 +1245,9 @@ async function runSearch(refresh, given, resumeIt){
     payload=searchPayload(); f.last=payload; f.res=null;
   }
   if(unlistedOn()) payload.unlisted=true; else delete payload.unlisted;   // kept out of Recent searches, or not, as the tick says now
-  f.formErr=""; f.busy=true; f.err=null; render();
+  f.formErr=""; f.busy=true; f.err=null;
   // a wide search comes in parts (searchParts): progress shows as they arrive, and Stop keeps what has arrived
-  const ctl=bsControl(), resume=resumeIt?f.resume:null; f.ctl=ctl; f.prog=resume?bsProgress(resume):null; f.resume=null; f.carrying=!!resume;
+  const ctl=bsControl(), resume=resumeIt?f.resume:null; f.ctl=ctl; f.prog=resume?bsProgress(resume):null; f.resume=null; f.carrying=!!resume; render();
   const r=await searchParts(payload, {ctl, resume, onPart:p=>{ if(f.ctl===ctl){ f.prog=p; render(); } }});
   if(f.ctl!==ctl) return;   // a newer search took over
   f.busy=false; f.ctl=null; f.prog=null; f.carrying=false;
@@ -1341,7 +1341,7 @@ function bsIncomplete(st, inc){
   if(!st.last) return {err:"stopped", msg:"You stopped the search before anything came back.", status:0};
   const p=bsProgress(st), of=p.of&&p.of>p.done ? `${p.exact?"":"about "}${count(p.of)}` : "";
   const text = inc.why==="stopped"
-    ? `You stopped the search after ${count(p.done)}${of?` of ${of}`:""} parts, so these results are incomplete.`
+    ? `The search was stopped after ${count(p.done)}${of?` of ${of}`:""} parts, so these results are incomplete.`
     : `Part ${count(p.done+1)}${of?` of ${of}`:""} couldn't be fetched, so these results are incomplete. ${errText(inc.err)}`;
   const d=bsResult(st);
   // a part before the last carries only a note for pages older than this one: left out
@@ -1353,7 +1353,7 @@ function bsStopHTML(){ const f=S.f; return f.ctl ? `<button type="button" class=
 /* A search that stopped part-way: why, and a button to carry on from where it stopped (the parts already in are kept). */
 function bsIncompleteHTML(r){
   const f=S.f, failed=r.incomplete.why==="failed";
-  const lead=failed ? "These results are incomplete." : "You stopped the search.";
+  const lead=failed ? "Not all of the search came back." : "You stopped the search.";
   return `<div class="banner" id="incomplete" role="alert"><span><b>${lead}</b> ${esc(r.incomplete.text)} ${plural(Array.isArray(r.rows)?r.rows.length:0,"filing")} arrived and ${Array.isArray(r.rows)&&r.rows.length===1?"is":"are"} shown below; the counts and exports cover only these.</span>${f.resume?`<button type="button" class="btn sm" id="searchResume" data-act="search-resume">${failed?"Try again":"Carry on"}</button>`:""}</div>`;
 }
 
