@@ -1552,19 +1552,32 @@ export function fpScopeIn(f: { scope?: FpScope }): FpScope {
   return s && typeof s === "object" && s.narrowed === true && typeof s.words === "string" && typeof s.short === "string" ? s : fpScopeOf(null, null);
 }
 const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
-/** Whether a text names the scope: one of its states (by code or name) or one of its types of insurance. */
+/** Whether a text names each part of the scope that was narrowed: one of its states (by code or name) and one of its
+    types of insurance. */
+const mentionsStates = (text: string, sc: FpScope) => !sc.states || sc.states.some((s) => new RegExp(`\\b${s}\\b`).test(text) || (!!STATE_NAMES[s] && text.toLowerCase().includes(STATE_NAMES[s].toLowerCase())));
+const mentionsTypes = (text: string, sc: FpScope) => !sc.types || sc.types.some((x) => !!x.name && text.toLowerCase().includes(x.name.toLowerCase()));
 export function fpMentionsScope(text: string, sc: FpScope): boolean {
-  const t = text.toLowerCase();
-  return (sc.states ?? []).some((s) => new RegExp(`\\b${s}\\b`).test(text) || (STATE_NAMES[s] && t.includes(STATE_NAMES[s].toLowerCase())))
-    || (sc.types ?? []).some((x) => x.name && t.includes(x.name.toLowerCase())) || (!!sc.short && t.includes(sc.short.toLowerCase()));
+  return mentionsStates(text, sc) && mentionsTypes(text, sc);
 }
-/** Every title and the cover of a narrowed profile name the scope: a title that doesn't gets the short scope added
-    when it fits ("Most filings in FL: 18 of 48 (FL and TX, homeowners)"); the slides' headers and source lines carry
-    it too. Text of a profile that isn't narrowed is returned as it is. */
+/** Every title and the cover of a narrowed profile name the scope: a title that doesn't gets the part it misses added
+    when it fits ("Most filings in FL: 9 of 16 (homeowners)", "Latest change an increase in 2 of 2 states (FL, TX
+    homeowners)"); the slides' headers and source lines carry it too. Text of a profile that isn't narrowed is
+    returned as it is. */
 export function fpScoped(f: { scope?: FpScope }, text: FpText): FpText {
   const sc = fpScopeIn(f);
   if (!sc.narrowed) return text;
-  const title = (t: string) => { if (fpMentionsScope(t, sc)) return t; const x = `${t} (${sc.short})`; return x.length <= LIMITS.title ? x : t; };
+  const stS = sc.states ? (sc.states.length <= 4 ? andWords(sc.states) : `${sc.states.slice(0, 3).join(", ")} and ${sc.states.length - 3} more`) : "";
+  const stC = sc.states ? (sc.states.length <= 4 ? sc.states.join(", ") : stS) : "";
+  const tyS = sc.types ? (sc.types.length <= 2 ? andWords(sc.types.map((x) => lowerName(x.name))) : `${sc.types.length} types of insurance`) : "";
+  const title = (t: string) => {
+    const st = !mentionsStates(t, sc), ty = !mentionsTypes(t, sc);
+    if (!st && !ty) return t;
+    for (const tag of [[st ? stS : "", ty ? tyS : ""].filter(Boolean).join(", "), [st ? stC : "", ty ? tyS : ""].filter(Boolean).join(" ")]) {
+      const x = `${t} (${tag})`;
+      if (x.length <= LIMITS.title - 1) return x;   // a character spare: the slide's title must also fit its width
+    }
+    return t;
+  };
   const out = structuredClone(text);
   for (const name of FP_SECTIONS) out[name] = { ...out[name], title: title(out[name].title) };
   out.questions = { ...out.questions, title: title(out.questions.title) };

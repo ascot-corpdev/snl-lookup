@@ -165,4 +165,19 @@ const factsSent = (body: any) => JSON.parse(String(body.messages[0].content).spl
   ok("facts made before narrowing existed read as not narrowed", P.fpScopeIn(old).narrowed === false && same(P.fpScoped(old, P.filingsPlainText(old)), P.filingsPlainText(old)));
 }
 
+// ---------- the narrowed sample the page and slide suites build from ----------
+{
+  // tests/web/viewfilters_deck.test.cjs and viewfilters_profile.test.cjs use this file, so it must stay what the function gives
+  const today = "2026-11-18", { from, to } = P.fpPeriod(today, 5);
+  const rows = P.filingsSampleRows(today).filter((r) => ["FL", "TX"].includes(String(r.serffFilingStateId)) && r.typeOfInsurance === "Homeowners");
+  const extra = P.filingsSampleExtra(rows, today, { from, to }); extra.states = ["FL", "TX"];
+  const facts = P.filingsFactsFrom({ kind: "group", name: "Calloway Group", groupName: "Calloway Group", companies: 3, noId: 0 }, { rows, capped: false }, { asOf: today, years: 5, from, to, statesSearched: 2, scope: P.fpScopeOf(["FL", "TX"], [{ id: 101, name: "Homeowners" }]) }, extra);
+  const saved = JSON.parse(await Deno.readTextFile(new URL("../fixtures/viewfilters_profile_facts.json", import.meta.url)));
+  ok("the saved narrowed sample is what the function gives", same({ facts: saved.facts, text: saved.text }, JSON.parse(JSON.stringify({ facts, text: P.filingsPlainText(facts) }))));
+  const t = P.filingsPlainText(facts), titles = [...P.FP_SECTIONS.map((k) => t[k].title), t.questions.title];
+  ok("every title of the narrowed sample names the scope, but two too long to take it (the slides' source lines say it there)", titles.filter((x) => !P.fpMentionsScope(x, facts.scope!)).length === 2 && titles.every((x) => x.length <= P.LIMITS.title), titles);
+  ok("…and a title that misses only the type gets only the type", t.states.title === "Most filings in FL: 9 of 16 (homeowners)", t.states.title);
+  ok("the narrowed sample's plain text passes the figure check", [t.cover.subtitle, ...P.FP_SECTIONS.flatMap((k) => [t[k].title, ...t[k].points.map((x) => x.text)]), ...t.questions.items.map((q) => q.text)].every((x) => P.fpUnmatched(x, P.fpAllowedFigures(facts)).length === 0));
+}
+
 done();

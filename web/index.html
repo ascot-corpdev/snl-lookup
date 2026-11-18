@@ -601,6 +601,8 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 .nwpanel .checks{max-height:220px;background:var(--surface)}
 .nwnote{margin:0;overflow-wrap:anywhere}
 .nwshown,.nwwide{align-items:center}
+.fgrid.three .mkwords{grid-column:span 2}
+@media (max-width:900px){.fgrid.three .mkwords{grid-column:auto}}
 .nwshown span,.nwwide span{flex:1 1 260px;min-width:0;overflow-wrap:anywhere}
 @media (max-width:700px){.nwgrid{grid-template-columns:1fr}.nwpanel .stpick{grid-template-columns:1fr}}
 </style>
@@ -2911,6 +2913,7 @@ function enterProfile(){
   const pf=S.pf;
   if(!pf.status && !pf.statusErr && !pf.loading) loadProfileStatus();
   if(!pf.tpl.checked && !pf.tpl.loading) checkTemplate();
+  if(!S.refs && !S.refsLoading) loadRefs(false);   // S&P's lists of states and types, for Narrow it down on the filings profile
 }
 /* ----- which template a deck is built on: three levels and a one-off, the first found is used -----
    1. "once": a file chosen from this computer for the next deck only, never stored anywhere;
@@ -6237,7 +6240,7 @@ function mkSearchHTML(){
       <label class="f"><span>Status <em>words in it</em></span><input type="text" id="mk_status" data-bind="mk.f.fstatus" value="${esc(f.fstatus)}" autocomplete="off" spellcheck="false" placeholder="For example Approved"></label>
       <label class="f">Published from<input type="date" id="mk_from" data-bind="mk.f.from" value="${esc(f.from)}"></label>
       <label class="f">Published to<input type="date" id="mk_to" data-bind="mk.f.to" value="${esc(f.to)}"></label>
-      <label class="f full"><span>Words <em>in the description or a company name</em></span><input type="search" id="mk_words" data-bind="mk.f.words" value="${esc(f.words)}" autocomplete="off" spellcheck="false" placeholder="For example Calloway"></label>
+      <label class="f mkwords"><span>Words <em>in the description or a company name</em></span><input type="search" id="mk_words" data-bind="mk.f.words" value="${esc(f.words)}" autocomplete="off" spellcheck="false" placeholder="For example Calloway"></label>
     </div>
     ${mk.res?"":ask.slice(0, MK_MAX_STATES).map((s,i)=>mkCoverageHTML(mkCovOf(s), i)).join("")}
     <div class="toolbar"><button type="submit" class="btn primary" id="mk_go" data-act="mk-search" ${mk.busy?"disabled":""}>${mk.busy?"Searching the index…":"Search the index"}</button><span class="t2">Costs no S&amp;P requests.</span></div>
@@ -6260,7 +6263,7 @@ function mkRowHTML(r){
 function mkResultsHTML(){
   const mk=S.mk, r=mk.res;
   if(mk.busy && !r) return `<div class="banner" role="status" id="mkSearching"><span>Searching the market index…</span></div>`;
-  if(mk.err) return mk.err.err==="not_indexed"||mk.err.err==="out_of_range"||mk.err.err==="bad" ? `<div class="info" id="mkRefused" role="status"><span>${esc(errText(mk.err))}</span></div>` : problemHTML(mk.err, "Couldn't search the index.", "mk-search");
+  if(mk.err) return ["not_indexed","out_of_range","bad","needs_update","not_updated"].includes(mk.err.err) ? `<div class="info" id="mkRefused" role="status"><span>${esc(errText(mk.err))}</span></div>` : problemHTML(mk.err, "Couldn't search the index.", "mk-search");
   if(!r) return "";
   const rows=Array.isArray(r.rows)?r.rows:[], total=isNum(r.total)?+r.total:rows.length, notes=Array.isArray(r.notes)?r.notes.filter(n=>!blank(n)):[];
   const q=r.query||{}, cov=r.coverage||null;
