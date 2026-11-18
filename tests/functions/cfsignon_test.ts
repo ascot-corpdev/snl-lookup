@@ -20,7 +20,11 @@ const why = (r: Awaited<ReturnType<typeof check>>) => (r.ok ? "ok" : r.why);
 
 // ---------- settings ----------
 ok("the team domain is taken with or without https:// and a trailing slash", teamHost("https://Team.Example.cloudflareaccess.com/") === "team.example.cloudflareaccess.com" && teamHost("team.example.cloudflareaccess.com") === "team.example.cloudflareaccess.com");
-ok("a team domain with a path, a space or no dot is refused", [teamHost("team.example.com/x"), teamHost("team example.com"), teamHost("localhost"), teamHost(""), teamHost(undefined), teamHost("http://team.example.com")].every((v) => v === null));
+ok("a team domain with a space, a port, http:// or nothing in it is refused", [teamHost("team example.com"), teamHost("team.example.com:8443"), teamHost(""), teamHost("   "), teamHost(undefined), teamHost("http://team.example.com"), teamHost("-team"), teamHost("https://")].every((v) => v === null));
+ok("a pasted sign-in address keeps only the host; quotes are dropped; the team name alone gets .cloudflareaccess.com",
+  teamHost("https://team.cloudflareaccess.com/cdn-cgi/access/login/snl.example?kid=abc#x") === "team.cloudflareaccess.com" && teamHost("team.example.com/x") === "team.example.com"
+  && teamHost('"team.cloudflareaccess.com"') === "team.cloudflareaccess.com" && teamHost("'Team.cloudflareaccess.com' ") === "team.cloudflareaccess.com"
+  && teamHost("my-team") === "my-team.cloudflareaccess.com" && teamHost(" MyTeam ") === "myteam.cloudflareaccess.com");
 ok("several audiences are read, comma-separated", JSON.stringify(accessSettings(env({ CF_ACCESS_TEAM_DOMAIN: kit.team, CF_ACCESS_AUD: " a1, ,a2 " }))?.auds) === '["a1","a2"]');
 ok("without the team domain or the audience there are no settings", accessSettings(env({ CF_ACCESS_AUD: "a" })) === null && accessSettings(env({ CF_ACCESS_TEAM_DOMAIN: kit.team })) === null && accessSettings(env({ CF_ACCESS_TEAM_DOMAIN: kit.team, CF_ACCESS_AUD: " , " })) === null);
 

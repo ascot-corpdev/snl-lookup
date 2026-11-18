@@ -33,10 +33,23 @@ const jsonPart = (s) => {
   try { const v = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(b)); return v && typeof v === "object" && !Array.isArray(v) ? v : null; }
   catch { return null; }
 };
+/* The team domain as a bare host name, or null. Forgiving about how it was pasted: quotes round it, https://, a
+   whole sign-in address (the host is kept, the rest dropped), or the team name alone (".cloudflareaccess.com" is
+   added). Whatever it is given, the result only ever names a host that is then asked over https. */
 export const teamHost = (v) => {
-  const s = String(v ?? "").trim().toLowerCase().replace(/^https:\/\//, "").replace(/\/+$/, "");
+  let s = String(v ?? "").trim().replace(/^["'`]+|["'`]+$/g, "").trim().toLowerCase();
+  s = s.replace(/^https:\/\//, "").replace(/[\/?#].*$/, "");
+  if (/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(s)) s += ".cloudflareaccess.com";
   return /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(s) ? s : null;
 };
+/** Which of the two sign-in settings is at fault, in plain words (never the value itself). */
+export function settingsProblem(env) {
+  const out = [];
+  if (!String(env.TEAM_DOMAIN ?? "").trim()) out.push("TEAM_DOMAIN is missing.");
+  else if (!teamHost(env.TEAM_DOMAIN)) out.push("TEAM_DOMAIN is set, but it isn't a team domain. It should look like your-team.cloudflareaccess.com.");
+  if (!auds(env.POLICY_AUD).length) out.push("POLICY_AUD is missing.");
+  return out.join(" ");
+}
 const auds = (v) => String(v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
 /** The Supabase settings this Worker passes to the page: the address only when it is a plain https origin, and the
@@ -149,7 +162,7 @@ export function createWorker({ fetch: fetchFn, now = () => Date.now() } = {}) {
       env = env || {};
       const team = teamHost(env.TEAM_DOMAIN), want = auds(env.POLICY_AUD);
       const url = new URL(req.url), path = url.pathname, isApi = path.startsWith("/auth/");
-      if (!team || !want.length) return isApi ? json(403, { error: "not_configured", message: TEXT.notSetUp }) : page(403, "Not set up yet", TEXT.notSetUp);
+      if (!team || !want.length) { const why = `${TEXT.notSetUp} ${settingsProblem(env)}`.trim(); return isApi ? json(403, { error: "not_configured", message: why }) : page(403, "Not set up yet", why); }
       const token = req.headers.get("Cf-Access-Jwt-Assertion");
       const verdict = await check(token, team, want);
       if (verdict === "keys") return isApi ? json(503, { error: "unavailable", message: TEXT.keys }) : page(503, "Sign-in check unavailable", TEXT.keys);

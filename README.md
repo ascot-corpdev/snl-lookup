@@ -198,7 +198,7 @@ npx wrangler secret put SUPABASE_PUBLISHABLE_KEY
 npx wrangler secret put ORG_NAME
 ```
 
-Use the publishable key, never the secret key. A secret key set here by mistake is refused and never sent to a browser.
+`TEAM_DOMAIN` is `YOUR_TEAM.cloudflareaccess.com`; the team name alone, or the sign-in page's whole address, is also accepted. Use the publishable key, never the secret key. A secret key set here by mistake is refused and never sent to a browser. If the site answers "Not set up yet", the page says which of `TEAM_DOMAIN` and `POLICY_AUD` is missing or in the wrong form; `npx wrangler secret list` shows which settings exist.
 
 **5. Set the Supabase secrets.** `SNL_ADMIN_EMAILS` is a comma-separated list; for the owner it is the email address of their Cloudflare account.
 
