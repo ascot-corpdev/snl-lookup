@@ -558,6 +558,18 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 .setitem{border:1px solid var(--grid);padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-width:0;overflow-wrap:anywhere}
 .setedit,.setrename{border-top:1px solid var(--grid);padding-top:10px;display:flex;flex-direction:column;gap:10px;min-width:0}
 .setedit .wlist{display:flex;flex-direction:column;gap:6px;font-size:13px;min-width:0}
+/* Market index (#market) */
+.mkmgr{gap:12px}
+.mkopen{border:1px solid var(--grid);padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.mkbar{height:8px;background:var(--tile);border:1px solid var(--grid)}
+.mkbar span{display:block;height:100%;background:var(--magenta)}
+.mklist{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:8px;min-width:0}
+.mklist li{min-width:0;overflow-wrap:anywhere}
+.mkli{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;justify-content:space-between;min-width:0}
+.mkli>span{flex:1 1 240px;min-width:0}
+.mkstart{display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--grid);padding-top:12px;min-width:0}
+.mkcost,.mkcov span{overflow-wrap:anywhere}
+.mkmiss summary,.mkrecent summary{cursor:pointer;font-size:12px;font-weight:bold;color:var(--blue)}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
@@ -5234,7 +5246,7 @@ function render(){
   if(!on){ v.innerHTML=loginHTML(); keep(); renderDrawer(); renderAsk(); renderConn(); renderLive(); renderDigest(); return; }
   document.querySelectorAll("nav.tabs a").forEach(a=>a.setAttribute("aria-current", a.dataset.view===S.view ? "page" : "false"));
   document.getElementById("stripIn").innerHTML=stripHTML();
-  v.innerHTML = S.view==="statutory" ? renderStatutory() : S.view==="profile" ? renderProfile() : S.view==="snapshot" ? renderSnapshot() : S.view==="forms" ? renderForms() : S.view==="compare" ? renderCompare() : renderFilings();
+  v.innerHTML = S.view==="statutory" ? renderStatutory() : S.view==="profile" ? renderProfile() : S.view==="snapshot" ? renderSnapshot() : S.view==="forms" ? renderForms() : S.view==="compare" ? renderCompare() : S.view==="market" ? renderMarket() : renderFilings();
   keep(); renderDrawer(); renderAsk();
   renderConn();
   renderLive();
@@ -5267,6 +5279,273 @@ async function savePassword(){
   toast("Password changed"); closeDrawer();
 }
 
+/* ---------- Market index (#market): search filings swept for every company in the list; Corp Dev runs the sweeps ----------
+   The snl-index function keeps filing details for chosen states in the app's own database. Searching it costs no S&P
+   request. Every answer says what it rests on (the state, the period swept, when, and how many companies were and
+   weren't covered), and the coverage line stays on screen. Corp Dev starts a sweep (its cost shown first), and while
+   this page is open it carries the sweep on step by step, as the Ask Claude panel carries on an answer; closing the
+   tab only pauses it. Three functions are what the rest of the page needs: renderMarket, enterMarket, resetMarket. */
+VIEWS.push("market");
+FN["snl-index"]="the market index function";
+const MK_PAGE = 50, MK_EXPORT = 500;
+const MK_PERIODS = [["this_year","This year"],["last_12_months","Last 12 months"],["last_3_years","Last 3 years"]];
+const MK_FTYPES = ["Rate","Rule","Form"];
+function freshMarket(){
+  return {loading:false, status:null, statusErr:null, state:"", types:{}, typesBusy:"", f:{toi:"", ftype:"", fstatus:"", from:"", to:"", words:""},
+    busy:false, err:null, res:null, byCo:null, asked:null, tab:"rows", more:false, moreBusy:false, exporting:"",
+    mgr:{state:"", period:"last_12_months", busy:"", err:"", note:""}, timer:null, stepping:false, stepErr:""};
+}
+S.mk=freshMarket();
+function resetMarket(){ clearTimeout(S.mk&&S.mk.timer); S.mk=freshMarket(); }
+function enterMarket(){ if(!S.mk.loading) loadMarket(); }
+const mkStates = () => (S.mk.status&&Array.isArray(S.mk.status.states) ? S.mk.status.states.filter(s=>s&&/^[A-Z]{2}$/.test(String(s.state))) : []);
+const mkStateName = s => US_MAP[s] ? US_MAP[s][1] : s;
+const mkPct = v => isNum(v) ? `${(Math.round(+v*1000)/10).toFixed(1)}%` : "n/d";
+async function loadMarket(quiet){
+  const mk=S.mk; if(!S.session) return;
+  mk.loading=true; if(!quiet) render();
+  const r=await callFn("snl-index",{action:"status"});
+  if(!S.session || S.mk!==mk) return;
+  mk.loading=false;
+  if(r.data){
+    mk.status=r.data; mk.statusErr=null; takeUsage({used:r.data.usage, limits:r.data.limits, account:r.data.account});
+    const st=mkStates().map(s=>s.state);
+    if(!st.includes(mk.state)) mk.state=st[0]||"";
+    if(mk.state && !mk.types[mk.state]) mkLoadTypes(mk.state);
+  } else if(r.err!=="signin") mk.statusErr=r;
+  if(S.view==="market") render();
+  mkDrive();
+}
+async function mkLoadTypes(state){
+  const mk=S.mk; if(mk.typesBusy===state) return; mk.typesBusy=state;
+  const r=await callFn("snl-index",{action:"query", state, group:"type", limit:100});
+  if(S.mk!==mk) return; mk.typesBusy="";
+  mk.types[state]=r.data&&Array.isArray(r.data.groups) ? r.data.groups.map(g=>String(g&&g.name||"")).filter(n=>n&&n!=="n/d") : [];
+  if(S.view==="market") render();
+}
+function mkQuery(extra){
+  const mk=S.mk, f=mk.f;
+  return {action:"query", state:mk.state, typeOfInsurance:f.toi||null, filingType:f.ftype||null, status:f.fstatus.trim()||null, from:f.from||null, to:f.to||null, words:f.words.trim()||null, ...extra};
+}
+async function mkSearch(){
+  const mk=S.mk; if(mk.busy || !mk.state) return;
+  if(mk.f.from && mk.f.to && mk.f.from>mk.f.to){ mk.err={err:"bad", msg:"The start date is after the end date."}; render(); return; }
+  mk.busy=true; mk.err=null; render();
+  const q=mkQuery({});
+  const [rows, byCo]=await Promise.all([callFn("snl-index",{...q, group:"rows", limit:MK_PAGE, offset:0}), callFn("snl-index",{...q, group:"company", limit:100})]);
+  if(!S.session || S.mk!==mk) return;
+  mk.busy=false;
+  if(rows.data){ mk.res=rows.data; mk.asked=q; mk.more=!!rows.data.more; mk.byCo=byCo.data||null; }
+  else if(rows.err!=="signin"){ mk.err=rows; mk.res=null; mk.byCo=null; }
+  render();
+}
+async function mkMore(){
+  const mk=S.mk, res=mk.res; if(!res || mk.moreBusy || !mk.asked) return;
+  mk.moreBusy=true; render();
+  const r=await callFn("snl-index",{...mk.asked, group:"rows", limit:MK_PAGE, offset:res.rows.length});
+  if(S.mk!==mk || mk.res!==res) return;
+  mk.moreBusy=false;
+  if(r.data&&Array.isArray(r.data.rows)){ res.rows=res.rows.concat(r.data.rows); mk.more=!!r.data.more; }
+  else if(r.err!=="signin") toast("Couldn't load more. "+errText(r));
+  render();
+}
+/* The coverage line: what an answer rests on, always on screen while a state is chosen. */
+function mkCoverageHTML(cov){
+  if(!cov) return "";
+  const missed=Array.isArray(cov.missed)?cov.missed.filter(x=>!blank(x)):[];
+  const shown=missed.slice(0,5);
+  return `<div class="info mkcov" id="mkCov" role="note"><span>${esc(cov.sentence||"")}${+cov.companiesMissed&&shown.length?` Not covered: ${esc(shown.join("; "))}${+cov.companiesMissed>shown.length?` and ${count(+cov.companiesMissed-shown.length)} more`:""}.`:""}</span></div>`;
+}
+const mkCovOf = state => { const s=mkStates().find(x=>x.state===state); return s||null; };
+function mkSearchHTML(){
+  const mk=S.mk, f=mk.f, states=mkStates(), types=mk.types[mk.state]||[];
+  const opt=(v,label,on)=>`<option value="${esc(v)}"${on?" selected":""}>${esc(label)}</option>`;
+  return `<form class="tcard" id="mkForm" novalidate aria-label="Search the market index">
+    <div class="fgrid three">
+      <label class="f">State<select id="mk_state">${states.map(s=>opt(s.state, `${s.state} ${mkStateName(s.state)}`, s.state===mk.state)).join("")}</select></label>
+      <label class="f">Type of insurance<select id="mk_toi"><option value="">Any</option>${types.map(t=>opt(t,t,t===f.toi)).join("")}${f.toi&&!types.includes(f.toi)?opt(f.toi,f.toi,true):""}</select></label>
+      <label class="f">Filing type<select id="mk_ftype"><option value="">Any</option>${MK_FTYPES.map(t=>opt(t,t,t===f.ftype)).join("")}</select></label>
+      <label class="f"><span>Status <em>words in it</em></span><input type="text" id="mk_status" data-bind="mk.f.fstatus" value="${esc(f.fstatus)}" autocomplete="off" spellcheck="false" placeholder="For example Approved"></label>
+      <label class="f">Published from<input type="date" id="mk_from" data-bind="mk.f.from" value="${esc(f.from)}"></label>
+      <label class="f">Published to<input type="date" id="mk_to" data-bind="mk.f.to" value="${esc(f.to)}"></label>
+      <label class="f full"><span>Words <em>in the description or a company name</em></span><input type="search" id="mk_words" data-bind="mk.f.words" value="${esc(f.words)}" autocomplete="off" spellcheck="false" placeholder="For example Calloway"></label>
+    </div>
+    ${mk.res?"":mkCoverageHTML(mkCovOf(mk.state))}
+    <div class="toolbar"><button type="submit" class="btn primary" id="mk_go" data-act="mk-search" ${mk.busy?"disabled":""}>${mk.busy?"Searching the index…":"Search the index"}</button><span class="t2">Costs no S&amp;P requests.</span></div>
+  </form>`;
+}
+function mkRowHTML(r){
+  const cos=companiesOf(r).map(c=>c.companyName).filter(x=>!blank(x)), key=docKeyOf(r), cols=S.mk.cols;
+  const t=v=>blank(v)?"n/d":esc(v);
+  return `<tr>
+    <td class="c-co"><div class="t1">${cos.length?esc(cos[0]):"n/d"}</div>${cos.length>1?`<div class="t2">and ${esc(cos.slice(1).join("; "))}</div>`:""}</td>
+    ${cols.toi?`<td class="c-late" data-label="Type of insurance">${t(r.typeOfInsurance)}${!blank(r.subTypeOfInsurance)?`<div class="t2">${esc(r.subTypeOfInsurance)}</div>`:""}</td>`:""}
+    ${cols.ftype?`<td class="c-half" data-label="Filing type">${t(r.serffFilingType)}</td>`:""}
+    ${cols.status?`<td class="c-half" data-label="Status">${t(r.filingStatus)}</td>`:""}
+    <td class="c-half" data-label="Published">${fmtDay(r.publishDate)}</td>
+    ${cols.rate?`<td class="num c-half" data-label="Rate impact">${esc(rateImpact(r))}</td>`:""}
+    ${cols.desc?`<td class="c-late" data-label="Description">${blank(r.filingDescription)?"n/d":esc(String(r.filingDescription).slice(0,300))}</td>`:""}
+    <td class="c-tn c-late" data-label="Filing number">${filingNoHTML(r)}</td>
+    <td class="c-doc c-late">${docButtonHTML(key, "Open document")}${isNum(r.pages)?`<div class="t2">${plural(r.pages,"page")}</div>`:""}</td></tr>`;
+}
+function mkResultsHTML(){
+  const mk=S.mk, r=mk.res;
+  if(mk.busy && !r) return `<div class="banner" role="status" id="mkSearching"><span>Searching the market index…</span></div>`;
+  if(mk.err) return mk.err.err==="not_indexed"||mk.err.err==="out_of_range"||mk.err.err==="bad" ? `<div class="info" id="mkRefused" role="status"><span>${esc(errText(mk.err))}</span></div>` : problemHTML(mk.err, "Couldn't search the index.", "mk-search");
+  if(!r) return "";
+  const rows=Array.isArray(r.rows)?r.rows:[], total=isNum(r.total)?+r.total:rows.length, notes=Array.isArray(r.notes)?r.notes.filter(n=>!blank(n)):[];
+  const q=r.query||{}, cov=r.coverage||null;
+  let h=`<h2 class="sec">Results</h2>${mkCoverageHTML(cov)}`;
+  h+=`<p class="sub" id="mkSummary" style="margin:0">${total?`<b>${plural(total,"filing")}</b> in the index`:`<b>No filing in the index matches</b>`} for ${esc(q.state||"")}${q.from&&q.to?`, published ${fmtDay(q.from)} to ${fmtDay(q.to)}`:""}.${total?` ${count(r.rateFilings)} ${+r.rateFilings===1?"is a rate filing":"are rate filings"}.`:""}</p>`;
+  if(notes.length) h+=`<div class="notes" id="mkNotes" role="status"><b>Read this before you rely on the results</b><ul>${notes.map(n=>`<li>${esc(n)}</li>`).join("")}</ul></div>`;
+  if(!total) return h;
+  h+=`<div class="toolbar"><div class="seg" role="group" aria-label="Show"><button type="button" class="btn sm" data-act="mk-tab" data-tab="rows" aria-pressed="${mk.tab==="rows"}">Filings</button><button type="button" class="btn sm" data-act="mk-tab" data-tab="company" aria-pressed="${mk.tab==="company"}">By company</button></div>
+    <span class="grow"></span><button class="btn" data-act="mk-export" data-fmt="csv" ${mk.exporting?"disabled":""}>Export CSV</button><button class="btn" data-act="mk-export" data-fmt="xlsx" ${mk.exporting?"disabled":""}>Export Excel</button></div>`;
+  if(mk.tab==="company") return h+mkByCompanyHTML();
+  // No empty columns: a column every row leaves blank isn't shown (real rows often have no description).
+  const has=k=>rows.some(x=>!blank(x[k]));
+  mk.cols={toi:has("typeOfInsurance"), ftype:has("serffFilingType"), status:has("filingStatus"), rate:has("overallRateImpact")||has("dispOverallRateImpact"), desc:has("filingDescription")};
+  const c=mk.cols;
+  h+=`<div class="tbl-wrap cardwrap" id="mkWrap"><table class="cards filings" id="mkTable"><thead><tr><th>Company</th>${c.toi?"<th>Type of insurance</th>":""}${c.ftype?"<th>Filing type</th>":""}${c.status?"<th>Status</th>":""}<th>Published</th>${c.rate?`<th class="num">Rate impact</th>`:""}${c.desc?"<th>Description</th>":""}<th>Filing number</th><th>Document</th></tr></thead>
+    <tbody>${rows.map(mkRowHTML).join("")}</tbody></table></div>`;
+  if(!c.desc) h+=`<p class="t2" id="mkNoDesc">S&amp;P gave no description for these filings, so there is no description column.</p>`;
+  h+=`<div class="inline"><span class="t2" id="mkCount">Showing ${count(rows.length)} of ${count(total)}</span>${mk.more?`<button class="btn" data-act="mk-more" ${mk.moreBusy?"disabled":""}>${mk.moreBusy?"Loading…":`Show ${count(Math.min(MK_PAGE, total-rows.length))} more`}</button>`:""}</div>`;
+  return h+`<p class="source">Source: ${esc(r.source||"S&P Global Market Intelligence, SNL Insurance Product Filings")}. Opening a document uses one S&amp;P request the first time.</p>`;
+}
+function mkRange(g){ if(!isNum(g.rateMin)&&!isNum(g.rateMax)) return "n/d"; return +g.rateMin===+g.rateMax ? pct(g.rateMin) : `${pct(g.rateMin)} to ${pct(g.rateMax)}`; }
+function mkByCompanyHTML(){
+  const b=S.mk.byCo, groups=b&&Array.isArray(b.groups)?b.groups:[];
+  if(!b) return `<div class="info" role="status"><span>The summary by company couldn't be loaded. Search again.</span></div>`;
+  const tot=isNum(b.groupTotal)?+b.groupTotal:groups.length;
+  return `<p class="t2" id="mkCoCount">${count(tot)} ${tot===1?"company":"companies"}, most filings first${tot>groups.length?`; the top ${count(groups.length)} are shown`:""}.</p>
+    <div class="tbl-wrap cardwrap" id="mkCoWrap"><table class="cards" id="mkCoTable"><thead><tr><th>Company</th><th class="num">Filings</th><th class="num">Rate filings</th><th class="num">Rate impact</th><th>Latest published</th></tr></thead>
+    <tbody>${groups.map(g=>`<tr><td class="c-co">${blank(g.name)?"n/d":esc(g.name)}</td><td class="num c-half" data-label="Filings">${count(g.filings)}</td><td class="num c-half" data-label="Rate filings">${count(g.rateFilings)}</td><td class="num c-half" data-label="Rate impact">${esc(mkRange(g))}</td><td class="c-half" data-label="Latest published">${fmtDay(g.latest)}</td></tr>`).join("")}</tbody></table></div>`;
+}
+async function mkExport(fmt){
+  const mk=S.mk; if(!mk.res || mk.exporting) return;
+  const stamp=`${mk.asked&&mk.asked.state||"index"}-${TODAY()}`;
+  if(mk.tab==="company"){
+    const g=mk.byCo&&Array.isArray(mk.byCo.groups)?mk.byCo.groups:[];
+    exportTable({name:`snl-market-${stamp}-by-company`, sheet:"By company", cols:["Company","S&P company id","Institution id","Filings","Rate filings","Lowest rate impact","Highest rate impact","Latest published"],
+      rows:g.map(x=>[x.name, x.companyId, x.institutionId, isNum(x.filings)?+x.filings:null, isNum(x.rateFilings)?+x.rateFilings:null, isNum(x.rateMin)?+x.rateMin:null, isNum(x.rateMax)?+x.rateMax:null, dayOut(x.latest)])}, fmt);
+    return;
+  }
+  mk.exporting=fmt; render();
+  const r=await callFn("snl-index",{...mk.asked, group:"rows", limit:MK_EXPORT, offset:0});
+  if(S.mk!==mk) return; mk.exporting=""; render();
+  if(!r.data){ if(r.err!=="signin") toast("Couldn't export. "+errText(r)); return; }
+  const rows=Array.isArray(r.data.rows)?r.data.rows:[];
+  if(r.data.more) toast(`The export holds the newest ${count(rows.length)} of ${count(r.data.total)} filings. Narrow the search for the rest.`);
+  exportTable({name:`snl-market-${stamp}`, sheet:"Filings", cols:["Companies","State","Type of insurance","Sub-type of insurance","Filing type","Status","Date submitted","Date published","Effective date, new business","Effective date, renewals","Rate impact","Rate impact (number)","Description","Filing number","Document id","Filing version id","Pages"],
+    rows:rows.map(x=>[companiesOf(x).map(c=>c.companyName).filter(n=>!blank(n)).join("; "), x.serffFilingStateId, x.typeOfInsurance, x.subTypeOfInsurance, x.serffFilingType, x.filingStatus, dayOut(x.dateSubmitted), dayOut(x.publishDate), dayOut(x.newBusReqEffDate), dayOut(x.renewBusReqEffDate), rateImpact(x), isNum(x.overallRateImpact)?+x.overallRateImpact:null, x.filingDescription, filingNoText(x), x.documentId, x.filingVersionId, isNum(x.pages)?+x.pages:null])}, fmt);
+}
+
+/* ----- the index manager (Corp Dev): what is indexed, a sweep's cost and progress, pause, top up ----- */
+const MK_STATUS = {running:"Working", waiting:"Waiting to carry on", held:"Paused", done:"Finished", failed:"Failed", stopped:"Stopped"};
+function mkOpenHTML(o){
+  const pctDone=Math.max(0, Math.min(100, +o.percent||0)), held=o.status==="held", what=o.kind==="top_up"?"Top-up":"Sweep";
+  const until=o.resume_after&&Date.parse(o.resume_after)>Date.now() ? ` until ${fmtTime(o.resume_after)}` : "";
+  return `<div class="mkopen" id="mkOpen">
+    <div class="blk-h"><div><b>${esc(what)} of ${esc(o.state)}</b> <span class="t2">${esc(`published ${fmtDay(o.from_date)} to ${fmtDay(o.to_date)}`)}</span></div><span class="pill" id="mkOpenStatus">${esc((MK_STATUS[o.status]||o.status)+until)}</span></div>
+    <div class="mkbar" role="progressbar" aria-label="Sweep progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pctDone}"><span style="width:${pctDone}%"></span></div>
+    <p class="t2" id="mkProgress" style="margin:0">${count(o.next_unit)} of ${count(o.units_total)} batches of companies (${pctDone}%), ${plural(o.requests,"S&amp;P request")} so far, ${plural(o.rows_found,"filing")} found.${+o.companiesMissed?` ${plural(o.companiesMissed,"company","companies")} not covered so far.`:""}</p>
+    ${!blank(o.message)?`<p class="t2" id="mkOpenMsg" style="margin:0">${esc(o.message)}</p>`:""}
+    ${S.mk.stepping?`<p class="t2" id="mkStepping" role="status" style="margin:0">Asking S&amp;P for the next batches… Each step takes up to a minute. Keep this page open, or the schedule carries it on if it is set up.</p>`:""}
+    ${S.mk.stepErr?`<p class="err" id="mkStepErr" role="alert">${esc(S.mk.stepErr)}</p>`:""}
+    <div class="toolbar">${held?`<button class="btn primary" data-act="mk-resume" id="mkResume" ${S.mk.mgr.busy?"disabled":""}>Carry on</button>`:`<button class="btn" data-act="mk-pause" id="mkPause" ${S.mk.mgr.busy||o.request==="pause"?"disabled":""}>${o.request==="pause"?"Pausing after this batch…":"Pause"}</button>`}${S.mk.stepErr&&!held?`<button class="btn" data-act="mk-step" id="mkStepAgain">Try again</button>`:""}<button class="btn ghost" data-act="mk-stop" id="mkStop" ${S.mk.mgr.busy||o.request==="stop"?"disabled":""}>Stop</button></div>
+  </div>`;
+}
+function mkManagerHTML(){
+  const mk=S.mk, st=mk.status, m=mk.mgr, open=st.open, states=mkStates(), costs=st.costs||{}, tops=st.topUps||{};
+  const lim=st.limits||{}, res=st.reserves||{};
+  let h=`<section class="blk tcard mkmgr" id="mkMgr" aria-labelledby="mkMgrH"><div class="blk-h"><h3 id="mkMgrH" style="margin:0">Index manager</h3><span class="t2">Corp Dev only</span></div>
+    <p class="t2" style="margin:0">A sweep asks S&amp;P for every company in the company list${st.companies?` (${count(st.companies.searchable)} with an S&amp;P id)`:""}, 10 at a time, for one state. It leaves ${count(res.hour)} of the hour's ${count(lim.hour)} S&amp;P requests and ${count(res.day)} of the day's ${count(lim.day)} for searches and questions, and waits when it reaches them.</p>`;
+  if(st.configured===false) h+=`<div class="info" id="mkOff" role="status"><span><b>S&amp;P filings aren't set up yet,</b> so no sweep can run. Searching what is already indexed still works.</span></div>`;
+  if(m.err) h+=`<p class="err" id="mkMgrErr" role="alert">${esc(m.err)}</p>`;
+  if(m.note) h+=`<p class="t2" id="mkMgrNote" role="status" style="margin:0">${esc(m.note)}</p>`;
+  if(open) h+=mkOpenHTML(open);
+  h+=`<div id="mkIndexed"><b>States indexed</b>${states.length?`<ul class="mklist">${states.map(s=>{ const tu=tops[s.state];
+    return `<li data-state="${esc(s.state)}"><div class="mkli"><span><b>${esc(s.state)}</b> ${esc(`${fmtDay(s.from)} to ${fmtDay(s.to)}, last completed ${fmtAt(s.lastComplete)}: ${count(s.filings)} filings, ${count(s.companiesCovered)} companies covered, ${count(s.companiesMissed)} not`)}</span>
+      ${tu?`<button class="btn sm" data-act="mk-topup" data-s="${esc(s.state)}" ${open||m.busy||st.configured===false?"disabled":""}>Top up</button>`:`<span class="t2">Up to date</span>`}</div>
+      ${tu?`<p class="t2 mkcost" style="margin:0">Top up: filings published since ${esc(fmtDay(tu.from))}. ${esc(tu.words||"")} A top-up costs about as much as a sweep of a year, so top up weekly or monthly, not daily.</p>`:""}
+      ${Array.isArray(s.missed)&&s.missed.length?`<details class="mkmiss"><summary>Not covered (${count(s.companiesMissed)})</summary><p class="t2" style="margin:4px 0 0">${esc(s.missed.join("; "))}${+s.companiesMissed>s.missed.length?` and ${count(+s.companiesMissed-s.missed.length)} more`:""}. Their batch failed twice; the next sweep tries them again.</p></details>`:""}</li>`; }).join("")}</ul>`:`<p class="t2" style="margin:4px 0 0">None yet.</p>`}</div>`;
+  const c=costs[m.period]||null, refused=c&&c.refused;
+  h+=`<div class="mkstart" id="mkStart"><b>Start a sweep</b>
+    <div class="fgrid"><label class="f">State<select id="mk_mstate"><option value="">Choose a state</option>${US_STATES.map(s=>`<option value="${s}"${s===m.state?" selected":""}>${s} ${esc(mkStateName(s))}</option>`).join("")}</select></label>
+    <div class="f"><span>Period</span><div class="seg" role="group" aria-label="Period">${MK_PERIODS.map(([id,label])=>`<button type="button" class="btn sm" data-act="mk-period" data-p="${id}" aria-pressed="${m.period===id}">${label}</button>`).join("")}</div></div></div>
+    ${c?`<p class="t2 mkcost" id="mkCost" style="margin:0"><b>What it costs:</b> ${esc(c.words||"")}${c.finishesToday===false&&!refused?` Fewer requests are left today than it needs, so it carries on after midnight UTC.`:""}</p>`:""}
+    ${refused?`<p class="err" id="mkRefusedCost" role="alert">${esc(refused)}</p>`:""}
+    ${m.state&&states.some(s=>s.state===m.state)?`<p class="t2" style="margin:0">${esc(m.state)} is already indexed: a new sweep replaces its period when it finishes. To add only new filings, top it up instead.</p>`:""}
+    <div class="toolbar"><button class="btn primary" data-act="mk-start" id="mkStartBtn" ${open||refused||m.busy||st.configured===false?"disabled":""}>${m.busy==="start"?"Starting…":"Start the sweep"}</button>${open?`<span class="t2">One sweep runs at a time.</span>`:""}</div></div>`;
+  const sch=st.schedule||{};
+  h+=`<p class="t2" id="mkSchedule" style="margin:0">${sch.ready?`The schedule is set up: it carries a sweep on with this page closed, and tops up each indexed state ${+sch.topUpDays?`every ${count(sch.topUpDays)} days`:"never (switched off)"}.`:"No schedule: a sweep only runs while this page is open. To let it run with the page closed and keep states topped up, the owner sets INDEX_SECRET and runs supabase/index_schedule.sql (README, Market index)."}</p>`;
+  const recent=(Array.isArray(st.recent)?st.recent:[]).filter(x=>x&&!["running","waiting","held"].includes(x.status)).slice(0,5);
+  if(recent.length) h+=`<details class="mkrecent" id="mkRecent"><summary>Recent sweeps</summary><ul class="mklist">${recent.map(x=>`<li><b>${esc(x.state)}</b> <span class="pill">${esc(MK_STATUS[x.status]||x.status)}</span> <span class="t2">${esc(fmtAt(x.started_at))}</span>${!blank(x.message)?`<div class="t2">${esc(x.message)}</div>`:""}</li>`).join("")}</ul></details>`;
+  return h+`</section>`;
+}
+function renderMarket(){
+  const mk=S.mk, st=mk.status;
+  let h=`<div><h2 class="action-title">Market index</h2>
+    <p class="sub">Filings S&amp;P holds for every company in the app's company list, in the states swept here, so you can see a whole market rather than the carriers you thought of. Searching it costs no S&amp;P requests.</p></div>`;
+  if(!st){
+    if(mk.statusErr) return h+(mk.statusErr.err==="no_tables" ? `<div class="info" id="mkNoTables" role="status"><span>${esc(isCorpDev()?mk.statusErr.msg:"The market index isn't set up yet. Ask Corp Dev.")}</span></div>`
+      : mk.statusErr.err==="not_deployed" ? `<div class="info" id="mkNotDeployed" role="status"><span>${esc(mk.statusErr.msg)}</span></div>` : problemHTML(mk.statusErr, "Couldn't load the market index.", "mk-retry"));
+    return h+`<p class="t2" id="mkLoading" role="status">Loading the market index…</p>`;
+  }
+  if(!mkStates().length){
+    const going=st.open?` A ${st.open.kind==="top_up"?"top-up":"sweep"} of ${st.open.state} is under way (${+st.open.percent||0}% done); its filings can be searched when it finishes.`:"";
+    h+=`<div class="empty" id="mkNone"><p><b>No state is indexed yet.</b>${esc(going)} ${isCorpDev()?"Start a sweep in the index manager below.":"Corp Dev can sweep a state; until then, use the Filings view or Ask Claude."}</p></div>`;
+  } else h+=mkSearchHTML()+`<div id="mkOut" style="display:flex;flex-direction:column;gap:12px;min-width:0" aria-live="polite">${mkResultsHTML()}</div>`;
+  if(isCorpDev()) h+=mkManagerHTML();
+  return h;
+}
+
+/* ----- Corp Dev's actions, and carrying a sweep on while this page is open ----- */
+async function mkAct(action, extra){
+  const mk=S.mk, m=mk.mgr; if(m.busy) return;
+  m.busy=action; m.err=""; m.note=""; render();
+  const r=await callFn("snl-index",{action, ...(extra||{})});
+  if(S.mk!==mk) return; m.busy="";
+  if(r.data){ m.note=r.data.message||""; if(r.data.used) takeUsage(r.data); mk.stepErr=""; }
+  else if(r.err!=="signin") m.err=errText(r);
+  await loadMarket(true);
+}
+function mkStart(){
+  const m=S.mk.mgr;
+  if(!m.state){ m.err="Choose a state to sweep."; render(); document.getElementById("mk_mstate")?.focus(); return; }
+  mkAct("start", {state:m.state, period:m.period});
+}
+/* One step at a time while this page shows the index: right away while the sweep is waiting to carry on, at the time
+   it gave when it is leaving room for people, and a look every 15 seconds while someone else's step is running. */
+function mkDrive(){
+  const mk=S.mk; clearTimeout(mk.timer); mk.timer=null;
+  const o=mk.status&&mk.status.open;
+  if(!S.session || !isCorpDev() || S.view!=="market" || !o || mk.stepping || mk.stepErr || o.status==="held") return;
+  if(o.status==="running"){ mk.timer=setTimeout(()=>{ if(S.mk===mk) loadMarket(true); }, 15000); return; }
+  // A step that didn't run (someone else's step had just started, say) is tried again in 15 seconds, not at once.
+  const wait=o.resume_after ? Date.parse(o.resume_after)-Date.now() : mk.idle ? 15000 : 0;
+  mk.timer=setTimeout(()=>{ if(S.mk===mk) mkStep(); }, wait>0 ? Math.min(wait+2000, 3600000) : 0);
+}
+async function mkStep(){
+  const mk=S.mk; if(mk.stepping) return;
+  mk.stepping=true; mk.stepErr=""; if(S.view==="market") render();
+  const r=await callFn("snl-index",{action:"continue"});
+  if(S.mk!==mk) return;
+  mk.stepping=false;
+  mk.idle=!(r.data&&r.data.step&&r.data.step.ran);
+  if(r.data){ if(r.data.used) takeUsage(r.data); }
+  else if(r.err!=="signin") mk.stepErr="The sweep couldn't carry on: "+errText(r)+" It hasn't lost its place.";
+  await loadMarket(true);
+}
+document.addEventListener("change", e=>{
+  const id=e.target.id, mk=S.mk;
+  if(id==="mk_state"){ mk.state=e.target.value; mk.f.toi=""; mk.res=null; mk.byCo=null; mk.err=null; if(mk.state && !mk.types[mk.state]) mkLoadTypes(mk.state); render(); }
+  else if(id==="mk_toi"){ mk.f.toi=e.target.value; }
+  else if(id==="mk_ftype"){ mk.f.ftype=e.target.value; }
+  else if(id==="mk_mstate"){ mk.mgr.state=e.target.value; mk.mgr.err=""; render(); }
+});
+document.addEventListener("submit", e=>{ if(e.target.id==="mkForm"){ e.preventDefault(); mkSearch(); } });
+
 /* ---------- routing ---------- */
 const VIEW_KEY="snl.view";
 function enterView(){
@@ -5279,6 +5558,7 @@ function enterView(){
   if(S.view==="forms") enterForms();
   if(S.view==="compare") enterCompare();
   if(!S.sets.loaded && !S.sets.loading) loadSets();
+  if(S.view==="market") enterMarket();
 }
 function route(){
   const h=location.hash.replace(/^#/,""); let v=VIEWS.includes(h)?h:null;
@@ -5489,6 +5769,19 @@ document.addEventListener("click", e=>{
     case "sets-gr-remove": setsRemoveGroup(t.dataset.id, t.dataset.g); break;
     case "sets-recount": for(const [k,v] of Object.entries(S.sets.groups)) if(v.status==="error") delete S.sets.groups[k]; render(); setsCount(); break;
     case "set-use": useSet(t.dataset.target, document.getElementById("setsel_"+setTarget(t.dataset.target))?.value); break;
+
+    case "mk-search": mkSearch(); break;
+    case "mk-retry": S.mk.statusErr=null; loadMarket(); break;
+    case "mk-tab": S.mk.tab=t.dataset.tab==="company"?"company":"rows"; render(); break;
+    case "mk-more": mkMore(); break;
+    case "mk-export": mkExport(t.dataset.fmt); break;
+    case "mk-period": S.mk.mgr.period=t.dataset.p; S.mk.mgr.err=""; render(); break;
+    case "mk-start": mkStart(); break;
+    case "mk-topup": mkAct("top_up", {state:t.dataset.s}); break;
+    case "mk-pause": mkAct("pause"); break;
+    case "mk-resume": mkAct("resume"); break;
+    case "mk-stop": mkAct("stop"); break;
+    case "mk-step": S.mk.stepErr=""; mkStep(); break;
   }
 });
 function onInput(e){
@@ -5552,6 +5845,7 @@ function resetState(){
   S.cmp=freshCmp();
   S.sets=freshSets();
   S.dg=freshDigests();
+  resetMarket();
 }
 async function onSignedIn(session){
   const {data, error}=await S.sb.from("profiles").select("username,display_name,role").eq("id", session.user.id).maybeSingle();
