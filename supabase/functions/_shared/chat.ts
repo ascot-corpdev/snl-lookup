@@ -18,6 +18,7 @@ import { credsReady, Snowflake, snowflakeCreds, SnowflakeError } from "./snowfla
 import { type Gate, makeGate, NOT_CONFIGURED, planLimits, Spgmi, SpgmiError } from "./spgmi.ts";
 import { getMapping, parseStatQuery, savedOrFreshStatutory, STAT_FIELDS } from "./statutory.ts";
 import { cutPages, openPdf, originalPage, rangeText } from "./pdf.ts";
+import { askMarketIndex, CLAUDE_ROWS, marketIndexNote } from "./marketindex.ts";
 
 
 
@@ -69,6 +70,7 @@ Rules that matter
 - S&P's filings API has no company search: every search needs S&P company ids or institution ids. resolve_entity and resolve_entities find them in the app's company list, which holds the companies the owner loaded plus every company seen in earlier results. They never call S&P. If a company isn't in the list, say so and tell the user they can add it on the Filings view by its S&P company id or institution id. Don't guess ids.
 - An insurer group usually files through several companies. Search every company the user names.
 - S&P can't list every company that filed in a market, so a question about a market or a segment rather than named companies (for example "which carriers filed high net worth homeowners forms in Florida this year") needs a list of companies to check. Choosing that list is the one place to use your general knowledge: pick the carriers or groups most likely to write that business there, usually 10 to 15, and look them all up in one resolve_entities call, with insurer groups under groups so every member company comes back. Then search the searchBatches it returns. In the answer, say plainly that the carriers checked are your own choice, not a list from S&P, and may miss carriers. Describe the results as covering the carriers checked, never the whole market. Name the candidates that weren't in the company list and tell the user they can add them on the Filings view by S&P company id or institution id.
+- For a question about a market in a state the market index covers (listed under "Market index" at the start, when any state is), ask query_market_index first and say in the answer what the index covers and when it was last completed; choose carriers yourself only for states it does not cover.
 - Narrow a search before you run it, so it fits the limits on one question: only the states asked about, dates no wider than the question needs (each 364 days of dates costs one S&P request for every 10 companies, so "this year" is one request for each 10), and the type_of_insurance_ids and filing_type_ids that fit the question (for example homeowners and form filings). You see at most ${LIMITS.rowsToClaude} filings from one search, so a wide search hides the rest. One search takes up to ${MAX_IDS} ids. To find a filing you already know again, put its tracking number in tracking_numbers, with its company and state.
 - Reading documents is slow and counts against S&P's request limit, so read the filings that decide the answer, not every filing. Start from the search results (filing type, description, sub-type and dates), then read what you need. When you state something a document says, rely on the document so the page citation is recorded.
 - Long filings are read in parts. One read takes up to ${LIMITS.docPages} pages and one question up to ${LIMITS.totalPages} pages in all; a search row gives each filing's page count. A SERFF filing usually opens with the filing summary, then the rate information and the form schedule; the long tail is actuarial exhibits and supporting documents. So start with the front of a long filing (a read without first_page and last_page gives you its first pages), look there for the form schedule and the rate information, and read a further range only when the question needs it, for example an exhibit the front pages point to. Keep ranges as short as the question allows, so the pages last for every filing you need.
@@ -139,6 +141,28 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
         tracking_numbers: { type: "array", items: { type: "string" }, description: "Tracking numbers of filings to find again, exactly as a search row or the user gives them (up to 20), or [] for any. An exact way to find a known filing; the search still needs its company and state." },
       },
       required: ["company_ids", "institution_ids", "states", "from", "to", "type_of_insurance_ids", "filing_type_ids", "filing_status_ids", "tracking_numbers"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "query_market_index",
+    description: `Ask the market index: filing details the app has swept from S&P for every company in its company list, for the states listed under "Market index" at the start. Costs no S&P request, so use it before search_filings for a question about a market in an indexed state. One state a call. type_of_insurance, filing_type and status are words that appear in those fields (for example "homeowners", "rate", "form"), or null. words must all appear in the description or a company name. rate_above and rate_below are overall rate impact in percentage points, or null. group: "company" (filings by company, with rate filings and their range), "type" (by type of insurance), "month" (by month published) or "rows" (the filings, newest first, at most ${CLAUDE_ROWS}). Every answer carries coverage: the period indexed, when the last complete sweep finished, and how many companies were and weren't covered; say these in the answer. A state or dates outside the index are refused.`,
+    strict: true,
+    input_schema: {
+      type: "object",
+      properties: {
+        state: { type: "string", description: "One two-letter state code the index covers, for example \"FL\"" },
+        group: { type: "string", enum: ["company", "type", "month", "rows"] },
+        type_of_insurance: { type: ["string", "null"], description: "Words in the type or sub-type of insurance, or null for all" },
+        filing_type: { type: ["string", "null"], description: "Words in the filing type, for example \"rate\" or \"form\", or null for all" },
+        status: { type: ["string", "null"], description: "Words in the filing status, or null for all" },
+        from: { type: ["string", "null"], description: "Earliest publish date, yyyy-mm-dd, or null for the start of the index" },
+        to: { type: ["string", "null"], description: "Latest publish date, yyyy-mm-dd, or null for the end of the index" },
+        words: { type: "array", items: { type: "string" }, description: "Words that must all appear in the description or a company name, or []" },
+        rate_above: { type: ["number", "null"], description: "Keep filings whose overall rate impact is above this many percentage points, or null" },
+        rate_below: { type: ["number", "null"], description: "Keep filings whose overall rate impact is below this many percentage points, or null" },
+      },
+      required: ["state", "group", "type_of_insurance", "filing_type", "status", "from", "to", "words", "rate_above", "rate_below"],
       additionalProperties: false,
     },
   },
@@ -542,7 +566,7 @@ export async function runJob(jobId: string, ctx: ChatCtx): Promise<void> {
     if (st.orphans?.length) { await deleteFiles(client, st.orphans); st.orphans = []; await commit(); }
     const api = makeApi(ctx, st, cap);
     // Worked out once and kept: Claude must see the same system prompt on every step of an answer.
-    if (st.refs === undefined) { st.refs = await referenceText(db, api, ctx.now()); await commit(); }
+    if (st.refs === undefined) { st.refs = await referenceText(db, api, ctx.now()) + await marketIndexNote(db); await commit(); }
     // The tools and the system prompt are cached at their own breakpoint; the top-level cache_control below caches
     // the conversation so far, documents included, so a later step reads them from the cache.
     const system: Anthropic.Beta.BetaTextBlockParam[] = [{ type: "text", text: systemPrompt(orgName(ctx.env)) }, { type: "text", text: st.refs, cache_control: { type: "ephemeral" } }];
@@ -804,6 +828,25 @@ function makeTools(ctx: ChatCtx, st: ChatState, api: Spgmi | null, client: Anthr
     return { result: { source: found.source, fetchedAt: found.fetchedAt, fromSavedResult: found.fromStore, total: found.total, shown: shown.length, byState: found.byState, byCompany: found.byCompany, notes, filings: shown.map(compactFiling) } };
   }
 
+  /** query_market_index: an answer from the app's own index of filings, at no S&P cost. Its filings are kept like a
+      search's, so read_filing_document can name them. */
+  async function marketIndex(input: Record<string, unknown>): Promise<ToolOut> {
+    const state = String(input.state ?? "").trim().toUpperCase().slice(0, 2);
+    await step(`Asking the market index about ${state || "a state"}`);
+    const out = await askMarketIndex(db, input);
+    if (!out.ok) {
+      st.lookups.push({ tool: "query_market_index", detail: `${state}: not answered from the index` });
+      return fail(out.message);
+    }
+    for (const r of out.rows) {
+      if (Object.keys(st.seen).length >= 600) break;
+      st.seen[docKey(r.documentId, r.filingVersionId)] = compactFiling(r);
+    }
+    const total = Number(out.result.total) || 0;
+    st.lookups.push({ tool: "query_market_index", detail: `${state}${input.group && input.group !== "rows" ? `, by ${input.group}` : ""}: ${total ? plural(total, "filing", "filings") : "nothing in the index matches"}` });
+    return { result: { ...out.result, ...(out.rows.length ? { filings: out.rows.map(compactFiling) } : {}) } };
+  }
+
   // Time spent cutting PDFs in this function call, kept under LIMITS.cutMs so the call stays inside its CPU allowance.
   let cutSpent = 0;
 
@@ -986,6 +1029,7 @@ function makeTools(ctx: ChatCtx, st: ChatState, api: Spgmi | null, client: Anthr
           case "resolve_entity": return await resolve(input);
           case "resolve_entities": return await resolveSeveral(input);
           case "search_filings": return await search(input);
+          case "query_market_index": return await marketIndex(input);
           case "read_filing_document": return await read(input);
           case "query_statutory": return await statutory(input);
           default: return fail(`Unknown tool ${c.name}.`);

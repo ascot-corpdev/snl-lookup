@@ -44,6 +44,49 @@ export type FoundFiling = {
   rate_impact: string | null; description: string | null; tracking_number: string | null; document_id: number | null;
 };
 
+// ---------- the market index (migration 0006; see marketindex.ts) ----------
+/** A company in a sweep's plan: "c" and its S&P company id, or "i" and its institution id, and its name. */
+export type PlanCompany = ["c" | "i", number, string];
+/** What a sweep asks for, fixed when it starts: the companies in order, the date windows, S&P's filing statuses. */
+export type SweepPlan = { companies: PlanCompany[]; windows: [string, string][]; statusIds: number[] };
+/** A batch of companies a sweep could not cover: it failed twice (or came back cut short) and was skipped. */
+export type MissedBatch = { unit: number; kind: "companyId" | "institutionId"; ids: number[]; names: string[]; window: [string, string]; reason: string; at: string };
+export type SweepStatus = "running" | "waiting" | "held" | "done" | "failed" | "stopped";
+export type IndexSweep = {
+  id: string; state: string; kind: "sweep" | "top_up"; period: "this_year" | "last_12_months" | "last_3_years" | "top_up";
+  from_date: string; to_date: string; status: SweepStatus; request: "pause" | "stop" | null; trigger: "schedule" | "manual";
+  started_at: string; updated_at: string; finished_at: string | null; resume_after: string | null;
+  companies_total: number; units_total: number; next_unit: number; tries: number; stalls: number; requests: number; rows_found: number;
+  missed: MissedBatch[]; message: string | null; plan: SweepPlan | null;
+};
+export type IndexSweepPatch = Partial<Omit<IndexSweep, "id" | "started_at" | "updated_at">>;
+/** What the index covers for one state: written when a sweep or top-up finishes. */
+export type IndexState = {
+  state: string; from_date: string; to_date: string; last_complete_at: string; last_sweep_id: string | null;
+  companies_covered: number; companies_missed: number; missed: { kind: "companyId" | "institutionId"; id: number; name: string }[];
+};
+/** A company named on an indexed filing: n its name, c its company id, i its institution id. */
+export type IndexCompany = { n: string | null; c: number | null; i: number | null };
+/** One filing version in one state, as the index keeps it. Dates are yyyy-mm-dd. */
+export type IndexRow = {
+  state: string; filing_key: string; filing_version_id: string | null; document_id: number | null; companies: IndexCompany[];
+  type_of_insurance_id: number | null; type_of_insurance: string | null; sub_type_of_insurance: string | null;
+  filing_type_id: number | null; filing_type: string | null; filing_status_id: number | null; filing_status: string | null;
+  date_submitted: string | null; publish_date: string | null; effective_new: string | null; effective_renewal: string | null;
+  rate_impact: number | null; rate_impact_text: string | null; description: string | null; tracking_number: string | null; sfc_number: string | null;
+  pages: number | null; sweep_id: string | null; seen_at: string;
+};
+/** A question to the index, as snl_index_query takes it (migration 0006). */
+export type IndexQueryParams = {
+  state: string; from: string | null; to: string | null; typeOfInsurance: string | null; filingType: string | null; status: string | null;
+  words: string[]; rateAbove: number | null; rateBelow: number | null; group: "rows" | "company" | "type" | "month"; limit: number; offset: number;
+};
+export type IndexGroup = { name: string; companyId?: string | null; institutionId?: string | null; filings: number; rateFilings: number; rateMin: number | null; rateMax: number | null; latest: string | null };
+export type IndexQueryResult = {
+  total: number; withRate: number; rateFilings: number; stateRows: number; stateDescribed: number;
+  groupTotal?: number; groups?: IndexGroup[]; rows?: (Omit<IndexRow, "sweep_id" | "seen_at"> & { company_names?: string })[];
+};
+
 export interface Db {
   /** Takes the next one-second S&P slot and counts the request (migration 0001, snl_take_slot). */
   takeSlot(limits: Usage): Promise<Slot>;
@@ -106,6 +149,31 @@ export interface Db {
   countJobsSince(owner: string, since: string): Promise<number>;
   /** The usage part of the result of each of the login's finished answers started since the given time. */
   usageSince(owner: string, since: string): Promise<Record<string, unknown>[]>;
+  // ---------- the market index (migration 0006); optional, so a stand-in without them still works ----------
+  /** Every company in the company list (or seen before), one row each, up to limit. */
+  allEntities?(limit: number): Promise<Entity[]>;
+  /** The unfinished sweep (running, waiting or held), or null. */
+  openSweep?(): Promise<IndexSweep | null>;
+  getSweep?(id: string): Promise<IndexSweep | null>;
+  /** Records a new sweep as waiting. null when another sweep is unfinished (only one at a time). */
+  createSweep?(row: Omit<IndexSweep, "id" | "started_at" | "updated_at">): Promise<string | null>;
+  /** Moves a sweep to running for this caller: from waiting once resume_after has passed, or from running when it has
+      shown no life for staleMs (its function call was stopped). Returns whether this caller won it. */
+  claimSweep?(id: string, staleMs: number): Promise<boolean>;
+  /** Changes a sweep and marks it alive (updated_at). */
+  updateSweep?(id: string, patch: IndexSweepPatch): Promise<void>;
+  /** The latest sweeps, newest first. */
+  sweeps?(limit: number): Promise<IndexSweep[]>;
+  /** Saves filings (snl_index_put): a filing already there keeps its companies and gains the new ones. */
+  putIndexRows?(rows: IndexRow[]): Promise<void>;
+  /** Removes a state's filings published outside from..to (or with no publish date). */
+  pruneIndex?(state: string, from: string, to: string): Promise<void>;
+  /** Filings in the index: for one state, or in all. */
+  indexCount?(state?: string): Promise<number>;
+  indexStates?(): Promise<IndexState[]>;
+  putIndexState?(s: IndexState): Promise<void>;
+  /** One question to the index (snl_index_query). */
+  queryIndex?(q: IndexQueryParams): Promise<IndexQueryResult>;
 }
 
 // A saved place is kept as text inside its row. Postgres re-orders the keys of JSON it stores, and Claude must
@@ -494,6 +562,82 @@ export function supabaseDb(sb: SupabaseClient, now: () => number = Date.now): Db
       const { data, error } = await sb.from("snl_jobs").select("usage:result->usage").eq("owner", owner).eq("status", "done").gte("created_at", since);
       if (error) throw new Error(`Couldn't add up today's costs: ${error.message}`);
       return (data ?? []).map((r) => (r as { usage?: unknown }).usage).filter((u): u is Record<string, unknown> => !!u && typeof u === "object" && !Array.isArray(u));
+    },
+    // ---------- the market index (migration 0006) ----------
+    async allEntities(limit) {
+      const out: Entity[] = [];
+      for (let from = 0; from < limit; from += 1000) {
+        const { data, error } = await sb.from("snl_store").select("doc").eq("kind", "entity").order("id").range(from, Math.min(limit, from + 1000) - 1);
+        if (error) throw new Error(`Couldn't read the company list: ${error.message}`);
+        out.push(...((data ?? []) as { doc: Entity }[]).map((r) => r.doc));
+        if ((data ?? []).length < 1000) break;
+      }
+      return oneEach(out);
+    },
+    async openSweep() {
+      const { data, error } = await sb.from("snl_index_sweeps").select("*").in("status", ["running", "waiting", "held"]).order("started_at", { ascending: false }).limit(1);
+      if (error) throw new Error(`Couldn't read the sweeps: ${error.message}`);
+      return (data?.[0] as IndexSweep | undefined) ?? null;
+    },
+    async getSweep(id) {
+      const { data, error } = await sb.from("snl_index_sweeps").select("*").eq("id", id).maybeSingle();
+      if (error) throw new Error(`Couldn't read the sweep: ${error.message}`);
+      return (data as IndexSweep | null) ?? null;
+    },
+    async createSweep(row) {
+      const { data, error } = await sb.from("snl_index_sweeps").insert({ ...row, started_at: nowIso(), updated_at: nowIso() }).select("id").single();
+      if (error?.code === "23505") return null;   // the one-open-sweep index: another sweep is unfinished
+      if (error) throw new Error(`Couldn't record the sweep: ${error.message}`);
+      return data.id as string;
+    },
+    async claimSweep(id, staleMs) {
+      const at = nowIso();
+      const waiting = await sb.from("snl_index_sweeps").update({ status: "running", updated_at: at }).eq("id", id).eq("status", "waiting")
+        .or(`resume_after.is.null,resume_after.lte.${at}`).select("id");
+      if (!waiting.error && (waiting.data?.length ?? 0) === 1) return true;
+      const stuck = await sb.from("snl_index_sweeps").update({ status: "running", updated_at: at }).eq("id", id).eq("status", "running")
+        .lt("updated_at", new Date(now() - staleMs).toISOString()).select("id");
+      return !stuck.error && (stuck.data?.length ?? 0) === 1;
+    },
+    async updateSweep(id, patch) {
+      const { error } = await sb.from("snl_index_sweeps").update({ ...patch, updated_at: nowIso() }).eq("id", id);
+      if (error) throw new Error(`Couldn't save the sweep's progress: ${error.message}`);
+    },
+    async sweeps(limit) {
+      const { data, error } = await sb.from("snl_index_sweeps").select("*").order("started_at", { ascending: false }).limit(limit);
+      if (error) throw new Error(`Couldn't read the sweeps: ${error.message}`);
+      return (data ?? []) as IndexSweep[];
+    },
+    async putIndexRows(rows) {
+      for (let i = 0; i < rows.length; i += 500) {
+        const { error } = await sb.rpc("snl_index_put", { p_rows: rows.slice(i, i + 500) });
+        if (error) throw new Error(`Couldn't save filings to the index: ${error.message}`);
+      }
+    },
+    async pruneIndex(state, from, to) {
+      const { error } = await sb.from("snl_index_filings").delete().eq("state", state).or(`publish_date.is.null,publish_date.lt.${from},publish_date.gt.${to}`);
+      if (error) throw new Error(`Couldn't tidy the index: ${error.message}`);
+    },
+    async indexCount(state) {
+      let q = sb.from("snl_index_filings").select("state", { count: "exact", head: true });
+      if (state) q = q.eq("state", state);
+      const { count, error } = await q;
+      if (error) throw new Error(`Couldn't count the index: ${error.message}`);
+      return count ?? 0;
+    },
+    async indexStates() {
+      const { data, error } = await sb.from("snl_index_states").select("*").order("state");
+      if (error) throw new Error(`Couldn't read what the index covers: ${error.message}`);
+      return (data ?? []) as IndexState[];
+    },
+    async putIndexState(s) {
+      const { error } = await sb.from("snl_index_states").upsert(s, { onConflict: "state" });
+      if (error) throw new Error(`Couldn't record what the index covers: ${error.message}`);
+    },
+    async queryIndex(q) {
+      const { data, error } = await sb.rpc("snl_index_query", { p: q });
+      if (error) throw new Error(`Couldn't ask the index: ${error.message}`);
+      return data as IndexQueryResult;
     },
   };
 }
