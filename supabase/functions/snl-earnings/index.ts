@@ -26,7 +26,9 @@ import {
   quarterEnd, quarterName, readWatchlist, type Resolve, type Result, resultId, runCompany, safeFetch, secContact, SecError, secOpen,
 } from "../_shared/earnings.ts";
 
-export type Deps = { env: Env; fetch: typeof fetch; now?: () => number; whoIs?: WhoIs; db?: Db; sleep?: (ms: number) => Promise<void>; resolve?: Resolve };
+export type Deps = { env: Env; fetch: typeof fetch; now?: () => number; whoIs?: WhoIs; db?: Db; sleep?: (ms: number) => Promise<void>; resolve?: Resolve;
+  /** How long one investor page may take (PAGE_TIMEOUT_MS). Tests make it short. */
+  pageTimeoutMs?: number };
 
 export function handle(req: Request, deps: Deps): Promise<Response> {
   return withCors(req, deps.env, "The earnings function", (json, cors) => serve(req, deps, json, cors));
@@ -87,7 +89,7 @@ async function serve(req: Request, deps: Deps, json: Json, cors: Record<string, 
       const saved = asResult((await db.getStore(id))?.doc);
       if (body.action === "download") return await download(body, saved, co, deps, json, cors, contact, clock, start);
       if (saved && body.refresh !== true) return json(200, { result: saved, fromStore: true });
-      const result = await runCompany(co, qy.q, qy.y, { fetch: deps.fetch, now: clock, sleep: deps.sleep ?? sleep, resolve: deps.resolve ?? denoResolve, contact, db, deadline: start + CALL_MS }, saved);
+      const result = await runCompany(co, qy.q, qy.y, { fetch: deps.fetch, now: clock, sleep: deps.sleep ?? sleep, resolve: deps.resolve ?? denoResolve, contact, db, deadline: start + CALL_MS, pageTimeoutMs: deps.pageTimeoutMs }, saved);
       const ok = await db.putStore({ id, kind: "discover", label: `Earnings ${qn} ${co.name}`.slice(0, 400), doc: result as unknown as Record<string, unknown> });
       return json(200, { result, fromStore: false, ...(ok ? {} : { note: "What was found couldn't be saved, so it shows only now." }) });
     }

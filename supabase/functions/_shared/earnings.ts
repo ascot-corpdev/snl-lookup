@@ -351,13 +351,15 @@ export async function safeFetch(url: string, o: FetchOpts): Promise<Hop> {
         try { at = new URL(res.headers.get("location")!, at).href; } catch { done(); return { ok: false, kind: "failed", url: at, reason: "it redirects to an address that can't be read" }; }
         continue;
       }
+      // from here the timer covers reading the body; a body never read must not hold the process open
+      (globalThis as { Deno?: { unrefTimer?: (id: number) => void } }).Deno?.unrefTimer?.(timer as unknown as number);
       return { ok: true, res, url: at, done };
     }
     done();
     return { ok: false, kind: "failed", url: at, reason: `it redirects more than ${o.maxRedirects ?? MAX_REDIRECTS} times` };
   } catch (e) {
     done();
-    return ctl.signal.aborted ? { ok: false, kind: "timeout", url: at, reason: `it didn't answer within ${Math.round(o.timeoutMs / 1000)} seconds` } : { ok: false, kind: "failed", url: at, reason: `it couldn't be reached (${String((e as Error)?.message ?? e).slice(0, 80)})` };
+    return ctl.signal.aborted ? { ok: false, kind: "timeout", url: at, reason: `it didn't answer within ${Math.max(1, Math.round(o.timeoutMs / 1000))} second${Math.max(1, Math.round(o.timeoutMs / 1000)) === 1 ? "" : "s"}` } : { ok: false, kind: "failed", url: at, reason: `it couldn't be reached (${String((e as Error)?.message ?? e).slice(0, 80)})` };
   }
 }
 /** Reads a body up to max bytes. null bytes when it is bigger (declared or found while reading). */
@@ -669,7 +671,7 @@ export const PAGE_TIMEOUT_MS = 15_000;
 /** One call stays well inside Supabase's 150 seconds: the SEC part first, then investor pages while time is left. */
 export const CALL_MS = 120_000, IR_STOP_MS = 25_000;
 
-export type RunDeps = { fetch: typeof fetch; now: () => number; sleep: (ms: number) => Promise<void>; resolve?: Resolve; contact: string; db: Db; deadline: number };
+export type RunDeps = { fetch: typeof fetch; now: () => number; sleep: (ms: number) => Promise<void>; resolve?: Resolve; contact: string; db: Db; deadline: number; pageTimeoutMs?: number };
 
 async function docId(col: string, url: string) {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${col}|${url}`));
@@ -691,7 +693,7 @@ export async function crawl(urls: string[], o: { pageWords: string; collectPages
     if (visited.has(key)) continue;
     if (o.run.now() > o.stopAt) { notes.push({ url: key, outcome: "not_read", reason: "the time one look may take ran out" }); continue; }
     visited.add(key);
-    const hop = await safeFetch(key, { fetch: o.run.fetch, resolve: o.run.resolve, timeoutMs: Math.min(PAGE_TIMEOUT_MS, Math.max(3_000, o.stopAt + 10_000 - o.run.now())), headers: { "User-Agent": IR_UA, "Accept": "text/html,application/xhtml+xml,*/*;q=0.8", "Accept-Language": "en" } });
+    const hop = await safeFetch(key, { fetch: o.run.fetch, resolve: o.run.resolve, timeoutMs: o.run.pageTimeoutMs ?? Math.min(PAGE_TIMEOUT_MS, Math.max(3_000, o.stopAt + 10_000 - o.run.now())), headers: { "User-Agent": IR_UA, "Accept": "text/html,application/xhtml+xml,*/*;q=0.8", "Accept-Language": "en" } });
     if (!hop.ok) { notes.push({ url: key, outcome: hop.kind === "blocked" ? "blocked" : "failed", reason: hop.reason }); continue; }
     let html: string;
     try {
@@ -717,7 +719,7 @@ export async function crawl(urls: string[], o: { pageWords: string; collectPages
     notes.push({ url: key, outcome: "read", links: links.length });
     const host = urlparse(hop.url).netloc;
     for (const [href, txt] of links) {
-      if (!href.startsWith("https:")) continue;   // https only, here as everywhere
+      if (!href.startsWith("https:") || checkUrl(href)) continue;   // https only and safe addresses, here as everywhere
       let label = cleanLabel(txt, href);
       const hkey = href.split("#")[0];
       if (!linkExt(href) && o.collectPages && !pages.has(hkey)) pages.set(hkey, { url: hkey, label, via, generic: false, ext: null, page: true });
@@ -742,7 +744,7 @@ export async function crawl(urls: string[], o: { pageWords: string; collectPages
 /** Whether a known file address answers with a file of an allowed type (the script tries each until one works). Reads
     only the first bytes. */
 async function probeFile(url: string, allowed: string[], run: RunDeps): Promise<boolean> {
-  const hop = await safeFetch(url, { fetch: run.fetch, resolve: run.resolve, timeoutMs: PAGE_TIMEOUT_MS, headers: { "User-Agent": IR_UA, "Referer": `https://${hostOf(url)}/` } });
+  const hop = await safeFetch(url, { fetch: run.fetch, resolve: run.resolve, timeoutMs: run.pageTimeoutMs ?? PAGE_TIMEOUT_MS, headers: { "User-Agent": IR_UA, "Referer": `https://${hostOf(url)}/` } });
   if (!hop.ok) return false;
   try {
     if (!hop.res.ok) { await hop.res.body?.cancel().catch(() => {}); return false; }
@@ -866,7 +868,7 @@ export async function runCompany(co: Company, q: number, y: number, run: RunDeps
     }
   }
   if (cells.supplement.state !== "found" && inEight.length) cells.supplement = { state: "in_8k", docs: inEight };
-  if (pageNotes.some((p) => p.outcome === "read" && (p.links ?? 0) < 5)) notes.push("A page read had almost no links: the site may fill its lists with JavaScript, which a plain fetch can't see. Open the page yourself, or use the desktop script.");
+  if (pageNotes.some((p) => p.outcome === "read" && (p.links ?? 0) < 3)) notes.push("A page read had almost no links: the site may fill its lists with JavaScript, which a plain fetch can't see. Open the page yourself, or use the desktop script.");
   return {
     v: 1, company: { id: co.id, name: co.name, ticker: co.ticker, folder }, quarter: qn, q, y, madeAt: nowIso, cik, sec: !london, london,
     cells, docs, pages: pageNotes.slice(0, 30), notes, secRequests: count.n, pagesRead: read,
