@@ -117,7 +117,7 @@ const ROWS = [
   ok("dates partly outside are cut to the index, and the answer says so", partly.status === 200 && partly.body.query.from === "2025-11-19" && partly.body.notes.some((n: string) => n.includes("starts 19 Nov 2025, so filings published before that aren't in this answer")), partly.body.notes);
   const ga = await ask({ state: "GA" });
   ok("a state outside the index is refused, naming the states it covers", ga.status === 404 && ga.body.error === "not_indexed" && same(ga.body.indexed, ["FL"]) && ga.body.message.startsWith("GA isn't in the market index, so this can't be answered from it.") && ga.body.message.includes("The index covers FL."), ga.body);
-  ok("bad questions are refused with a reason", (await ask({ state: "" })).status === 400 && (await ask({ group: "zip" })).body.message === "Group by company, type or month, or ask for the rows." && (await ask({ from: "2026-13-01" })).body.message === "Dates must look like 2026-01-31." && (await ask({ rateAbove: "lots" })).body.message.includes("percentage points"));
+  ok("bad questions are refused with a reason", (await ask({ state: "" })).status === 400 && (await ask({ group: "zip" })).body.message === "Group by company, type, filing type, status or month, or ask for the rows." && (await ask({ from: "2026-13-01" })).body.message === "Dates must look like 2026-01-31." && (await ask({ rateAbove: "lots" })).body.message.includes("percentage points"));
   ok("asking the index used no S&P request", w.sp.log.length === before);
 
   // ----- top-up through the function -----
