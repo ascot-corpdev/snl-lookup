@@ -626,6 +626,29 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 .pb.sm .pb-track{flex-basis:96px;height:6px}
 @media (max-width:560px){.pb-track{flex:1 1 100%}.pb.sm .pb-track{flex:0 0 72px}}
 @media (prefers-reduced-motion:reduce){.pb-ind .pb-fill{animation:none;width:100%;transform:none;background:repeating-linear-gradient(135deg,var(--blue) 0 3px,transparent 3px 9px);opacity:.55}}
+/* Earnings (#earnings): one row a company, a cell a document kind, each state in words and a mark beside it */
+.ea .eatbl td{vertical-align:top}
+.ea .eatbl .c-co{min-width:160px;overflow-wrap:anywhere}
+.ea-st{display:flex;flex-direction:column;gap:2px;font-size:13px;min-width:0}
+.ea-st b{font-weight:bold}
+.ea-st .ea-kind{font-size:11px;color:var(--muted);font-weight:bold;text-transform:uppercase;letter-spacing:.04em}
+.ea-st.s-found b,.ea-st.s-in_8k b{color:var(--teal)}
+.ea-st.s-refused b,.ea-st.s-error b{color:var(--magenta)}
+.ea-st.s-not_filed b,.ea-st.s-not_found b,.ea-st.s-not_found_sec b,.ea-st.s-none_listed b,.ea-st.s-no_cik b,.ea-st.s-none b{color:var(--muted)}
+.ea-new{color:var(--magenta);font-weight:bold;font-size:11px}
+.ea-docs{display:flex;flex-direction:column;gap:10px;min-width:0}
+.ea-docs h4{margin:0;font-size:13px}
+.ea-docs ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px}
+.ea-docs li{overflow-wrap:anywhere}
+.ea-docs .ea-meta{color:var(--muted);font-size:12px}
+.ea-docs .btn{margin-left:6px}
+.ea-co label{display:flex;gap:6px;align-items:flex-start;font-weight:normal;overflow-wrap:anywhere}
+.ea-co .checks{max-height:220px}
+.ea-wl td{overflow-wrap:anywhere}
+.ea-wl .c-urls a{display:block}
+.ea-msgs{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;font-size:13px}
+.ea-msgs li{overflow-wrap:anywhere}
+@media (max-width:700px){.ea .eatbl .c-co{min-width:0}.ea-docs .btn{margin:4px 0 0}}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
@@ -650,6 +673,7 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
       <a href="#snapshot" data-view="snapshot">Snapshot</a>
       <a href="#compare" data-view="compare">Compare</a>
       <a href="#market" data-view="market">Market</a>
+      <a href="#earnings" data-view="earnings">Earnings</a>
       <a href="#statutory" data-view="statutory">Statutory</a>
       <a href="#profile" data-view="profile">Profile</a>
     </nav>
@@ -6480,7 +6504,7 @@ function render(){
   const tab = S.view==="forms" ? "compare" : S.view;   // Programs and forms is the Compare tab's second page
   document.querySelectorAll("nav.tabs a").forEach(a=>a.setAttribute("aria-current", a.dataset.view===tab ? "page" : "false"));
   document.getElementById("stripIn").innerHTML=stripHTML();
-  v.innerHTML = S.view==="statutory" ? renderStatutory() : S.view==="profile" ? renderProfile() : S.view==="snapshot" ? renderSnapshot() : S.view==="forms" ? renderForms() : S.view==="compare" ? renderCompare() : S.view==="market" ? renderMarket() : renderFilings();
+  v.innerHTML = S.view==="statutory" ? renderStatutory() : S.view==="profile" ? renderProfile() : S.view==="snapshot" ? renderSnapshot() : S.view==="forms" ? renderForms() : S.view==="compare" ? renderCompare() : S.view==="market" ? renderMarket() : S.view==="earnings" ? renderEarnings() : renderFilings();
   keep(); renderDrawer(); renderAsk();
   renderConn();
   renderLive();
@@ -6847,6 +6871,403 @@ document.addEventListener("change", e=>{
 });
 document.addEventListener("submit", e=>{ if(e.target.id==="mkForm"){ e.preventDefault(); mkSearch(); } });
 
+/* ---------- Earnings (#earnings): a quarter's results documents for the companies on the earnings watchlist ----------
+   The snl-earnings function finds, for one company and one quarter, the 10-Q (10-K) and the earnings 8-K from SEC
+   EDGAR, and the financial supplement and investor presentation from the company's investor pages (for London names
+   with no SEC filings, the report and the results release or trading update). The page asks for one company at a
+   time, with a progress bar, Stop, and one more try for a company that failed. What is found is saved by the function
+   and opens again without asking anyone until Refresh. Documents download through the function, one at a time or as
+   one zip laid out as the owner's desktop script lays out folders. The page never sends an address: it names a
+   company on the watchlist and a document by the id the function gave it.
+   The watchlist is the shared setting "earnings_watchlist" (snl_settings): every login reads it (through the
+   function, which cleans it), Corp Dev edits it here, the function checking each change first ("check").
+   What is new: documents not in this browser's record of the reader's last look at that quarter (localStorage). */
+VIEWS.push("earnings");
+FN["snl-earnings"]="the earnings function";
+const EA_COLS = ["10q","8k","supplement","deck"];
+const EA_WORDS = {found:"Found", in_8k:"In the 8-K", not_filed:"Not posted yet", not_found_sec:"Not found at the SEC", not_found:"Not found on the pages read", refused:"Site refused", none_listed:"No investor pages listed", no_cik:"No CIK", error:"Error"};
+const EA_SEEN_KEY = q => "snl.earn.seen."+q;
+const EA_RETRY_MS = 2000;
+function freshEarnings(){
+  return {loading:false, status:null, statusErr:null, list:null, problems:[], listErr:null, quarter:"", chosen:null, results:{}, errs:{}, savedQ:"", savedBusy:false,
+    open:{}, run:null, zip:null, dl:{}, newIds:{}, firstLook:false,
+    wl:{paste:"", checking:false, checked:null, saving:false, msg:"", err:"", edit:null, del:""}};
+}
+S.ea=freshEarnings();
+function resetEarnings(){ if(S.ea&&S.ea.run) S.ea.run.stop=true; if(S.ea&&S.ea.zip) S.ea.zip.stop=true; S.ea=freshEarnings(); }
+function enterEarnings(){ const ea=S.ea; if(!ea.status && !ea.loading && !ea.statusErr) loadEarnings(); }
+/* The quarters to choose from: the eight latest that have ended, newest first ("3Q26"). */
+function eaQuarters(){
+  const d=new Date(), out=[]; let y=d.getFullYear(), q=Math.floor(d.getMonth()/3);
+  if(q===0){ q=4; y--; }
+  for(let i=0;i<8;i++){ out.push(`${q}Q${String(y%100).padStart(2,"0")}`); q--; if(q===0){ q=4; y--; } }
+  return out;
+}
+const eaQ4 = qn => /^4Q/.test(qn);
+const eaColName = (c, qn) => c==="10q" ? (eaQ4(qn)?"10-K":"10-Q") : c==="8k" ? "Earnings 8-K" : c==="supplement" ? "Supplement" : "Presentation";
+const eaCompanies = () => Array.isArray(S.ea.list) ? S.ea.list : [];
+const eaChosen = () => { const all=eaCompanies(), c=S.ea.chosen; return c ? all.filter(x=>c[x.id]) : all; };
+async function loadEarnings(){
+  const ea=S.ea; if(!S.session) return;
+  ea.loading=true; render();
+  const [st, li]=await Promise.all([callFn("snl-earnings",{action:"status"}), callFn("snl-earnings",{action:"list"})]);
+  if(!S.session || S.ea!==ea) return;
+  ea.loading=false;
+  if(st.data){ ea.status=st.data; ea.statusErr=null; if(!ea.quarter) ea.quarter=eaQuarters().includes(st.data.quarter)?st.data.quarter:eaQuarters()[0]; }
+  else if(st.err!=="signin") ea.statusErr=st;
+  if(li.data){ ea.list=Array.isArray(li.data.companies)?li.data.companies:[]; ea.problems=Array.isArray(li.data.problems)?li.data.problems:[]; ea.listErr=null; }
+  else if(li.err!=="signin" && st.data) ea.listErr=li;
+  render();
+  if(ea.status && ea.list) eaLoadSaved();
+}
+/* What was found before for the chosen quarter: one call, nobody asked. */
+async function eaLoadSaved(){
+  const ea=S.ea, q=ea.quarter; if(!q || ea.savedBusy) return;
+  ea.savedBusy=true; render();
+  const r=await callFn("snl-earnings",{action:"saved", quarter:q});
+  if(S.ea!==ea || ea.quarter!==q) return;
+  ea.savedBusy=false; ea.savedQ=q; ea.results={}; ea.errs={}; ea.newIds={};
+  if(r.data){ for(const x of (Array.isArray(r.data.results)?r.data.results:[])) if(x&&x.company&&x.company.id) ea.results[x.company.id]=x; eaMarkNew(); }
+  else if(r.err!=="signin") toast("Couldn't open what was found before. "+errText(r));
+  render();
+}
+/* What is new since this reader's last look at the quarter: documents not in the record kept in this browser. The
+   first look at a quarter marks nothing (there is no last look) and says so; the record then holds every document. */
+function eaMarkNew(){
+  const ea=S.ea, q=ea.quarter, all=Object.values(ea.results).flatMap(r=>Array.isArray(r.docs)?r.docs.map(d=>String(d.id)):[]);
+  let seen=null; try{ const raw=localStorage.getItem(EA_SEEN_KEY(q)); seen=raw?new Set(JSON.parse(raw)):null; }catch{ seen=null; }
+  if(!seen){ ea.firstLook = all.length>0; if(all.length) try{ localStorage.setItem(EA_SEEN_KEY(q), JSON.stringify(all)); }catch{} return; }
+  for(const id of all) if(!seen.has(id)) ea.newIds[id]=true;
+  ea.firstLook=false;
+  try{ localStorage.setItem(EA_SEEN_KEY(q), JSON.stringify([...new Set([...seen, ...all])].slice(-5000))); }catch{}
+}
+/* Find: each chosen company in turn, one call each; a company that fails is asked once more at the end. refresh: ask
+   the SEC and the sites again instead of opening what was saved. */
+async function eaRun(refresh){
+  const ea=S.ea; if(ea.run && !ea.run.done) return;
+  const list=eaChosen(); if(!list.length){ toast("Choose at least one company."); return; }
+  const q=ea.quarter, run={q, n:list.length, i:0, stop:false, done:false, failed:[], retrying:"", refresh:!!refresh, state:"run"};
+  ea.run=run; pbStart("ea-run"); render();
+  const one=async co=>{
+    run.current=co.name; render();
+    const r=await callFn("snl-earnings",{action:"find", company:co.id, quarter:q, ...(refresh?{refresh:true}:{})});
+    if(S.ea!==ea || ea.quarter!==q) return "gone";
+    if(r.data && r.data.result){ ea.results[co.id]=r.data.result; delete ea.errs[co.id]; return "ok"; }
+    if(r.err==="signin") return "gone";
+    ea.errs[co.id]=r; return r.err==="not_configured"||r.err==="unknown_company"||r.err==="bad" ? "final" : "failed";
+  };
+  for(const co of list){
+    if(run.stop) break;
+    const out=await one(co);
+    if(out==="gone") return;
+    if(out==="failed") run.failed.push(co);
+    run.i++;
+    if(out==="final" && ea.errs[co.id].err==="not_configured"){ run.stop=true; run.state="failed"; break; }
+    render();
+  }
+  // one more try for each company that failed, after a short pause
+  for(const co of run.failed.slice()){
+    if(run.stop) break;
+    run.retrying=co.name; render();
+    await new Promise(res=>setTimeout(res, EA_RETRY_MS));
+    if(run.stop) break;
+    const out=await one(co);
+    if(out==="gone") return;
+    if(out==="ok") run.failed=run.failed.filter(x=>x!==co);
+  }
+  if(S.ea!==ea) return;
+  run.retrying=""; run.current=""; run.done=true;
+  if(run.stop && run.state!=="failed") run.state="stopped";
+  else if(run.failed.length) run.state="failed";
+  ea.newIds={}; eaMarkNew();
+  render();
+}
+/* ----- downloads ----- */
+function eaFileName(disposition){
+  const m=/filename\*=UTF-8''([^;]+)/i.exec(disposition||"") || /filename="([^"]+)"/i.exec(disposition||"");
+  let n=""; if(m){ try{ n=decodeURIComponent(m[1].trim()); }catch{ n=m[1]; } }
+  return n.replace(/[\x00-\x1f<>:"\/\\|?*]+/g," ").replace(/\s+/g," ").trim().slice(0,160);
+}
+/* One document through the function: {blob, name} or {msg}. A file cut off on the way (too big, or the source
+   stopped) is said plainly. */
+async function eaFetchDoc(co, doc){
+  const r=await callFn("snl-earnings",{action:"download", company:co, quarter:S.ea.quarter, doc:doc.id}, {raw:true});
+  if(!r.res) return {msg:errText(r)};
+  try{
+    const blob=await r.res.blob();
+    return {blob, name:eaFileName(r.res.headers.get("content-disposition")) || (doc.name+(doc.ext||""))};
+  }catch{ return {msg:`The file was cut off on the way: it is larger than 60 MB, or the source stopped sending it. Open it from its link.`}; }
+}
+async function eaDownload(coId, docId){
+  const ea=S.ea, r=ea.results[coId], doc=r&&r.docs.find(d=>d.id===docId); if(!doc || ea.dl[docId]==="busy") return;
+  ea.dl[docId]="busy"; render();
+  const got=await eaFetchDoc(coId, doc);
+  if(S.ea!==ea) return;
+  if(got.blob){ delete ea.dl[docId]; saveBlob(got.blob, got.name); }
+  else ea.dl[docId]=got.msg;
+  render();
+}
+/* The whole quarter as one zip: "<quarter> Financial Statements/<company folder>/<the script's file name>". Web pages
+   on company sites can't be saved, and anything that couldn't be fetched is listed in a note inside the zip. */
+async function eaZip(){
+  const ea=S.ea; if(ea.zip && !ea.zip.done) return;
+  const q=ea.quarter, items=[];
+  for(const co of eaCompanies()){ const r=ea.results[co.id]; if(!r) continue; for(const d of r.docs||[]) items.push({co:co.id, folder:r.company&&r.company.folder||co.name, doc:d}); }
+  const files=items.filter(x=>!x.doc.page);
+  if(!files.length){ toast("There is nothing to download for this quarter yet. Find first."); return; }
+  const z={n:files.length, i:0, stop:false, done:false, left:[], state:"run"}; ea.zip=z; pbStart("ea-zip"); render();
+  try{ if(!window.JSZip){ await loadScript(JSZIP_SRC); } }catch{}
+  if(!window.JSZip){ z.done=true; z.state="failed"; z.err="Couldn't load the zip maker. Check your connection and try again, or download the files one at a time."; render(); return; }
+  const zip=new window.JSZip(), root=`${q} Financial Statements`, used=new Set();
+  const place=(folder, name)=>{ const f=String(folder).replace(/[\x00-\x1f<>:"\/\\|?*]+/g," ").trim()||"Company"; let base=name.replace(/\.[a-z]{2,4}$/i,""), ext=(name.match(/\.[a-z]{2,4}$/i)||[""])[0], p=`${root}/${f}/${name}`, k=2;
+    while(used.has(p.toLowerCase())){ p=`${root}/${f}/${base} (${k})${ext}`; k++; } used.add(p.toLowerCase()); return p; };
+  let saved=0, sec=0;
+  for(const x of files){
+    if(z.stop || S.ea!==ea) break;
+    const got=await eaFetchDoc(x.co, x.doc);
+    if(S.ea!==ea) return;
+    z.i++;
+    if(got.blob){ zip.file(place(x.folder, got.name), got.blob); saved++; if(/\.htm$/i.test(got.name)) sec++; }
+    else z.left.push(`${x.doc.name}: ${got.msg}`);
+    render();
+  }
+  const pages=items.filter(x=>x.doc.page);
+  const note=[`What was found for ${q}, saved by SNL lookup on ${TODAY()}.`, "",
+    sec ? "SEC filings are saved as the SEC's own web pages (.htm), not PDFs. Open them in a browser; their images and links load from sec.gov when you are online." : "",
+    pages.length ? "Web pages on company sites aren't saved here. Open them from these addresses:" : "", ...pages.map(x=>`  ${x.doc.name}: ${x.doc.url}`),
+    z.left.length ? "Not saved:" : "", ...z.left.map(s=>"  "+s),
+    z.stop ? `Stopped after ${z.i} of ${z.n} files.` : ""].filter((s,i,a)=>s!==""||(i>0&&a[i-1]!=="")).join("\r\n");
+  if(saved){ zip.file(`${root}/About this download.txt`, note); saveBlob(await zip.generateAsync({type:"blob"}), `${q} Financial Statements.zip`); }
+  z.done=true; z.state=z.stop?"stopped":z.left.length?"failed":"run"; z.saved=saved;
+  render();
+}
+/* ----- the watchlist (Corp Dev edits; every change is checked by the function, then saved under row-level security) ----- */
+async function eaSaveList(change, done){
+  const ea=S.ea, w=ea.wl; if(w.saving) return false;
+  if(!isCorpDev()){ w.err="Only Corp Dev logins can change the earnings watchlist. Ask Corp Dev."; render(); return false; }
+  w.saving=true; w.err=""; w.msg=""; render();
+  const cur=await callFn("snl-earnings",{action:"list"});   // every change starts from what is saved now
+  if(S.ea!==ea) return false;
+  if(!cur.data){ w.saving=false; w.err="Couldn't read the watchlist: "+errText(cur)+" Nothing was changed."; render(); return false; }
+  const next=change(JSON.parse(JSON.stringify(cur.data.companies||[])));
+  if(!next || typeof next==="string"){ w.saving=false; w.err=typeof next==="string"?next:""; render(); return false; }
+  const chk=await callFn("snl-earnings",{action:"check", list:next});
+  if(S.ea!==ea) return false;
+  if(!chk.data){ w.saving=false; w.err="Couldn't check the change: "+errText(chk)+" Nothing was changed."; render(); return false; }
+  const dropped=(chk.data.problems||[]).filter(p=>p.dropped);
+  if(dropped.length){ w.saving=false; w.err="Not saved: "+dropped.map(p=>`${p.name||"entry "+p.at}: ${p.message}`).join(" "); render(); return false; }
+  let error=null;
+  try{ ({error}=await S.sb.from("snl_settings").upsert({id:"earnings_watchlist", doc:{companies:chk.data.companies}})); }catch(e){ error=e; }
+  if(S.ea!==ea) return false;
+  w.saving=false;
+  if(error){ const t=`${error.code||""} ${error.message||""}`;
+    w.err=/42501|row-level security|permission/i.test(t) ? "Only Corp Dev logins can change the earnings watchlist. Ask Corp Dev." : /23514|check constraint/i.test(t) ? "The watchlist is too big to save. Remove some companies. Nothing was changed." : "Couldn't save the watchlist: "+(error.message||"unknown error")+". Nothing was changed.";
+    render(); return false; }
+  ea.list=chk.data.companies; ea.problems=[];
+  const warn=(chk.data.problems||[]).filter(p=>!p.dropped);
+  w.msg=(typeof done==="function"?done(chk.data.companies):done)+(warn.length?` ${warn.length===1?"One note":plural(warn.length,"note")} on what was saved: `+warn.map(p=>`${p.name}: ${p.message}`).join(" "):"");
+  render(); return true;
+}
+async function eaCheckPaste(){
+  const w=S.ea.wl, text=w.paste.trim(); if(!text){ w.err="Paste the companies list from the script first."; render(); return; }
+  w.checking=true; w.err=""; w.msg=""; w.checked=null; render();
+  const r=await callFn("snl-earnings",{action:"check", list:text});
+  if(S.ea.wl!==w) return;
+  w.checking=false;
+  if(r.data) w.checked=r.data; else if(r.err!=="signin") w.err=errText(r);
+  render();
+}
+const eaLines = s => String(s||"").split(/[\n,]+/).map(x=>x.trim()).filter(Boolean);
+function eaEditFrom(co){ return co ? {id:co.id, name:co.name, ticker:co.ticker||"", others:(co.otherTickers||[]).join(", "), cik:co.cik||"", ir:(co.irUrls||[]).join("\n"), sec:co.sec!==false, folder:co.folder||"",
+  files:Object.entries(co.fileUrls||{}).flatMap(([k,v])=>v.map(u=>`${k}: ${u}`)).join("\n")} : {id:"", name:"", ticker:"", others:"", cik:"", ir:"", sec:true, folder:"", files:""}; }
+function eaEditTo(e){
+  const fileUrls={};
+  for(const line of String(e.files||"").split("\n").map(s=>s.trim()).filter(Boolean)){ const m=line.match(/^([a-z0-9_]+)\s*:\s*(\S+)$/i); const k=m?m[1].toLowerCase():"bad"; (fileUrls[k]=fileUrls[k]||[]).push(m?m[2]:line); }
+  return {...(e.id?{id:e.id}:{}), name:e.name, ticker:e.ticker||null, other_tickers:eaLines(e.others), cik:e.cik||null, ir_urls:eaLines(String(e.ir||"").replace(/\s+/g,"\n")), sec:!!e.sec, folder:e.folder||null, file_urls:fileUrls};
+}
+function eaSaveEdit(){
+  const e=S.ea.wl.edit; if(!e) return;
+  e.name=(document.getElementById("ea_e_name")?.value||"").trim();
+  if(!e.name){ S.ea.wl.err="Give the company a name."; render(); return; }
+  eaSaveList(list=>{
+    const entry=eaEditTo(e), i=e.id?list.findIndex(c=>c.id===e.id):-1;
+    if(list.some((c,j)=>j!==i && c.name.toLowerCase()===e.name.toLowerCase())) return `${e.name} is already on the watchlist.`;
+    if(i>=0) list[i]=entry; else list.push(entry);
+    return list;
+  }, ()=>{ const n=e.name; S.ea.wl.edit=null; return e.id?`Saved the changes to ${n}.`:`Added ${n}.`; });
+}
+/* ----- drawing ----- */
+function eaCellHTML(r, c){
+  if(!r) return `<div class="ea-st s-none"><b>Not looked at yet</b></div>`;
+  const cell=r.cells&&r.cells[c]; if(!cell) return `<div class="ea-st s-none"><b>n/d</b></div>`;
+  const n=(cell.docs||[]).length, fresh=(cell.docs||[]).filter(id=>S.ea.newIds[id]).length;
+  const kind = r.london && cell.kind ? `<span class="ea-kind">${esc(cell.kind==="Results Release"?"Results release":cell.kind==="Trading Update"?"Trading update":cell.kind==="Interim Report"?"Interim report":cell.kind==="Annual Report"?"Annual report":cell.kind)}</span>` : "";
+  const words = (cell.state==="found"||cell.state==="in_8k") ? `${EA_WORDS[cell.state]}, ${plural(n,"document")}` : (EA_WORDS[cell.state]||"n/d");
+  return `<div class="ea-st s-${esc(cell.state)}">${kind} <b>${esc(words)}</b> ${fresh?`<span class="ea-new">${count(fresh)} new</span>`:""}</div>`;
+}
+function eaDocHTML(coId, d){
+  const ea=S.ea, from=d.source==="sec" ? "SEC EDGAR" : (d.host||"the company's site"), busy=ea.dl[d.id]==="busy", err=ea.dl[d.id]&&ea.dl[d.id]!=="busy"?ea.dl[d.id]:"";
+  const safe=/^https:\/\//i.test(String(d.url||""));
+  const title = safe ? `<a href="${esc(d.url)}" target="_blank" rel="noopener noreferrer">${esc(d.title||d.name)}</a>` : esc(d.title||d.name);
+  return `<li data-doc="${esc(d.id)}">${ea.newIds[d.id]?`<span class="ea-new">New</span> `:""}${title} <span class="ea-meta">${esc(d.type||"")}; ${d.filed?`filed ${fmtDay(d.filed)}`:"date filed n/d"}; from ${esc(from)}</span>`
+    + (d.page ? ` <span class="ea-meta">A web page: open it from its link.</span>` : ` <button type="button" class="btn sm" data-act="ea-dl" data-co="${esc(coId)}" data-doc="${esc(d.id)}" ${busy?"disabled":""}>${busy?"Downloading…":"Download"}</button>${d.source==="sec"&&(d.ext||".htm")===".htm"?` <span class="ea-meta">Saved as a web page (.htm).</span>`:""}`)
+    + (err?`<p class="err">${esc(err)}</p>`:"")+`</li>`;
+}
+function eaDocsHTML(co, r){
+  const qn=S.ea.quarter, parts=[];
+  for(const c of EA_COLS){
+    const cell=r.cells&&r.cells[c]; if(!cell) continue;
+    const docs=(cell.docs||[]).map(id=>r.docs.find(d=>d.id===id)).filter(Boolean);
+    const head=r.london&&cell.kind ? `${eaColName(c, qn)} (for a London name: ${cell.kind.toLowerCase()})` : eaColName(c, qn);
+    let body = docs.length ? `<ul>${docs.map(d=>eaDocHTML(co.id, d)).join("")}</ul>` : `<p class="t2">${esc(EA_WORDS[cell.state]||"n/d")}.${cell.note?" "+esc(cell.note):""}</p>`;
+    if(cell.refused && cell.refused.length) body+=`<p class="t2">${cell.state==="refused"?"The site refused the app's requests. Open these pages yourself:":"These pages refused the app; open them yourself:"} ${cell.refused.map(u=>/^https:\/\//i.test(u)?`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(u)}</a>`:esc(u)).join(", ")}</p>`;
+    parts.push(`<div><h4>${esc(head)}</h4>${body}</div>`);
+  }
+  if(Array.isArray(r.notes) && r.notes.length) parts.push(`<div class="t2">${r.notes.map(n=>`<p class="t2">${esc(n)}</p>`).join("")}</div>`);
+  parts.push(`<p class="source">Looked ${fmtAt(r.madeAt)}${r.cik?`; SEC CIK ${esc(r.cik)}`:""}; ${plural(r.secRequests||0,"SEC request")}, ${plural(r.pagesRead||0,"investor page")} read.</p>`);
+  return `<div class="ea-docs" id="ea_docs_${esc(co.id)}">${parts.join("")}</div>`;
+}
+function eaTableHTML(){
+  const ea=S.ea, qn=ea.quarter, rows=eaCompanies().filter(co=>ea.results[co.id]||ea.errs[co.id]||(ea.chosen?ea.chosen[co.id]:true));
+  if(!rows.length) return "";
+  let h=`<div class="tbl-wrap cardwrap"><table class="cards eatbl" id="eaTable"><thead><tr><th>Company</th>${EA_COLS.map(c=>`<th>${esc(eaColName(c, qn))}</th>`).join("")}</tr></thead><tbody>`;
+  for(const co of rows){
+    const r=ea.results[co.id], e=ea.errs[co.id], n=r?(r.docs||[]).length:0, open=!!ea.open[co.id];
+    h+=`<tr data-co="${esc(co.id)}"><td class="c-co"><div class="t1">${esc(co.name)}</div>${co.ticker?`<div class="t2">${esc(co.ticker)}${co.sec===false?"; London, no SEC filings":""}</div>`:co.sec===false?`<div class="t2">London, no SEC filings</div>`:""}
+      ${r?`<button type="button" class="lnk" data-act="ea-open" data-co="${esc(co.id)}" aria-expanded="${open}">${open?"Hide documents":`Show documents (${count(n)})`}</button>`:""}
+      ${e?`<p class="err">${esc(e.err==="not_configured"?"Not set up yet.":errText(e))}</p>`:""}</td>
+      ${EA_COLS.map(c=>`<td class="c-half" data-label="${esc(eaColName(c, qn))}">${eaCellHTML(r, c)}</td>`).join("")}</tr>`;
+    if(r && open) h+=`<tr class="ea-open"><td colspan="5">${eaDocsHTML(co, r)}</td></tr>`;
+  }
+  h+=`</tbody></table></div>`;
+  if(rows.some(co=>co.sec===false)) h+=`<p class="t2" id="eaLondon">For London names with no SEC filings, the ${eaQ4(qn)?"10-K":"10-Q"} column holds the interim or annual report and the 8-K column the results release or trading update, as the desktop script does.</p>`;
+  return h;
+}
+function eaRunHTML(){
+  const ea=S.ea, run=ea.run, z=ea.zip; let h="";
+  if(run && run.q===ea.quarter){
+    const going=!run.done;
+    const say = run.retrying ? `${count(run.i)} of ${count(run.n)} companies. Asking again for ${run.retrying}, which didn't answer.` : going ? `${count(run.i)} of ${count(run.n)} companies${run.current?`; now ${run.current}`:""}` : run.state==="stopped" ? `${count(run.i)} of ${count(run.n)} companies, then stopped` : run.failed.length ? `${count(run.n-run.failed.length)} of ${count(run.n)} companies; ${run.failed.map(c=>c.name).join(", ")} failed twice` : `${count(run.n)} of ${count(run.n)} companies`;
+    if(going || run.state!=="run") h+=`<div class="info" id="eaProgress" role="status">${pbHTML("ea-run", {name:"Finding the quarter's documents", done:run.i, of:run.n, state:going?(run.retrying?"retry":"run"):run.state, say, text:say})}${going?`<button type="button" class="btn sm" data-act="ea-stop" ${run.stop?"disabled":""}>${run.stop?"Stopping after this one…":"Stop"}</button>`:""}</div>`;
+  }
+  if(z && (!z.done || z.state!=="run")){
+    const say = !z.done ? `${count(z.i)} of ${count(z.n)} files` : z.err ? z.err : z.state==="stopped" ? `Stopped after ${count(z.i)} of ${count(z.n)} files${z.saved?"; what arrived was saved":""}` : `${count(z.saved)} of ${count(z.n)} files saved; ${count(z.left.length)} couldn't be fetched (listed below and in the zip's note)`;
+    h+=`<div class="info" id="eaZipProgress" role="status">${pbHTML("ea-zip", {name:"Downloading this quarter", done:z.i, of:z.n, state:z.done?z.state:"run", say, text:say})}${!z.done?`<button type="button" class="btn sm" data-act="ea-zip-stop" ${z.stop?"disabled":""}>${z.stop?"Stopping…":"Stop"}</button>`:""}</div>`;
+    if(z.done && z.left.length) h+=`<ul class="ea-msgs" id="eaZipLeft">${z.left.map(s=>`<li>${esc(s)}</li>`).join("")}</ul>`;
+  }
+  return h;
+}
+function eaChooserHTML(){
+  const ea=S.ea, all=eaCompanies(), chosen=eaChosen();
+  return `<details class="ea-co" id="eaCos"><summary>Companies: ${chosen.length===all.length?`all ${count(all.length)}`:`${count(chosen.length)} of ${count(all.length)}`}</summary>
+    <div class="toolbar"><button type="button" class="btn sm ghost" data-act="ea-all">All</button><button type="button" class="btn sm ghost" data-act="ea-none">None</button></div>
+    <div class="checks">${all.map(c=>`<label><input type="checkbox" data-ea-co="${esc(c.id)}" ${chosen.includes(c)?"checked":""}> ${esc(c.name)}${c.ticker?` (${esc(c.ticker)})`:""}</label>`).join("")}</div></details>`;
+}
+function eaWatchlistHTML(){
+  const ea=S.ea, w=ea.wl, cd=isCorpDev(), list=eaCompanies();
+  let h=`<section class="tcard ea-wl" id="eaWatch" aria-labelledby="eaWatchH"><h3 id="eaWatchH">Earnings watchlist</h3>
+    <p class="t2" id="eaWatchNote">Every login can see this list. It holds public companies to compare against, with their tickers and investor pages, and nothing about why a company is on it.${cd?"":" Corp Dev can change it."}</p>`;
+  if(cd && ea.problems.length) h+=`<div class="banner" id="eaProblems" role="status"><span><b>${plural(ea.problems.length,"part")} of the saved list can't be used and ${ea.problems.length===1?"is":"are"} left out:</b> ${esc(ea.problems.map(p=>`${p.name||"entry "+p.at}: ${p.message}`).join(" "))}</span></div>`;
+  if(list.length){
+    h+=`<div class="tbl-wrap cardwrap"><table class="cards" id="eaWlTable"><thead><tr><th>Company</th><th>Ticker or CIK</th><th>SEC</th><th>Investor pages</th>${cd?"<th></th>":""}</tr></thead><tbody>${list.map(c=>`<tr>
+      <td class="c-co">${esc(c.name)}${c.folder?`<div class="t2">Folder: ${esc(c.folder)}</div>`:""}</td>
+      <td class="c-half" data-label="Ticker or CIK">${esc([c.ticker, ...(c.otherTickers||[])].filter(Boolean).join(", ")||"n/d")}${c.cik?`<div class="t2">CIK ${esc(c.cik)}</div>`:""}</td>
+      <td class="c-half" data-label="SEC">${c.sec===false?"London, no SEC filings":"Files with the SEC"}</td>
+      <td class="c-urls" data-label="Investor pages">${(c.irUrls||[]).map(u=>`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(u)}</a>`).join("")||"None listed"}${Object.keys(c.fileUrls||{}).length?`<div class="t2">${plural(Object.values(c.fileUrls).flat().length,"known file address","known file addresses")}</div>`:""}</td>
+      ${cd?`<td>${w.del===c.id?`<span class="inline"><button type="button" class="btn sm" data-act="ea-del-yes" data-co="${esc(c.id)}" ${w.saving?"disabled":""}>Remove ${esc(c.name)}</button><button type="button" class="btn sm ghost" data-act="ea-del-no">Keep</button></span>`:`<span class="inline"><button type="button" class="btn sm" data-act="ea-edit" data-co="${esc(c.id)}">Change</button><button type="button" class="btn sm ghost" data-act="ea-del" data-co="${esc(c.id)}">Remove</button></span>`}</td>`:""}</tr>`).join("")}</tbody></table></div>`;
+  } else h+=`<p class="t2" id="eaWlEmpty">No companies yet.${cd?" Paste the script's list below, or add one.":" Ask Corp Dev to add them."}</p>`;
+  if(w.msg) h+=`<p class="t2" id="eaWlMsg" role="status">${esc(w.msg)}</p>`;
+  if(w.err) h+=`<p class="err" id="eaWlErr" role="alert">${esc(w.err)}</p>`;
+  if(!cd) return h+`</section>`;
+  const e=w.edit;
+  if(e) h+=`<form class="tcard" id="eaEditForm" novalidate aria-label="${e.id?"Change a company":"Add a company"}"><b>${e.id?`Change ${esc(e.name)}`:"Add a company"}</b>
+    <div class="fgrid">
+      <label class="f">Name<input type="text" id="ea_e_name" data-bind="ea.wl.edit.name" value="${esc(e.name)}" maxlength="80" autocomplete="off"></label>
+      <label class="f"><span>Folder name <em>optional; the name is used otherwise</em></span><input type="text" id="ea_e_folder" data-bind="ea.wl.edit.folder" value="${esc(e.folder)}" maxlength="60" autocomplete="off"></label>
+      <label class="f">Ticker<input type="text" id="ea_e_ticker" data-bind="ea.wl.edit.ticker" value="${esc(e.ticker)}" maxlength="10" autocomplete="off" spellcheck="false"></label>
+      <label class="f"><span>Other tickers <em>separate with commas</em></span><input type="text" id="ea_e_others" data-bind="ea.wl.edit.others" value="${esc(e.others)}" autocomplete="off" spellcheck="false"></label>
+      <label class="f"><span>CIK <em>optional; found from the ticker otherwise</em></span><input type="text" id="ea_e_cik" data-bind="ea.wl.edit.cik" value="${esc(e.cik)}" inputmode="numeric" autocomplete="off"></label>
+      <label class="unl"><input type="checkbox" id="ea_e_sec" ${e.sec?"checked":""}> Files with the SEC (untick for a London name)</label>
+      <label class="f full"><span>Investor pages <em>one https address a line, up to 6</em></span><textarea id="ea_e_ir" data-bind="ea.wl.edit.ir" rows="3" spellcheck="false">${esc(e.ir)}</textarea></label>
+      <label class="f full"><span>Known file addresses <em>optional; a line each like "supplement: https://…{yyyy}…{q}q{yy}.pdf"</em></span><textarea id="ea_e_files" data-bind="ea.wl.edit.files" rows="2" spellcheck="false">${esc(e.files)}</textarea></label>
+    </div>
+    <div class="toolbar"><button type="button" class="btn primary" data-act="ea-save" ${w.saving?"disabled":""}>${w.saving?"Saving…":e.id?"Save changes":"Add"}</button><button type="button" class="btn ghost" data-act="ea-cancel">Cancel</button></div></form>`;
+  else h+=`<div class="toolbar"><button type="button" class="btn" data-act="ea-add">Add a company</button></div>`;
+  h+=`<details id="eaPaste"${w.paste||w.checked?" open":""}><summary>Load the list from the desktop script</summary>
+    <div class="tcard" style="margin-top:8px"><p class="t2" style="margin:0">Paste the script's "companies" list (from its opening [ to its closing ]), or the whole settings block between its triple quotes. It is checked entry by entry before anything is saved.</p>
+    <textarea id="ea_paste" data-bind="ea.wl.paste" rows="6" spellcheck="false" aria-label="The script's companies list">${esc(w.paste)}</textarea>
+    <div class="toolbar"><button type="button" class="btn" data-act="ea-check" ${w.checking?"disabled":""}>${w.checking?"Checking…":"Check the list"}</button></div>`;
+  const ck=w.checked;
+  if(ck){
+    const probs=ck.problems||[];
+    h+=`<div id="eaChecked"><p style="margin:0"><b>${plural((ck.companies||[]).length,"company","companies")} can be loaded.</b>${probs.length?` ${plural(probs.length,"note")}:`:" No problems found."}</p>
+      ${probs.length?`<ul class="ea-msgs" id="eaCheckMsgs">${probs.map(p=>`<li>${p.at?`Entry ${count(p.at)}${p.name?` (${esc(p.name)})`:""}: `:""}${esc(p.message)}${p.dropped?" <b>Left out.</b>":""}</li>`).join("")}</ul>`:""}
+      ${(ck.companies||[]).length?`<div class="toolbar"><button type="button" class="btn primary" data-act="ea-load" ${w.saving?"disabled":""}>${w.saving?"Saving…":`Load these ${plural(ck.companies.length,"company","companies")}`}</button><span class="t2">This replaces the watchlist${list.length?` of ${plural(list.length,"company","companies")}`:""}.</span></div>`:""}</div>`;
+  }
+  return h+`</div></details></section>`;
+}
+function renderEarnings(){
+  const ea=S.ea, st=ea.status;
+  let h=`<div class="ea" style="display:flex;flex-direction:column;gap:18px;min-width:0"><div><h2 class="action-title">Earnings documents for a quarter</h2>
+    <p class="sub">For each company on the team's earnings watchlist: the 10-Q (10-K for the fourth quarter) and the earnings 8-K from the SEC, and the financial supplement and investor presentation from the company's investor pages. No S&amp;P requests and no Claude.</p></div>
+    <div class="info" id="eaLimits" role="note"><span><b>What this can't do.</b> Investor sites that block automated tools show as refused, with the page to open yourself, and lists a site fills in with JavaScript can't be seen here. SEC filings are saved as web pages, not PDFs. The desktop script remains the way to get everything.</span></div>`;
+  if(!st){
+    if(ea.statusErr) return h+(ea.statusErr.err==="not_deployed" ? `<div class="info" id="eaNotDeployed" role="status"><span>${esc(ea.statusErr.msg)}</span></div>` : problemHTML(ea.statusErr, "Couldn't open Earnings.", "ea-retry"))+`</div>`;
+    return h+`<p class="t2" id="eaLoading" role="status">Loading the earnings watchlist…</p></div>`;
+  }
+  if(!st.configured) h+=`<div class="info" id="eaNotSet" role="status"><span>${esc(isCorpDev()?"Finding documents isn't set up yet: the owner sets SEC_CONTACT on Supabase (README, Earnings), the organisation and a contact email the SEC asks automated tools to send. The watchlist can be filled in meanwhile.":"Finding documents isn't set up yet. Ask Corp Dev.")}</span></div>`;
+  if(ea.listErr) h+=problemHTML(ea.listErr, "Couldn't read the earnings watchlist.", "ea-retry");
+  const busy=!!(ea.run&&!ea.run.done), zbusy=!!(ea.zip&&!ea.zip.done), list=eaCompanies();
+  if(list.length){
+    const qs=eaQuarters();
+    h+=`<form class="tcard" id="eaForm" novalidate aria-label="Find a quarter's documents"><div class="fgrid">
+      <label class="f">Quarter<select id="ea_q" ${busy?"disabled":""}>${qs.map(q=>`<option value="${esc(q)}"${q===ea.quarter?" selected":""}>${esc(q)}</option>`).join("")}</select></label>
+      <div class="f"><span>Companies</span>${eaChooserHTML()}</div></div>
+      <div class="toolbar"><button type="submit" class="btn primary" id="ea_go" data-act="ea-find" ${busy||!st.configured?"disabled":""}>Find</button>
+        <button type="button" class="btn" data-act="ea-refresh" id="ea_refresh" ${busy||!st.configured?"disabled":""} title="Asks the SEC and the investor sites again instead of opening what was found before">Refresh</button>
+        <button type="button" class="btn" data-act="ea-zip" id="ea_zip" ${zbusy||busy||!Object.keys(ea.results).length?"disabled":""}>Download this quarter</button>
+        <span class="t2 grow">One company at a time. What was found before opens again without asking anyone; Refresh asks again. Each company takes a few requests to the SEC, at most five a second.</span></div></form>`;
+    h+=eaRunHTML();
+    if(ea.savedBusy) h+=`<p class="t2" role="status">Opening what was found before…</p>`;
+    if(ea.firstLook && Object.keys(ea.results).length) h+=`<p class="t2" id="eaFirstLook">This is your first look at ${esc(ea.quarter)} in this browser, so nothing is marked new. Next time, documents that have appeared since are marked New.</p>`;
+    else if(Object.keys(ea.newIds).length) h+=`<p class="t2" id="eaNewNote"><span class="ea-new">${plural(Object.keys(ea.newIds).length,"new document")}</span> since your last look at ${esc(ea.quarter)} in this browser.</p>`;
+    h+=`<div id="eaOut" aria-live="polite">${eaTableHTML()}</div>`;
+  }
+  return h+eaWatchlistHTML()+`</div>`;
+}
+document.addEventListener("change", e=>{
+  const t=e.target, ea=S.ea; if(!t || !ea) return;
+  if(t.id==="ea_q"){ ea.quarter=t.value; ea.results={}; ea.errs={}; ea.newIds={}; ea.open={}; ea.firstLook=false; render(); eaLoadSaved(); }
+  else if(t.dataset && t.dataset.eaCo){ const all=eaCompanies(); if(!ea.chosen) ea.chosen=Object.fromEntries(all.map(c=>[c.id,true])); if(t.checked) ea.chosen[t.dataset.eaCo]=true; else delete ea.chosen[t.dataset.eaCo]; render(); document.getElementById("eaCos")?.setAttribute("open",""); }
+  else if(t.id==="ea_e_sec" && ea.wl.edit){ ea.wl.edit.sec=t.checked; }
+});
+document.addEventListener("submit", e=>{ if(e.target.id==="eaForm"){ e.preventDefault(); eaRun(false); } });
+document.addEventListener("click", e=>{
+  const t=e.target.closest("[data-act]"); if(!t || !/^ea-/.test(t.dataset.act)) return;
+  const ea=S.ea, w=ea.wl, co=t.dataset.co;
+  switch(t.dataset.act){
+    case "ea-retry": ea.statusErr=null; ea.listErr=null; loadEarnings(); break;
+    case "ea-find": e.preventDefault(); eaRun(false); break;
+    case "ea-refresh": eaRun(true); break;
+    case "ea-stop": if(ea.run) ea.run.stop=true; render(); break;
+    case "ea-open": ea.open[co]=!ea.open[co]; render(); break;
+    case "ea-dl": eaDownload(co, t.dataset.doc); break;
+    case "ea-zip": eaZip(); break;
+    case "ea-zip-stop": if(ea.zip) ea.zip.stop=true; render(); break;
+    case "ea-all": ea.chosen=null; render(); document.getElementById("eaCos")?.setAttribute("open",""); break;
+    case "ea-none": ea.chosen={}; render(); document.getElementById("eaCos")?.setAttribute("open",""); break;
+    case "ea-add": w.edit=eaEditFrom(null); w.err=""; w.msg=""; render(); document.getElementById("ea_e_name")?.focus(); break;
+    case "ea-edit": w.edit=eaEditFrom(eaCompanies().find(c=>c.id===co)); w.err=""; w.msg=""; render(); document.getElementById("ea_e_name")?.focus(); break;
+    case "ea-cancel": w.edit=null; w.err=""; render(); break;
+    case "ea-save": eaSaveEdit(); break;
+    case "ea-del": w.del=co; render(); break;
+    case "ea-del-no": w.del=""; render(); break;
+    case "ea-del-yes": { const name=(eaCompanies().find(c=>c.id===co)||{}).name||"the company"; eaSaveList(list=>list.filter(c=>c.id!==co), ()=>{ w.del=""; return `Removed ${name}.`; }); break; }
+    case "ea-check": eaCheckPaste(); break;
+    case "ea-load": { const ck=w.checked; if(ck&&ck.companies) eaSaveList(()=>ck.companies, l=>{ w.checked=null; w.paste=""; return `Loaded ${plural(l.length,"company","companies")}.`; }); break; }
+  }
+});
+
 /* ---------- routing ---------- */
 const VIEW_KEY="snl.view";
 function enterView(){
@@ -6860,6 +7281,7 @@ function enterView(){
   if(S.view==="compare") enterCompare();
   if(!S.sets.loaded && !S.sets.loading) loadSets();
   if(S.view==="market") enterMarket();
+  if(S.view==="earnings") enterEarnings();
 }
 function route(){
   const h=location.hash.replace(/^#/,""); let v=VIEWS.includes(h)?h:null;
@@ -7179,6 +7601,7 @@ function resetState(){
   S.sets=freshSets();
   S.dg=freshDigests();
   resetMarket();
+  resetEarnings();
   pbReset();
 }
 async function onSignedIn(session){
