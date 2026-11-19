@@ -1,0 +1,1712 @@
+{
+ "_about": "Made up: the sample filings profile narrowed to rate filings (filing type Rate), as filingsFactsFrom and filingsPlainText give it. Pinned by tests/functions/morefilters_profile_test.ts.",
+ "facts": {
+  "version": 1,
+  "profile": "filings",
+  "sample": false,
+  "asOf": "2026-11-18",
+  "entity": {
+   "kind": "group",
+   "name": "Calloway Group",
+   "groupName": "Calloway Group",
+   "companies": 3,
+   "noId": 0
+  },
+  "period": {
+   "years": 5,
+   "from": "2021-11-20",
+   "to": "2026-11-18"
+  },
+  "source": "S&P Global Market Intelligence, SNL Insurance Product Filings",
+  "search": {
+   "capped": false,
+   "statesSearched": 51,
+   "fromStore": false,
+   "fetchedAt": null
+  },
+  "scope": {
+   "narrowed": true,
+   "states": null,
+   "types": null,
+   "filingTypes": [
+    {
+     "id": 12,
+     "name": "Rate"
+    }
+   ],
+   "statuses": null,
+   "words": "rate filings",
+   "short": "rate filings",
+   "leftOut": {
+    "rate": false,
+    "rule": true,
+    "form": true,
+    "approved": false,
+    "unapproved": false,
+    "statuses": false
+   }
+  },
+  "totals": {
+   "filings": 25,
+   "rate": 25,
+   "rule": 0,
+   "form": 0,
+   "other": 0,
+   "states": 6,
+   "latest": "2026-07-14",
+   "undated": 0
+  },
+  "largest": {
+   "date": "2023-01-23",
+   "state": "LA",
+   "toi": "Homeowners",
+   "rate": 13.8,
+   "status": "Approved",
+   "approved": true,
+   "filingNo": "S&P no. CAL1451383"
+  },
+  "approval": {
+   "rateFilings": 25,
+   "approved": 23,
+   "share": 92
+  },
+  "rates": {
+   "filings": 25,
+   "withImpact": 21,
+   "notApproved": 2,
+   "noDate": 0,
+   "lo": -4.7,
+   "hi": 13.8,
+   "points": [
+    {
+     "date": "2022-01-24",
+     "state": "GA",
+     "toi": "Homeowners",
+     "rate": 10.7,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2022-02-12",
+     "state": "FL",
+     "toi": "Inland marine",
+     "rate": -2.3,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2022-07-05",
+     "state": "TX",
+     "toi": "Homeowners",
+     "rate": 0.5,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2022-10-31",
+     "state": "FL",
+     "toi": "Inland marine",
+     "rate": -0.4,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2023-01-23",
+     "state": "LA",
+     "toi": "Homeowners",
+     "rate": 13.8,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2023-08-07",
+     "state": "TX",
+     "toi": "Commercial property",
+     "rate": 6.8,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2023-08-24",
+     "state": "TX",
+     "toi": "Commercial property",
+     "rate": -1.9,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2023-09-23",
+     "state": "TX",
+     "toi": "Inland marine",
+     "rate": -2,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2024-02-18",
+     "state": "FL",
+     "toi": "Homeowners",
+     "rate": 9.2,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2024-03-12",
+     "state": "SC",
+     "toi": "Commercial property",
+     "rate": 8.5,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2024-04-09",
+     "state": "MS",
+     "toi": "Inland marine",
+     "rate": -4.7,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2024-04-13",
+     "state": "MS",
+     "toi": "Inland marine",
+     "rate": 13.7,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2024-05-02",
+     "state": "SC",
+     "toi": "Commercial property",
+     "rate": 10.1,
+     "status": "Withdrawn",
+     "approved": false
+    },
+    {
+     "date": "2025-02-25",
+     "state": "SC",
+     "toi": "Homeowners",
+     "rate": 12.4,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2025-03-29",
+     "state": "GA",
+     "toi": "Commercial property",
+     "rate": 3.2,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2025-06-21",
+     "state": "TX",
+     "toi": "Commercial property",
+     "rate": -3.3,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2026-01-08",
+     "state": "TX",
+     "toi": "Commercial property",
+     "rate": -0.6,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2026-03-12",
+     "state": "FL",
+     "toi": "Commercial property",
+     "rate": 7.5,
+     "status": "Withdrawn",
+     "approved": false
+    },
+    {
+     "date": "2026-03-25",
+     "state": "TX",
+     "toi": "Homeowners",
+     "rate": 9,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2026-06-16",
+     "state": "TX",
+     "toi": "Commercial property",
+     "rate": -4.4,
+     "status": "Approved",
+     "approved": true
+    },
+    {
+     "date": "2026-07-14",
+     "state": "FL",
+     "toi": "Inland marine",
+     "rate": 2.3,
+     "status": "Approved",
+     "approved": true
+    }
+   ],
+   "pointsTotal": 21,
+   "rows": [
+    {
+     "state": "TX",
+     "toi": "Commercial property",
+     "n": 5,
+     "withRate": 5,
+     "lo": -4.4,
+     "hi": 6.8,
+     "latest": {
+      "date": "2026-06-16",
+      "state": "TX",
+      "toi": "Commercial property",
+      "rate": -4.4,
+      "status": "Approved",
+      "approved": true
+     }
+    },
+    {
+     "state": "FL",
+     "toi": "Inland marine",
+     "n": 3,
+     "withRate": 3,
+     "lo": -2.3,
+     "hi": 2.3,
+     "latest": {
+      "date": "2026-07-14",
+      "state": "FL",
+      "toi": "Inland marine",
+      "rate": 2.3,
+      "status": "Approved",
+      "approved": true
+     }
+    },
+    {
+     "state": "TX",
+     "toi": "Homeowners",
+     "n": 3,
+     "withRate": 2,
+     "lo": 0.5,
+     "hi": 9,
+     "latest": {
+      "date": "2026-03-25",
+      "state": "TX",
+      "toi": "Homeowners",
+      "rate": 9,
+      "status": "Approved",
+      "approved": true
+     }
+    },
+    {
+     "state": "FL",
+     "toi": "Dwelling fire",
+     "n": 2,
+     "withRate": 0,
+     "lo": null,
+     "hi": null,
+     "latest": null
+    },
+    {
+     "state": "FL",
+     "toi": "Homeowners",
+     "n": 2,
+     "withRate": 1,
+     "lo": 9.2,
+     "hi": 9.2,
+     "latest": {
+      "date": "2024-02-18",
+      "state": "FL",
+      "toi": "Homeowners",
+      "rate": 9.2,
+      "status": "Approved",
+      "approved": true
+     }
+    },
+    {
+     "state": "MS",
+     "toi": "Inland marine",
+     "n": 2,
+     "withRate": 2,
+     "lo": -4.7,
+     "hi": 13.7,
+     "latest": {
+      "date": "2024-04-13",
+      "state": "MS",
+      "toi": "Inland marine",
+      "rate": 13.7,
+      "status": "Approved",
+      "approved": true
+     }
+    },
+    {
+     "state": "SC",
+     "toi": "Commercial property",
+     "n": 2,
+     "withRate": 2,
+     "lo": 8.5,
+     "hi": 10.1,
+     "latest": {
+      "date": "2024-05-02",
+      "state": "SC",
+      "toi": "Commercial property",
+      "rate": 10.1,
+      "status": "Withdrawn",
+      "approved": false
+     }
+    },
+    {
+     "state": "FL",
+     "toi": "Commercial property",
+     "n": 1,
+     "withRate": 1,
+     "lo": 7.5,
+     "hi": 7.5,
+     "latest": {
+      "date": "2026-03-12",
+      "state": "FL",
+      "toi": "Commercial property",
+      "rate": 7.5,
+      "status": "Withdrawn",
+      "approved": false
+     }
+    },
+    {
+     "state": "GA",
+     "toi": "Commercial property",
+     "n": 1,
+     "withRate": 1,
+     "lo": 3.2,
+     "hi": 3.2,
+     "latest": {
+      "date": "2025-03-29",
+      "state": "GA",
+      "toi": "Commercial property",
+      "rate": 3.2,
+      "status": "Approved",
+      "approved": true
+     }
+    },
+    {
+     "state": "GA",
+     "toi": "Homeowners",
+     "n": 1,
+     "withRate": 1,
+     "lo": 10.7,
+     "hi": 10.7,
+     "latest": {
+      "date": "2022-01-24",
+      "state": "GA",
+      "toi": "Homeowners",
+      "rate": 10.7,
+      "status": "Approved",
+      "approved": true
+     }
+    },
+    {
+     "state": "LA",
+     "toi": "Homeowners",
+     "n": 1,
+     "withRate": 1,
+     "lo": 13.8,
+     "hi": 13.8,
+     "latest": {
+      "date": "2023-01-23",
+      "state": "LA",
+      "toi": "Homeowners",
+      "rate": 13.8,
+      "status": "Approved",
+      "approved": true
+     }
+    },
+    {
+     "state": "SC",
+     "toi": "Homeowners",
+     "n": 1,
+     "withRate": 1,
+     "lo": 12.4,
+     "hi": 12.4,
+     "latest": {
+      "date": "2025-02-25",
+      "state": "SC",
+      "toi": "Homeowners",
+      "rate": 12.4,
+      "status": "Approved",
+      "approved": true
+     }
+    },
+    {
+     "state": "TX",
+     "toi": "Inland marine",
+     "n": 1,
+     "withRate": 1,
+     "lo": -2,
+     "hi": -2,
+     "latest": {
+      "date": "2023-09-23",
+      "state": "TX",
+      "toi": "Inland marine",
+      "rate": -2,
+      "status": "Approved",
+      "approved": true
+     }
+    }
+   ],
+   "rowsTotal": 13
+  },
+  "states": {
+   "rows": [
+    {
+     "state": "TX",
+     "n": 9,
+     "rate": 9,
+     "latest": {
+      "date": "2026-06-16",
+      "state": "TX",
+      "toi": "Commercial property",
+      "rate": -4.4,
+      "status": "Approved",
+      "approved": true
+     }
+    },
+    {
+     "state": "FL",
+     "n": 8,
+     "rate": 8,
+     "latest": {
+      "date": "2026-07-14",
+      "state": "FL",
+      "toi": "Inland marine",
+      "rate": 2.3,
+      "status": "Approved",
+      "approved": true
+     }
+    },
+    {
+     "state": "SC",
+     "n": 3,
+     "rate": 3,
+     "latest": {
+      "date": "2025-02-25",
+      "state": "SC",
+      "toi": "Homeowners",
+      "rate": 12.4,
+      "status": "Approved",
+      "approved": true
+     }
+    },
+    {
+     "state": "GA",
+     "n": 2,
+     "rate": 2,
+     "latest": {
+      "date": "2025-03-29",
+      "state": "GA",
+      "toi": "Commercial property",
+      "rate": 3.2,
+      "status": "Approved",
+      "approved": true
+     }
+    },
+    {
+     "state": "MS",
+     "n": 2,
+     "rate": 2,
+     "latest": {
+      "date": "2024-04-13",
+      "state": "MS",
+      "toi": "Inland marine",
+      "rate": 13.7,
+      "status": "Approved",
+      "approved": true
+     }
+    },
+    {
+     "state": "LA",
+     "n": 1,
+     "rate": 1,
+     "latest": {
+      "date": "2023-01-23",
+      "state": "LA",
+      "toi": "Homeowners",
+      "rate": 13.8,
+      "status": "Approved",
+      "approved": true
+     }
+    }
+   ],
+   "noState": 0
+  },
+  "years": {
+   "years": [
+    2021,
+    2022,
+    2023,
+    2024,
+    2025,
+    2026
+   ],
+   "types": [
+    "Rate"
+   ],
+   "counts": [
+    [
+     0
+    ],
+    [
+     5
+    ],
+    [
+     5
+    ],
+    [
+     5
+    ],
+    [
+     5
+    ],
+    [
+     5
+    ]
+   ],
+   "totals": [
+    0,
+    5,
+    5,
+    5,
+    5,
+    5
+   ],
+   "byType": [
+    25
+   ]
+  },
+  "latest": {
+   "rows": [],
+   "total": 0
+  },
+  "regulator": {
+   "rows": [
+    {
+     "state": "TX",
+     "n": 9,
+     "median": 98,
+     "lo": 31,
+     "hi": 147
+    },
+    {
+     "state": "FL",
+     "n": 8,
+     "median": 107,
+     "lo": 74,
+     "hi": 155
+    },
+    {
+     "state": "SC",
+     "n": 3,
+     "median": 116,
+     "lo": 79,
+     "hi": 153
+    },
+    {
+     "state": "GA",
+     "n": 2,
+     "median": 145,
+     "lo": 139,
+     "hi": 150
+    },
+    {
+     "state": "MS",
+     "n": 2,
+     "median": 104,
+     "lo": 71,
+     "hi": 136
+    },
+    {
+     "state": "LA",
+     "n": 1,
+     "median": 75,
+     "lo": 75,
+     "hi": 75
+    }
+   ],
+   "all": {
+    "state": null,
+    "n": 25,
+    "median": 116,
+    "lo": 31,
+    "hi": 155
+   },
+   "left": 0
+  },
+  "map": {
+   "searched": [
+    "AK",
+    "AL",
+    "AR",
+    "AZ",
+    "CA",
+    "CO",
+    "CT",
+    "DC",
+    "DE",
+    "FL",
+    "GA",
+    "HI",
+    "IA",
+    "ID",
+    "IL",
+    "IN",
+    "KS",
+    "KY",
+    "LA",
+    "MA",
+    "MD",
+    "ME",
+    "MI",
+    "MN",
+    "MO",
+    "MS",
+    "MT",
+    "NC",
+    "ND",
+    "NE",
+    "NH",
+    "NJ",
+    "NM",
+    "NV",
+    "NY",
+    "OH",
+    "OK",
+    "OR",
+    "PA",
+    "RI",
+    "SC",
+    "SD",
+    "TN",
+    "TX",
+    "UT",
+    "VA",
+    "VT",
+    "WA",
+    "WI",
+    "WV",
+    "WY"
+   ]
+  },
+  "summaries": {
+   "checked": true,
+   "version": 2,
+   "note": null,
+   "rate": {
+    "filings": 25,
+    "withDocument": 25,
+    "summarised": 12,
+    "older": 2
+   },
+   "form": {
+    "filings": 0,
+    "withDocument": 0,
+    "summarised": 0,
+    "older": 0
+   }
+  },
+  "exposure": {
+   "rows": [
+    {
+     "filingNo": "S&P no. CAL1134623",
+     "state": "MS",
+     "toi": "Inland marine",
+     "published": "2024-04-13",
+     "status": "Approved",
+     "approved": true,
+     "premium": 183000,
+     "policyholders": 140,
+     "exposures": 146,
+     "rate": 13.7,
+     "page": 5,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1221732",
+     "state": "SC",
+     "toi": "Commercial property",
+     "published": "2024-05-02",
+     "status": "Withdrawn",
+     "approved": false,
+     "premium": 3812000,
+     "policyholders": 4683,
+     "exposures": 4870,
+     "rate": 10.1,
+     "page": 4,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1293003",
+     "state": "TX",
+     "toi": "Homeowners",
+     "published": "2025-02-16",
+     "status": "Approved",
+     "approved": true,
+     "premium": 29527000,
+     "policyholders": 41757,
+     "exposures": 43427,
+     "rate": null,
+     "page": 3,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1340517",
+     "state": "FL",
+     "toi": "Dwelling fire",
+     "published": "2025-02-23",
+     "status": "Approved",
+     "approved": true,
+     "premium": 15424000,
+     "policyholders": 11789,
+     "exposures": 12260,
+     "rate": null,
+     "page": 5,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1182137",
+     "state": "SC",
+     "toi": "Homeowners",
+     "published": "2025-02-25",
+     "status": "Approved",
+     "approved": true,
+     "premium": 7782000,
+     "policyholders": 9559,
+     "exposures": null,
+     "rate": 12.4,
+     "page": 4,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1095028",
+     "state": "GA",
+     "toi": "Commercial property",
+     "published": "2025-03-29",
+     "status": "Approved",
+     "approved": true,
+     "premium": 2825000,
+     "policyholders": 3793,
+     "exposures": 3944,
+     "rate": 3.2,
+     "page": 3,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1467221",
+     "state": "TX",
+     "toi": "Commercial property",
+     "published": "2025-06-21",
+     "status": "Approved",
+     "approved": true,
+     "premium": 13287000,
+     "policyholders": 18791,
+     "exposures": 19542,
+     "rate": -3.3,
+     "page": 5,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1055433",
+     "state": "TX",
+     "toi": "Commercial property",
+     "published": "2026-01-08",
+     "status": "Approved",
+     "approved": true,
+     "premium": 14288000,
+     "policyholders": 20205,
+     "exposures": 21013,
+     "rate": -0.6,
+     "page": 4,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1308841",
+     "state": "FL",
+     "toi": "Commercial property",
+     "published": "2026-03-12",
+     "status": "Withdrawn",
+     "approved": false,
+     "premium": 17135000,
+     "policyholders": 21828,
+     "exposures": null,
+     "rate": 7.5,
+     "page": 3,
+     "exposuresPage": 3
+    },
+    {
+     "filingNo": "S&P no. CAL1380112",
+     "state": "TX",
+     "toi": "Homeowners",
+     "published": "2026-03-25",
+     "status": "Approved",
+     "approved": true,
+     "premium": 27305000,
+     "policyholders": 38614,
+     "exposures": 40159,
+     "rate": 9,
+     "page": 5,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1158380",
+     "state": "TX",
+     "toi": "Commercial property",
+     "published": "2026-06-16",
+     "status": "Approved",
+     "approved": true,
+     "premium": 13287000,
+     "policyholders": 18791,
+     "exposures": 19542,
+     "rate": -4.4,
+     "page": 4,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1324679",
+     "state": "FL",
+     "toi": "Inland marine",
+     "published": "2026-07-14",
+     "status": "Approved",
+     "approved": true,
+     "premium": 3856000,
+     "policyholders": 2947,
+     "exposures": 3065,
+     "rate": 2.3,
+     "page": 3,
+     "exposuresPage": 4
+    }
+   ],
+   "total": 12,
+   "latest": [
+    {
+     "filingNo": "S&P no. CAL1380112",
+     "state": "TX",
+     "toi": "Homeowners",
+     "published": "2026-03-25",
+     "status": "Approved",
+     "approved": true,
+     "premium": 27305000,
+     "policyholders": 38614,
+     "exposures": 40159,
+     "rate": 9,
+     "page": 5,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1308841",
+     "state": "FL",
+     "toi": "Commercial property",
+     "published": "2026-03-12",
+     "status": "Withdrawn",
+     "approved": false,
+     "premium": 17135000,
+     "policyholders": 21828,
+     "exposures": null,
+     "rate": 7.5,
+     "page": 3,
+     "exposuresPage": 3
+    },
+    {
+     "filingNo": "S&P no. CAL1340517",
+     "state": "FL",
+     "toi": "Dwelling fire",
+     "published": "2025-02-23",
+     "status": "Approved",
+     "approved": true,
+     "premium": 15424000,
+     "policyholders": 11789,
+     "exposures": 12260,
+     "rate": null,
+     "page": 5,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1158380",
+     "state": "TX",
+     "toi": "Commercial property",
+     "published": "2026-06-16",
+     "status": "Approved",
+     "approved": true,
+     "premium": 13287000,
+     "policyholders": 18791,
+     "exposures": 19542,
+     "rate": -4.4,
+     "page": 4,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1182137",
+     "state": "SC",
+     "toi": "Homeowners",
+     "published": "2025-02-25",
+     "status": "Approved",
+     "approved": true,
+     "premium": 7782000,
+     "policyholders": 9559,
+     "exposures": null,
+     "rate": 12.4,
+     "page": 4,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1324679",
+     "state": "FL",
+     "toi": "Inland marine",
+     "published": "2026-07-14",
+     "status": "Approved",
+     "approved": true,
+     "premium": 3856000,
+     "policyholders": 2947,
+     "exposures": 3065,
+     "rate": 2.3,
+     "page": 3,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1221732",
+     "state": "SC",
+     "toi": "Commercial property",
+     "published": "2024-05-02",
+     "status": "Withdrawn",
+     "approved": false,
+     "premium": 3812000,
+     "policyholders": 4683,
+     "exposures": 4870,
+     "rate": 10.1,
+     "page": 4,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1095028",
+     "state": "GA",
+     "toi": "Commercial property",
+     "published": "2025-03-29",
+     "status": "Approved",
+     "approved": true,
+     "premium": 2825000,
+     "policyholders": 3793,
+     "exposures": 3944,
+     "rate": 3.2,
+     "page": 3,
+     "exposuresPage": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1134623",
+     "state": "MS",
+     "toi": "Inland marine",
+     "published": "2024-04-13",
+     "status": "Approved",
+     "approved": true,
+     "premium": 183000,
+     "policyholders": 140,
+     "exposures": 146,
+     "rate": 13.7,
+     "page": 5,
+     "exposuresPage": 4
+    }
+   ],
+   "latestPremium": 91609000,
+   "latestPolicyholders": 112144,
+   "summarised": 12
+  },
+  "adequacy": {
+   "rows": [
+    {
+     "filingNo": "S&P no. CAL1324679",
+     "state": "FL",
+     "toi": "Inland marine",
+     "published": "2026-07-14",
+     "status": "Approved",
+     "approved": true,
+     "spRate": 2.3,
+     "lossCostRef": "Nonesuch Rating Bureau loss costs NRB-HO-2022-01",
+     "page": 3,
+     "pages": {
+      "overallPct": 3,
+      "requestedPct": 3,
+      "approvedPct": 3,
+      "indicatedPct": 14,
+      "maxPct": 22,
+      "minPct": 22,
+      "lossCostMultiplier": 9,
+      "targetLossRatio": 14,
+      "projectedLossRatio": 14,
+      "lossTrendPct": 15,
+      "expensePct": 16,
+      "profitPct": 16,
+      "lossCostRef": 9
+     },
+     "overallPct": 2.3,
+     "requestedPct": 2.3,
+     "approvedPct": 2.3,
+     "indicatedPct": 8.7,
+     "maxPct": 12.3,
+     "minPct": -5.7,
+     "lossCostMultiplier": 1.185,
+     "targetLossRatio": 62.5,
+     "projectedLossRatio": 71.8,
+     "lossTrendPct": 6.5,
+     "expensePct": 27.4,
+     "profitPct": 5
+    },
+    {
+     "filingNo": "S&P no. CAL1158380",
+     "state": "TX",
+     "toi": "Commercial property",
+     "published": "2026-06-16",
+     "status": "Approved",
+     "approved": true,
+     "spRate": -4.4,
+     "lossCostRef": "Nonesuch Rating Bureau loss costs NRB-HO-2023-02",
+     "page": 4,
+     "pages": {
+      "overallPct": 4,
+      "requestedPct": 4,
+      "approvedPct": 4,
+      "indicatedPct": 14,
+      "maxPct": 22,
+      "minPct": 22,
+      "lossCostMultiplier": 9,
+      "targetLossRatio": 14,
+      "projectedLossRatio": 14,
+      "lossTrendPct": 15,
+      "expensePct": 16,
+      "profitPct": 16,
+      "lossCostRef": 9
+     },
+     "overallPct": -4.4,
+     "requestedPct": -4.4,
+     "approvedPct": -4.4,
+     "indicatedPct": -2.3,
+     "maxPct": 5.6,
+     "minPct": -12.4,
+     "lossCostMultiplier": 1.25,
+     "targetLossRatio": 60,
+     "projectedLossRatio": 66.4,
+     "lossTrendPct": 5,
+     "expensePct": 29.1,
+     "profitPct": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1380112",
+     "state": "TX",
+     "toi": "Homeowners",
+     "published": "2026-03-25",
+     "status": "Approved",
+     "approved": true,
+     "spRate": 9,
+     "lossCostRef": "Nonesuch Rating Bureau loss costs NRB-HO-2024-03",
+     "page": 5,
+     "pages": {
+      "overallPct": 5,
+      "requestedPct": 5,
+      "approvedPct": 5,
+      "indicatedPct": 14,
+      "maxPct": 22,
+      "minPct": 22,
+      "lossCostMultiplier": 9,
+      "targetLossRatio": 14,
+      "projectedLossRatio": 14,
+      "lossTrendPct": 15,
+      "expensePct": 16,
+      "profitPct": 16,
+      "lossCostRef": 9
+     },
+     "overallPct": 9,
+     "requestedPct": 9,
+     "approvedPct": 9,
+     "indicatedPct": 9,
+     "maxPct": 19,
+     "minPct": 1,
+     "lossCostMultiplier": 1.12,
+     "targetLossRatio": 64,
+     "projectedLossRatio": 59.9,
+     "lossTrendPct": 7.25,
+     "expensePct": 25.8,
+     "profitPct": 6
+    },
+    {
+     "filingNo": "S&P no. CAL1308841",
+     "state": "FL",
+     "toi": "Commercial property",
+     "published": "2026-03-12",
+     "status": "Withdrawn",
+     "approved": false,
+     "spRate": 7.5,
+     "lossCostRef": null,
+     "page": 3,
+     "pages": {
+      "overallPct": 3,
+      "requestedPct": 3
+     },
+     "overallPct": 7.5,
+     "requestedPct": 7.5
+    },
+    {
+     "filingNo": "S&P no. CAL1055433",
+     "state": "TX",
+     "toi": "Commercial property",
+     "published": "2026-01-08",
+     "status": "Approved",
+     "approved": true,
+     "spRate": -0.6,
+     "lossCostRef": "Nonesuch Rating Bureau loss costs NRB-HO-2022-02",
+     "page": 4,
+     "pages": {
+      "overallPct": 4,
+      "requestedPct": 4,
+      "approvedPct": 4,
+      "indicatedPct": 14,
+      "maxPct": 22,
+      "minPct": 22,
+      "lossCostMultiplier": 9,
+      "targetLossRatio": 14,
+      "projectedLossRatio": 14,
+      "lossTrendPct": 15,
+      "expensePct": 16,
+      "profitPct": 16,
+      "lossCostRef": 9
+     },
+     "overallPct": -0.6,
+     "requestedPct": -0.6,
+     "approvedPct": -0.6,
+     "indicatedPct": 0.9,
+     "maxPct": 9.4,
+     "minPct": -8.6,
+     "lossCostMultiplier": 1.185,
+     "targetLossRatio": 60,
+     "projectedLossRatio": 71.8,
+     "lossTrendPct": 5,
+     "expensePct": 29.1,
+     "profitPct": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1467221",
+     "state": "TX",
+     "toi": "Commercial property",
+     "published": "2025-06-21",
+     "status": "Approved",
+     "approved": true,
+     "spRate": -3.3,
+     "lossCostRef": "Nonesuch Rating Bureau loss costs NRB-HO-2023-03",
+     "page": 5,
+     "pages": {
+      "overallPct": 5,
+      "requestedPct": 5,
+      "approvedPct": 5,
+      "indicatedPct": 14,
+      "maxPct": 22,
+      "minPct": 22,
+      "lossCostMultiplier": 9,
+      "targetLossRatio": 14,
+      "projectedLossRatio": 14,
+      "lossTrendPct": 15,
+      "expensePct": 16,
+      "profitPct": 16,
+      "lossCostRef": 9
+     },
+     "overallPct": -3.3,
+     "requestedPct": -3.3,
+     "approvedPct": -3.3,
+     "indicatedPct": 5.9,
+     "maxPct": 6.7,
+     "minPct": -11.3,
+     "lossCostMultiplier": 1.25,
+     "targetLossRatio": 64,
+     "projectedLossRatio": 66.4,
+     "lossTrendPct": 7.25,
+     "expensePct": 25.8,
+     "profitPct": 6
+    },
+    {
+     "filingNo": "S&P no. CAL1095028",
+     "state": "GA",
+     "toi": "Commercial property",
+     "published": "2025-03-29",
+     "status": "Approved",
+     "approved": true,
+     "spRate": 3.2,
+     "lossCostRef": "Nonesuch Rating Bureau loss costs NRB-HO-2024-01",
+     "page": 3,
+     "pages": {
+      "overallPct": 3,
+      "requestedPct": 3,
+      "approvedPct": 3,
+      "indicatedPct": 14,
+      "maxPct": 22,
+      "minPct": 22,
+      "lossCostMultiplier": 9,
+      "targetLossRatio": 14,
+      "projectedLossRatio": 14,
+      "lossTrendPct": 15,
+      "expensePct": 16,
+      "profitPct": 16,
+      "lossCostRef": 9
+     },
+     "overallPct": 3.2,
+     "requestedPct": 3.2,
+     "approvedPct": 3.2,
+     "indicatedPct": 9.6,
+     "maxPct": 13.2,
+     "minPct": -4.8,
+     "lossCostMultiplier": 1.12,
+     "targetLossRatio": 62.5,
+     "projectedLossRatio": 59.9,
+     "lossTrendPct": 6.5,
+     "expensePct": 27.4,
+     "profitPct": 5
+    },
+    {
+     "filingNo": "S&P no. CAL1182137",
+     "state": "SC",
+     "toi": "Homeowners",
+     "published": "2025-02-25",
+     "status": "Approved",
+     "approved": true,
+     "spRate": 12.4,
+     "lossCostRef": null,
+     "page": 4,
+     "pages": {
+      "overallPct": 4,
+      "requestedPct": 4,
+      "approvedPct": 4
+     },
+     "overallPct": 12.4,
+     "requestedPct": 12.4,
+     "approvedPct": 12.4
+    },
+    {
+     "filingNo": "S&P no. CAL1340517",
+     "state": "FL",
+     "toi": "Dwelling fire",
+     "published": "2025-02-23",
+     "status": "Approved",
+     "approved": true,
+     "spRate": null,
+     "lossCostRef": "Nonesuch Rating Bureau loss costs NRB-HO-2022-03",
+     "page": 5,
+     "pages": {
+      "lossCostMultiplier": 9,
+      "targetLossRatio": 14,
+      "projectedLossRatio": 14,
+      "lossTrendPct": 15,
+      "expensePct": 16,
+      "profitPct": 16,
+      "lossCostRef": 9
+     },
+     "lossCostMultiplier": 1.185,
+     "targetLossRatio": 64,
+     "projectedLossRatio": 71.8,
+     "lossTrendPct": 7.25,
+     "expensePct": 25.8,
+     "profitPct": 6
+    },
+    {
+     "filingNo": "S&P no. CAL1293003",
+     "state": "TX",
+     "toi": "Homeowners",
+     "published": "2025-02-16",
+     "status": "Approved",
+     "approved": true,
+     "spRate": null,
+     "lossCostRef": "Nonesuch Rating Bureau loss costs NRB-HO-2023-01",
+     "page": 3,
+     "pages": {
+      "lossCostMultiplier": 9,
+      "targetLossRatio": 14,
+      "projectedLossRatio": 14,
+      "lossTrendPct": 15,
+      "expensePct": 16,
+      "profitPct": 16,
+      "lossCostRef": 9
+     },
+     "lossCostMultiplier": 1.25,
+     "targetLossRatio": 62.5,
+     "projectedLossRatio": 66.4,
+     "lossTrendPct": 6.5,
+     "expensePct": 27.4,
+     "profitPct": 5
+    },
+    {
+     "filingNo": "S&P no. CAL1221732",
+     "state": "SC",
+     "toi": "Commercial property",
+     "published": "2024-05-02",
+     "status": "Withdrawn",
+     "approved": false,
+     "spRate": 10.1,
+     "lossCostRef": "Nonesuch Rating Bureau loss costs NRB-HO-2024-02",
+     "page": 4,
+     "pages": {
+      "overallPct": 4,
+      "requestedPct": 4,
+      "indicatedPct": 14,
+      "maxPct": 22,
+      "minPct": 22,
+      "lossCostMultiplier": 9,
+      "targetLossRatio": 14,
+      "projectedLossRatio": 14,
+      "lossTrendPct": 15,
+      "expensePct": 16,
+      "profitPct": 16,
+      "lossCostRef": 9
+     },
+     "overallPct": 10.1,
+     "requestedPct": 10.1,
+     "indicatedPct": 11.6,
+     "maxPct": 20.1,
+     "minPct": 2.1,
+     "lossCostMultiplier": 1.12,
+     "targetLossRatio": 60,
+     "projectedLossRatio": 59.9,
+     "lossTrendPct": 5,
+     "expensePct": 29.1,
+     "profitPct": 4
+    },
+    {
+     "filingNo": "S&P no. CAL1134623",
+     "state": "MS",
+     "toi": "Inland marine",
+     "published": "2024-04-13",
+     "status": "Approved",
+     "approved": true,
+     "spRate": 13.7,
+     "lossCostRef": "Nonesuch Rating Bureau loss costs NRB-HO-2025-03",
+     "page": 5,
+     "pages": {
+      "overallPct": 5,
+      "requestedPct": 5,
+      "approvedPct": 5,
+      "indicatedPct": 14,
+      "maxPct": 22,
+      "minPct": 22,
+      "lossCostMultiplier": 9,
+      "targetLossRatio": 14,
+      "projectedLossRatio": 14,
+      "lossTrendPct": 15,
+      "expensePct": 16,
+      "profitPct": 16,
+      "lossCostRef": 9
+     },
+     "overallPct": 13.7,
+     "requestedPct": 13.7,
+     "approvedPct": 13.7,
+     "indicatedPct": 22.9,
+     "maxPct": 23.7,
+     "minPct": 5.7,
+     "lossCostMultiplier": 1.3,
+     "targetLossRatio": 64,
+     "projectedLossRatio": 74.2,
+     "lossTrendPct": 7.25,
+     "expensePct": 25.8,
+     "profitPct": 6
+    }
+   ],
+   "total": 12,
+   "summarised": 12
+  },
+  "programs": {
+   "programs": [],
+   "programsTotal": 0,
+   "forms": [],
+   "formsTotal": 0,
+   "summaries": 12
+  },
+  "market": {
+   "checked": true,
+   "reason": "",
+   "indexed": [
+    "FL",
+    "TX"
+   ],
+   "rows": [
+    {
+     "state": "FL",
+     "toi": "Homeowners",
+     "from": "2024-11-19",
+     "to": "2026-11-18",
+     "truncated": false,
+     "market": {
+      "filings": 46,
+      "companies": 6,
+      "withRate": 33,
+      "lo": -2.5,
+      "q1": 0.5,
+      "median": 3.5,
+      "q3": 8.9,
+      "hi": 13
+     },
+     "carrier": {
+      "filings": 0,
+      "withRate": 0,
+      "lo": null,
+      "hi": null,
+      "latest": null
+     },
+     "share": 0,
+     "rank": null
+    },
+    {
+     "state": "TX",
+     "toi": "Homeowners",
+     "from": "2024-11-19",
+     "to": "2026-11-18",
+     "truncated": false,
+     "market": {
+      "filings": 36,
+      "companies": 6,
+      "withRate": 25,
+      "lo": -2.7,
+      "q1": -0.3,
+      "median": 2.8,
+      "q3": 6.3,
+      "hi": 11
+     },
+     "carrier": {
+      "filings": 2,
+      "withRate": 1,
+      "lo": 9,
+      "hi": 9,
+      "latest": {
+       "rate": 9,
+       "date": "2026-03-25",
+       "approved": true
+      }
+     },
+     "share": 5.5556,
+     "rank": 5
+    }
+   ],
+   "coverage": [
+    {
+     "state": "FL",
+     "from": "2024-11-19",
+     "to": "2026-11-18",
+     "lastComplete": "2026-11-18",
+     "covered": 2712,
+     "missed": 0
+    },
+    {
+     "state": "TX",
+     "from": "2024-11-19",
+     "to": "2026-11-18",
+     "lastComplete": "2026-11-18",
+     "covered": 2712,
+     "missed": 10
+    }
+   ]
+  }
+ },
+ "text": {
+  "by": "plain",
+  "note": null,
+  "cover": {
+   "subtitle": "Rate filings: 3 companies in the group; 25 filings published 20 Nov 2021 to 18 Nov 2026"
+  },
+  "summary": {
+   "title": "25 filings over the last 5 years (rate filings)",
+   "points": [
+    {
+     "lead": "Filings",
+     "text": "S&P returned 25 filings (rate filings) published 20 Nov 2021 to 18 Nov 2026: 25 rate. The profile was narrowed to rate filings, so rule and form filings weren't searched."
+    },
+    {
+     "lead": "States",
+     "text": "Filings in 6 states; the most in TX (9)."
+    },
+    {
+     "lead": "Largest rate change",
+     "text": "13.8% in LA (Homeowners), published 23 Jan 2023, approved."
+    },
+    {
+     "lead": "Exposure",
+     "text": "The latest rate filings state $91.6M of written premium affected; the largest TX (Homeowners) at $27.3M (S&P no. CAL1380112, page 5)."
+    },
+    {
+     "lead": "Rate adequacy",
+     "text": "7 of 8 rate filings filed below the indicated change; FL (Inland marine) indicated 8.7%, filed 2.3%."
+    },
+    {
+     "lead": "Against the market",
+     "text": "FL Homeowners: 0 of 46 filings (0.0%); index median rate change 3.5% (derived)."
+    }
+   ]
+  },
+  "rates": {
+   "title": "Overall rate changes from (4.7%) to 13.8%",
+   "points": [
+    {
+     "lead": "Range",
+     "text": "From (4.7%) to 13.8% across 21 filings; each is S&P's overall figure for the filing, not weighted by premium."
+    },
+    {
+     "lead": "Not approved",
+     "text": "2 filings with a rate impact aren't approved; their figures may be the change asked for."
+    },
+    {
+     "lead": "Latest",
+     "text": "2.3% in FL (Inland marine), published 14 Jul, approved."
+    }
+   ]
+  },
+  "states": {
+   "title": "Most filings in TX: 9 of 25 (rate filings)",
+   "points": [
+    {
+     "lead": "Top states",
+     "text": "TX 9, FL 8, SC 3, GA 2."
+    },
+    {
+     "lead": "Spread",
+     "text": "Filings in 6 states of the 51 searched."
+    },
+    {
+     "lead": "Rate filings",
+     "text": "9 of the 9 filings in TX are rate filings."
+    }
+   ]
+  },
+  "years": {
+   "title": "Most filings in 2026: 5 of 25 (rate filings)",
+   "points": [
+    {
+     "lead": "Busiest year",
+     "text": "2026: 5 filings."
+    },
+    {
+     "lead": "By type",
+     "text": "Rate 25."
+    },
+    {
+     "lead": "Part years",
+     "text": "2021 and 2026 are part years."
+    }
+   ]
+  },
+  "forms": {
+   "title": "Form and rule filings left out by the narrowing (rate filings)",
+   "points": [
+    {
+     "lead": "Left out",
+     "text": "The profile was narrowed to rate filings, so form and rule filings weren't searched."
+    }
+   ]
+  },
+  "regulator": {
+   "title": "About 116 days with the regulator (median) (rate filings)",
+   "points": [
+    {
+     "lead": "Median",
+     "text": "About 116 days from submitted to published over 25 filings, from 31 to 155 days (approximate)."
+    },
+    {
+     "lead": "Slowest state",
+     "text": "GA: about 145 days, the median of 2 filings."
+    }
+   ]
+  },
+  "rateMap": {
+   "title": "Latest change an increase in 5 of 6 states (rate filings)",
+   "points": [
+    {
+     "lead": "Highest",
+     "text": "LA: 13.8%, published 23 Jan 2023, approved."
+    },
+    {
+     "lead": "Lowest",
+     "text": "TX: (4.4%), published 16 Jun, approved."
+    },
+    {
+     "lead": "Direction",
+     "text": "5 up, 1 down, 0 unchanged."
+    }
+   ]
+  },
+  "exposure": {
+   "title": "Latest rate filings state $91.6M of premium affected",
+   "points": [
+    {
+     "lead": "Largest book",
+     "text": "TX (Homeowners): $27.3M of written premium, 38,614 policyholders (S&P no. CAL1380112, page 5)."
+    },
+    {
+     "lead": "What it is",
+     "text": "What each rate filing says about the book it covers, from 12 summarised filings; not statutory premium. The total adds the latest filing for each state and type (derived)."
+    },
+    {
+     "lead": "Not yet read",
+     "text": "13 rate filings have no saved summary."
+    }
+   ]
+  },
+  "adequacy": {
+   "title": "Indicated above filed in 7 of 8 rate filings",
+   "points": [
+    {
+     "lead": "Indicated and filed",
+     "text": "FL (Inland marine): indicated 8.7%, filed 2.3%, approved 2.3% (S&P no. CAL1324679, page 14)."
+    },
+    {
+     "lead": "Loss costs",
+     "text": "FL (Inland marine): adopts Nonesuch Rating Bureau loss costs NRB-HO-2022-01, multiplier 1.185 (S&P no. CAL1324679, page 9)."
+    },
+    {
+     "lead": "Assumptions",
+     "text": "FL (Inland marine): loss trend 6.5%, target loss ratio 62.5%, projected loss ratio 71.8%, expenses 27.4% (S&P no. CAL1324679)."
+    }
+   ]
+  },
+  "programs": {
+   "title": "Programs and forms left out by the narrowing (rate filings)",
+   "points": [
+    {
+     "lead": "Left out",
+     "text": "The profile was narrowed to rate filings, so form filings weren't searched. The 12 saved summaries of the filings searched name no program or form."
+    }
+   ]
+  },
+  "market": {
+   "title": "0.0% of indexed FL Homeowners filings (rate filings)",
+   "points": [
+    {
+     "lead": "Share",
+     "text": "FL Homeowners: 0 of 46 filings (0.0%); index median rate change 3.5% (derived)."
+    },
+    {
+     "lead": "Coverage",
+     "text": "The market index holds the companies in the app's company list only, so it isn't the whole market."
+    },
+    {
+     "lead": "Narrowed alike",
+     "text": "The index's filings are counted for rate filings only, as the company's are."
+    }
+   ]
+  },
+  "questions": {
+   "title": "Key diligence questions (rate filings)",
+   "items": [
+    {
+     "title": "Rate requests in progress",
+     "text": "2 filings with a rate impact aren't approved, the largest 10.1% in SC. What outcome and timing does management expect?"
+    },
+    {
+     "title": "Indicated above filed",
+     "text": "In FL a rate filing indicated 8.7% but filed 2.3% (S&P no. CAL1324679). How and when will the gap be closed?"
+    },
+    {
+     "title": "Rate versus the market",
+     "text": "Its latest TX Homeowners change is 9.0% against an index median of 2.8% (derived). What explains the difference?"
+    },
+    {
+     "title": "Rate adequacy",
+     "text": "An approved overall rate change of 13.8% in LA (23 Jan 2023). What loss trend drove it, and is more needed?"
+    }
+   ]
+  }
+ }
+}

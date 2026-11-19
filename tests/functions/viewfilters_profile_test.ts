@@ -160,7 +160,7 @@ const factsSent = (body: any) => JSON.parse(String(body.messages[0].content).spl
 {
   const sc = P.fpScopeOf(["TX", "FL", "LA", "GA", "SC"], [{ id: 1, name: "Homeowners" }, { id: 2, name: "Dwelling fire" }, { id: 3, name: "Inland marine" }, { id: 5, name: "Commercial property" }]);
   ok("many states and types: codes and a count", sc.words === "FL, GA, LA, SC and TX, 4 types of insurance" && sc.short === "FL, GA, LA and 2 more, 4 types of insurance", sc);
-  ok("parseFpNarrow accepts codes in any case and ids as text", same(P.parseFpNarrow({ states: [" fl ", "TX"], typeOfInsuranceIds: ["4", 19] }), { ok: true, narrow: { states: ["FL", "TX"], typeOfInsuranceIds: [4, 19] } }));
+  ok("parseFpNarrow accepts codes in any case and ids as text", same(P.parseFpNarrow({ states: [" fl ", "TX"], typeOfInsuranceIds: ["4", 19] }), { ok: true, narrow: { states: ["FL", "TX"], typeOfInsuranceIds: [4, 19], filingTypeIds: [], filingStatusIds: [] } }));
   const old = { ...P.filingsSampleFacts("2026-11-18") } as any; delete old.scope;
   ok("facts made before narrowing existed read as not narrowed", P.fpScopeIn(old).narrowed === false && same(P.fpScoped(old, P.filingsPlainText(old)), P.filingsPlainText(old)));
 }

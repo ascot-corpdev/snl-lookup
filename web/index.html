@@ -3619,7 +3619,7 @@ function fpBody(action, pick, years, scope){
   // Narrow it down: only when something is chosen, so a profile nobody narrowed asks exactly what it always has
   if(scope && scope.states && scope.states.length) b.states=scope.states.slice();
   const ids=(scope&&scope.tois||[]).map(t=>Number(t.id)).filter(Number.isInteger); if(ids.length) b.typeOfInsuranceIds=ids;
-  return b;
+  return {...b, ...nwIdsOf(scope)};   // filing types and statuses, only when chosen
 }
 // what a filings profile was narrowed to: the facts' own scope (the function's words), else not narrowed
 function fpScopeOf(f){ const s=f&&f.scope; return s&&typeof s==="object"&&s.narrowed===true&&typeof s.words==="string"&&typeof s.short==="string" ? s : null; }
@@ -3693,7 +3693,7 @@ async function fpMake(fp){
 function fpScreen(){
   const fp=S.pf.fp, r=fp.res, s=r&&r.search; if(!r || r.facts.sample || !s) return null;
   const ints=a=>(Array.isArray(a)?a:[]).map(Number).filter(Number.isInteger);
-  return {view:"filings", search:{companyIds:ints(s.companyIds), institutionIds:ints(s.institutionIds), states:(Array.isArray(s.states)?s.states:[]).map(String), from:String(s.from||""), to:String(s.to||""), typeOfInsuranceIds:ints(s.typeOfInsuranceIds), filingTypeIds:[], filingStatusIds:[]},
+  return {view:"filings", search:{companyIds:ints(s.companyIds), institutionIds:ints(s.institutionIds), states:(Array.isArray(s.states)?s.states:[]).map(String), from:String(s.from||""), to:String(s.to||""), typeOfInsuranceIds:ints(s.typeOfInsuranceIds), filingTypeIds:ints(s.filingTypeIds), filingStatusIds:ints(s.filingStatusIds)},
     total:isNum(r.facts.totals&&r.facts.totals.filings)?+r.facts.totals.filings:0, companies:blank(r.facts.entity&&r.facts.entity.name)?[]:[String(r.facts.entity.name)]};
 }
 
@@ -3724,12 +3724,12 @@ function fpChosenHTML(){
 }
 function fpCostHTML(){
   const fp=S.pf.fp, pk=fp.pick, rg=fpRange(fp.years), sc=nwNow("fp");
-  const dates=`<span class="t2" id="fp_dates">Filings published ${fmtDay(rg.from)} to ${fmtDay(rg.to)}, ${sc.states.length?`in ${esc(sc.stWords)}`:"in every state in S&amp;P's list"}, ${sc.tois.length?`${esc(sc.toiWords)} only, `:""}every filing type and status.${sc.narrowed?" Every slide will say so.":""}</span>`;
+  const dates=`<span class="t2" id="fp_dates">Filings published ${fmtDay(rg.from)} to ${fmtDay(rg.to)}, ${sc.states.length?`in ${esc(sc.stWords)}`:"in every state in S&amp;P's list"}, ${sc.tois.length?`${esc(sc.toiWords)} only, `:""}${esc(sc.kinds)}.${sc.narrowed?" Every slide will say so.":""}</span>`;
   if(!pk) return dates;
   const big=fpTooBig(pk, fp.years);
   if(big) return `${dates}<div class="banner" id="fp_tooBig" role="alert"><span>${esc(big)}</span></div>`;
   const need=fpPlanned(pk.ids, fp.years);
-  return `${dates}<p class="t2" id="fp_cost" style="margin:0"><b>About ${plural(need,"S&amp;P request")}</b> (one for each 10 companies and each year of dates), plus up to ${FP_OVERHEAD} for signing in and S&amp;P's lists, and more if S&amp;P has over 500 filings in a year. One filings profile may use at most ${FP_MAX_SP_REQUESTS}. None if the same search was run before, here or on the Snapshot view, and saved.${sc.narrowed?" Narrowing the states or types doesn't change the number of S&amp;P requests, which depends on the companies and years; it means fewer filings come back.":""}</p>`;
+  return `${dates}<p class="t2" id="fp_cost" style="margin:0"><b>About ${plural(need,"S&amp;P request")}</b> (one for each 10 companies and each year of dates), plus up to ${FP_OVERHEAD} for signing in and S&amp;P's lists, and more if S&amp;P has over 500 filings in a year. One filings profile may use at most ${FP_MAX_SP_REQUESTS}. None if the same search was run before, here or on the Snapshot view, and saved.${sc.narrowed?` Narrowing the ${nwNarrowingOf(sc)} doesn't change the number of S&amp;P requests, which depends on the companies and years; it means fewer filings come back.`:""}</p>`;
 }
 function fpPlanHTML(fp){
   if(fp.libsErr) return `<div class="banner" id="fpLibsErr" role="alert"><span>${esc(fp.libsErr)}</span><button type="button" class="btn sm" data-act="fp-libs-retry">Try again</button></div>`;
@@ -3766,8 +3766,8 @@ function fpOutHTML(){
   const who = e.kind==="group" ? `Group of ${plural(e.companies,"company","companies")}${e.noId?`, ${count(e.noId)} more without S&P ids left out`:""}` : "Company";
   const sc=fpScopeOf(f);
   h+=`<div class="blk-h"><div><h3 id="fpName">${esc(blank(e.name)?"n/d":e.name)}${sc?` <span class="t2" id="fpScope">${esc(sc.short)}</span>`:""}</h3><p class="t2" id="fpMeta">${esc([who, `filings published ${fmtDay(P.from)} to ${fmtDay(P.to)}`, sc?`narrowed to ${sc.words}`:""].filter(Boolean).join(" · "))}</p></div></div>`;
-  if(!T.filings) h+=`<div class="info" id="fpNothing" role="status"><span><b>S&amp;P returned nothing for this search${sc?` of ${esc(sc.words)}`:""}.</b> No filings came back for ${esc(e.name||"this choice")} ${sc?`there`:"in any state"} over ${fpYearsText(P.years||fp.years)}. That doesn't prove nothing was filed${sc?", and it says nothing about other states or types of insurance":""}. Check the choice, or try a longer period${sc?" or a wider choice of states and types":""}.</span></div>`;
-  else h+=`<div class="pftiles" id="fpHead"><div class="pftile" data-k="filings"><span class="t2">Filings</span><b>${count(T.filings)}</b></div><div class="pftile" data-k="rate"><span class="t2">Rate filings</span><b>${count(T.rate)}</b></div><div class="pftile" data-k="states"><span class="t2">States with filings</span><b>${count(T.states)}</b></div></div>`;
+  if(!T.filings) h+=`<div class="info" id="fpNothing" role="status"><span><b>S&amp;P returned nothing for this search${sc?` of ${esc(sc.words)}`:""}.</b> No filings came back for ${esc(e.name||"this choice")} ${sc?`there`:"in any state"} over ${fpYearsText(P.years||fp.years)}. That doesn't prove nothing was filed${sc?`, and it says nothing about other ${nwOtherOr({ftypes:sc.filingTypes, fstats:sc.statuses})}`:""}. Check the choice, or try a longer period${sc?` or a wider choice of ${nwWiderOf({ftypes:sc.filingTypes, fstats:sc.statuses})}`:""}.</span></div>`;
+  else h+=`<div class="pftiles" id="fpHead"><div class="pftile" data-k="filings"><span class="t2">Filings</span><b>${count(T.filings)}</b></div><div class="pftile" data-k="rate"><span class="t2">Rate filings</span><b>${sc&&sc.leftOut&&sc.leftOut.rate&&!T.rate?"Left out":count(T.rate)}</b>${sc&&sc.leftOut&&sc.leftOut.rate&&!T.rate?`<span class="t2">by the narrowing</span>`:""}</div><div class="pftile" data-k="states"><span class="t2">States with filings</span><b>${count(T.states)}</b></div></div>`;
   if(sh.capped) h+=`<div class="banner" id="fpCapped" role="alert"><span><b>The search stopped early,</b> so these filings may be incomplete and the slides say so. Choose a shorter period or one company for a complete profile.</span></div>`;
   h+=fpPlanHTML(fp);
   h+=fpSumHTML(fp);
@@ -3796,7 +3796,7 @@ function fpRender(){
   else if(fpFilingsOff()) h+=`<div class="info" id="fpOff" role="status"><span><b>S&amp;P filings aren't set up yet,</b> so a new filings profile can't be searched. A profile whose search was run before still opens from its saved result. You can build the sample below meanwhile.</span></div>`;
   h+=`<form class="tcard" id="fpForm" novalidate aria-label="Choose a company or group and a period">${fpFinderHTML()}${fpChosenHTML()}
     <div class="f"><span>Period</span><div class="snper"><div class="seg" role="group" aria-label="Period">${FP_YEARS.map(y=>`<button type="button" class="btn sm" data-act="fp-years" data-y="${y}" aria-pressed="${fp.years===y}">${y===1?"Last year":`Last ${y} years`}</button>`).join("")}</div></div></div>
-    ${nwHTML("fp", {busy:!!fp.busy, note:"Only the states and types chosen are searched, and every slide, title, map and source line says what the profile was narrowed to. To change it, choose again and get the filings again."})}
+    ${nwHTML("fp", {busy:!!fp.busy, note:"Only what is chosen is searched, and every slide, title, map and source line says what the profile was narrowed to. A slide whose figures need a filing type or status left out is left out and says why. To change it, choose again and get the filings again."})}
     <div id="fp_costBox" style="display:flex;flex-direction:column;gap:8px;min-width:0">${fpCostHTML()}</div>
     ${fp.formErr?`<p class="err" id="fpFormErr" role="alert">${esc(fp.formErr)}</p>`:""}
     <div class="toolbar"><button type="button" class="btn primary" id="fp_get" data-act="fp-facts" ${fp.busy||(pf.statusErr&&pf.statusErr.err==="not_deployed")?"disabled":""}>${fp.busy==="facts"?"Getting the filings…":"Get the filings"}</button><span class="t2 grow">Shows which slides the profile will hold before anything is built.</span></div>
@@ -3858,7 +3858,9 @@ function fpSumHTML(fp){
   let h=`<section class="fpsum" id="fpSum" aria-labelledby="fpSumH"><div class="f"><span id="fpSumH">Filing summaries <em>what the exposure, rate adequacy and programs slides rest on</em></span></div>`;
   if(!U.checked){ h+=`<p class="t2" id="fpSumHave">${esc(blank(U.note)?"Saved summaries weren't looked up for this profile.":U.note)}</p>`; return h+`</section>`; }
   const sw=fpScopeOf(f);
-  h+=`<p style="margin:0" id="fpSumHave"><b>Saved summaries:</b> ${count(R.summarised)} of ${plural(R.filings,"rate filing")} and ${count(F.summarised)} of ${plural(F.filings,"form filing")}${sw?` in ${esc(sw.short)}`:""}${older?`; ${plural(older,"was","were")} made before the newer rate figures (loss costs, indicated change, assumptions) were read, and can be made again`:""}. Saved summaries cost nothing to use.</p>`;
+  // a kind the narrowing left out is said to be left out, never counted as 0 of 0
+  const lo=sw&&sw.leftOut&&typeof sw.leftOut==="object"?sw.leftOut:{}, rP=lo.rate&&!R.filings?"rate filings left out by the narrowing":`${count(R.summarised)} of ${plural(R.filings,"rate filing")}`, fP=lo.form&&!F.filings?"form filings left out by the narrowing":`${count(F.summarised)} of ${plural(F.filings,"form filing")}`;
+  h+=`<p style="margin:0" id="fpSumHave"><b>Saved summaries:</b> ${rP} and ${fP}${sw?` in ${esc(sw.short)}`:""}${older?`; ${plural(older,"was","were")} made before the newer rate figures (loss costs, indicated change, assumptions) were read, and can be made again`:""}. Saved summaries cost nothing to use.</p>`;
   const mk=fp.mk;
   if(fp.busy==="refresh") h+=`<div class="info" id="fpRefreshing" role="status"><span><b>Working out the figures again with the new summaries…</b> From the saved search: no new S&amp;P search.</span></div>`;
   if(fp.refreshErr) h+=`<div class="banner" id="fpRefreshErr" role="alert"><span><b>The new summaries are saved, but the figures couldn't be worked out again.</b> ${esc(errText(fp.refreshErr))}</span><button type="button" class="btn sm" data-act="fp-refresh-retry">Try again</button></div>`;
@@ -3871,7 +3873,7 @@ function fpSumHTML(fp){
   if(!cand.rate.length && !cand.form.length){ h+=`<p class="t2" id="fpSumNone">Every rate and form filing with a document already has a current summary${R.withDocument<R.filings||F.withDocument<F.filings?", or has no document to summarise":""}.</p>`; return h+(mk?fpSumMadeHTML(mk):"")+`</section>`; }
   const opts=(max, cur)=>Array.from({length:max+1},(_,i)=>`<option value="${i}" ${cur===i?"selected":""}>${i}</option>`).join("");
   h+=`<div class="inline fpsumpick"><label for="fp_nRate" class="t2"><b>Summarise the latest</b></label><select id="fp_nRate" data-bind="pf.fp.nRate" data-live style="width:auto" ${fp.busy?"disabled":""}>${opts(Math.min(FP_SUM_MAX, cand.rate.length), n.r)}</select><label for="fp_nForm" class="t2"><b>rate filings and the latest</b></label><select id="fp_nForm" data-bind="pf.fp.nForm" data-live style="width:auto" ${fp.busy?"disabled":""}>${opts(Math.min(FP_SUM_MAX, cand.form.length), n.f)}</select><span class="t2"><b>form filings</b></span></div>`;
-  h+=`<p class="t2" id="fpSumWhich" style="margin:0">${plural(cand.rate.length,"rate filing")} and ${plural(cand.form.length,"form filing")}${sw?` in ${esc(sw.short)}`:""} have no current summary${cand.rate.some(x=>x.older)||cand.form.some(x=>x.older)?" (older summaries are made again)":""}; the newest are taken first.</p>`;
+  h+=`<p class="t2" id="fpSumWhich" style="margin:0">${[lo.rate&&!R.filings?"":plural(cand.rate.length,"rate filing"), lo.form&&!F.filings?"":plural(cand.form.length,"form filing")].filter(Boolean).join(" and ")}${sw?` in ${esc(sw.short)}`:""} ${(lo.rate&&!R.filings)||(lo.form&&!F.filings)||cand.rate.length+cand.form.length!==1?"have":"has"} no current summary${cand.rate.some(x=>x.older)||cand.form.some(x=>x.older)?" (older summaries are made again)":""}; the newest are taken first.</p>`;
   if(q.length){
     const est=fpSumEstimate(q), cu=S.chatUse, left = cu && isNum(cu.dailyLimit) && isNum(cu.askedToday) ? Math.max(0, +cu.dailyLimit - +cu.askedToday) : null;
     h+=`<p style="margin:0" id="fpSumCost"><b>${plural(q.length,"new summary","new summaries")}: ${plural(q.length,"S&amp;P request")}, roughly ${fpUsd(est.lo)} to ${fpUsd(est.hi)} of Claude reading, and ${plural(q.length,"of today's questions","of today's questions")}.</b> <span class="t2">An estimate: up to the first 150 pages of each filing (${count(est.pages)} pages in all${est.unknown?`, counting ${plural(est.unknown,"filing")} with no page count as 150`:""}). What it really cost shows when it is done. Summaries are saved for everyone, so nobody pays to read these filings again.</span></p>`;
@@ -3936,10 +3938,31 @@ async function fpRefresh(fp){
    The picker: a "Choose states" panel with the Filings view's map and a list (each row a toggle button, the list being
    the control for keyboards and screen readers), the US Census regions as shortcuts, and a "Choose types" panel with
    S&P's list and a filter box. The chosen ones show as chips that can be removed. */
-function nwFresh(){ return {states:[], tois:[], open:"", stQ:"", toiQ:""}; }
-const NW_OF = {snap:()=>S.snap, cmp:()=>S.cmp, fp:()=>S.pf&&S.pf.fp, mk:()=>S.mk};
-const NW_PATH = {snap:"snap", cmp:"cmp", fp:"pf.fp", mk:"mk"};
-function nwOf(k){ const o=NW_OF[k]&&NW_OF[k](); if(!o) return null; if(!o.nw || typeof o.nw!=="object") o.nw=nwFresh(); return o.nw; }
+function nwFresh(){ return {states:[], tois:[], ftypes:[], fstats:[], open:"", stQ:"", toiQ:"", ftQ:"", fsQ:""}; }
+const NW_OF = {snap:()=>S.snap, cmp:()=>S.cmp, fp:()=>S.pf&&S.pf.fp, mk:()=>S.mk, fc:()=>S.fc};
+const NW_PATH = {snap:"snap", cmp:"cmp", fp:"pf.fp", mk:"mk", fc:"fc"};
+function nwOf(k){ const o=NW_OF[k]&&NW_OF[k](); if(!o) return null; if(!o.nw || typeof o.nw!=="object") o.nw=nwFresh(); for(const a of ["ftypes","fstats"]) if(!Array.isArray(o.nw[a])) o.nw[a]=[]; return o.nw; }
+/* Filing type and status (added to Narrow it down): S&P's own lists (serffFilingType, filingStatus) by id, as the
+   Filings form sends them (filingTypeIds, filingStatusIds); for the Market, the names its index holds. No status chosen
+   means every status, as always: the search sends none and the filings function asks S&P for every status in its list. */
+const NW_KINDS = {
+  ft:{key:"ftypes", q:"ftQ", ref:"serffFilingType", label:"Filing type", all:"All filing types", none:"All filing types", choose:"Choose filing types", change:"Change filing types", list:"filing types", one:"filing type", many:"filing types"},
+  fs:{key:"fstats", q:"fsQ", ref:"filingStatus", label:"Status", all:"All statuses", none:"All statuses", choose:"Choose statuses", change:"Change statuses", list:"statuses", one:"status", many:"statuses"}};
+function nwKindOpts(k, w){
+  if(k==="mk") return typeof mkHeld==="function" ? mkHeld(w) : [];
+  return refOptions(NW_KINDS[w].ref).map(o=>({id:String(o.id), name:blank(o.name)?String(o.id):String(o.name)}));
+}
+const nwKindWaiting = (k, w) => k==="mk" ? !!(S.mk&&S.mk.heldBusy) : (S.refsLoading && !S.refs);
+function nwKind(k, w){
+  const nw=nwOf(k); if(!nw) return [];
+  const list=[...new Set(nw[NW_KINDS[w].key])];
+  if(k==="mk") return list.map(n=>({id:n, name:n}));
+  const opts=nwKindOpts(k, w); return list.map(id=>opts.find(o=>o.id===id)).filter(Boolean);
+}
+const nwFtypes = k => nwKind(k, "ft"), nwFstats = k => nwKind(k, "fs");
+// ids as the filings function matches them (sameId in filings.ts): "11" and 11 are the same id
+const nwIdText = v => { if(v===null || v===undefined || typeof v==="object" || typeof v==="boolean") return null; const s=String(v).trim(); return !s ? null : /^[+-]?\d{1,15}(\.0+)?$/.test(s) ? String(Number(s)) : s.toUpperCase(); };
+const nwSameId = (a, b) => { const x=nwIdText(a), y=nwIdText(b); return x!==null && x===y; };
 // US Census regions, as shortcuts that add their states (DC with the South)
 const NW_REGIONS = [["Northeast","CT ME MA NH RI VT NJ NY PA"],["Midwest","IL IN MI OH WI IA KS MN MO NE ND SD"],["South","DE DC FL GA MD NC SC VA WV AL KY MS TN AR LA OK TX"],["West","AZ CO ID MT NV NM UT WY AK CA HI OR WA"]];
 const nwStateName = s => US_MAP[s] ? US_MAP[s][1] : s;
@@ -3964,20 +3987,61 @@ function nwTois(k){
    Texas, homeowners"), short for headings, names and source lines ("FL and TX, homeowners"); "" when not narrowed. */
 const nwLower = s => /^[A-Z][a-z]/.test(s) ? s[0].toLowerCase()+s.slice(1) : s;
 const nwAnd = a => a.length<2 ? a.join("") : a.slice(0,-1).join(", ")+" and "+a[a.length-1];
-function nwScope(states, tois){
+const nwOr = a => a.length<2 ? a.join("") : a.slice(0,-1).join(", ")+" or "+a[a.length-1];
+// filing types in words: "rate filings", "rate and form filings"; statuses: "approved", "approved or pending"
+const nwFtWords = (ft, max) => !ft.length ? "every filing type" : ft.length<=max ? (s=>/\bfilings?$/i.test(s)?s:s+" filings")(nwAnd(ft.map(t=>nwLower(String(t.name))))) : `${ft.length} filing types`;
+const nwFsWords = (fs, max) => !fs.length ? "every status" : fs.length<=max ? nwOr(fs.map(t=>nwLower(String(t.name)))) : `${fs.length} statuses`;
+/* When a filing type or a status is chosen, the parts are named with semicolons and only the parts narrowed: "FL and TX;
+   homeowners; rate filings; approved". kinds is the part of a sentence about filing types and statuses: "every filing
+   type and status" (as always), "rate filings only, every status", "every filing type, approved only". */
+function nwScope(states, tois, ftypes, fstats){
   const st=[...new Set((states||[]).map(String))].sort(), ty=(tois||[]).filter(t=>t&&!blank(t.name));
-  if(!st.length && !ty.length) return {narrowed:false, states:[], tois:[], words:"", short:"", stWords:"every state", toiWords:"every type of insurance"};
+  const ft=(ftypes||[]).filter(t=>t&&!blank(t.name)), fs=(fstats||[]).filter(t=>t&&!blank(t.name));
+  const ftW=nwFtWords(ft, 3), fsW=nwFsWords(fs, 3), ftS=nwFtWords(ft, 2), fsS=nwFsWords(fs, 2);
+  const kinds=!ft.length&&!fs.length ? "every filing type and status" : ft.length&&fs.length ? `${ftW}, ${fsW} only` : ft.length ? `${ftW} only, every status` : `every filing type, ${fsW} only`;
+  if(!st.length && !ty.length && !ft.length && !fs.length) return {narrowed:false, states:[], tois:[], ftypes:[], fstats:[], words:"", short:"", stWords:"every state", toiWords:"every type of insurance", ftWords:ftW, fsWords:fsW, kinds};
   const stW=!st.length ? "every state" : st.length<=3 ? nwAnd(st.map(nwStateName)) : st.length<=8 ? nwAnd(st) : `${st.slice(0,6).join(", ")} and ${st.length-6} more states`;
   const stS=!st.length ? "all states" : st.length<=4 ? nwAnd(st) : `${st.slice(0,3).join(", ")} and ${st.length-3} more`;
   const tyW=!ty.length ? "every type of insurance" : ty.length<=3 ? nwAnd(ty.map(t=>nwLower(String(t.name)))) : `${ty.length} types of insurance`;
   const tyS=!ty.length ? "all types" : ty.length<=2 ? nwAnd(ty.map(t=>nwLower(String(t.name)))) : `${ty.length} types of insurance`;
-  return {narrowed:true, states:st, tois:ty, words:`${stW}, ${tyW}`, short:`${stS}, ${tyS}`, stWords:stW, toiWords:tyW};
+  const more=ft.length||fs.length;
+  const words=more ? [st.length?stW:"", ty.length?tyW:"", ft.length?ftW:"", fs.length?fsW:""].filter(Boolean).join("; ") : `${stW}, ${tyW}`;
+  const short=more ? [st.length?stS:"", ty.length?tyS:"", ft.length?ftS:"", fs.length?fsS:""].filter(Boolean).join("; ") : `${stS}, ${tyS}`;
+  return {narrowed:true, states:st, tois:ty, ftypes:ft, fstats:fs, words, short, stWords:stW, toiWords:tyW, ftWords:ftW, fsWords:fsW, kinds};
 }
 // the scope a view would search now
-const nwNow = k => nwScope(nwStates(k), nwTois(k));
-// a scope as kept with a run: {states:[codes]|null, tois:[{id,name}]}; older runs have none (every state and type)
-const nwRunScope = sc => nwScope(sc&&Array.isArray(sc.states)?sc.states:[], sc&&Array.isArray(sc.tois)?sc.tois.filter(t=>t&&typeof t==="object"):[]);
-function nwKeep(k){ const st=nwStates(k), ti=nwTois(k); return {states:st.length?st:null, tois:ti.map(t=>({id:t.id, name:t.name}))}; }
+const nwNow = k => nwScope(nwStates(k), nwTois(k), nwFtypes(k), nwFstats(k));
+// a scope as kept with a run: {states:[codes]|null, tois:[{id,name}], ftypes?, fstats?}; older runs have none (everything)
+const nwObjs = a => Array.isArray(a) ? a.filter(t=>t&&typeof t==="object") : [];
+const nwRunScope = sc => nwScope(sc&&Array.isArray(sc.states)?sc.states:[], nwObjs(sc&&sc.tois), nwObjs(sc&&sc.ftypes), nwObjs(sc&&sc.fstats));
+function nwKeep(k){ const st=nwStates(k), ti=nwTois(k), ft=nwFtypes(k), fs=nwFstats(k), two=a=>a.map(t=>({id:t.id, name:t.name}));
+  return {states:st.length?st:null, tois:two(ti), ...(ft.length?{ftypes:two(ft)}:{}), ...(fs.length?{fstats:two(fs)}:{})}; }
+// the ids a scope sends to the filings function: filingTypeIds and filingStatusIds, only when chosen
+function nwIdsOf(scope){ const ids=a=>nwObjs(a).map(t=>Number(t.id)).filter(Number.isInteger).sort((x,y)=>x-y), ft=ids(scope&&scope.ftypes), fs=ids(scope&&scope.fstats);
+  return {...(ft.length?{filingTypeIds:ft}:{}), ...(fs.length?{filingStatusIds:fs}:{})}; }
+/* What a scope leaves out, for the sections that depend on it. UNCONFIRMED, as snapKinds and snapApproved are: a chosen
+   filing type counts as rate, rule or form when its S&P name says so, and a chosen status as approved when it says so. */
+function nwOut(sc){
+  const ft=sc&&sc.ftypes||[], fs=sc&&sc.fstats||[], k=ft.map(t=>snapKinds(t.name));
+  return {ft:ft.length>0, fs:fs.length>0, rate:ft.length>0&&!k.some(x=>x.rate), rule:ft.length>0&&!k.some(x=>x.rule), form:ft.length>0&&!k.some(x=>x.form),
+    approved:fs.length>0&&!fs.some(s=>snapApproved(s.name)), unapproved:fs.length>0&&fs.every(s=>snapApproved(s.name))};
+}
+/* The words for a section left out by the narrowing. run: the scope searched; shown: the scope shown (the same, or
+   narrower on the page). kind: rate, rule, form, formrule (both form and rule) or approved. what: "snapshot" and so on. */
+function nwOutText(run, shown, kind, what){
+  const ks=kind==="formrule" ? ["form","rule"] : Array.isArray(kind) ? kind : [kind], r=nwOut(run), searched=ks.every(x=>r[x]), sc=searched?run:shown;
+  const part = ks[0]==="approved" ? sc.fsWords : sc.ftWords;
+  const noun = ks[0]==="approved" ? "approved filings" : nwAnd(ks)+" filings";
+  return `Left out by the narrowing: this ${what} ${searched?"was":"is"} narrowed to ${part}, so ${noun} ${searched?"weren't searched":"aren't shown"}.`;
+}
+// the kinds among rate, rule and form a scope leaves out, in that order
+const nwOutKinds = o => ["rate","rule","form"].filter(x=>o[x]);
+// "says nothing about other ...": states or types of insurance, as before; with a filing type or status chosen, all four
+const nwOtherOr = sc => sc && ((sc.ftypes&&sc.ftypes.length)||(sc.fstats&&sc.fstats.length)) ? "states, types of insurance, filing types or statuses" : "states or types of insurance";
+// "Narrowing the states or types doesn't change ...", likewise
+const nwNarrowingOf = sc => sc && ((sc.ftypes&&sc.ftypes.length)||(sc.fstats&&sc.fstats.length)) ? "states, types, filing types or statuses" : "states or types";
+// "or a wider choice of ...", likewise
+const nwWiderOf = sc => sc && ((sc.ftypes&&sc.ftypes.length)||(sc.fstats&&sc.fstats.length)) ? "states, types, filing types and statuses" : "states and types";
 // a file name part for a narrowed scope: "-fl-tx-homeowners"
 const nwSlug = sc => sc&&sc.narrowed ? "-"+String(sc.short).toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,40) : "";
 
@@ -4015,20 +4079,45 @@ function nwToiPanelHTML(k, opts){
 /* The block: a heading, the chosen states and types as chips (or "All states", "All types of insurance"), the two
    "Choose" buttons, the open panel, and a note on what narrowing does for this view. o: {note, why (a state that can't
    be chosen), toiOff (text when the list of types isn't there), busy}. */
+/* A filing type or status list: S&P's list with a filter box when it is long, as the types of insurance are. */
+function nwKindPanelHTML(k, w, opts){
+  const K=NW_KINDS[w], nw=nwOf(k), on=new Set(nw[K.key]), q=String(nw[K.q]||"").trim().toLowerCase();
+  const shown=q ? opts.filter(o=>String(o.name).toLowerCase().includes(q)) : opts;
+  return `<div class="nwpanel" id="nw_${k}_${w}p" role="group" aria-label="Choose ${K.list}">
+    ${opts.length>12?`<input type="search" id="nw_${k}_${w}q" data-bind="${NW_PATH[k]}.nw.${K.q}" data-live value="${esc(nw[K.q]||"")}" placeholder="Filter this list" aria-label="Filter the list of ${K.list}" autocomplete="off" spellcheck="false">`:""}
+    <div class="checks" id="nw_${k}_${w}s" data-keep>${shown.map((o,i)=>`<label><input type="checkbox" id="nw_${k}_${w}${i}_${esc(String(o.id).replace(/[^A-Za-z0-9]/g,"").slice(0,20))}" data-act="nw-${w}" data-k="${k}" data-id="${esc(o.id)}" ${on.has(o.id)?"checked":""}>${esc(o.name)}</label>`).join("") || `<span class="t2">Nothing in the list matches.</span>`}</div>
+    <div class="toolbar"><button type="button" class="btn sm primary" data-act="nw-open" data-k="${k}" data-w="" id="nw_${k}_${w}Done">Done</button><button type="button" class="btn sm ghost" data-act="nw-${w}-none" data-k="${k}">${K.all}</button><span class="t2 grow">${plural(nwKind(k,w).length,K.one,K.many)} chosen of ${count(opts.length)}.</span></div></div>`;
+}
+/* The filing type or status column: chips, the Choose button, and what is in force. For status, the box always says
+   which: none chosen means every status (S&P needs one on every search, so the function sends every status in its list). */
+function nwKindColHTML(k, w, o){
+  const K=NW_KINDS[w], ch=nwKind(k, w), opts=nwKindOpts(k, w), wait=nwKindWaiting(k, w), off=!opts.length&&!ch.length, open=nwOf(k).open;
+  const chips=ch.length ? ch.map(t=>`<span class="cchip"><span><b>${esc(t.name)}</b></span><button type="button" data-act="nw-${w}-x" data-k="${k}" data-id="${esc(t.id)}" aria-label="${esc(`Remove ${t.name}`)}" ${o.busy?"disabled":""}>×</button></span>`).join("") : `<span class="nwall" id="nw_${k}_all${w}">${K.all}</span>`;
+  const btn=`<button type="button" class="btn sm" id="nw_${k}_${w}b" data-act="nw-open" data-k="${k}" data-w="${open===w?"":w}" aria-expanded="${open===w}" aria-controls="nw_${k}_${w}p" ${o.busy||off?"disabled":""}>${open===w?"Close the list":ch.length?K.change:K.choose}</button>${ch.length?`<button type="button" class="lnk t2" data-act="nw-${w}-none" data-k="${k}">${K.none}</button>`:""}`;
+  const note = wait ? `<p class="t2 nwnote" id="nw_${k}_${w}wait">Loading the list of ${K.list}…</p>`
+    : off ? `<p class="t2 nwnote" id="nw_${k}_${w}off">${esc(o[w+"Off"]||"S&P's lists aren't loaded yet, so this filter is left out of the search.")}</p>`
+    : w==="fs" ? `<p class="t2 nwnote" id="nw_${k}_fsnote">${esc(ch.length ? (o.fsSome||`Only filings with ${ch.length===1?"this status":"these statuses"} are searched.`) : (o.fsAll||"No status chosen: every status in S&P's list is searched."))}</p>` : "";
+  return `<div class="nwcol"><span class="nwlab" id="nw_${k}_${w}l">${K.label}</span><div class="nwrow chips" aria-labelledby="nw_${k}_${w}l">${chips}</div><div class="nwrow">${btn}</div>${note}</div>
+      ${open===w && opts.length ? nwKindPanelHTML(k, w, opts) : ""}`;
+}
 function nwHTML(k, o){
   o=o||{}; const nw=nwOf(k), sts=nwStates(k), tis=nwTois(k), sopts=nwStateOpts(k), topts=nwToiOpts(k), waitT=nwToiWaiting(k);
+  // only some of the filters (Programs and forms takes status alone): o.cols
+  if(o.cols) return `<div class="nwbox" id="nw_${k}" role="group" aria-labelledby="nw_${k}_h"><div class="nwhead"><b id="nw_${k}_h">${esc(o.title||"Narrow it down")}</b>${o.sub?`<span class="t2">${esc(o.sub)}</span>`:""}</div><div class="nwgrid">${o.cols.map(w=>nwKindColHTML(k, w, o)).join("")}</div>${o.note?`<p class="t2 nwnote" id="nw_${k}_note">${o.note}</p>`:""}</div>`;
   const chip=(label, sub, act, id, aria)=>`<span class="cchip"><span><b>${esc(label)}</b>${sub?` <span class="t2">${esc(sub)}</span>`:""}</span><button type="button" data-act="${act}" data-k="${k}" data-id="${esc(id)}" aria-label="${esc(aria)}" ${o.busy?"disabled":""}>×</button></span>`;
   const stChips = sts.length ? sts.map(s=>chip(nwStateName(s), s, "nw-st-x", s, `Remove ${nwStateName(s)}`)).join("") : `<span class="nwall" id="nw_${k}_allst">All states</span>`;
   const toiOff = !topts.length && !tis.length;
   const toiChips = tis.length ? tis.map(t=>chip(t.name, "", "nw-toi-x", t.id, `Remove ${t.name}`)).join("") : `<span class="nwall" id="nw_${k}_alltoi">All types of insurance</span>`;
   const toiNote = waitT ? `<p class="t2 nwnote" id="nw_${k}_toiwait">Loading the list of types of insurance…</p>` : toiOff ? `<p class="t2 nwnote" id="nw_${k}_toioff">${esc(o.toiOff||"S&P's lists aren't loaded yet, so this filter is left out of the search.")}</p>` : "";
   const open=nw.open, btn=(w, label, n)=>`<button type="button" class="btn sm" id="nw_${k}_${w}b" data-act="nw-open" data-k="${k}" data-w="${open===w?"":w}" aria-expanded="${open===w}" aria-controls="nw_${k}_${w}p" ${o.busy||(w==="toi"&&toiOff)?"disabled":""}>${open===w?"Close the list":label}</button>`;
-  let h=`<div class="nwbox" id="nw_${k}" role="group" aria-labelledby="nw_${k}_h"><div class="nwhead"><b id="nw_${k}_h">Narrow it down</b><span class="t2">optional: by state and type of insurance</span></div>
+  const more = o.more===false ? "" : nwKindColHTML(k, "ft", o)+nwKindColHTML(k, "fs", o);
+  let h=`<div class="nwbox" id="nw_${k}" role="group" aria-labelledby="nw_${k}_h"><div class="nwhead"><b id="nw_${k}_h">Narrow it down</b><span class="t2">optional: by state, type of insurance${o.more===false?"":", filing type and status"}</span></div>
     <div class="nwgrid">
       <div class="nwcol"><span class="nwlab" id="nw_${k}_stl">States</span><div class="nwrow chips" aria-labelledby="nw_${k}_stl">${stChips}</div><div class="nwrow">${btn("st", sts.length?"Change states":"Choose states")}${sts.length?`<button type="button" class="lnk t2" data-act="nw-st-all" data-k="${k}">All states</button>`:""}</div></div>
       ${open==="st" ? nwStatePanelHTML(k, sopts, o.why||"isn't in S&P's list of states") : ""}
       <div class="nwcol"><span class="nwlab" id="nw_${k}_toil">Type of insurance</span><div class="nwrow chips" aria-labelledby="nw_${k}_toil">${toiChips}</div><div class="nwrow">${btn("toi", tis.length?"Change types":"Choose types")}${tis.length?`<button type="button" class="lnk t2" data-act="nw-toi-none" data-k="${k}">All types</button>`:""}</div>${toiNote}</div>
       ${open==="toi" && topts.length ? nwToiPanelHTML(k, topts) : ""}
+      ${more}
     </div>`;
   if(o.note) h+=`<p class="t2 nwnote" id="nw_${k}_note">${o.note}</p>`;
   return h+`</div>`;
@@ -4043,42 +4132,62 @@ function nwShown(k, sc){
   let states=null, tois=null; const wideSt=[], wideT=[];
   if(chSt.length){ const inS=sSt?chSt.filter(s=>sSt.includes(s)):chSt; if(sSt) wideSt.push(...chSt.filter(s=>!sSt.includes(s))); if(!(sSt && inS.length===sSt.length)) states=inS; }
   else if(sSt) wideSt.push("every state");
-  if(chT.length){ const ids=sT.map(t=>String(t.id)), inS=sT.length?chT.filter(t=>ids.includes(String(t.id))):chT; if(sT.length) wideT.push(...chT.filter(t=>!ids.includes(String(t.id))).map(t=>t.name)); if(!(sT.length && inS.length===sT.length)) tois=inS; }
-  else if(sT.length) wideT.push("every type of insurance");
-  const shown=nwScope(states||sc.states, tois||sc.tois);
-  return {states, tois, wideSt, wideT, narrowed:!!(states||tois), wider:!!(wideSt.length||wideT.length), shown};
+  // types of insurance, filing types and statuses alike: by id, inside what was searched or wider
+  const byId=(ch, sL, every, wide)=>{ if(ch.length){ const ids=sL.map(t=>String(t.id)), inS=sL.length?ch.filter(t=>ids.includes(String(t.id))):ch; if(sL.length) wide.push(...ch.filter(t=>!ids.includes(String(t.id))).map(t=>t.name)); return sL.length && inS.length===sL.length ? null : inS; } if(sL.length) wide.push(every); return null; };
+  tois=byId(chT, sT, "every type of insurance", wideT);
+  const wideFt=[], wideFs=[], ftypes=byId(nwFtypes(k), sc.ftypes||[], "every filing type", wideFt), fstats=byId(nwFstats(k), sc.fstats||[], "every status", wideFs);
+  const shown=nwScope(states||sc.states, tois||sc.tois, ftypes||sc.ftypes, fstats||sc.fstats);
+  return {states, tois, ftypes, fstats, wideSt, wideT, wideFt, wideFs, narrowed:!!(states||tois||ftypes||fstats), wider:!!(wideSt.length||wideT.length||wideFt.length||wideFs.length), shown};
 }
 const nwToiKey = s => String(s??"").trim().toLowerCase();
-function nwRowOk(sh, r){
+// a filing type or status chosen by S&P's id: a row matches by its id ("11" or 11), or by name when it has no id
+const nwRowHas = (list, id, name) => !blank(id) ? list.some(x=>nwSameId(x.id, id)) : !blank(name) && list.some(x=>nwToiKey(x.name)===nwToiKey(name));
+// skip: one kind of narrowing not to apply (to count the rows that have none of it)
+function nwRowOk(sh, r, skip){
   if(sh.states){ const st=snapState(r); if(!st || !sh.states.includes(st)) return false; }
-  if(sh.tois){ const t=nwToiKey(r.typeOfInsurance); if(!t || !sh.tois.some(x=>nwToiKey(x.name)===t)) return false; }
+  if(sh.tois && skip!=="toi"){ const t=nwToiKey(r.typeOfInsurance); if(!t || !sh.tois.some(x=>nwToiKey(x.name)===t)) return false; }
+  if(sh.ftypes && skip!=="ft" && !nwRowHas(sh.ftypes, r.serffFilingTypeId, r.serffFilingType)) return false;
+  if(sh.fstats && skip!=="fs" && !nwRowHas(sh.fstats, r.filingStatusId, r.filingStatus)) return false;
   return true;
 }
-// rows kept, and how many were left out for having no type of insurance in S&P's data
+/* Rows kept, and how many filings were left out for having no type of insurance (noToi), no filing type (noFt) or no
+   status (noFs) in S&P's data, among those the rest of the narrowing keeps. */
 function nwFilterRows(sh, rows){
-  const list=Array.isArray(rows)?rows:[];
-  if(!sh.narrowed) return {rows:list, noToi:0};
-  return {rows:list.filter(r=>r&&typeof r==="object"&&nwRowOk(sh, r)), noToi:sh.tois?snapFilings(list.filter(r=>r&&typeof r==="object"&&blank(r.typeOfInsurance)&&(!sh.states||sh.states.includes(snapState(r))))).length:0};
+  const list=(Array.isArray(rows)?rows:[]).filter(r=>r&&typeof r==="object");
+  if(!sh.narrowed) return {rows:Array.isArray(rows)?rows:[], noToi:0, noFt:0, noFs:0};
+  const none=(on, skip, has)=>on ? snapFilings(list.filter(r=>!has(r)&&nwRowOk(sh, r, skip))).length : 0;
+  return {rows:list.filter(r=>nwRowOk(sh, r)), noToi:none(!!sh.tois, "toi", r=>!blank(r.typeOfInsurance)),
+    noFt:none(!!sh.ftypes, "ft", r=>!blank(r.serffFilingTypeId)||!blank(r.serffFilingType)), noFs:none(!!sh.fstats, "fs", r=>!blank(r.filingStatusId)||!blank(r.filingStatus))};
 }
 /* The lines over a narrowed result: what is shown of what was searched, with "Show everything"; and, when the choice
-   is wider than the search, an offer to search again. what: "snapshot" or "comparison". */
-function nwShownHTML(k, sh, n, of, noToi, what){
+   is wider than the search, an offer to search again. what: "snapshot" or "comparison". miss: the filings without a
+   type of insurance (a number, as before), or {noToi, noFt, noFs}. */
+function nwShownHTML(k, sh, n, of, miss, what){
   let h="";
-  if(sh.narrowed) h+=`<div class="info nwshown" id="${k}Shown" role="status"><span><b>Showing ${esc(sh.shown.short)}: ${count(n)} of ${plural(of,"filing")}.</b> Narrowed on this page from what the ${what} searched, without asking S&amp;P again.${noToi?` ${plural(noToi,"filing has","filings have")} no type of insurance in S&amp;P's data and ${noToi===1?"isn't":"aren't"} shown.`:""}</span><button type="button" class="btn sm" data-act="nw-show-all" data-k="${k}">Show everything</button></div>`;
+  const m=typeof miss==="object"&&miss ? miss : {noToi:miss||0}, gone=(c, what)=>c?` ${plural(c,"filing has","filings have")} no ${what} in S&amp;P's data and ${c===1?"isn't":"aren't"} shown.`:"";
+  if(sh.narrowed) h+=`<div class="info nwshown" id="${k}Shown" role="status"><span><b>Showing ${esc(sh.shown.short)}: ${count(n)} of ${plural(of,"filing")}.</b> Narrowed on this page from what the ${what} searched, without asking S&amp;P again.${gone(m.noToi,"type of insurance")}${gone(m.noFt,"filing type")}${gone(m.noFs,"status")}</span><button type="button" class="btn sm" data-act="nw-show-all" data-k="${k}">Show everything</button></div>`;
   if(sh.wider){
-    const more=[sh.wideSt.length?(sh.wideSt[0]==="every state"?"every state":nwAnd(sh.wideSt)):"", sh.wideT.length?(sh.wideT[0]==="every type of insurance"?"every type of insurance":nwAnd(sh.wideT.map(nwLower))):""].filter(Boolean).join(" and ");
+    const part=(a, every, f)=>!a||!a.length ? "" : a[0]===every ? every : f(a);
+    const parts=[part(sh.wideSt,"every state",nwAnd), part(sh.wideT,"every type of insurance",a=>nwAnd(a.map(nwLower))), part(sh.wideFt,"every filing type",a=>nwFtWords(a.map(x=>({name:x})), 99)), part(sh.wideFs,"every status",a=>nwOr(a.map(nwLower)))].filter(Boolean);
+    const more=(sh.wideFt&&sh.wideFt.length)||(sh.wideFs&&sh.wideFs.length) ? parts.join("; ") : parts.join(" and ");
     h+=`<div class="banner nwwide" id="${k}Wider" role="status"><span><b>You've chosen more than this ${what} searched:</b> ${esc(more)}. What is below covers only what was searched. Search again to include it.</span><button type="button" class="btn sm" data-act="nw-research" data-k="${k}">Search again</button></div>`;
   }
   return h;
 }
 // "Show everything": back to what was searched
-function nwShowAll(k, sc){ const nw=nwOf(k); if(!nw) return; nw.states=sc.states.slice(); nw.tois=sc.tois.map(t=>String(t.id)); nw.open=""; }
-function nwSetFrom(k, sc){ const nw=nwOf(k); if(!nw) return; const s=nwRunScope(sc); nw.states=s.states.slice(); nw.tois=s.tois.map(t=>String(t.id)); nw.open=""; nw.stQ=""; nw.toiQ=""; }
+function nwShowAll(k, sc){ const nw=nwOf(k); if(!nw) return; nw.states=sc.states.slice(); nw.tois=sc.tois.map(t=>String(t.id)); nw.ftypes=(sc.ftypes||[]).map(t=>String(t.id)); nw.fstats=(sc.fstats||[]).map(t=>String(t.id)); nw.open=""; }
+function nwSetFrom(k, sc){ const nw=nwOf(k); if(!nw) return; const s=nwRunScope(sc); nw.states=s.states.slice(); nw.tois=s.tois.map(t=>String(t.id)); nw.ftypes=s.ftypes.map(t=>String(t.id)); nw.fstats=s.fstats.map(t=>String(t.id)); nw.open=""; nw.stQ=""; nw.toiQ=""; nw.ftQ=""; nw.fsQ=""; }
 
 /* ----- clicks ----- */
 function nwAct(a, t){
   const k=t.dataset.k, nw=nwOf(k); if(!nw) return;
-  if(a==="nw-open"){ const was=nw.open; nw.open=t.dataset.w||""; render(); document.getElementById(nw.open ? `nw_${k}_${nw.open}q` : `nw_${k}_${was||"st"}b`)?.focus({preventScroll:true}); return; }
+  if(a==="nw-open"){ const was=nw.open; nw.open=t.dataset.w||""; render(); (nw.open ? (document.getElementById(`nw_${k}_${nw.open}q`)||document.querySelector(`#nw_${k}_${nw.open}s input`)) : document.getElementById(`nw_${k}_${was||"st"}b`))?.focus({preventScroll:true}); return; }
+  const kw=/^nw-(ft|fs)(-x|-none)?$/.exec(a);
+  if(kw){ const key=NW_KINDS[kw[1]].key, id=t.dataset.id;
+    nw[key] = kw[2]==="-none" ? [] : kw[2]==="-x" ? nw[key].filter(x=>x!==id) : nw[key].includes(id) ? nw[key].filter(x=>x!==id) : nw[key].concat(id);
+    nwChanged(k); render();
+    if(kw[2]==="-x") document.getElementById(`nw_${k}_${kw[1]}b`)?.focus({preventScroll:true});
+    return; }
   if(a==="nw-st"){ const s=t.dataset.s; nw.states=nw.states.includes(s)?nw.states.filter(x=>x!==s):nw.states.concat(s); }
   else if(a==="nw-st-x"){ const s=t.dataset.id; nw.states=nw.states.filter(x=>x!==s); }
   else if(a==="nw-st-all") nw.states=[];
@@ -4243,18 +4352,28 @@ function snapPayload(companyIds, institutionIds, scope, from, to){
   const p={action:"search", companyIds, institutionIds, states:(scope&&scope.states&&scope.states.length?scope.states:stateOptions().map(s=>s.id)).slice().sort(), from, to};
   const ids=(scope&&scope.tois||[]).map(t=>Number(t.id)).filter(Number.isInteger);
   if(ids.length) p.typeOfInsuranceIds=ids;
-  return p;
+  return {...p, ...nwIdsOf(scope)};   // filing types and statuses, only when chosen
 }
 // the result as shown: the rows narrowed on this page (when the choice is inside what was searched), and what says so
 function snapView(r, run){
   const sc=nwRunScope(run&&run.scope), sh=nwShown("snap", sc), f=nwFilterRows(sh, r.rows), p=r.params||run&&run.payload||{};
-  return {sc, sh, noToi:f.noToi, res:sh.narrowed ? {...r, rows:f.rows, params:{...p, states:sh.states?sh.states.slice():p.states}} : r};
+  return {sc, sh, noToi:f.noToi, miss:f, res:sh.narrowed ? {...r, rows:f.rows, params:{...p, states:sh.states?sh.states.slice():p.states}} : r};
 }
 // how the map and its key name a state that isn't in the snapshot
 function snapNsWhy(c, v){
   if(v.sh.states){ c.nsWhy="not shown: this page is narrowed to "+v.sh.shown.stWords; c.nsKey="Not shown: outside what this page is narrowed to"; c.shownOnly=true; }
   else if(v.sc.states.length){ c.nsWhy="not searched: this snapshot was narrowed to "+v.sc.stWords; c.nsKey="Not searched: outside what this snapshot was narrowed to"; }
 }
+/* What the narrowing leaves out, for the sections that depend on it (c.nw): the scope searched, the scope shown, and
+   which of rate, rule, form filings and approved ones it excludes (nwOut). A state with nothing shown when the page is
+   narrowed is "none in what is shown", never "S&P returned nothing". */
+function snapOutOf(c, v){
+  const shown=v.sh.narrowed?v.sh.shown:v.sc; c.nw={run:v.sc, shown, o:nwOut(shown), what:"snapshot"};
+  if(v.sh.narrowed){ c.noneWhy=`none of the filings searched there is in ${shown.words}`; c.noneKey=`Dashed outline: none of the filings searched there is in ${shown.short}`; }
+}
+// a note for a section some of whose filings the narrowing leaves out: "" when it leaves none out
+const snapOutNote = (c, kinds, id) => { const k=kinds.filter(x=>c.nw&&c.nw.o[x]); return k.length ? `<p class="t2 nwout" id="${id}">${esc(nwOutText(c.nw.run, c.nw.shown, k, c.nw.what))}</p>` : ""; };
+const snapOutBox = (c, kinds, id) => `<div class="info nwout" id="${id}" role="status" data-out><span>${esc(nwOutText(c.nw.run, c.nw.shown, kinds, c.nw.what))} Choose Show everything${c.nw.run.narrowed?" or a wider search":""} to see them.</span></div>`;
 function snapShowAll(){ const run=S.snap.ran; if(run) nwShowAll("snap", nwRunScope(run.scope)); }
 function snapReopen(i){
   const sn=S.snap, run=snapRecentList()[i]; if(!run || sn.busy) return;
@@ -4268,7 +4387,7 @@ function snapToFilings(){
   if(f.busy){ toast("The Filings view is still running a search. Try again when it has finished."); return; }
   const p=run.payload;
   f.chips=run.pick.ids.slice(0, MAX_COMPANIES).map(c=>({kind:c.kind, id:String(c.id), name:c.name||""}));
-  f.states=[...p.states]; f.from=p.from; f.to=p.to; f.toi=(Array.isArray(p.typeOfInsuranceIds)?p.typeOfInsuranceIds:[]).map(String); f.ftype=[]; f.fstatus=[]; f.toiFilter=""; f.tracking="";
+  f.states=[...p.states]; f.from=p.from; f.to=p.to; f.toi=(Array.isArray(p.typeOfInsuranceIds)?p.typeOfInsuranceIds:[]).map(String); f.ftype=(Array.isArray(p.filingTypeIds)?p.filingTypeIds:[]).map(String); f.fstatus=(Array.isArray(p.filingStatusIds)?p.filingStatusIds:[]).map(String); f.toiFilter=""; f.tracking="";
   f.q=""; f.matches=null; f.resolveNote=""; f.resolveErr=""; f.formErr="";
   location.hash="#filings";
   if(r.capped){ f.res=null; f.err=null; toast("The form is filled in. Press Search filings to run it: a partial result isn't saved, so it asks S&P again."); }
@@ -4367,6 +4486,9 @@ function snapRateBlockHTML(c){
   const exp=snapExpHTML("rates");
   let h=`<section class="snblk" id="snRates" aria-labelledby="snRateH"><div class="blk-h"><h3 id="snRateH">Rate changes over time</h3>${c.rateFs.length?snapAskLinkHTML("rates"):""}${exp}</div>`;
   h+=`<p class="t2 snnote" id="snRateNote">Each mark is one filing's overall rate impact as S&amp;P gives it. It isn't weighted by premium, and for a filing that isn't approved it may be what the company asked for rather than what was approved. Each filing's status is shown, and nothing here is averaged.</p>`;
+  if(!c.rateFs.length && c.nw && c.nw.o.rate) return h+snapOutBox(c, ["rate"], "snNoRates")+`</section>`;
+  h+=snapOutNote(c, ["rate"], "snRateOut");   // narrowed to other filing types: what is here is other filings with a rate impact
+  if(c.nw && c.nw.o.approved) h+=`<p class="t2 nwout" id="snRateStatus">${esc(`Narrowed to ${c.nw.shown.fsWords} filings, so every rate impact here may be the change asked for rather than one approved.`)}</p>`;
   if(!c.rateFs.length) return h+`<div class="info" id="snNoRates" role="status"><span>S&amp;P returned no rate filings for this search, so there are no rate changes to show.</span></div></section>`;
   if(!c.ratePts.length && !c.rateNoDate) h+=`<div class="info" id="snNoRates" role="status"><span>None of the ${plural(c.rateFs.length,"rate filing")} carries an overall rate impact in S&amp;P's data, so there is nothing to chart. The table below still lists them.</span></div>`;
   else{
@@ -4396,7 +4518,7 @@ function snapMapHTML(c, by){
     const [d, name, lx, ly]=US_MAP[code], s=stats.get(code);
     let cls="", fill="", what="";
     if(!searched.has(code) && !s){ cls="ns"; what=`${name} (${code}): ${c.nsWhy||"not searched, as it isn't in S&P's list of states"}`; }
-    else if(!s || !s.n){ cls="none"; what=`${name} (${code}): S&P returned nothing for this search`; }
+    else if(!s || !s.n){ cls="none"; what=`${name} (${code}): ${c.noneWhy||"S&P returned nothing for this search"}`; }
     else if(by==="rate"){
       if(!s.latest){ cls="nrate"; what=`${name} (${code}): ${plural(s.n,"filing")}, none with a rate impact`; }
       else { fill=SNAP_RATE_BINS.find(b=>b.has(s.latest.rate)).fill; what=`${name} (${code}): latest rate impact ${pct(s.latest.rate)}${s.latest.pub?`, ${fmtD(s.latest.pub)}`:""}, ${snapStatus(s.latest)}`; }
@@ -4409,13 +4531,13 @@ function snapMapHTML(c, by){
     : bins.map(b=>`<li><span class="sw" style="background:${b.fill}" aria-hidden="true"></span>${esc(b.label)}</li>`).join("");
   const ns=Object.keys(US_MAP).some(k=>!searched.has(k)&&!stats.has(k));
   return `<svg class="snchart snmap" id="snMapSvg" viewBox="0 0 975 610" role="img" aria-label="${by==="rate"?"Map of the latest overall rate impact in each state":"Map of the number of filings in each state"}. The same figures are in the table beside it." focusable="false">${shapes}${last}${labels}</svg>
-    <ul class="snlegend" id="snMapKey">${key}<li><span class="sw none" aria-hidden="true"></span>Dashed outline: S&amp;P returned nothing for this search</li>${ns?`<li><span class="sw" style="background:var(--tile)" aria-hidden="true"></span>${esc(c.nsKey||"Not searched: not in S&P's list of states")}</li>`:""}</ul>`;
+    <ul class="snlegend" id="snMapKey">${key}<li><span class="sw none" aria-hidden="true"></span>${c.noneKey?esc(c.noneKey):"Dashed outline: S&amp;P returned nothing for this search"}</li>${ns?`<li><span class="sw" style="background:var(--tile)" aria-hidden="true"></span>${esc(c.nsKey||"Not searched: not in S&P's list of states")}</li>`:""}</ul>`;
 }
 function snapMapBlockHTML(c){
   const sn=S.snap, by=sn.mapBy, rows=c.byState.filter(s=>s.n).sort((a,b)=>b.n-a.n || a.st.localeCompare(b.st)), none=c.byState.filter(s=>!s.n).map(s=>s.st).sort();
   const table=`<div class="tbl-wrap"><table class="sntbl" id="snStateTable"><caption class="sr">Filings by state</caption><thead><tr><th>State</th><th class="num">Filings</th><th class="num">Rate filings</th><th class="num">Latest rate impact</th></tr></thead><tbody>${rows.map(s=>`<tr><td>${esc(snapStLabel(s.st))}</td><td class="num">${count(s.n)}</td><td class="num">${count(s.rates)}</td><td class="num">${s.latest?`${esc(pct(s.latest.rate))}<div class="t2">${s.latest.pub?fmtD(s.latest.pub):"date n/d"}, ${esc(snapStatus(s.latest))}</div>`:"n/d"}</td></tr>`).join("")}</tbody></table></div>`;
   return `<section class="snblk" id="snMap" aria-labelledby="snMapH"><div class="blk-h"><h3 id="snMapH">Where it files</h3>${snapAskLinkHTML("states")}<span class="inline"><span class="seg" role="group" aria-label="Colour the map by"><button type="button" class="btn sm" data-act="snap-map" data-by="count" aria-pressed="${by!=="rate"}">Number of filings</button><button type="button" class="btn sm" data-act="snap-map" data-by="rate" aria-pressed="${by==="rate"}">Latest rate impact</button></span>${snapExpHTML("states")}</span></div>
-    <div class="sngrid"><div>${snapMapHTML(c, by)}</div><div>${table}${none.length?`<p class="t2" id="snStateNone">S&amp;P returned nothing for this search in ${esc(andList(none, 12))}. That isn't proof that nothing was filed there.</p>`:""}</div></div></section>`;
+    <div class="sngrid"><div>${snapMapHTML(c, by)}</div><div>${table}${none.length?(c.noneWhy?`<p class="t2" id="snStateNone">None of the filings searched in ${esc(andList(none, 12))} is in ${esc(c.nw.shown.words)}.</p>`:`<p class="t2" id="snStateNone">S&amp;P returned nothing for this search in ${esc(andList(none, 12))}. That isn't proof that nothing was filed there.</p>`):""}</div></div>${by==="rate"?snapOutNote(c, ["rate"], "snMapOut"):""}</section>`;
 }
 const SNAP_TYPE_FILL = ["#00539E","#EB008C","#00857C","#944599","#C46A1B","#0081C3","#262166"];
 const snapTypeFill = (t, i) => t ? SNAP_TYPE_FILL[i%SNAP_TYPE_FILL.length] : "#B8BCCB";
@@ -4441,6 +4563,8 @@ function snapYearBlockHTML(c){
 function snapLatestBlockHTML(c){
   const list=c.latestFR.slice(0, SNAP_LATEST);
   let h=`<section class="snblk" id="snLatest" aria-labelledby="snLatestH"><div class="blk-h"><h3 id="snLatestH">Latest form and rule filings</h3>${list.length?snapAskLinkHTML("forms"):""}${snapExpHTML("forms")}</div>`;
+  if(!list.length && c.nw && c.nw.o.form && c.nw.o.rule) return h+snapOutBox(c, ["form","rule"], "snNoForms")+`</section>`;
+  h+=snapOutNote(c, ["form","rule"], "snFormsOut");
   if(!list.length) return h+`<div class="info" id="snNoForms" role="status"><span>S&amp;P returned no form or rule filings for this search.</span></div></section>`;
   h+=`<p class="t2">The ${list.length<c.latestFR.length?`${count(list.length)} most recent of ${count(c.latestFR.length)}`:plural(list.length,"filing")}, newest first by the date S&amp;P published ${list.length===1?"it":"them"}.</p>`;
   h+=`<div class="tbl-wrap cardwrap" id="snLatestWrap" data-keep><table class="cards filings" id="snLatestTable"><thead><tr><th>Company</th><th>State</th><th>Filing type</th><th>Type of insurance</th><th>Status</th><th>Dates</th><th class="num">Rate impact</th><th>Description</th><th>Tracking number</th><th>Document</th></tr></thead>
@@ -4450,6 +4574,7 @@ function snapLatestBlockHTML(c){
 function snapDaysBlockHTML(c){
   let h=`<section class="snblk" id="snDays" aria-labelledby="snDaysH"><div class="blk-h"><h3 id="snDaysH">Time with the regulator, approximately</h3>${snapExpHTML("days")}</div>`;
   h+=`<p class="t2 snnote" id="snDaysNote">Days from the date a filing was submitted to the date S&amp;P published it, which is close to, but not always the same as, the date the regulator decided it. Read these as approximate.${c.dayLeft?` ${plural(c.dayLeft,"filing doesn't","filings don't")} have both dates and ${c.dayLeft===1?"is":"are"} left out.`:""}</p>`;
+  if(c.nw && (c.nw.o.ft || c.nw.o.fs)) h+=`<p class="t2 nwout" id="snDaysScope">${esc(`Counted over the filings in ${c.nw.shown.short} only.`)}</p>`;
   if(!c.dayRows.length) return h+`<div class="info" id="snNoDays" role="status"><span>None of these filings has both a submitted date and a publish date in S&amp;P's data.</span></div></section>`;
   const row=(label, g, cls)=>`<tr${cls?` class="${cls}"`:""}><td>${label}</td><td class="num">${count(g.n)}</td><td class="num">${count(g.median)}</td><td class="num">${esc(snapRange2(g.lo, g.hi, count))}</td></tr>`;
   return h+`<div class="tbl-wrap"><table class="sntbl" id="snDaysTable"><caption class="sr">Days from submitted to published, by state</caption><thead><tr><th>State</th><th class="num">Filings with both dates</th><th class="num">Median days</th><th class="num">Range of days</th></tr></thead><tbody>${c.dayRows.map(g=>row(esc(snapStLabel(g.st)), g)).join("")}${c.dayRows.length>1?row("<b>All states</b>", c.dayAll):""}</tbody></table></div></section>`;
@@ -4457,9 +4582,11 @@ function snapDaysBlockHTML(c){
 const snapExpHTML = tbl => `<span class="snexp"><button type="button" class="btn sm ghost" data-act="export" data-what="snap" data-tbl="${tbl}" data-fmt="csv">CSV</button><button type="button" class="btn sm ghost" data-act="export" data-what="snap" data-tbl="${tbl}" data-fmt="xlsx">Excel</button></span>`;
 function snapTilesHTML(c){
   const t=c.tiles, tile=(k, label, v, sub)=>`<div class="sntile" data-k="${k}"><span class="t2">${label}</span><b>${v}</b>${sub?`<span class="t2">${sub}</span>`:""}</div>`;
-  return `<div class="sntiles" id="snTiles">${tile("n","Filings",count(t.n),"in the period")}${tile("rate","Rate filings",count(t.rate))}${tile("rule","Rule filings",count(t.rule))}${tile("form","Form filings",count(t.form))}
+  // a kind the narrowing leaves out is said to be left out, never counted as 0
+  const o=c.nw?c.nw.o:{}, kind=(k, label)=>o[k]&&!t[k] ? tile(k, label, "Left out", "by the narrowing") : tile(k, label, count(t[k]));
+  return `<div class="sntiles" id="snTiles">${tile("n","Filings",count(t.n),"in the period")}${kind("rate","Rate filings")}${kind("rule","Rule filings")}${kind("form","Form filings")}
     ${tile("states","States with filings",count(t.states),`of ${plural(c.searched.length,"state")} ${c.shownOnly?"shown":"searched"}`)}${tile("latest","Latest filing",t.latest?fmtD(t.latest):"n/d",t.latest?"published":"")}</div>
-    <p class="t2" id="snTileNote">Each filing version counts once, however many of the companies are on it. A filing of more than one type, such as rate and rule, counts in each.${t.other?` ${plural(t.other,"filing is","filings are")} of another type or ${t.other===1?"has":"have"} none given.`:""}</p>`;
+    <p class="t2" id="snTileNote">Each filing version counts once, however many of the companies are on it. A filing of more than one type, such as rate and rule, counts in each.${t.other?` ${plural(t.other,"filing is","filings are")} of another type or ${t.other===1?"has":"have"} none given.`:""}${(k=>k.length?" "+esc(nwOutText(c.nw.run, c.nw.shown, k, "snapshot")):"")(nwOutKinds(o).filter(k=>!t[k]))}</p>`;
 }
 function snapByCompanyHTML(res, run){
   const bc=(Array.isArray(res.byCompany)?res.byCompany:[]).filter(x=>x&&typeof x==="object");
@@ -4477,18 +4604,18 @@ function snapOutHTML(){
     return `<div id="snErr">${problemHTML(sn.err, wide?"This snapshot is too big for one search.":"Couldn't get the snapshot.", wide?"":"snap-retry")}</div>`;
   }
   const v=snapView(r, run), c=snapCompute(v.res, run), p=c.p, pk=run&&run.pick, sc=v.sc, all=v.sh.narrowed?snapFilings(r.rows).length:c.fs.length;
-  snapNsWhy(c, v);
-  let h=`<div class="snhead" id="snHead"><div><h3 id="snName">${esc(who||"Snapshot")}${sc.narrowed?` <span class="t2" id="snScope">${esc(sc.short)}</span>`:""}</h3><p class="t2" id="snMeta">${esc([pk&&pk.kind==="group"?`Group of ${plural(pk.ids.length,"company","companies")} with S&P ids${pk.noId?`; ${plural(pk.noId,"company","companies")} without one left out`:""}`:pk&&pk.group?`Part of ${pk.group}`:"", `filings published ${fmtDay(p.from)} to ${fmtDay(p.to)}`, sc.states.length?`searched in ${sc.stWords}`:`${plural((r.params&&Array.isArray(r.params.states)?r.params.states:run.payload.states||[]).length,"state")} searched`, sc.tois.length?`${sc.toiWords} only`:"", "every filing type and status"].filter(Boolean).join(" · "))}</p></div>
+  snapNsWhy(c, v); snapOutOf(c, v);
+  let h=`<div class="snhead" id="snHead"><div><h3 id="snName">${esc(who||"Snapshot")}${sc.narrowed?` <span class="t2" id="snScope">${esc(sc.short)}</span>`:""}</h3><p class="t2" id="snMeta">${esc([pk&&pk.kind==="group"?`Group of ${plural(pk.ids.length,"company","companies")} with S&P ids${pk.noId?`; ${plural(pk.noId,"company","companies")} without one left out`:""}`:pk&&pk.group?`Part of ${pk.group}`:"", `filings published ${fmtDay(p.from)} to ${fmtDay(p.to)}`, sc.states.length?`searched in ${sc.stWords}`:`${plural((r.params&&Array.isArray(r.params.states)?r.params.states:run.payload.states||[]).length,"state")} searched`, sc.tois.length?`${sc.toiWords} only`:"", sc.kinds].filter(Boolean).join(" · "))}</p></div>
     <div class="toolbar"><button type="button" class="btn" id="sn_ask" data-act="snap-ask" data-q="all">Ask Claude about this</button><button type="button" class="btn" id="sn_toFilings" data-act="snap-filings" ${sn.busy?"disabled":""}>See every filing on the Filings view</button><span class="inline"><span class="t2">All filings:</span>${snapExpHTML("filings")}</span></div></div>`;
   if(sn.busy) h+=`<div class="banner" role="status" id="snRefreshing"><span>Asking S&amp;P again… What is below is from ${fmtAt(r.fetchedAt)} until the new result arrives.${bsProgHTML(sn.prog)}</span></div>`;
   else if(sn.err) h+=problemHTML(sn.err, "Couldn't refresh the snapshot.", "snap-refresh");
   else if(r.fromStore) h+=`<div class="info" id="snFromStore" role="status"><span>From the saved result fetched ${fmtAt(r.fetchedAt)}, so opening it used no S&amp;P requests.</span><button type="button" class="btn sm" data-act="snap-refresh">Refresh from S&amp;P</button></div>`;
-  h+=nwShownHTML("snap", v.sh, c.fs.length, all, v.noToi, "snapshot");
+  h+=nwShownHTML("snap", v.sh, c.fs.length, all, v.miss, "snapshot");
   if(r.capped) h+=`<div class="banner" id="snPartial" role="alert"><span><b>This snapshot is partial.</b> The search stopped at its limit before S&amp;P had returned everything, so every count below is lower than it should be. Choose a shorter period${pk&&pk.kind==="group"?" or one of the group's companies":""} and run it again.</span></div>`;
   if(!c.fs.length){
     const notes=(Array.isArray(r.notes)?r.notes:[]).filter(n=>!blank(n)&&!/^S&P returned no filings for [A-Z]{2} in this search/.test(String(n)));
     if(v.sh.narrowed && r.rows.length) return h+`<div class="info" id="snEmpty" role="status"><span>None of the ${plural(all,"filing")} searched is in ${esc(v.sh.shown.words)}. Choose Show everything to see them all.</span></div>`;
-    return h+`<div class="notes" id="snEmpty" role="status"><b>S&amp;P returned nothing for this search${sc.narrowed?` of ${esc(sc.words)}`:""}, and that isn't proof that nothing was filed</b><ul>${[EMPTY_RESULT, ...(sc.narrowed?[`The search was narrowed to ${sc.words}, so it says nothing about other states or types of insurance.`]:[]), ...notes].map(n=>`<li>${esc(n)}</li>`).join("")}</ul><p class="t2" style="margin:6px 0 0">Check that this is the company you meant, or try a longer period${sc.narrowed?" or a wider choice of states and types":""}.</p></div>`;
+    return h+`<div class="notes" id="snEmpty" role="status"><b>S&amp;P returned nothing for this search${sc.narrowed?` of ${esc(sc.words)}`:""}, and that isn't proof that nothing was filed</b><ul>${[EMPTY_RESULT, ...(sc.narrowed?[`The search was narrowed to ${sc.words}, so it says nothing about other ${nwOtherOr(sc)}.`]:[]), ...notes].map(n=>`<li>${esc(n)}</li>`).join("")}</ul><p class="t2" style="margin:6px 0 0">Check that this is the company you meant, or try a longer period${sc.narrowed?` or a wider choice of ${nwWiderOf(sc)}`:""}.</p></div>`;
   }
   const notes=(Array.isArray(r.notes)?r.notes:[]).filter(n=>!blank(n)&&!/^S&P returned no filings for [A-Z]{2} in this search/.test(String(n)));   // empty states are on the map
   h+=snapTilesHTML(c)+snapByCompanyHTML(r, run);
@@ -4524,12 +4651,12 @@ function snapChosenHTML(){
 }
 function snapCostHTML(){
   const sn=S.snap, pk=sn.pick, rg=snapRange(sn.years), states=stateOptions().length, sc=nwNow("snap");
-  const dates=`<span class="t2" id="sn_dates">Filings published ${fmtDay(rg.from)} to ${fmtDay(rg.to)}, ${sc.states.length?`in ${esc(sc.stWords)}`:`in all ${plural(states,"state")} in ${S.refs&&refOptions("serffFilingState").length?"S&amp;P's list":"the app's list"}`}, ${sc.tois.length?`${esc(sc.toiWords)} only, `:""}every filing type and status.</span>`;
+  const dates=`<span class="t2" id="sn_dates">Filings published ${fmtDay(rg.from)} to ${fmtDay(rg.to)}, ${sc.states.length?`in ${esc(sc.stWords)}`:`in all ${plural(states,"state")} in ${S.refs&&refOptions("serffFilingState").length?"S&amp;P's list":"the app's list"}`}, ${sc.tois.length?`${esc(sc.toiWords)} only, `:""}${esc(sc.kinds)}.</span>`;
   if(!pk) return dates;
   const big=snapTooBig(pk, sn.years);
   if(big) return `${dates}<div class="banner" id="sn_tooBig" role="alert"><span>${esc(big)}</span></div>`;
   const need=snapCost(pk.ids, rg.from, rg.to);
-  return `${dates}<p class="t2" id="sn_cost" style="margin:0"><b>About ${plural(need,"S&amp;P request")}</b> (one for each 10 companies for each year of dates), more if S&amp;P has many filings.${sc.narrowed?" Narrowing the states or types doesn't change that number, which depends on the companies and years; it means fewer filings come back, so fewer extra pages may be needed.":""} Once it has run, the result is saved: reopening it below costs no S&amp;P requests.</p>`;
+  return `${dates}<p class="t2" id="sn_cost" style="margin:0"><b>About ${plural(need,"S&amp;P request")}</b> (one for each 10 companies for each year of dates), more if S&amp;P has many filings.${sc.narrowed?` Narrowing the ${nwNarrowingOf(sc)} doesn't change that number, which depends on the companies and years; it means fewer filings come back, so fewer extra pages may be needed.`:""} Once it has run, the result is saved: reopening it below costs no S&amp;P requests.</p>`;
 }
 function snapRecentHTML(){
   const list=snapRecentList(); if(!list.length) return "";
@@ -4542,7 +4669,7 @@ function renderSnapshot(){
   if(fst && fst.configured===false) h+=`<div class="info" id="snOff" role="status"><span><b>S&amp;P filings aren't set up yet,</b> so a new snapshot can't be run. Snapshots run before still open from their saved results.</span></div>`;
   h+=`<form class="tcard" id="snForm" novalidate aria-label="Choose a company or group and a period">${snapFinderHTML()}${snapChosenHTML()}
     <div class="f"><span>Period</span><div class="snper"><div class="seg" role="group" aria-label="Period">${SNAP_YEARS.map(y=>`<button type="button" class="btn sm" data-act="snap-years" data-y="${y}" aria-pressed="${sn.years===y}">${y===1?"Last year":`Last ${y} years`}</button>`).join("")}</div></div></div>
-    ${nwHTML("snap", {busy:sn.busy, note:"Only the states and types chosen are asked of S&amp;P. After a snapshot has run, choosing fewer narrows what is shown at once, without asking S&amp;P again."})}
+    ${nwHTML("snap", {busy:sn.busy, note:"Only what is chosen is asked of S&amp;P. After a snapshot has run, choosing fewer narrows what is shown at once, without asking S&amp;P again."})}
     <div id="sn_costBox" style="display:flex;flex-direction:column;gap:8px;min-width:0">${snapCostHTML()}</div>
     ${sn.formErr?`<p class="err" id="sn_formErr" role="alert">${esc(sn.formErr)}</p>`:""}
     <div class="toolbar"><button type="button" class="btn primary" id="sn_run" data-act="snap-run" ${sn.busy||sn.picking||waitStates?"disabled":""}>${sn.busy?"Getting the snapshot…":waitStates?"Loading S&amp;P's list of states…":"Show snapshot"}</button></div>
@@ -4554,13 +4681,14 @@ function renderSnapshot(){
 function snapExport(tbl){
   const sn=S.snap, r=sn.res; if(!r) return null;
   const v=snapView(r, sn.ran), c=snapCompute(v.res, sn.ran), slug=(String(sn.ran&&sn.ran.pick.name||"snapshot").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,40)||"snapshot")+nwSlug(v.sh.narrowed?v.sh.shown:v.sc);
+  snapOutOf(c, v);
   const out=(name, sheet, cols, rows)=>({name:`snl-snapshot-${slug}-${name}-${TODAY()}`, sheet, cols, rows});
   const day=d=>d?iso(d):"", n=v=>v===null||v===undefined?null:+v;
   if(tbl==="filings") return out("filings","Filings",["Company","S&P company id","S&P institution id","All companies on the filing","State","Filing type","Type of insurance","Sub-type of insurance","Status","Date submitted","Date published","Effective date, new business","Effective date, renewals","Rate impact","Rate impact (number)","Description","Tracking number","Document id","Filing version id"],
     c.fs.slice().sort(snapByDate).map(f=>{ const r0=f.r, c0=r0.companies[0]||{}; return [c0.companyName, c0.companyId, c0.institutionId??r0.institutionId, r0.companies.map(x=>x.companyName).filter(x=>!blank(x)).join("; "), f.st||r0.serffFilingState, r0.serffFilingType, r0.typeOfInsurance, r0.subTypeOfInsurance, r0.filingStatus,
       dayOut(r0.dateSubmitted), dayOut(r0.publishDate), dayOut(r0.newBusReqEffDate), dayOut(r0.renewBusReqEffDate), rateImpact(r0), f.rate, r0.filingDescription, filingNoText(r0), r0.documentId, r0.filingVersionId]; }));
   if(tbl==="states") return out("states","By state",["State","State name","Filings","Rate filings","Latest rate impact (%)","Latest rate impact, date published","Latest rate impact, status","Note"],
-    c.byState.slice().sort((a,b)=>a.st.localeCompare(b.st)).map(s=>[s.st, s.name, s.n, s.rates, s.latest?s.latest.rate:null, s.latest?day(s.latest.pub):"", s.latest?snapStatus(s.latest):"", s.n?"":"S&P returned nothing for this search"]));
+    c.byState.slice().sort((a,b)=>a.st.localeCompare(b.st)).map(s=>[s.st, s.name, s.n, s.rates, s.latest?s.latest.rate:null, s.latest?day(s.latest.pub):"", s.latest?snapStatus(s.latest):"", s.n?"":c.noneWhy?"None of the filings searched there is in "+c.nw.shown.words:"S&P returned nothing for this search"]));
   if(tbl==="rates") return out("rate-changes","Rate changes",["State","Type of insurance","Rate filings","With a rate impact","Lowest rate impact (%)","Highest rate impact (%)","Latest rate impact (%)","Latest, date published","Latest, status"],
     c.rateRows.map(g=>[g.st, g.toi, g.n, g.withRate, n(g.lo), n(g.hi), g.latest?g.latest.rate:null, g.latest?day(g.latest.pub):"", g.latest?snapStatus(g.latest):""]));
   if(tbl==="years") return out("by-year","By year and type",["Year", ...c.types.map(snapTypeName), "All"], c.years.map(y=>[y.year, ...y.by, y.total]));
@@ -4576,7 +4704,7 @@ function snapScreen(){
   const sn=S.snap, r=sn.res, run=sn.ran; if(!r || !run) return null;
   const p=r.params||run.payload, ints=a=>(Array.isArray(a)?a:[]).map(Number).filter(Number.isInteger);
   const names=[...new Set([run.pick.name, ...run.pick.ids.map(c=>c.name)].filter(x=>!blank(x)).map(String))].slice(0,20);
-  return {view:"filings", search:{companyIds:ints(p.companyIds), institutionIds:ints(p.institutionIds), states:(Array.isArray(p.states)?p.states:[]).map(String), from:String(p.from||""), to:String(p.to||""), typeOfInsuranceIds:ints(p.typeOfInsuranceIds), filingTypeIds:[], filingStatusIds:[]},
+  return {view:"filings", search:{companyIds:ints(p.companyIds), institutionIds:ints(p.institutionIds), states:(Array.isArray(p.states)?p.states:[]).map(String), from:String(p.from||""), to:String(p.to||""), typeOfInsuranceIds:ints(p.typeOfInsuranceIds), filingTypeIds:ints(run.payload.filingTypeIds), filingStatusIds:ints(run.payload.filingStatusIds)},
     total:snapFilings(r.rows).length, companies:names,
     // that it is a Snapshot: an older snl-chat ignores this and describes the search alone
     snapshot:{name:snapAskName(run.pick.name, ""), kind:run.pick.kind==="group"?"group":"company", years:SNAP_YEARS.includes(+run.years)?+run.years:null, capped:!!r.capped}};
@@ -4645,8 +4773,9 @@ function snapAsk(k){
 // the line under the question box over a Snapshot
 function snapToldText(sc, past){
   const s=sc.search, sp=sc.snapshot, n=s.companyIds.length+s.institutionIds.length;
-  const nw=nwScope(s.states.length<stateOptions().length?s.states:[], (s.typeOfInsuranceIds||[]).map(id=>({id:String(id), name:(refOptions("typeOfInsurance").find(o=>String(o.id)===String(id))||{}).name||`type of insurance id ${id}`})));
-  return `${past?"Claude started":"Claude starts"} from this carrier and period: ${sp.name||"the snapshot's companies"}${sp.kind==="group"?` and its ${plural(n,"company","companies")}`:""}, filings published ${fmtDay(s.from)} to ${fmtDay(s.to)} in ${nw.states.length?nw.stWords:plural(s.states.length,"state")}${nw.tois.length?`, ${nw.toiWords} only`:""}, every filing type and status. ${plural(sc.total,"filing")} on screen${sp.capped?", a partial result":""}.`;
+  const named=(ids, field, what)=>(ids||[]).map(id=>({id:String(id), name:(refOptions(field).find(o=>String(o.id)===String(id))||{}).name||`${what} id ${id}`}));
+  const nw=nwScope(s.states.length<stateOptions().length?s.states:[], named(s.typeOfInsuranceIds,"typeOfInsurance","type of insurance"), named(s.filingTypeIds,"serffFilingType","filing type"), named(s.filingStatusIds,"filingStatus","status"));
+  return `${past?"Claude started":"Claude starts"} from this carrier and period: ${sp.name||"the snapshot's companies"}${sp.kind==="group"?` and its ${plural(n,"company","companies")}`:""}, filings published ${fmtDay(s.from)} to ${fmtDay(s.to)} in ${nw.states.length?nw.stWords:plural(s.states.length,"state")}${nw.tois.length?`, ${nw.toiWords} only`:""}, ${nw.kinds}. ${plural(sc.total,"filing")} on screen${sp.capped?", a partial result":""}.`;
 }
 
 /* ---------- Programs and forms: two to four carriers' form filings in one state, and what saved summaries say ----------
@@ -4800,7 +4929,7 @@ function fcProblem(){
 }
 function fcCostHTML(){
   const fc=S.fc, rg=snapRange(fc.years), types=fcFilingTypes(fc.wide);
-  const what=`<span class="t2" id="fc_dates">${esc(fc.wide?"Form, rule and rate filings":"Form filings")} published ${fmtDay(rg.from)} to ${fmtDay(rg.to)}${fc.state?` in ${esc(fcStateName(fc.state))}`:""}${fc.toi&&fcToiName(fc.toi)?`, ${esc(fcToiName(fc.toi))}`:""}, every status${types.length?` (S&amp;P's filing ${types.length===1?"type":"types"} ${esc(types.map(t=>t.name).join(", "))})`:""}.</span>`;
+  const what=`<span class="t2" id="fc_dates">${esc(fc.wide?"Form, rule and rate filings":"Form filings")} published ${fmtDay(rg.from)} to ${fmtDay(rg.to)}${fc.state?` in ${esc(fcStateName(fc.state))}`:""}${fc.toi&&fcToiName(fc.toi)?`, ${esc(fcToiName(fc.toi))}`:""}, ${nwFstats("fc").length?`${esc(nwFsWords(nwFstats("fc"), 3))} only`:"every status"}${types.length?` (S&amp;P's filing ${types.length===1?"type":"types"} ${esc(types.map(t=>t.name).join(", "))})`:""}.</span>`;
   if(fc.picks.length<FC_MIN || fc.picks.some(pk=>fcPickProblem(pk, fc.years))) return what+(fc.picks.length ? fc.picks.map(pk=>fcPickProblem(pk, fc.years)).filter(Boolean).map(m=>`<div class="banner" role="alert"><span>${esc(m)}</span></div>`).join("") : "");
   const plan=fcPlan(fc.picks, fc.years), req=plan.reduce((a,s)=>a+s.cost,0);
   return what+`<p class="t2" id="fc_cost" style="margin:0"><b>About ${plural(req,"S&amp;P request")}</b>${plan.length>1?` in ${count(plan.length)} searches run one after another, since one search takes at most ${MAX_COMPANIES} companies and ${SNAP_MAX_REQUESTS} requests`:" in one search"} (one for each 10 companies for each year of dates), more if S&amp;P has many filings. A search someone has already run costs none.</p>`;
@@ -4811,9 +4940,10 @@ async function fcRun(){
   const fc=S.fc; if(fc.busy || (fc.mk&&fc.mk.busy)) return;
   const problem=fcProblem(); if(problem){ fc.formErr=problem; render(); document.getElementById("fc_formErr")?.scrollIntoView({block:"nearest"}); return; }
   const rg=snapRange(fc.years), types=fcFilingTypes(fc.wide), nums=(ids,k)=>ids.filter(c=>c.kind===k).map(c=>Number(c.id));
-  fc.ran={picks:JSON.parse(JSON.stringify(fc.picks)), state:fc.state, toi:fc.toi, toiName:fcToiName(fc.toi), years:fc.years, wide:fc.wide, types, from:rg.from, to:rg.to};
+  const statuses=nwFstats("fc").map(t=>({id:t.id, name:t.name})), stIds=statuses.map(t=>Number(t.id)).filter(Number.isInteger);   // no status chosen: every status, as before
+  fc.ran={picks:JSON.parse(JSON.stringify(fc.picks)), state:fc.state, toi:fc.toi, toiName:fcToiName(fc.toi), years:fc.years, wide:fc.wide, types, from:rg.from, to:rg.to, ...(statuses.length?{statuses}:{})};
   fc.runs=fcPlan(fc.picks, fc.years).map(s=>({carriers:s.carriers, cost:s.cost, res:null, err:null,
-    payload:{action:"search", companyIds:nums(s.ids,"companyId"), institutionIds:nums(s.ids,"institutionId"), states:[fc.state], from:rg.from, to:rg.to, typeOfInsuranceIds:[Number(fc.toi)], filingTypeIds:types.map(t=>t.id)}}));
+    payload:{action:"search", companyIds:nums(s.ids,"companyId"), institutionIds:nums(s.ids,"institutionId"), states:[fc.state], from:rg.from, to:rg.to, typeOfInsuranceIds:[Number(fc.toi)], filingTypeIds:types.map(t=>t.id), ...(stIds.length?{filingStatusIds:stIds}:{})}}));
   fc.digests={}; fc.asked={}; fc.getErr=null; fc.results={}; fc.mk=null; fc.open={}; fc.formErr="";
   await fcSearches(fc);
 }
@@ -5085,11 +5215,12 @@ function fcFormHTML(){
   const toiBox = tois.length ? `<select id="fc_toi" data-bind="fc.toi" data-live><option value="">Choose a type of insurance</option>${tois.map(o=>`<option value="${esc(o.id)}" ${String(o.id)===fc.toi?"selected":""}>${esc(o.name)}</option>`).join("")}</select>`
     : `<p class="t2" id="fc_noToi">${waitRefs?"Loading S&amp;P's lists…":"S&amp;P's list of types of insurance isn't loaded yet, so this can't be chosen. Refresh the lists on the Filings view."}</p>`;
   return `<form class="tcard" id="fcForm" novalidate aria-label="Choose carriers, a state, a type of insurance and a period">${fcFinderHTML()}${fcChosenHTML()}
-    <div class="nwbox" id="fc_narrow" role="group" aria-labelledby="fc_narrowH"><div class="nwhead"><b id="fc_narrowH">Narrow it down</b><span class="t2">one state and one type of insurance: programs and forms are compared within one market</span></div>
+    <div class="nwbox" id="fc_narrow" role="group" aria-labelledby="fc_narrowH"><div class="nwhead"><b id="fc_narrowH">Narrow it down</b><span class="t2">one state and one type of insurance: programs and forms are compared within one market; optionally, by status</span></div>
     <div class="fcsel">
       <div class="f"><label for="fc_state">State <em>one</em></label><select id="fc_state" data-bind="fc.state" data-live><option value="">Choose a state</option>${states.map(s=>`<option value="${esc(s.id)}" ${s.id===fc.state?"selected":""}>${esc(s.name!==s.id?`${s.name} (${s.id})`:s.id)}</option>`).join("")}</select></div>
       <div class="f"><label for="fc_toi">Type of insurance <em>one, from S&amp;P's list</em></label>${toiBox}${fc.toi?"":`<p class="t2" id="fc_toiHint">Choose one, such as Homeowners: the comparison is for one type of insurance.</p>`}</div>
-    </div></div>
+    </div>
+    <div class="nwgrid" id="fc_status">${nwKindColHTML("fc", "fs", {busy:fc.busy, fsAll:"No status chosen: forms of every status are searched.", fsSome:`Only filings with ${nwFstats("fc").length===1?"this status":"these statuses"} are searched, for every carrier alike.`})}</div></div>
     <div class="fcopts"><div class="f"><span>Period</span><div class="seg" role="group" aria-label="Period">${FC_YEARS.map(y=>`<button type="button" class="btn sm" data-act="fc-years" data-y="${y}" aria-pressed="${fc.years===y}">${y===1?"Last year":`Last ${y} years`}</button>`).join("")}</div></div>
       <label class="unl" for="fc_wide"><input type="checkbox" id="fc_wide" data-act="fc-wide" ${fc.wide?"checked":""}><span>Include rule and rate filings too <em class="t2" style="font-style:normal">Form filings alone by default</em></span></label></div>
     <div id="fc_costBox" style="display:flex;flex-direction:column;gap:8px;min-width:0">${fcCostHTML()}</div>
@@ -5118,7 +5249,8 @@ function fcSumCellHTML(fc, f){
 }
 function fcFiledHTML(fc, c){
   if(!c.list) return c.run&&c.run.err ? `<p class="err" data-err>Its search didn't run: ${esc(errText(c.run.err))}</p>` : `<p class="t2" role="status">Waiting for its search…</p>`;
-  if(!c.list.length) return `<div class="notes" data-empty role="status"><b>S&amp;P returned nothing for this search</b> for ${esc(c.pk.name)}. That isn't proof that nothing was filed: check the carrier, or try a longer period${S.fc.ran.wide?"":" or include rule and rate filings"}.</div>`;
+  const fst=S.fc.ran.statuses||[];
+  if(!c.list.length) return `<div class="notes" data-empty role="status"><b>S&amp;P returned nothing for this search</b> for ${esc(c.pk.name)}${fst.length?` with ${esc(nwFsWords(fst, 3))} only`:""}. That isn't proof that nothing was filed${fst.length?", and it says nothing about other statuses":""}: check the carrier, or try a longer period${S.fc.ran.wide?"":" or include rule and rate filings"}${fst.length?" or more statuses":""}.</div>`;
   const t=v=>blank(v)?"n/d":esc(v);
   return `<div class="tbl-wrap cardwrap" id="fcFiledWrap${c.i}" data-keep><table class="cards fcfiled" id="fcFiled${c.i}"><thead><tr><th>Filing</th><th>Filing type</th><th>Status</th><th>Submitted</th><th>Published</th><th class="num">Pages</th><th>Summary</th><th>Document</th></tr></thead><tbody>${c.list.map(f=>`<tr data-dk="${esc(f.dk)}">
     <td class="c-tn">${filingNoHTML(f.r)}</td><td class="c-half" data-label="Filing type">${t(f.r.serffFilingType)}</td><td class="c-half" data-label="Status">${t(f.r.filingStatus)}</td>
@@ -5205,7 +5337,7 @@ function fcScreen(){
   const names=uniq([...ran.picks.map(p=>p.name), ...ran.picks.flatMap(p=>p.ids.map(c=>c.name))].filter(x=>!blank(x)).map(String)).slice(0,20);
   const seen=new Set(); let total=0; for(const c of fcCarriers(fc)) for(const f of c.list||[]){ const k=f.dk||f.key; if(!seen.has(k)){ seen.add(k); total++; } }
   return {view:"filings", search:{companyIds:uniq(done.flatMap(x=>x.payload.companyIds)), institutionIds:uniq(done.flatMap(x=>x.payload.institutionIds)), states:[ran.state], from:ran.from, to:ran.to,
-    typeOfInsuranceIds:[Number(ran.toi)], filingTypeIds:ran.types.map(t=>t.id), filingStatusIds:[]}, total, companies:names};
+    typeOfInsuranceIds:[Number(ran.toi)], filingTypeIds:ran.types.map(t=>t.id), filingStatusIds:(ran.statuses||[]).map(t=>Number(t.id)).filter(Number.isInteger)}, total, companies:names};
 }
 const FC_ASK = "Do these carriers have separate programs or forms for different kinds of customer, such as private client and middle market? Use their form filings in this search and cite the pages.";
 function fcAsk(){ if(!fcScreen()) return; if(!S.ask.turns.length && !S.ask.draft.trim()) S.ask.draft=FC_ASK; openAsk(); }
@@ -5394,7 +5526,8 @@ async function cmpRun(given){
     if(cm.carriers.length<CMP_MIN){ cm.formErr=`Choose at least ${CMP_MIN} carriers to compare: find each by name above.`; render(); return; }
     const big=cmpTooBig(cm.carriers, cm.years); if(big){ cm.formErr=big; render(); return; }
     const scope=nwKeep("cmp"), toi=scope.tois.map(x=>Number(x.id)).filter(Number.isInteger);
-    run={carriers:JSON.parse(JSON.stringify(cm.carriers)), years:cm.years, scope, parts:cmpPlan(cm.carriers, cm.years, scope.states||stateOptions().map(s=>s.id).sort()).parts.map(p=>toi.length?{...p, typeOfInsuranceIds:toi}:p)};
+    const more=nwIdsOf(scope);   // filing types and statuses, only when chosen: every carrier alike
+    run={carriers:JSON.parse(JSON.stringify(cm.carriers)), years:cm.years, scope, parts:cmpPlan(cm.carriers, cm.years, scope.states||stateOptions().map(s=>s.id).sort()).parts.map(p=>({...(toi.length?{...p, typeOfInsuranceIds:toi}:p), ...more}))};
   }
   cm.ran=run; cm.parts=run.parts.map(payload=>({payload, state:"wait", res:null, err:null})); cm.who="all"; cm.shown=CMP_LATEST;
   await cmpGo(cm, cm.parts.map((_,i)=>i), false);
@@ -5450,6 +5583,8 @@ function cmpCompute(cm){
   // narrowed on this page when the choice is inside what was searched (Narrow it down); every carrier alike
   const sc=nwRunScope(run.scope), sh=nwShown("cmp", sc), rows0=got.flatMap(p=>p.res.rows), fr=nwFilterRows(sh, rows0);
   const allN=sh.narrowed ? snapFilings(rows0).filter(r=>cmpOwners(r, index).length).length : null;
+  // each carrier's filings before the page narrowed them: one with some, none of them shown, isn't "S&P returned nothing"
+  const before=sh.narrowed ? (l=>cars.map((x,i)=>l.filter(o=>o.includes(i)).length))(snapFilings(rows0).map(r=>cmpOwners(r, index))) : null;
   const all=snapFilings(fr.rows).map(r=>({r, k:snapKinds(r.serffFilingType), st:snapState(r), toi:blank(r.typeOfInsurance)?"":String(r.typeOfInsurance), type:blank(r.serffFilingType)?"":String(r.serffFilingType),
     pub:parseDay(r.publishDate), sub:parseDay(r.dateSubmitted), rate:isNum(r.overallRateImpact)?+r.overallRateImpact:null, ok:snapApproved(r.filingStatus)}));
   for(const f of all) f.owners=cmpOwners(f.r, index);
@@ -5469,7 +5604,8 @@ function cmpCompute(cm){
   const y0=parseDay(p0.from), y1=parseDay(p0.to), years=[];
   if(y0 && y1) for(let y=y0.getFullYear(); y<=y1.getFullYear() && years.length<20; y++) years.push(y);
   const yearRows=cars.map((c,i)=>{ const l=of(i); return {by:years.map(y=>l.filter(f=>f.pub&&f.pub.getFullYear()===y).length), undated:l.filter(f=>!f.pub).length}; });
-  return {from:p0.from, to:p0.to, sc, sh, allN, noToi:fr.noToi, cars, cover, fs, stray, shared, sum, searched, stateRows, toiRows, years, yearRows, noState:fs.filter(f=>!f.st).length,
+  const shownSc=sh.narrowed?sh.shown:sc;
+  return {from:p0.from, to:p0.to, sc, sh, allN, before, noToi:fr.noToi, miss:fr, nw:{run:sc, shown:shownSc, o:nwOut(shownSc), what:"comparison"}, cars, cover, fs, stray, shared, sum, searched, stateRows, toiRows, years, yearRows, noState:fs.filter(f=>!f.st).length,
     ratePts:cars.map((c,i)=>of(i).filter(f=>f.rate!==null&&f.pub).sort((a,b)=>a.pub-b.pub)), rateNoDate:fs.filter(f=>f.rate!==null&&!f.pub).length,
     latest:fs.slice().sort(snapByDate), got, notes:[...new Set(got.flatMap(p=>Array.isArray(p.res.notes)?p.res.notes:[]))].filter(n=>!blank(n)&&!/^S&P returned no(thing| filings) for /.test(String(n))&&!/^The search stopped|^S&P was answering slowly/.test(String(n)))};
 }
@@ -5479,22 +5615,25 @@ const cmpExpHTML = tbl => `<span class="snexp"><button type="button" class="btn 
 const cmpNames = (c, f) => f.owners.map(i=>c.cars[i].name);
 const cmpCoverText = v => v.none ? "Not fetched" : !v.all ? `Partly fetched: ${v.got} of ${v.of} companies` : v.capped ? "Partial: the search stopped early" : "";
 function cmpSummaryHTML(c){
+  const o=c.nw.o, hid=i=>c.before&&c.before[i]>0;   // a carrier with filings, none in what this page is narrowed to
   const rows=c.cars.map((car,i)=>{ const s=c.sum[i], v=c.cover[i], warn=cmpCoverText(v), none=!v.none && !s.n;
     const td=(cls, label, h)=>`<td class="${cls}" data-label="${label}">${h}</td>`, nd=v.none||none;
-    const lr=s.latestRate;
+    const lr=s.latestRate, out=`<span class="t2 nwout">Left out</span>`;
+    const kind=k=>v.none?"n/d":o[k]&&!s[k]?out:nd?"n/d":count(s[k]);
     return `<tr data-i="${i}">
       <td class="c-car"><b>${esc(car.name)}</b><span class="t2">${esc(car.kind==="group"?`Group · ${cmpCos(car)}`:car.group?`Company · part of ${car.group}`:"Company")}</span>${warn?`<div class="cmwarn t2">${esc(warn)}</div>`:""}</td>
-      ${td("num c-half","Filings", v.none?"n/d":none?`<span class="t2">S&amp;P returned nothing</span>`:count(s.n))}
-      ${td("num c-half","Rate filings", nd?"n/d":count(s.rate))}${td("num c-half","Rule filings", nd?"n/d":count(s.rule))}${td("num c-half","Form filings", nd?"n/d":count(s.form))}
-      ${td("num c-half","States with filings", nd?"n/d":count(s.states))}${td("num c-half","Rate filings with an impact", nd?"n/d":count(s.withRate))}
-      ${td("num c-half","Range of overall rate impacts", esc(snapRange2(s.lo, s.hi, pct)))}
-      ${td("num c-half","Latest rate change", lr?`<b>${esc(pct(lr.rate))}</b><div class="t2">${esc(`${lr.st||"state n/d"}, ${lr.pub?fmtD(lr.pub):"date n/d"}, ${snapStatus(lr)}`)}</div>`:"n/d")}
+      ${td("num c-half","Filings", v.none?"n/d":none?(hid(i)?`<span class="t2">None in ${esc(c.nw.shown.short)}</span>`:`<span class="t2">S&amp;P returned nothing</span>`):count(s.n))}
+      ${td("num c-half","Rate filings", kind("rate"))}${td("num c-half","Rule filings", kind("rule"))}${td("num c-half","Form filings", kind("form"))}
+      ${td("num c-half","States with filings", nd?"n/d":count(s.states))}${td("num c-half","Rate filings with an impact", o.rate&&!s.withRate&&!v.none?out:nd?"n/d":count(s.withRate))}
+      ${td("num c-half","Range of overall rate impacts", o.rate&&s.lo===null&&!v.none?out:esc(snapRange2(s.lo, s.hi, pct)))}
+      ${td("num c-half","Latest rate change", lr?`<b>${esc(pct(lr.rate))}</b><div class="t2">${esc(`${lr.st||"state n/d"}, ${lr.pub?fmtD(lr.pub):"date n/d"}, ${snapStatus(lr)}`)}</div>`:o.rate&&!v.none?out:"n/d")}
       ${td("num c-half","Latest filing", s.latest?esc(fmtD(s.latest)):"n/d")}
       <td class="c-doc"><button type="button" class="btn sm" data-act="cmp-snap" data-i="${i}" aria-label="Open the snapshot of ${esc(car.name)}">Open its snapshot</button></td></tr>`; }).join("");
-  const nothing=c.cars.map((car,i)=>!c.cover[i].none&&!c.sum[i].n?car.name:"").filter(Boolean);
+  const nothing=c.cars.map((car,i)=>!c.cover[i].none&&!c.sum[i].n&&!hid(i)?car.name:"").filter(Boolean), hidden=c.cars.map((car,i)=>!c.cover[i].none&&!c.sum[i].n&&hid(i)?car.name:"").filter(Boolean);
+  const outK=nwOutKinds(o).filter(k=>c.sum.every(x=>!x[k]));
   return `<section class="snblk" id="cmSummary" aria-labelledby="cmSumH"><div class="blk-h"><h3 id="cmSumH">Summary</h3>${cmpExpHTML("summary")}</div>
     <div class="tbl-wrap cardwrap"><table class="sntbl cards cmsum" id="cmSumTable"><caption class="sr">One row per carrier</caption><thead><tr><th>Carrier</th><th class="num">Filings</th><th class="num">Rate</th><th class="num">Rule</th><th class="num">Form</th><th class="num">States with filings</th><th class="num">Rate filings with an impact</th><th class="num">Range of overall rate impacts</th><th class="num">Latest rate change</th><th class="num">Latest filing</th><th><span class="sr">Snapshot</span></th></tr></thead><tbody>${rows}</tbody></table></div>
-    ${nothing.length?`<p class="t2" id="cmNothingFor">S&amp;P returned nothing for ${esc(andList(nothing, 8))} in this comparison. That isn't proof that nothing was filed.</p>`:""}</section>`;
+    ${nothing.length?`<p class="t2" id="cmNothingFor">S&amp;P returned nothing for ${esc(andList(nothing, 8))} in this comparison. That isn't proof that nothing was filed.</p>`:""}${hidden.length?`<p class="t2" id="cmHiddenFor">None of the filings of ${esc(andList(hidden, 8))} is in ${esc(c.nw.shown.words)}. Choose Show everything to see them.</p>`:""}${outK.length?`<p class="t2 nwout" id="cmSumOut">${esc(nwOutText(c.nw.run, c.nw.shown, outK, "comparison"))}${o.rate?" The rate columns are left out with them.":""}</p>`:""}</section>`;
 }
 /* Rate changes over time: one lane per carrier on one time scale and one rate scale, each mark a filing with an
    overall rate impact (the Snapshot's marks: up and down differ, approved filled, any other status hollow). */
@@ -5518,10 +5657,13 @@ function cmpRateChart(c){
 function cmpRateBlockHTML(c){
   let h=`<section class="snblk" id="cmRates" aria-labelledby="cmRateH"><div class="blk-h"><h3 id="cmRateH">Rate changes over time</h3>${cmpExpHTML("rates")}</div>`;
   const pts=c.ratePts.reduce((a,l)=>a+l.length,0);
+  if(!pts && c.nw.o.rate) return h+`<div class="info nwout" id="cmNoRates" role="status" data-out><span>${esc(nwOutText(c.nw.run, c.nw.shown, ["rate"], "comparison"))} Choose Show everything${c.nw.run.narrowed?" or a wider search":""} to see them.</span></div></section>`;
   if(!pts) return h+`<div class="info" id="cmNoRates" role="status"><span>None of these carriers' filings carries an overall rate impact with a publish date in S&amp;P's data, so there are no rate changes to show.</span></div></section>`;
+  if(c.nw.o.rate) h+=`<p class="t2 nwout" id="cmRateOut">${esc(nwOutText(c.nw.run, c.nw.shown, ["rate"], "comparison"))} These are other filings that carry a rate impact.</p>`;
+  if(c.nw.o.approved) h+=`<p class="t2 nwout" id="cmRateStatus">${esc(`Narrowed to ${c.nw.shown.fsWords} filings, so every rate impact here may be the change asked for rather than one approved.`)}</p>`;
   h+=cmpRateChart(c);
   h+=`<ul class="snlegend" id="cmRateKey"><li><span class="mkk" style="color:var(--magenta)" aria-hidden="true">▲</span>Increase</li><li><span class="mkk" style="color:var(--teal)" aria-hidden="true">▼</span>Decrease</li><li><span class="mkk" style="color:var(--muted)" aria-hidden="true">●</span>No change</li><li><span class="mkk" aria-hidden="true">■</span>Filled: approved</li><li><span class="mkk" aria-hidden="true">□</span>Hollow: any other status, such as pending or withdrawn</li></ul>`;
-  const off=c.cars.map((car,i)=>c.ratePts[i].length?"":`${car.name} (${c.cover[i].none?"not fetched":!c.sum[i].n?"S&P returned nothing":"no filing with a rate impact and a publish date"})`).filter(Boolean);
+  const off=c.cars.map((car,i)=>c.ratePts[i].length?"":`${car.name} (${c.cover[i].none?"not fetched":!c.sum[i].n?(c.before&&c.before[i]?`none in ${c.nw.shown.short}`:"S&P returned nothing"):"no filing with a rate impact and a publish date"})`).filter(Boolean);
   if(off.length) h+=`<p class="t2" id="cmRateOff">No row for ${esc(andList(off, 8))}.</p>`;
   if(c.rateNoDate) h+=`<p class="t2" id="cmRateNoDate">${plural(c.rateNoDate,"filing with a rate impact has","filings with a rate impact have")} no publish date in S&amp;P's data, so ${c.rateNoDate===1?"it isn't":"they aren't"} on the chart.</p>`;
   const list=c.cars.flatMap((car,i)=>c.ratePts[i].slice().sort(snapByDate).map(f=>({car, f})));
@@ -5530,9 +5672,9 @@ function cmpRateBlockHTML(c){
 }
 /* A shaded table: carriers as columns, by the number of filings or by the latest overall rate impact, every figure
    written in its cell. A carrier S&P returned nothing for here says so; a carrier whose search failed says that. */
-function cmpCellHTML(cell, v, by, bins){
+function cmpCellHTML(cell, v, by, bins, shown){
   if(v.none) return `<td class="cmnf">not fetched</td>`;
-  if(!cell.n) return `<td class="cmna">none returned</td>`;
+  if(!cell.n) return `<td class="cmna">${shown?"none shown":"none returned"}</td>`;
   if(by==="rate"){
     if(!cell.latest) return `<td class="cmnr" style="background:var(--alt)">${plural(cell.n,"filing")}, no rate impact</td>`;
     const l=cell.latest, fill=SNAP_RATE_BINS.find(b=>b.has(l.rate)).fill;
@@ -5544,11 +5686,11 @@ function cmpCellHTML(cell, v, by, bins){
 function cmpMatrixHTML(c, rows, id, label, by, nameOf){
   const max=Math.max(0, ...rows.flatMap(r=>r.cells.map(x=>x.n))), bins=snapCountBins(max);
   const head=`<tr><th>${esc(label)}</th>${c.cars.map(car=>`<th class="cmc">${esc(car.name)}</th>`).join("")}<th class="cmall">All carriers</th></tr>`;
-  const body=rows.map(r=>`<tr><td>${esc(nameOf(r.k))}</td>${r.cells.map((cell,i)=>cmpCellHTML(cell, c.cover[i], by, bins)).join("")}<td class="cmall">${count(r.all)}</td></tr>`).join("");
+  const body=rows.map(r=>`<tr><td>${esc(nameOf(r.k))}</td>${r.cells.map((cell,i)=>cmpCellHTML(cell, c.cover[i], by, bins, c.sh.narrowed)).join("")}<td class="cmall">${count(r.all)}</td></tr>`).join("");
   const key = by==="rate" ? SNAP_RATE_BINS.map(b=>`<li><span class="sw" style="background:${b.fill}" aria-hidden="true"></span>${esc(b.label)}</li>`).join("")+`<li><span class="sw" style="background:var(--alt);border-color:var(--muted)" aria-hidden="true"></span>Filings, but none with a rate impact</li>`
     : bins.map(b=>`<li><span class="sw" style="background:${b.fill}" aria-hidden="true"></span>${esc(b.label)}</li>`).join("");
   return `<div class="tbl-wrap" id="${id}Wrap" data-keep><table class="sntbl cmmx" id="${id}"><caption class="sr">${esc(label)} by carrier</caption><thead>${head}</thead><tbody>${body}</tbody></table></div>
-    <ul class="snlegend" id="${id}Key">${key}<li><span class="sw none" aria-hidden="true"></span>None returned: S&amp;P returned nothing for that carrier there</li>${c.cover.some(v=>v.none)?`<li><span class="sw" style="border-color:var(--magenta)" aria-hidden="true"></span>Not fetched: that carrier's search didn't run</li>`:""}</ul>`;
+    <ul class="snlegend" id="${id}Key">${key}<li><span class="sw none" aria-hidden="true"></span>${c.sh.narrowed?`None shown: none of that carrier's filings there is in ${esc(c.nw.shown.short)}`:"None returned: S&amp;P returned nothing for that carrier there"}</li>${c.cover.some(v=>v.none)?`<li><span class="sw" style="border-color:var(--magenta)" aria-hidden="true"></span>Not fetched: that carrier's search didn't run</li>`:""}</ul>`;
 }
 function cmpByBlockHTML(c, what){
   const cm=S.cmp, st=what==="states", by=st?cm.by:cm.toiBy, multi=st?cm.multi:cm.toiMulti, all=st?c.stateRows:c.toiRows;
@@ -5560,7 +5702,7 @@ function cmpByBlockHTML(c, what){
   if(!filed.length) return h+`<div class="info" role="status"><span>S&amp;P returned nothing for any of these carriers, so there is nothing to show here.</span></div></section>`;
   if(!rows.length) h+=`<div class="info" id="${id}None" role="status"><span>No ${st?"state":"type of insurance"} has filings from two or more of these carriers.</span></div>`;
   else h+=cmpMatrixHTML(c, rows, id+"Table", st?"State":"Type of insurance", by, st?snapStLabel:(k=>k||"Type of insurance n/d"));
-  if(st && empty.length) h+=`<p class="t2" id="cmStateNone">S&amp;P returned nothing for any of these carriers in ${esc(andList(empty, 12))}. That isn't proof that nothing was filed there.</p>`;
+  if(st && empty.length) h+=c.sh.narrowed ? `<p class="t2" id="cmStateNone">None of these carriers' filings in ${esc(andList(empty, 12))} is in ${esc(c.nw.shown.words)}.</p>` : `<p class="t2" id="cmStateNone">S&amp;P returned nothing for any of these carriers in ${esc(andList(empty, 12))}. That isn't proof that nothing was filed there.</p>`;
   if(st && c.noState) h+=`<p class="t2">${plural(c.noState,"filing has","filings have")} no state in S&amp;P's data and ${c.noState===1?"isn't":"aren't"} in this table.</p>`;
   return h+`</section>`;
 }
@@ -5576,7 +5718,7 @@ function cmpYearChart(c, i, top){
 }
 function cmpYearBlockHTML(c){
   const max=Math.max(0, ...c.yearRows.flatMap(r=>r.by)), top=[2,4,6,8,10,20,30,40,50,100,200,300,400,500,1000].find(v=>v>=max)||Math.ceil(max/1000)*1000;
-  const cards=c.cars.map((car,i)=>`<div class="cmyr" data-i="${i}"><h4>${esc(car.name)}</h4>${c.cover[i].none?`<div class="info"><span>Not fetched: its search didn't run.</span></div>`:!c.sum[i].n?`<div class="info"><span>S&amp;P returned nothing for this carrier.</span></div>`:cmpYearChart(c, i, top)}</div>`).join("");
+  const cards=c.cars.map((car,i)=>`<div class="cmyr" data-i="${i}"><h4>${esc(car.name)}</h4>${c.cover[i].none?`<div class="info"><span>Not fetched: its search didn't run.</span></div>`:!c.sum[i].n?`<div class="info"><span>${c.before&&c.before[i]?`None of this carrier's filings is in ${esc(c.nw.shown.short)}.`:"S&amp;P returned nothing for this carrier."}</span></div>`:cmpYearChart(c, i, top)}</div>`).join("");
   const undated=c.yearRows.reduce((a,r)=>a+r.undated,0);
   const table=`<div class="tbl-wrap"><table class="sntbl cmmx" id="cmYearTable"><caption class="sr">Filings by year published, by carrier</caption><thead><tr><th>Carrier</th>${c.years.map(y=>`<th class="num">${y}</th>`).join("")}<th class="num">No publish date</th></tr></thead><tbody>${c.cars.map((car,i)=>`<tr><td>${esc(car.name)}</td>${c.cover[i].none?c.years.concat([0]).map(()=>`<td class="cmnf">not fetched</td>`).join(""):!c.sum[i].n?c.years.concat([0]).map(()=>`<td class="cmna">none returned</td>`).join(""):c.yearRows[i].by.map(n=>`<td class="num">${count(n)}</td>`).join("")+`<td class="num">${count(c.yearRows[i].undated)}</td>`}</tr>`).join("")}</tbody></table></div>`;
   return `<section class="snblk" id="cmYears" aria-labelledby="cmYearH"><div class="blk-h"><h3 id="cmYearH">Filings by year</h3>${cmpExpHTML("years")}</div>
@@ -5589,6 +5731,7 @@ function cmpLatestBlockHTML(c){
   let h=`<section class="snblk" id="cmLatest" aria-labelledby="cmLatestH"><div class="blk-h"><h3 id="cmLatestH">Latest filings</h3>${cmpExpHTML("latest")}</div>`;
   h+=`<div class="toolbar"><label class="f" style="flex:0 1 320px">Carrier<select id="cm_who" data-bind="cmp.who" data-live><option value="all"${cm.who==="all"?" selected":""}>All carriers</option>${c.cars.map((car,i)=>`<option value="${i}"${cm.who===String(i)?" selected":""}>${esc(car.name)}</option>`).join("")}</select></label>
     <span class="t2 grow" id="cmLatestCount">${all.length?`The ${list.length<all.length?`${count(list.length)} most recent of ${count(all.length)}`:plural(all.length,"filing")}, newest first by the date S&amp;P published ${list.length===1?"it":"them"}.`:""}</span></div>`;
+  if(!all.length && (cm.who==="all" ? c.allN : c.before&&c.before[+cm.who])) return h+`<div class="info" id="cmLatestNone" role="status"><span>None of the filings of ${cm.who==="all"?"these carriers":esc(c.cars[+cm.who].name)} is in ${esc(c.nw.shown.words)}. Choose Show everything to see them.</span></div></section>`;
   if(!all.length) return h+`<div class="info" id="cmLatestNone" role="status"><span>S&amp;P returned nothing for ${cm.who==="all"?"these carriers":esc(c.cars[+cm.who].name)} in this comparison.</span></div></section>`;
   const t=v=>blank(v)?"n/d":esc(v);
   h+=`<div class="tbl-wrap cardwrap" id="cmLatestWrap" data-keep><table class="cards filings cmlist" id="cmLatestTable"><thead><tr><th>Company</th><th>Carrier</th><th>State</th><th>Type of insurance</th><th>Filing type</th><th>Status</th><th>Published</th>${desc?"<th>Description</th>":""}<th>Filing number</th><th>Document</th></tr></thead><tbody>${list.map(f=>{
@@ -5625,10 +5768,10 @@ function cmpOutHTML(){
     return `<div id="cmErr">${problemHTML(e, "Couldn't run the comparison.", "cmp-retry")}</div>`;
   }
   const c=cmpCompute(cm), n=cm.parts.length;
-  let h=`<div class="snhead" id="cmHead"><div><h3 id="cmName">Comparing ${plural(c.cars.length,"carrier")}${c.sc.narrowed?` <span class="t2" id="cmScope">${esc(c.sc.short)}</span>`:""}</h3><p class="t2" id="cmMeta">${esc([`filings published ${fmtDay(c.from)} to ${fmtDay(c.to)}`, c.sc.states.length?`searched in ${c.sc.stWords}`:`${plural(c.sh.states?(Array.isArray(run.parts[0].states)?run.parts[0].states.length:0):c.searched.length,"state")} searched`, c.sc.tois.length?`${c.sc.toiWords} only`:"", "every filing type and status", `${plural(cmpUnion(c.cars).length,"company","companies")} in ${plural(n,"search","searches")}`].filter(Boolean).join(" · "))}</p>${c.sc.narrowed?`<p class="t2" id="cmAlike" style="margin:2px 0 0">Every carrier was searched for ${esc(c.sc.words)} alike, so the tables and charts below compare like with like.</p>`:""}</div>
+  let h=`<div class="snhead" id="cmHead"><div><h3 id="cmName">Comparing ${plural(c.cars.length,"carrier")}${c.sc.narrowed?` <span class="t2" id="cmScope">${esc(c.sc.short)}</span>`:""}</h3><p class="t2" id="cmMeta">${esc([`filings published ${fmtDay(c.from)} to ${fmtDay(c.to)}`, c.sc.states.length?`searched in ${c.sc.stWords}`:`${plural(c.sh.states?(Array.isArray(run.parts[0].states)?run.parts[0].states.length:0):c.searched.length,"state")} searched`, c.sc.tois.length?`${c.sc.toiWords} only`:"", c.sc.kinds, `${plural(cmpUnion(c.cars).length,"company","companies")} in ${plural(n,"search","searches")}`].filter(Boolean).join(" · "))}</p>${c.sc.narrowed?`<p class="t2" id="cmAlike" style="margin:2px 0 0">Every carrier was searched for ${esc(c.sc.words)} alike, so the tables and charts below compare like with like.</p>`:""}</div>
     <div class="toolbar">${n===1?`<button type="button" class="btn" id="cm_toFilings" data-act="cmp-filings" data-k="0" ${cm.busy?"disabled":""}>See every filing on the Filings view</button>`:`<span class="inline" id="cm_toFilings"><span class="t2">See every filing on the Filings view, one search at a time:</span>${cm.parts.map((p,k)=>`<button type="button" class="btn sm" data-act="cmp-filings" data-k="${k}" ${cm.busy?"disabled":""}>Search ${k+1}</button>`).join("")}</span>`}<span class="inline"><span class="t2">All filings:</span>${cmpExpHTML("filings")}</span></div></div>`;
   if(cm.busy) h+=cmpProgressHTML(cm);
-  h+=nwShownHTML("cmp", c.sh, c.fs.length, c.allN===null?c.fs.length:c.allN, c.noToi, "comparison");
+  h+=nwShownHTML("cmp", c.sh, c.fs.length, c.allN===null?c.fs.length:c.allN, c.miss, "comparison");
   h+=cmpFailedHTML(c, cm);
   if(!cm.busy && got.length===n && got.every(p=>p.res.fromStore)) h+=`<div class="info" id="cmFromStore" role="status"><span>From saved results fetched ${fmtAt(got.map(p=>p.res.fetchedAt).filter(Boolean).sort()[0])}, so opening it used no S&amp;P requests.</span><button type="button" class="btn sm" data-act="cmp-refresh">Refresh from S&amp;P</button></div>`;
   const capped=cm.parts.map((p,i)=>p.res&&p.res.capped?i:-1).filter(i=>i>=0);
@@ -5643,7 +5786,7 @@ function cmpOutHTML(){
   if(!c.fs.length){
     if(cm.busy) return h;
     if(c.sh.narrowed && c.allN) return h+`<div class="info" id="cmEmpty" role="status"><span>None of the ${plural(c.allN,"filing")} searched is in ${esc(c.sh.shown.words)}. Choose Show everything to see them all.</span></div>`;
-    return h+`<div class="notes" id="cmEmpty" role="status"><b>S&amp;P returned nothing for this comparison${c.sc.narrowed?` of ${esc(c.sc.words)}`:""}, and that isn't proof that nothing was filed</b><ul><li>${esc(EMPTY_RESULT)}</li>${c.sc.narrowed?`<li>${esc(`The comparison was narrowed to ${c.sc.words}, so it says nothing about other states or types of insurance.`)}</li>`:""}</ul><p class="t2" style="margin:6px 0 0">Check that these are the carriers you meant, or try a longer period${c.sc.narrowed?" or a wider choice of states and types":""}.</p></div>`;
+    return h+`<div class="notes" id="cmEmpty" role="status"><b>S&amp;P returned nothing for this comparison${c.sc.narrowed?` of ${esc(c.sc.words)}`:""}, and that isn't proof that nothing was filed</b><ul><li>${esc(EMPTY_RESULT)}</li>${c.sc.narrowed?`<li>${esc(`The comparison was narrowed to ${c.sc.words}, so it says nothing about other ${nwOtherOr(c.sc)}.`)}</li>`:""}</ul><p class="t2" style="margin:6px 0 0">Check that these are the carriers you meant, or try a longer period${c.sc.narrowed?` or a wider choice of ${nwWiderOf(c.sc)}`:""}.</p></div>`;
   }
   h+=cmpSummaryHTML(c)+cmpRateBlockHTML(c)+cmpByBlockHTML(c,"states")+cmpByBlockHTML(c,"types")+cmpYearBlockHTML(c)+cmpLatestBlockHTML(c);
   return h+`<p class="source" id="cmSource">Source: ${esc(got[0].res.source||"S&P Global Market Intelligence, SNL Insurance Product Filings")}, fetched ${fmtAt(got.map(p=>p.res.fetchedAt).filter(Boolean).sort()[0])}. Worked out in this browser from the filings S&amp;P returned. Opening a document uses one S&amp;P request the first time.</p>`;
@@ -5674,12 +5817,12 @@ function cmpChosenHTML(){
 }
 function cmpCostHTML(){
   const cm=S.cmp, rg=snapRange(cm.years), states=stateOptions().length, sc=nwNow("cmp");
-  const dates=`<span class="t2" id="cm_dates">Filings published ${fmtDay(rg.from)} to ${fmtDay(rg.to)}, ${sc.states.length?`in ${esc(sc.stWords)}`:`in all ${plural(states,"state")} in ${S.refs&&refOptions("serffFilingState").length?"S&amp;P's list":"the app's list"}`}, ${sc.tois.length?`${esc(sc.toiWords)} only, `:""}every filing type and status${sc.narrowed?", for every carrier alike":""}.</span>`;
+  const dates=`<span class="t2" id="cm_dates">Filings published ${fmtDay(rg.from)} to ${fmtDay(rg.to)}, ${sc.states.length?`in ${esc(sc.stWords)}`:`in all ${plural(states,"state")} in ${S.refs&&refOptions("serffFilingState").length?"S&amp;P's list":"the app's list"}`}, ${sc.tois.length?`${esc(sc.toiWords)} only, `:""}${esc(sc.kinds)}${sc.narrowed?", for every carrier alike":""}.</span>`;
   if(cm.carriers.length<CMP_MIN) return dates+`<p class="t2" id="cm_cost" style="margin:0">Choose at least ${CMP_MIN} carriers to see what the comparison costs.</p>`;
   const big=cmpTooBig(cm.carriers, cm.years);
   if(big) return `${dates}<div class="banner" id="cm_tooBig" role="alert"><span>${esc(big)}</span></div>`;
   const plan=cmpPlan(cm.carriers, cm.years, []), sum=cm.carriers.reduce((a,c)=>a+c.ids.length,0), twice=sum-plan.ids.length;
-  return `${dates}<p class="t2" id="cm_cost" style="margin:0"><b>About ${plural(plan.requests,"S&amp;P request")} in ${plural(plan.parts.length,"search","searches")}</b> (one for each 10 companies for each year of dates), more if S&amp;P has many filings. ${plural(plan.ids.length,"company","companies")} in all${twice?`; ${plural(twice,"company is","companies are")} in more than one carrier and searched once`:""}.${plan.parts.length>1?` A search takes at most ${MAX_COMPANIES} companies, so they run one after another.`:""} A search run before costs nothing, and once this has run, reopening it below costs no S&amp;P requests.${sc.narrowed?" Narrowing the states or types doesn't change the number of S&amp;P requests, which depends on the companies and years; it means fewer filings come back.":""}</p>`;
+  return `${dates}<p class="t2" id="cm_cost" style="margin:0"><b>About ${plural(plan.requests,"S&amp;P request")} in ${plural(plan.parts.length,"search","searches")}</b> (one for each 10 companies for each year of dates), more if S&amp;P has many filings. ${plural(plan.ids.length,"company","companies")} in all${twice?`; ${plural(twice,"company is","companies are")} in more than one carrier and searched once`:""}.${plan.parts.length>1?` A search takes at most ${MAX_COMPANIES} companies, so they run one after another.`:""} A search run before costs nothing, and once this has run, reopening it below costs no S&amp;P requests.${sc.narrowed?` Narrowing the ${nwNarrowingOf(sc)} doesn't change the number of S&amp;P requests, which depends on the companies and years; it means fewer filings come back.`:""}</p>`;
 }
 function cmpRecentHTML(){
   const list=cmpRecentList(); if(!list.length) return "";
@@ -5707,7 +5850,7 @@ function renderCompare(){
   if(fst && fst.configured===false) h+=`<div class="info" id="cmOff" role="status"><span><b>S&amp;P filings aren't set up yet,</b> so a new comparison can't be run. Comparisons run before still open from their saved results.</span></div>`;
   h+=`<form class="tcard" id="cmForm" novalidate aria-label="Choose carriers and a period">${cmpSetHTML()}${cmpFinderHTML()}${cmpChosenHTML()}
     <div class="f"><span>Period</span><div class="snper"><div class="seg" role="group" aria-label="Period">${SNAP_YEARS.map(y=>`<button type="button" class="btn sm" data-act="cmp-years" data-y="${y}" aria-pressed="${cm.years===y}">${y===1?"Last year":`Last ${y} years`}</button>`).join("")}</div></div></div>
-    ${nwHTML("cmp", {busy:cm.busy, note:"Every carrier is searched for the same states and types. After a comparison has run, choosing fewer narrows what is shown at once, without asking S&amp;P again."})}
+    ${nwHTML("cmp", {busy:cm.busy, note:"Every carrier is searched for the same states, types, filing types and statuses, so the comparison is like with like. After a comparison has run, choosing fewer narrows what is shown at once, without asking S&amp;P again."})}
     <div id="cm_costBox" style="display:flex;flex-direction:column;gap:8px;min-width:0">${cmpCostHTML()}</div>
     ${cm.formErr?`<p class="err" id="cm_formErr" role="alert">${esc(cm.formErr)}</p>`:""}
     <div class="toolbar"><button type="button" class="btn primary" id="cm_run" data-act="cmp-run" ${cm.busy||cm.picking||waitStates?"disabled":""}>${cm.busy?"Comparing…":waitStates?"Loading S&amp;P's list of states…":"Compare"}</button></div>
@@ -5733,7 +5876,7 @@ function cmpToFilings(k){
   if(f.busy){ toast("The Filings view is still running a search. Try again when it has finished."); return; }
   const p=part.payload, names=new Map(); run.carriers.forEach(c=>c.ids.forEach(x=>{ if(!names.get(x.kind+":"+x.id)) names.set(x.kind+":"+x.id, x.name||""); }));
   f.chips=cmpPartIds(p).map(x=>({kind:x.kind, id:x.id, name:names.get(x.kind+":"+x.id)||""}));
-  f.states=[...p.states]; f.from=p.from; f.to=p.to; f.toi=(Array.isArray(p.typeOfInsuranceIds)?p.typeOfInsuranceIds:[]).map(String); f.ftype=[]; f.fstatus=[]; f.toiFilter=""; f.tracking="";
+  f.states=[...p.states]; f.from=p.from; f.to=p.to; f.toi=(Array.isArray(p.typeOfInsuranceIds)?p.typeOfInsuranceIds:[]).map(String); f.ftype=(Array.isArray(p.filingTypeIds)?p.filingTypeIds:[]).map(String); f.fstatus=(Array.isArray(p.filingStatusIds)?p.filingStatusIds:[]).map(String); f.toiFilter=""; f.tracking="";
   f.q=""; f.matches=null; f.resolveNote=""; f.resolveErr=""; f.formErr="";
   location.hash="#filings";
   if(part.state!=="ok" || !part.res || part.res.capped){ f.res=null; f.err=null; toast("The form is filled in. Press Search filings to run it: this search wasn't saved complete, so it asks S&P again."); }
@@ -5745,15 +5888,16 @@ function cmpExport(tbl){
   const cm=S.cmp; if(!cm.ran || !cm.parts || !cm.parts.some(p=>p.res)) return null;
   const c=cmpCompute(cm), out=(name, sheet, cols, rows)=>({name:`snl-compare-${c.cars.length}-carriers${nwSlug(c.sh.narrowed?c.sh.shown:c.sc)}-${name}-${TODAY()}`, sheet, cols, rows});
   const day=d=>d?iso(d):"", n=v=>v===null||v===undefined?null:+v, who=f=>cmpNames(c, f).join("; "), cos=f=>(Array.isArray(f.r.companies)?f.r.companies:[]).map(x=>x&&x.companyName).filter(x=>!blank(x)).join("; ");
-  const note=i=>c.cover[i].none?"Not fetched: the search didn't run":!c.sum[i].n?"S&P returned nothing for this carrier":cmpCoverText(c.cover[i]);
+  const note=i=>c.cover[i].none?"Not fetched: the search didn't run":!c.sum[i].n?(c.before&&c.before[i]?`None of this carrier's filings is in ${c.nw.shown.short}`:"S&P returned nothing for this carrier"):cmpCoverText(c.cover[i]);
   if(tbl==="summary") return out("summary","Summary",["Carrier","Kind","Companies","Filings","Rate filings","Rule filings","Form filings","States with filings","Rate filings with an impact","Lowest rate impact (%)","Highest rate impact (%)","Latest rate change (%)","Latest rate change, state","Latest rate change, date published","Latest rate change, status","Latest filing, date published","Note"],
-    c.cars.map((car,i)=>{ const s=c.sum[i], nd=c.cover[i].none||!s.n, lr=s.latestRate; return [car.name, car.kind==="group"?"Group":"Company", car.ids.length, nd?null:s.n, nd?null:s.rate, nd?null:s.rule, nd?null:s.form, nd?null:s.states, nd?null:s.withRate, n(s.lo), n(s.hi), lr?lr.rate:null, lr?lr.st:"", lr?day(lr.pub):"", lr?snapStatus(lr):"", day(s.latest), note(i)]; }));
+    c.cars.map((car,i)=>{ const s=c.sum[i], nd=c.cover[i].none||!s.n, lr=s.latestRate, o=c.nw.o, out=k=>o[k]&&!s[k], left=nwOutKinds(o).filter(out);
+      return [car.name, car.kind==="group"?"Group":"Company", car.ids.length, nd?null:s.n, nd||out("rate")?null:s.rate, nd||out("rule")?null:s.rule, nd||out("form")?null:s.form, nd?null:s.states, nd?null:s.withRate, n(s.lo), n(s.hi), lr?lr.rate:null, lr?lr.st:"", lr?day(lr.pub):"", lr?snapStatus(lr):"", day(s.latest), [note(i), left.length&&!c.cover[i].none?nwOutText(c.nw.run, c.nw.shown, left, "comparison"):""].filter(Boolean).join(" ")]; }));
   const list=f=>[who(f), cos(f), f.st||f.r.serffFilingState, f.toi, f.type, f.r.filingStatus, dayOut(f.r.dateSubmitted), dayOut(f.r.publishDate), f.rate, filingNoText(f.r), f.owners.length>1?"Yes":"", f.r.documentId, f.r.filingVersionId];
   const listCols=["Carrier","Companies on the filing","State","Type of insurance","Filing type","Status","Date submitted","Date published","Rate impact (%)","Filing number","In more than one carrier","Document id","Filing version id"];
   if(tbl==="rates") return out("rate-changes","Rate changes",listCols, c.cars.flatMap((car,i)=>c.ratePts[i].slice().sort(snapByDate).map(f=>[car.name, ...list(f).slice(1)])));
   if(tbl==="states" || tbl==="types"){
     const st=tbl==="states", multi=st?cm.multi:cm.toiMulti, rows=(st?c.stateRows:c.toiRows).filter(r=>r.all && (!multi || r.filers>=2));
-    const cell=(x,i)=>c.cover[i].none?["Not fetched","","",""]:!x.n?["S&P returned nothing","","",""]:[x.n, x.latest?x.latest.rate:null, x.latest?day(x.latest.pub):"", x.latest?snapStatus(x.latest):""];
+    const cell=(x,i)=>c.cover[i].none?["Not fetched","","",""]:!x.n?[c.sh.narrowed?"None shown":"S&P returned nothing","","",""]:[x.n, x.latest?x.latest.rate:null, x.latest?day(x.latest.pub):"", x.latest?snapStatus(x.latest):""];
     return out(st?"by-state":"by-type-of-insurance", st?"By state":"By type of insurance", [st?"State":"Type of insurance", ...(st?["State name"]:[]), "All carriers (each filing once)", ...c.cars.flatMap(car=>[`${car.name}: filings`,`${car.name}: latest rate impact (%)`,`${car.name}: latest, date published`,`${car.name}: latest, status`])],
       rows.map(r=>[st?r.k:(r.k||"n/d"), ...(st?[snapStateName(r.k)]:[]), r.all, ...r.cells.flatMap(cell)]));
   }
@@ -5768,7 +5912,7 @@ function cmpScreen(){
   const cm=S.cmp, run=cm.ran; if(!run || !cm.parts || cm.parts.length!==1 || cm.parts[0].state!=="ok" || !cm.parts[0].res) return null;
   const r=cm.parts[0].res, p=r.params||run.parts[0], ints=a=>(Array.isArray(a)?a:[]).map(Number).filter(Number.isInteger);
   const names=[...new Set([...run.carriers.map(c=>c.name), ...run.carriers.flatMap(c=>c.ids.map(x=>x.name))].filter(x=>!blank(x)).map(String))].slice(0,20);
-  return {view:"filings", search:{companyIds:ints(p.companyIds), institutionIds:ints(p.institutionIds), states:(Array.isArray(p.states)?p.states:[]).map(String), from:String(p.from||""), to:String(p.to||""), typeOfInsuranceIds:ints(p.typeOfInsuranceIds), filingTypeIds:[], filingStatusIds:[]},
+  return {view:"filings", search:{companyIds:ints(p.companyIds), institutionIds:ints(p.institutionIds), states:(Array.isArray(p.states)?p.states:[]).map(String), from:String(p.from||""), to:String(p.to||""), typeOfInsuranceIds:ints(p.typeOfInsuranceIds), filingTypeIds:ints(run.parts[0].filingTypeIds), filingStatusIds:ints(run.parts[0].filingStatusIds)},
     total:snapFilings(r.rows).length, companies:names};
 }
 
@@ -6243,7 +6387,7 @@ const MK_PAGE = 50, MK_EXPORT = 500;
 const MK_PERIODS = [["this_year","This year"],["last_12_months","Last 12 months"],["last_3_years","Last 3 years"]];
 const MK_FTYPES = ["Rate","Rule","Form"];
 function freshMarket(){
-  return {loading:false, status:null, statusErr:null, state:"", types:{}, typesBusy:"", f:{toi:"", ftype:"", fstatus:"", from:"", to:"", words:""},
+  return {loading:false, status:null, statusErr:null, state:"", types:{}, typesBusy:"", held:{}, heldBusy:"", heldOff:"", f:{toi:"", ftype:"", fstatus:"", from:"", to:"", words:""},
     busy:false, err:null, res:null, byCo:null, asked:null, tab:"rows", more:false, moreBusy:false, exporting:"",
     mgr:{state:"", period:"last_12_months", busy:"", err:"", note:""}, timer:null, stepping:false, stepErr:""};
 }
@@ -6265,6 +6409,7 @@ async function loadMarket(quiet){
     if(!st.includes(mk.state)) mk.state=st[0]||"";
     mkNarrowInit();
     if(mk.state && !mk.types[mk.state]) mkLoadTypes(mk.state);
+    if(mk.state && !mk.held[mk.state]) mkLoadHeld(mk.state);
   } else if(r.err!=="signin") mk.statusErr=r;
   if(S.view==="market") render();
   mkDrive();
@@ -6276,6 +6421,29 @@ async function mkLoadTypes(state){
   mk.types[state]=r.data&&Array.isArray(r.data.groups) ? r.data.groups.map(g=>String(g&&g.name||"")).filter(n=>n&&n!=="n/d") : [];
   if(S.view==="market") render();
 }
+/* Filing types and statuses on the Market: the names the index holds in a state (groups "ftype" and "status", which
+   migration 0010 adds), so each can be chosen and is matched by its whole name. Before 0010 (or with an older
+   snl-index) the index can't list them: heldOff says so, and the form keeps its one Filing type and Status words. */
+async function mkLoadHeld(state){
+  const mk=S.mk; if(mk.heldBusy===state || mk.heldOff) return; mk.heldBusy=state;
+  const ask=g=>callFn("snl-index",{action:"query", state, group:g, limit:100});
+  const [a, b]=await Promise.all([ask("ftype"), ask("status")]);
+  if(S.mk!==mk) return; mk.heldBusy="";
+  const names=r=>{ const seen=new Map(); for(const g of r.data.groups) { const n=String(g&&g.name||"").trim(); if(n && n!=="n/d" && !seen.has(n.toLowerCase())) seen.set(n.toLowerCase(), n); } return [...seen.values()]; };
+  if(a.data && b.data && Array.isArray(a.data.groups) && Array.isArray(b.data.groups)) mk.held[state]={ft:names(a), fs:names(b)};
+  else if(a.err!=="signin" && b.err!=="signin") mk.heldOff = [a, b].some(r=>r.err==="needs_update"||r.err==="bad"||r.err==="not_updated")
+    ? "The index can't list its filing types and statuses until the database update 0010 is run and snl-index is deployed again (README, Market index). Use the Filing type and Status boxes below meanwhile."
+    : "The index's filing types and statuses couldn't be listed just now. Use the Filing type and Status boxes below, or reload the page.";
+  if(S.view==="market") render();
+}
+// the names the index holds in the states chosen (or every indexed state), each once whatever its letter case
+function mkHeld(w){
+  const mk=S.mk, sts=nwStates("mk").length ? nwStates("mk") : mkStates().map(s=>String(s.state)), seen=new Map();
+  for(const s of sts) for(const n of (mk.held[s]&&mk.held[s][w])||[]) if(!seen.has(n.toLowerCase())) seen.set(n.toLowerCase(), {id:n, name:n});
+  return [...seen.values()].sort((a,b)=>a.name.localeCompare(b.name));
+}
+// the lists are in use once the index has listed them for a state; until then the one-choice boxes are
+const mkListsOn = () => !S.mk.heldOff && Object.keys(S.mk.held).length>0;
 /* Narrow it down on the Market: the states (the index's own) and types of insurance (the index's names) chosen. The
    first indexed state is chosen to start with, as the one state always was. Nothing chosen means every indexed state,
    at most MK_MAX_STATES (the snl-index function's MAX_QUERY_STATES). One state and one type are asked exactly as
@@ -6294,17 +6462,23 @@ async function mkNarrowChanged(){
   if(JSON.stringify(sts)!==JSON.stringify(mk.lastStates||[before])){ mk.res=null; mk.byCo=null; mk.err=null; }
   mk.lastStates=sts;
   for(const s of sts.slice(0, MK_MAX_STATES)) if(!mk.types[s] && S.mk===mk){ await mkLoadTypes(s); }
+  for(const s of sts.slice(0, MK_MAX_STATES)) if(!mk.held[s] && !mk.heldOff && S.mk===mk){ await mkLoadHeld(s); }
 }
 // the scope of an answer, from the question it echoes: its states and types
 function mkScopeOf(q){
   const sts=Array.isArray(q&&q.states)&&q.states.length ? q.states : q&&q.state ? [q.state] : [];
   const tys=Array.isArray(q&&q.types)&&q.types.length ? q.types : q&&q.typeOfInsurance ? [q.typeOfInsurance] : [];
-  return nwScope(sts, tys.map(t=>({id:String(t), name:String(t)})));
+  const named=a=>(Array.isArray(a)?a:[]).filter(x=>!blank(x)).map(t=>({id:String(t), name:String(t)}));
+  return nwScope(sts, tys.map(t=>({id:String(t), name:String(t)})), named(q&&q.filingTypes), named(q&&q.statuses));
 }
 function mkQuery(extra){
   const mk=S.mk, f=mk.f, sts=mkAskStates(), tys=mkAskTypes();
-  const q={action:"query", state:sts[0]||mk.state, typeOfInsurance:tys.length===1?tys[0]:null, filingType:f.ftype||null, status:f.fstatus.trim()||null, from:f.from||null, to:f.to||null, words:f.words.trim()||null, ...extra};
+  const on=mkListsOn(), fts=on?nwFtypes("mk").map(t=>t.name):[], fss=on?nwFstats("mk").map(t=>t.name):[];
+  const q={action:"query", state:sts[0]||mk.state, typeOfInsurance:tys.length===1?tys[0]:null, filingType:on?null:(f.ftype||null), status:on?null:(f.fstatus.trim()||null), from:f.from||null, to:f.to||null, words:f.words.trim()||null, ...extra};
   if(sts.length>1 || tys.length>1){ q.states=sts; q.typesOfInsurance=tys; }
+  // filing types and statuses from the index's lists, only when chosen (an unnarrowed question is asked as before)
+  if(fts.length) q.filingTypes=fts;
+  if(fss.length) q.statuses=fss;
   return q;
 }
 async function mkSearch(){
@@ -6317,7 +6491,8 @@ async function mkSearch(){
   if(!S.session || S.mk!==mk) return;
   mk.busy=false;
   // several states or types asked of a function from before Narrow it down would be answered wider: shown as not done
-  if(rows.data && (q.states||q.typesOfInsurance) && !(rows.data.query&&Array.isArray(rows.data.query.states))){ mk.err={err:"not_updated", msg:"The market index function on this site can only search one state and one type of insurance at a time. Choose one of each, or ask Corp Dev to deploy snl-index again (README, Market index)."}; mk.res=null; mk.byCo=null; }
+  if(rows.data && (q.filingTypes||q.statuses) && !(rows.data.query&&(Array.isArray(rows.data.query.filingTypes)||Array.isArray(rows.data.query.statuses)))){ mk.err={err:"not_updated", msg:"The market index function on this site can't search by several filing types or statuses yet. Use the Filing type and Status boxes, or ask Corp Dev to deploy snl-index again (README, Market index)."}; mk.res=null; mk.byCo=null; }
+  else if(rows.data && (q.states||q.typesOfInsurance) && !(rows.data.query&&Array.isArray(rows.data.query.states))){ mk.err={err:"not_updated", msg:"The market index function on this site can only search one state and one type of insurance at a time. Choose one of each, or ask Corp Dev to deploy snl-index again (README, Market index)."}; mk.res=null; mk.byCo=null; }
   else if(rows.data){ mk.res=rows.data; mk.asked=q; mk.more=!!rows.data.more; mk.byCo=byCo.data||null; }
   else if(rows.err!=="signin"){ mk.err=rows; mk.res=null; mk.byCo=null; }
   render();
@@ -6345,10 +6520,12 @@ function mkSearchHTML(){
   const opt=(v,label,on)=>`<option value="${esc(v)}"${on?" selected":""}>${esc(label)}</option>`;
   const ask=mkAskStates();
   return `<form class="tcard" id="mkForm" novalidate aria-label="Search the market index">
-    ${nwHTML("mk", {busy:mk.busy, why:"isn't in the market index", toiOff:"The index lists no types of insurance for these states yet.", note:`Each state is answered over what its own sweep covers, with its own coverage line. Nothing chosen means every state the index holds${mkStates().length>MK_MAX_STATES?`, and the index answers up to ${MK_MAX_STATES} at once`:""}. Costs no S&amp;P requests.`})}
+    ${nwHTML("mk", {busy:mk.busy, why:"isn't in the market index", toiOff:"The index lists no types of insurance for these states yet.",
+      ftOff:mk.heldOff||"The index lists no filing types for these states yet.", fsOff:mk.heldOff||"The index lists no statuses for these states yet.",
+      fsAll:"No status chosen: filings of every status the index holds.", fsSome:`Only filings with ${nwFstats("mk").length===1?"this status":"these statuses"}, each matched by its whole name.`, note:`Each state is answered over what its own sweep covers, with its own coverage line. Nothing chosen means every state the index holds${mkStates().length>MK_MAX_STATES?`, and the index answers up to ${MK_MAX_STATES} at once`:""}. Costs no S&amp;P requests.`})}
     <div class="fgrid three">
-      <label class="f">Filing type<select id="mk_ftype"><option value="">Any</option>${MK_FTYPES.map(t=>opt(t,t,t===f.ftype)).join("")}</select></label>
-      <label class="f"><span>Status <em>words in it</em></span><input type="text" id="mk_status" data-bind="mk.f.fstatus" value="${esc(f.fstatus)}" autocomplete="off" spellcheck="false" placeholder="For example Approved"></label>
+      ${mkListsOn()?"":`<label class="f">Filing type<select id="mk_ftype"><option value="">Any</option>${MK_FTYPES.map(t=>opt(t,t,t===f.ftype)).join("")}</select></label>
+      <label class="f"><span>Status <em>words in it</em></span><input type="text" id="mk_status" data-bind="mk.f.fstatus" value="${esc(f.fstatus)}" autocomplete="off" spellcheck="false" placeholder="For example Approved"></label>`}
       <label class="f">Published from<input type="date" id="mk_from" data-bind="mk.f.from" value="${esc(f.from)}"></label>
       <label class="f">Published to<input type="date" id="mk_to" data-bind="mk.f.to" value="${esc(f.to)}"></label>
       <label class="f mkwords"><span>Words <em>in the description or a company name</em></span><input type="search" id="mk_words" data-bind="mk.f.words" value="${esc(f.words)}" autocomplete="off" spellcheck="false" placeholder="For example Calloway"></label>
@@ -6378,9 +6555,9 @@ function mkResultsHTML(){
   if(!r) return "";
   const rows=Array.isArray(r.rows)?r.rows:[], total=isNum(r.total)?+r.total:rows.length, notes=Array.isArray(r.notes)?r.notes.filter(n=>!blank(n)):[];
   const q=r.query||{}, cov=r.coverage||null;
-  const covs=Array.isArray(r.coverages)&&r.coverages.length ? r.coverages : [cov], sc=mkScopeOf(q), many=Array.isArray(q.states)&&(q.states.length>1||(q.types||[]).length>1);
+  const covs=Array.isArray(r.coverages)&&r.coverages.length ? r.coverages : [cov], sc=mkScopeOf(q), many=Array.isArray(q.states)&&(q.states.length>1||(q.types||[]).length>1||(q.filingTypes||[]).length>0||(q.statuses||[]).length>0);
   let h=`<h2 class="sec">Results</h2>${covs.map((x,i)=>mkCoverageHTML(x, i)).join("")}`;
-  h+=`<p class="sub" id="mkSummary" style="margin:0">${total?`<b>${plural(total,"filing")}</b> in the index`:`<b>No filing in the index matches</b>`} for ${esc(many?sc.words:(q.state||""))}${!many&&q.typeOfInsurance?`, ${esc(nwLower(String(q.typeOfInsurance)))} only`:""}${q.from&&q.to?`, published ${fmtDay(q.from)} to ${fmtDay(q.to)}`:""}.${total?` ${count(r.rateFilings)} ${+r.rateFilings===1?"is a rate filing":"are rate filings"}.`:""}</p>`;
+  h+=`<p class="sub" id="mkSummary" style="margin:0">${total?`<b>${plural(total,"filing")}</b> in the index`:`<b>No filing in the index matches</b>`} for ${esc(many?sc.words:(q.state||""))}${!many&&q.typeOfInsurance?`, ${esc(nwLower(String(q.typeOfInsurance)))} only`:""}${q.from&&q.to?`, published ${fmtDay(q.from)} to ${fmtDay(q.to)}`:""}.${total?(nwOut(sc).rate&&!+r.rateFilings?` Rate filings are left out by the narrowing to ${esc(sc.ftWords)}.`:` ${count(r.rateFilings)} ${+r.rateFilings===1?"is a rate filing":"are rate filings"}.`):""}</p>`;
   if(notes.length) h+=`<div class="notes" id="mkNotes" role="status"><b>Read this before you rely on the results</b><ul>${notes.map(n=>`<li>${esc(n)}</li>`).join("")}</ul></div>`;
   if(!total) return h;
   h+=`<div class="toolbar"><div class="seg" role="group" aria-label="Show"><button type="button" class="btn sm" data-act="mk-tab" data-tab="rows" aria-pressed="${mk.tab==="rows"}">Filings</button><button type="button" class="btn sm" data-act="mk-tab" data-tab="company" aria-pressed="${mk.tab==="company"}">By company</button></div>
@@ -6400,14 +6577,14 @@ function mkRange(g){ if(!isNum(g.rateMin)&&!isNum(g.rateMax)) return "n/d"; retu
 function mkByCompanyHTML(){
   const b=S.mk.byCo, groups=b&&Array.isArray(b.groups)?b.groups:[];
   if(!b) return `<div class="info" role="status"><span>The summary by company couldn't be loaded. Search again.</span></div>`;
-  const tot=isNum(b.groupTotal)?+b.groupTotal:groups.length;
+  const tot=isNum(b.groupTotal)?+b.groupTotal:groups.length, rOut=nwOut(mkScopeOf(S.mk.res&&S.mk.res.query||{})).rate;   // rate filings left out by the narrowing: never 0
   return `<p class="t2" id="mkCoCount">${count(tot)} ${tot===1?"company":"companies"}, most filings first${tot>groups.length?`; the top ${count(groups.length)} are shown`:""}.</p>
     <div class="tbl-wrap cardwrap" id="mkCoWrap"><table class="cards" id="mkCoTable"><thead><tr><th>Company</th><th class="num">Filings</th><th class="num">Rate filings</th><th class="num">Rate impact</th><th>Latest published</th></tr></thead>
-    <tbody>${groups.map(g=>`<tr><td class="c-co">${blank(g.name)?"n/d":esc(g.name)}</td><td class="num c-half" data-label="Filings">${count(g.filings)}</td><td class="num c-half" data-label="Rate filings">${count(g.rateFilings)}</td><td class="num c-half" data-label="Rate impact">${esc(mkRange(g))}</td><td class="c-half" data-label="Latest published">${fmtDay(g.latest)}</td></tr>`).join("")}</tbody></table></div>`;
+    <tbody>${groups.map(g=>`<tr><td class="c-co">${blank(g.name)?"n/d":esc(g.name)}</td><td class="num c-half" data-label="Filings">${count(g.filings)}</td><td class="num c-half" data-label="Rate filings">${rOut&&!+g.rateFilings?`<span class="t2">Left out</span>`:count(g.rateFilings)}</td><td class="num c-half" data-label="Rate impact">${esc(mkRange(g))}</td><td class="c-half" data-label="Latest published">${fmtDay(g.latest)}</td></tr>`).join("")}</tbody></table></div>`;
 }
 async function mkExport(fmt){
   const mk=S.mk; if(!mk.res || mk.exporting) return;
-  const q0=mk.res&&mk.res.query||mk.asked||{}, many=Array.isArray(q0.states)&&(q0.states.length>1||(q0.types||[]).length>1);
+  const q0=mk.res&&mk.res.query||mk.asked||{}, many=Array.isArray(q0.states)&&(q0.states.length>1||(q0.types||[]).length>1||(q0.filingTypes||[]).length>0||(q0.statuses||[]).length>0);
   const stamp=`${many?nwSlug(mkScopeOf(q0)).slice(1):(mk.asked&&mk.asked.state||"index")}-${TODAY()}`;
   if(mk.tab==="company"){
     const g=mk.byCo&&Array.isArray(mk.byCo.groups)?mk.byCo.groups:[];
@@ -6730,6 +6907,7 @@ document.addEventListener("click", e=>{
     case "snap-filings": snapToFilings(); break;
     case "snap-ask": snapAsk(t.dataset.q); break;   // fills the question box; sending is left to the reader
     case "nw-open": case "nw-st": case "nw-st-x": case "nw-st-all": case "nw-region": case "nw-toi": case "nw-toi-x": case "nw-toi-none": case "nw-show-all": case "nw-research": nwAct(a, t); break;   // Narrow it down, on four views
+    case "nw-ft": case "nw-ft-x": case "nw-ft-none": case "nw-fs": case "nw-fs-x": case "nw-fs-none": nwAct(a, t); break;   // filing type and status
 
     case "fc-find": fcLookup(); break;
     case "fc-co": fcChooseCompany(+t.dataset.i); break;

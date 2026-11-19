@@ -512,7 +512,7 @@
     var f = facts || {}, T = f.totals || {}, R = f.rates || {}, Y = f.years || {};
     var rows = FP_SLIDES.map(function (s) { return { id: s[0], label: s[1], included: true, reason: "" }; });
     var out = function (id, reason) { rows.forEach(function (r) { if (r.id === id) { r.included = false; r.reason = reason; } }); };
-    if (!num(T.filings) || T.filings <= 0) { ["states", "rateMap", "rates", "exposure", "adequacy", "programs", "market", "years", "forms", "regulator"].forEach(function (id) { out(id, fpScope(f) ? fpNothing(f) + ", so there are no filings to show. That says nothing about other states or types of insurance, and doesn't prove nothing was filed." : NOTHING); }); return rows; }
+    if (!num(T.filings) || T.filings <= 0) { ["states", "rateMap", "rates", "exposure", "adequacy", "programs", "market", "years", "forms", "regulator"].forEach(function (id) { out(id, fpScope(f) ? fpNothing(f) + ", so there are no filings to show. That says nothing about other " + fpOther(f) + ", and doesn't prove nothing was filed." : NOTHING); }); return rows; }
     var X = rich(f), map = usMapOf(opts);
     if (!map) out("rateMap", "The outlines of the states didn't load, so the rate map is left out (the filings by state are a bar chart instead). Reload the page and build again.");
     else if (!fpRows(f, "states").some(function (s) { return s.latest && num(s.latest.rate); })) out("rateMap", "No filing in any state carried an overall rate impact in S&P's data, so there is nothing to shade.");
@@ -520,12 +520,18 @@
     if (!arr(X.A.rows).length) out("adequacy", needSummaries(f, "rate", "an indicated, filed or approved change, loss costs or assumptions"));
     if (!arr(X.G.programs).length && !arr(X.G.forms).length) out("programs", X.U.checked && X.G.summaries ? "The " + plural(X.G.summaries, "saved summary", "saved summaries") + " of this company's filings name no program or form." : needSummaries(f, "form", "a program or a form"));
     if (!arr(X.M.rows).length) out("market", flat(X.M.reason) || "The market index wasn't looked up for this profile.");
-    if (!R.filings) out("rates", fpNothing(f, "no rate filings") + ", so there are no rate changes to show.");
+    // what the narrowing by filing type left out (fpLeftOut in profile.ts): said so, never as "S&P returned nothing"
+    var LO = fpLeft(f);
+    if (LO.rate && !(R.filings > 0)) { out("rateMap", fpOutWhy(f, ["rate"])); out("exposure", fpOutWhy(f, ["rate"])); out("adequacy", fpOutWhy(f, ["rate"])); }
+    if (LO.form && !arr(X.G.programs).length && !arr(X.G.forms).length) out("programs", fpOutWhy(f, LO.rule ? ["form", "rule"] : ["form"]));
+    if (LO.form && LO.rule && !(f.latest && f.latest.total > 0)) out("forms", fpOutWhy(f, ["form", "rule"]));
+    if (LO.rate && !R.filings) out("rates", fpOutWhy(f, ["rate"]));
+    else if (!R.filings) out("rates", fpNothing(f, "no rate filings") + ", so there are no rate changes to show.");
     else if (!R.withImpact) out("rates", "No filing carried an overall rate impact in S&P's data, so there are no rate changes to chart.");
     else if (!arr(R.points).length) out("rates", "None of the filings with a rate impact has a publish date, so they can't be put in date order.");
     if (!fpRows(f, "states").length) out("states", "None of the filings names a state in S&P's data.");
     if (!arr(Y.totals).some(function (n) { return n > 0; })) out("years", "None of the filings has a publish date in S&P's data.");
-    if (!(f.latest && f.latest.total > 0 && fpRows(f, "latest").length)) out("forms", fpNothing(f, "no form or rule filings") + ".");
+    if (!(LO.form && LO.rule) && !(f.latest && f.latest.total > 0 && fpRows(f, "latest").length)) out("forms", fpNothing(f, "no form or rule filings") + ".");
     if (!(f.regulator && f.regulator.all)) out("regulator", "None of the filings has both a submitted date and a publish date in S&P's data, so the time with the regulator can't be worked out.");
     return rows;
   }
@@ -535,6 +541,22 @@
   function fpDate(f, s) { return shortDate(s, fpThisYear(f)); }
   // what the profile was narrowed to ("Narrow it down"), from the facts (profile.ts fpScopeOf); null when it wasn't
   function fpScope(f) { var s = f && f.scope; return s && typeof s === "object" && s.narrowed === true && flat(s.words) && flat(s.short) ? { words: flat(s.words), short: flat(s.short) } : null; }
+  // what the narrowing by filing type or status leaves out (profile.ts fpLeftOut); nothing for facts not narrowed by them
+  function fpLeft(f) { var s = f && f.scope, l = s && s.narrowed === true && s.leftOut && typeof s.leftOut === "object" ? s.leftOut : {}; return { rate: !!l.rate, rule: !!l.rule, form: !!l.form, approved: !!l.approved, unapproved: !!l.unapproved, statuses: !!l.statuses }; }
+  function fpNames(a, max, words) { a = arr(a).map(function (x) { return x && flat(x.name); }).filter(Boolean); return a.length ? words(a, max) : ""; }
+  function lowName(n) { return /^[A-Z][a-z]/.test(n) ? n[0].toLowerCase() + n.slice(1) : n; }
+  function andW(a) { return a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1]; }
+  function orW(a) { return a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " or " + a[a.length - 1]; }
+  function ftWords(a, max) { if (a.length > max) return a.length + " filing types"; var w = andW(a.map(lowName)); return /\bfilings?$/i.test(w) ? w : w + " filings"; }
+  function stWords(a, max) { return a.length > max ? a.length + " statuses" : orW(a.map(lowName)); }
+  // "The profile was narrowed to rate filings, so form and rule filings weren't searched." (as fpOutWhy in profile.ts)
+  function fpOutWhy(f, kinds) {
+    var s = f && f.scope || {};
+    if (kinds === "status") return "The profile was narrowed to " + (fpNames(s.statuses, 3, stWords) || "some statuses") + ", so not every status was searched.";
+    return "The profile was narrowed to " + (fpNames(s.filingTypes, 3, ftWords) || "some filing types") + ", so " + andW(kinds) + " filings weren't searched.";
+  }
+  // "says nothing about other ...": all four kinds when a filing type or status was chosen
+  function fpOther(f) { var s = f && f.scope || {}; return arr(s.filingTypes).length || arr(s.statuses).length ? "states, types of insurance, filing types or statuses" : "states or types of insurance"; }
   // the same, for a header: " (FL and TX, homeowners)"; "" when not narrowed
   function fpTag(f) { var s = fpScope(f); return s ? " (" + s.short + ")" : ""; }
   // "S&P returned nothing for this search", naming the scope when narrowed
@@ -583,7 +605,7 @@
     var P = f.period || {};
     return { type: "box", x: x, y: y, w: w, h: 1.6, fill: "EEEEF5", margins: [0.2, 0.2, 0.15, 0.15], anchor: "ctr", name: "Nothing returned",
       paras: [{ after: 4, runs: [{ text: "S&P returned nothing for this search" + fpTag(f), size: 16, bold: true, color: NAVY }] },
-              { runs: [{ text: "Filings published " + longDate(P.from) + " to " + longDate(P.to) + (fpScope(f) ? " were searched in " + fpScope(f).words + " only. That says nothing about other states or types of insurance, and doesn't prove nothing was filed." : " were searched in every state in S&P's list. That doesn't prove nothing was filed."), size: 12, color: NAVY }] }] };
+              { runs: [{ text: "Filings published " + longDate(P.from) + " to " + longDate(P.to) + (fpScope(f) ? " were searched in " + fpScope(f).words + " only. That says nothing about other " + fpOther(f) + ", and doesn't prove nothing was filed." : " were searched in every state in S&P's list. That doesn't prove nothing was filed."), size: 12, color: NAVY }] }] };
   }
 
   function fpSummary(f, t) {
@@ -593,13 +615,14 @@
       items.push(header("Filings", L, TOP, lw), fpNothingBox(f, L, TOP + HDR, lw));
     } else {
       items.push(header("Key figures" + fpTag(f), L, TOP, lw));
+      var LO = fpLeft(f), kindTile = function (k, label) { return LO[k] && !T[k] ? ["Left out", label + ": not searched, as the profile was narrowed"] : [cnt(T[k]), label]; };
       var tiles = [
-        [cnt(T.filings), "Filings published in the period"], [cnt(T.rate), "Rate filings"], [cnt(T.rule), "Rule filings"], [cnt(T.form), "Form filings"],
+        [cnt(T.filings), "Filings published in the period"], kindTile("rate", "Rate filings"), kindTile("rule", "Rule filings"), kindTile("form", "Form filings"),
         [cnt(T.states), "States with filings, of " + cnt(f.search && f.search.statesSearched) + " searched"],
         [T.latest ? fpDate(f, T.latest) : "n/d", "Latest filing published"],
-        big ? [pct(big.rate), "Largest overall rate change: " + (flat(big.state) || "state n/d") + ", " + fpDate(f, big.date) + ", " + statusWord(big.status) + (big.approved ? "" : " (may be as asked)"), big.approved ? NAVY : PURPLE]
+        LO.rate && !big ? ["Left out", "Largest overall rate change: rate filings weren't searched"] : big ? [pct(big.rate), "Largest overall rate change: " + (flat(big.state) || "state n/d") + ", " + fpDate(f, big.date) + ", " + statusWord(big.status) + (big.approved ? "" : " (may be as asked)"), big.approved ? NAVY : PURPLE]
           : ["n/d", "Largest overall rate change (no filing carried one)"],
-        A.rateFilings ? [pct(A.share), "Rate filings approved, " + cnt(A.approved) + " of " + cnt(A.rateFilings) + " (derived)"] : ["n/d", "Rate filings approved (no rate filings)"]
+        LO.statuses ? ["Left out", "Rate filings approved: not every status was searched"] : A.rateFilings ? [pct(A.share), "Rate filings approved, " + cnt(A.approved) + " of " + cnt(A.rateFilings) + " (derived)"] : ["n/d", "Rate filings approved (no rate filings)"]
       ];
       // what the saved summaries and the market index add takes the place of the rule and form counts, then the latest date
       richTiles(f).forEach(function (r, i) { tiles[[2, 3, 5][i]] = r; });
@@ -775,6 +798,7 @@
   /* Why a slide that needs saved summaries is left out, and what including it would cost. kind: "rate" or "form". */
   function needSummaries(f, kind, what) {
     var R = rich(f), c = R.U[kind], noun = kind === "rate" ? "rate filing" : "form filing";
+    if (!c.filings && fpLeft(f)[kind]) return fpOutWhy(f, [kind]);
     if (!R.U.checked) return (R.U.note || "Saved summaries weren't looked up for this profile.") + " This slide needs them.";
     if (!c.filings) return "S&P returned no " + noun + "s for this search, so there is nothing to summarise for this slide.";
     if (!c.summarised) {

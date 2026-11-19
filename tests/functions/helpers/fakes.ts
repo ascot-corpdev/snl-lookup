@@ -200,8 +200,14 @@ export function indexTables(clock: Clock, entities: () => Entity[]) {
   const inDates = (f: IndexRow, from: string | null | undefined, to: string | null | undefined) => (!from || (f.publish_date !== null && f.publish_date >= from)) && (!to || (f.publish_date !== null && f.publish_date <= to));
   const inScope = (p: Many, f: IndexRow) => (p.scope?.length ? p.scope.some((x) => f.state === x.state && inDates(f, x.from, x.to)) : f.state === p.state && inDates(f, p.from, p.to));
   const typeOk = (p: Many, f: IndexRow) => { const t = `${f.type_of_insurance ?? ""} / ${f.sub_type_of_insurance ?? ""}`; return p.types?.length ? p.types.some((x) => has(t, x)) : has(t, p.typeOfInsurance); };
-  const match = (p: Many) => [...filings.values()].filter((f) => inScope(p, f)
-    && typeOk(p, f) && has(f.filing_type, p.filingType) && has(f.filing_status, p.status)
+  // migration 0010: filingTypes and statuses, names the index holds, each matched exactly in any letter case (only by a
+  // database with 0010: filtersVersion 3 or more; one before it ignores them, as Postgres ignores keys it doesn't read)
+  type More = Many & { filingTypes?: string[]; statuses?: string[] };
+  let asked = 0;   // the filters version of the database being asked (set at the start of each question)
+  const v10 = () => asked >= 3;
+  const exact = (list: string[] | undefined, v: string | null) => !list?.length || !v10() || list.some((x) => x.trim().toLowerCase() === (v ?? "").trim().toLowerCase());
+  const match = (p: More) => [...filings.values()].filter((f) => inScope(p, f)
+    && typeOk(p, f) && (v10() && p.filingTypes?.length ? exact(p.filingTypes, f.filing_type) : has(f.filing_type, p.filingType)) && (v10() && p.statuses?.length ? exact(p.statuses, f.filing_status) : has(f.filing_status, p.status))
     && (p.rateAbove === null || (f.rate_impact !== null && f.rate_impact > p.rateAbove)) && (p.rateBelow === null || (f.rate_impact !== null && f.rate_impact < p.rateBelow))
     && p.words.every((w) => `${f.description ?? ""} ${f.company_names}`.toLowerCase().includes(w.toLowerCase())));
   const t: Required<Pick<Db, "allEntities" | "openSweep" | "getSweep" | "createSweep" | "claimSweep" | "updateSweep" | "sweeps" | "putIndexRows" | "pruneIndex" | "indexCount" | "indexStates" | "putIndexState" | "queryIndex">>
@@ -242,6 +248,10 @@ export function indexTables(clock: Clock, entities: () => Entity[]) {
     async putIndexState(s) { states.set(s.state, structuredClone(s)); },
     async queryIndex(p) {
       queries.push(structuredClone(p));
+      asked = (this as unknown as { filtersVersion?: number } | undefined)?.filtersVersion ?? t.filtersVersion;
+      // the groups 0010 adds: a database before it raises "unknown group", as the SQL does
+      const g10 = (p as { group: string }).group === "ftype" || (p as { group: string }).group === "status";
+      if (g10 && !v10()) throw new Error(`Couldn't ask the index: unknown group ${(p as { group: string }).group}`);
       const m = match(p), limit = Math.min(Math.max(p.limit || 50, 1), 500), offset = Math.max(p.offset || 0, 0);
       const scoped = (p as Many).scope?.length ? (p as Many).scope!.map((x) => x.state) : [p.state];
       const inState = [...filings.values()].filter((f) => scoped.includes(f.state));
@@ -273,9 +283,10 @@ export function indexTables(clock: Clock, entities: () => Entity[]) {
         out.groups = groups.slice(offset, offset + limit).map(({ k: _k, ...g }) => g);
       } else {
         const by = new Map<string, IndexRow[]>();
-        for (const f of m) { const k = p.group === "type" ? f.type_of_insurance ?? "n/d" : f.publish_date ? f.publish_date.slice(0, 7) : "n/d"; by.set(k, [...(by.get(k) ?? []), f]); }
+        const gk = (p as { group: string }).group, byCount = gk === "type" || gk === "ftype" || gk === "status";
+        for (const f of m) { const k = gk === "type" ? f.type_of_insurance ?? "n/d" : gk === "ftype" ? f.filing_type ?? "n/d" : gk === "status" ? f.filing_status ?? "n/d" : f.publish_date ? f.publish_date.slice(0, 7) : "n/d"; by.set(k, [...(by.get(k) ?? []), f]); }
         const groups = [...by.entries()].map(([name, rows]) => ({ name, ...sum(rows) }))
-          .sort((a, b) => (p.group === "type" ? b.filings - a.filings : 0) || (a.name === "n/d" ? 1 : 0) - (b.name === "n/d" ? 1 : 0) || cmp(a.name, b.name));
+          .sort((a, b) => (byCount ? b.filings - a.filings : 0) || (a.name === "n/d" ? 1 : 0) - (b.name === "n/d" ? 1 : 0) || cmp(a.name, b.name));
         out.groupTotal = groups.length;
         out.groups = groups.slice(offset, offset + limit);
       }
