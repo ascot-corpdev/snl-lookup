@@ -234,7 +234,7 @@ const claudeText = (edit: (t: any) => void = () => {}) => (body: any): Reply => 
     ["a refusal", { script: [{ content: [], stop_reason: "refusal" }] }, P.NOTES.refusal],
     ["Claude being busy (429)", { script: [{ error: { status: 429, type: "rate_limit_error", message: "slow down" } }] }, P.NOTES.busy],
     ["a bad API key (401)", { script: [{ error: { status: 401, type: "authentication_error", message: "bad key" } }] }, P.NOTES.key],
-    ["Anthropic failing (500)", { script: [{ error: { status: 500, type: "api_error", message: "oops" } }] }, P.NOTES.unreachable],
+    ["Anthropic failing (500)", { script: [{ error: { status: 500, type: "api_error", message: "oops" } }] }, P.NOTES.overloaded],
     ["Anthropic unreachable", { anthropicFetch: (() => Promise.reject(new TypeError("connection refused"))) as unknown as typeof fetch }, P.NOTES.unreachable],
   ];
   for (const [name, o, note] of cases) {

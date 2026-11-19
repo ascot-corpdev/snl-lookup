@@ -61,7 +61,9 @@ const rich = (over: Record<string, unknown> = {}) => goodRaw({ rate: { ...goodRa
 {
   const strict = (s: any): boolean => s.type === "object" ? s.additionalProperties === false && same([...s.required].sort(), Object.keys(s.properties).sort()) && Object.values(s.properties).every(strict) : s.type === "array" ? strict(s.items) : true;
   const props = D.DIGEST_SCHEMA.properties.rate.properties;
-  ok("Claude is asked for each new figure, nullable, with a page each, in a strict schema", strict(D.DIGEST_SCHEMA) && strict(D.AFTER_SCHEMA) && D.RATE_MORE_KEYS.every((k: string) => Array.isArray(props[k].type) && props[k].type.includes("null") && props.pages.properties[k]) && same(props.lossCostRef.type, ["string", "null"]));
+  const after = D.AFTER_SCHEMA.properties.digests.items.properties.rate.properties;
+  ok("after an answer (no structured output): each new figure nullable, with a page each, in a strict schema", strict(D.AFTER_SCHEMA) && D.RATE_MORE_KEYS.every((k: string) => Array.isArray(after[k].type) && after[k].type.includes("null") && after.pages.properties[k]) && same(after.lossCostRef.type, ["string", "null"]));
+  ok("on request (structured output): the new figures as a list of name, value and page, the reference as a list, in a strict schema with no field per figure", strict(D.DIGEST_SCHEMA) && same(props.more.items.properties.name.enum, D.RATE_MORE_KEYS) && props.more.items.properties.value.type === "number" && props.more.items.properties.page.type === "integer" && same(Object.keys(props.lossCostRefs.items.properties), ["text", "page"]) && D.RATE_MORE_KEYS.every((k: string) => !(k in props)) && !("pages" in props) && !("lossCostRef" in props));
   ok("the rules name each new figure and say it must be quoted in the basis", D.RATE_MORE_KEYS.every((k: string) => D.DIGEST_RULES.includes(k + ": ")) && /Each must be quoted, as printed, in the rate's basis/.test(D.DIGEST_RULES) && !D.DIGEST_RULES.includes("—"));
 }
 
