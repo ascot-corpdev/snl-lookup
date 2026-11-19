@@ -507,7 +507,7 @@ The **Earnings** tab finds a quarter's results documents for the companies on th
 
 What it cannot do, because a site can't drive a browser as the script does: an investor site that turns away automated requests shows as "Site refused" with the page to open yourself, and a list a site fills in with JavaScript can't be seen ("Not found on the pages read"). SEC filings are saved as the SEC's own web pages (`.htm`, with a line that makes their images and links load from sec.gov when opened online), not PDFs. The desktop script remains the way to get everything.
 
-1. Set the contact the SEC asks automated tools to send: your organisation's name and a contact email, for example `Organisation Name contact@yourco.com`. It goes only to the SEC and is never shown on the page. Until it is set, the tab says "not set up yet" and nothing is fetched from anywhere.
+1. Set the contact the SEC asks automated tools to send: your organisation's name and a contact email, for example `Organisation Name name@your-company.example`. It goes only to the SEC and is never shown on the page. Until it is set, the tab says "not set up yet" and nothing is fetched from anywhere.
 
    ```bash
    supabase secrets set SEC_CONTACT=...
