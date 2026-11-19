@@ -207,7 +207,10 @@ const WIDE = { action: "search", companyIds: SIXTY, states: ["FL", "TX"], from: 
   const n = w.searches();
   const again = await w.call({ ...WIDE, cursor: one.body.cursor });
   ok("asking for a part again (its answer was lost on the way) sends the same part, without asking S&P", again.status === 200 && w.searches() === n && same(again.body.rows, two.body.rows) && again.body.part === 2 && same(again.body.cursor, two.body.cursor), { s: again.status, n: w.searches() - n });
-  const bad = await w.call({ ...WIDE, cursor: { run: one.body.cursor.run.replace(/^./, "0"), part: 3 } });
+  // Another run's id: the real one with its first character changed. (Swapping it for a fixed "0" left the id unchanged
+  // whenever the real one already began with 0, one run in sixteen, and the check then failed by chance.)
+  const otherRun = (one.body.cursor.run[0] === "0" ? "1" : "0") + one.body.cursor.run.slice(1);
+  const bad = await w.call({ ...WIDE, cursor: { run: otherRun, part: 3 } });
   ok("a cursor from another run of the search can't carry on: 409 with what to do", bad.status === 409 && bad.body.error === "search_lost" && bad.body.message === LOST_PLACE, bad.body);
   const skip = await w.call({ ...WIDE, cursor: { ...two.body.cursor, part: 5 } });
   ok("nor can a cursor that skips a part", skip.status === 409 && skip.body.error === "search_lost");
