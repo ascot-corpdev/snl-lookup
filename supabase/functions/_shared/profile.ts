@@ -21,7 +21,7 @@ import Anthropic from "npm:@anthropic-ai/sdk@1.8.0";
 import type { Db, Entity } from "./db.ts";
 import { canSearchFilings } from "./db.ts";
 import { type Filing, filingNumberText, getReference, MAX_WINDOW_DAYS, savedOrFreshSearch, type SearchAnswer, type SearchParams } from "./filings.ts";
-import { groupChoices, MAX_IDS, planSearch, resolveEntity } from "./filings.ts";
+import { groupChoices, MAX_IDS, planSearch, resolveEntity, sameId } from "./filings.ts";
 import type { Env } from "./http.ts";
 import type { Snowflake } from "./snowflake.ts";
 import { type Spgmi, SpgmiError } from "./spgmi.ts";
@@ -882,11 +882,12 @@ export const FP_DRAFT_SEARCH_MS = 70_000;     // "filings_draft": sooner, so Cla
 export const FP_POINTS = 60, FP_ROWS = 60, FP_LATEST = 12;   // the most rate points, table rows and latest filings kept
 export const FP_SOURCE = "S&P Global Market Intelligence, SNL Insurance Product Filings";
 
-/** "Narrow it down": the states and types of insurance a filings profile is narrowed to. Empty lists mean every state
-    in S&P's list and every type of insurance, as before. */
-export type FpNarrow = { states: string[]; typeOfInsuranceIds: number[] };
+/** "Narrow it down": the states, types of insurance, filing types and statuses a filings profile is narrowed to. Empty
+    lists mean every state in S&P's list, every type of insurance, every filing type and every status, as before (no
+    status sent means every status in S&P's list, as savedOrFreshSearch sends it). */
+export type FpNarrow = { states: string[]; typeOfInsuranceIds: number[]; filingTypeIds: number[]; filingStatusIds: number[] };
 export type FpAsk = ({ kind: "company"; idKind: "companyId" | "institutionId"; id: string; years: FpYears } | { kind: "group"; group: string; years: FpYears }) & Partial<FpNarrow>;
-export const FP_MAX_STATES = 60, FP_MAX_TYPES = 100;   // as parseSearch in filings.ts takes them
+export const FP_MAX_STATES = 60, FP_MAX_TYPES = 100, FP_MAX_KINDS = 50;   // as parseSearch in filings.ts takes them
 
 /** The narrowing in a request, checked the way parseSearch checks a search's states and type of insurance ids:
     two-letter codes, whole-number ids, lists of at most 60 and 100. Missing, null or empty: no narrowing. */
@@ -903,7 +904,15 @@ export function parseFpNarrow(b: Record<string, unknown>): { ok: true; narrow: F
     if (!ok) return bad(`Types of insurance must be ids from S&P's reference list, at most ${FP_MAX_TYPES}.`);
     typeOfInsuranceIds = [...new Set((ti as unknown[]).map((x) => Number(String(x).trim())))].sort((x, y) => x - y);
   }
-  return { ok: true, narrow: { states, typeOfInsuranceIds } };
+  // filing types and statuses: whole-number ids from S&P's lists, at most 50 each, as parseSearch takes them
+  const kinds = (v: unknown): number[] | null | undefined => {
+    if (v === undefined || v === null) return [];
+    const ok = Array.isArray(v) && v.length <= FP_MAX_KINDS && v.every((x) => (typeof x === "number" && Number.isInteger(x) && x >= 0 && x < 1e12) || (typeof x === "string" && /^\d{1,12}$/.test(x.trim())));
+    return ok ? [...new Set((v as unknown[]).map((x) => Number(String(x).trim())))].sort((x, y) => x - y) : null;
+  };
+  const filingTypeIds = kinds(b.filingTypeIds), filingStatusIds = kinds(b.filingStatusIds);
+  if (!filingTypeIds || !filingStatusIds) return bad(`Filing types and statuses must be ids from S&P's reference lists, at most ${FP_MAX_KINDS} of each.`);
+  return { ok: true, narrow: { states, typeOfInsuranceIds, filingTypeIds, filingStatusIds } };
 }
 
 /** The company (by its S&P company or institution id, as the company list gives it) or the group (by its name in the
@@ -914,7 +923,8 @@ export function parseFilingsProfile(b: Record<string, unknown>): { ok: true; ask
   if (!FP_YEARS.includes(years as FpYears)) return bad("Choose the last 1, 3 or 5 years.");
   const nw = parseFpNarrow(b);
   if (!nw.ok) return bad(nw.message);
-  const narrow = { ...(nw.narrow.states.length ? { states: nw.narrow.states } : {}), ...(nw.narrow.typeOfInsuranceIds.length ? { typeOfInsuranceIds: nw.narrow.typeOfInsuranceIds } : {}) };
+  const narrow = { ...(nw.narrow.states.length ? { states: nw.narrow.states } : {}), ...(nw.narrow.typeOfInsuranceIds.length ? { typeOfInsuranceIds: nw.narrow.typeOfInsuranceIds } : {}),
+    ...(nw.narrow.filingTypeIds.length ? { filingTypeIds: nw.narrow.filingTypeIds } : {}), ...(nw.narrow.filingStatusIds.length ? { filingStatusIds: nw.narrow.filingStatusIds } : {}) };
   const id = (v: unknown) => (typeof v === "string" || typeof v === "number") && /^\d{1,12}$/.test(String(v).trim()) ? String(Number(String(v).trim())) : null;
   if (b.kind === "company") {
     const c = id(b.companyId), i = id(b.institutionId);
@@ -932,20 +942,56 @@ export function parseFilingsProfile(b: Record<string, unknown>): { ok: true; ask
 /** What a filings profile was narrowed to, in the facts: null lists mean every state searched (S&P's list) or every
     type of insurance. words is for sentences ("Florida and Texas, homeowners"), short for titles and source lines
     ("FL and TX, homeowners"); both are "" when nothing was narrowed. Type names are S&P's, from its saved list. */
-export type FpScope = { narrowed: boolean; states: string[] | null; types: { id: number; name: string }[] | null; words: string; short: string };
+export type FpScope = { narrowed: boolean; states: string[] | null; types: { id: number; name: string }[] | null; words: string; short: string;
+  /** Filing types and statuses chosen (left out of facts that weren't narrowed by them, as in facts made before), and
+      what they leave out of the profile (fpLeftOut). */
+  filingTypes?: { id: number; name: string }[] | null; statuses?: { id: number; name: string }[] | null; leftOut?: FpLeftOut };
+/** What a filings profile's filing types and statuses leave out. UNCONFIRMED, as fpKinds and fpApproved are: a chosen
+    filing type counts as rate, rule or form when its S&P name says so, and a chosen status as approved when it says so.
+    approved: no chosen status is approved; unapproved: every chosen status is (so none that isn't approved was searched). */
+export type FpLeftOut = { rate: boolean; rule: boolean; form: boolean; approved: boolean; unapproved: boolean; statuses: boolean };
+export function fpLeftOut(ft: { name: string }[] | null | undefined, st: { name: string }[] | null | undefined): FpLeftOut {
+  const f = ft ?? [], s = st ?? [], k = f.map((x) => fpKinds(x.name));
+  return { rate: f.length > 0 && !k.some((x) => x.rate), rule: f.length > 0 && !k.some((x) => x.rule), form: f.length > 0 && !k.some((x) => x.form),
+    approved: s.length > 0 && !s.some((x) => fpApproved(x.name)), unapproved: s.length > 0 && s.every((x) => fpApproved(x.name)), statuses: s.length > 0 };
+}
 export const STATE_NAMES: Record<string, string> = { AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado", CT: "Connecticut", DE: "Delaware", DC: "District of Columbia", FL: "Florida", GA: "Georgia", HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa", KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland", MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri", MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey", NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota", OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina", SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont", VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming" };
 const andWords = (a: string[]) => (a.length < 2 ? a.join("") : `${a.slice(0, -1).join(", ")} and ${a[a.length - 1]}`);
 /** A type of insurance's name inside a sentence: lower case when it is an ordinary capitalised word ("Homeowners"). */
 const lowerName = (s: string) => (/^[A-Z][a-z]/.test(s) ? s[0].toLowerCase() + s.slice(1) : s);
-export function fpScopeOf(states: string[] | null, types: { id: number; name: string }[] | null): FpScope {
+/** Filing types in words ("rate filings", "rate and form filings") and statuses ("approved", "approved or pending"). */
+const orWords = (a: string[]) => (a.length < 2 ? a.join("") : `${a.slice(0, -1).join(", ")} or ${a[a.length - 1]}`);
+export const fpFtWords = (ft: { name: string }[], max: number) => (ft.length <= max ? ((x: string) => (/\bfilings?$/i.test(x) ? x : `${x} filings`))(andWords(ft.map((t) => lowerName(t.name)))) : `${ft.length} filing types`);
+export const fpStWords = (st: { name: string }[], max: number) => (st.length <= max ? orWords(st.map((t) => lowerName(t.name))) : `${st.length} statuses`);
+export function fpScopeOf(states: string[] | null, types: { id: number; name: string }[] | null, ftypes?: { id: number; name: string }[] | null, statuses?: { id: number; name: string }[] | null): FpScope {
   const st = states && states.length ? [...states].sort() : null, ty = types && types.length ? types : null;
-  if (!st && !ty) return { narrowed: false, states: null, types: null, words: "", short: "" };
+  const ft = ftypes && ftypes.length ? ftypes : null, fs = statuses && statuses.length ? statuses : null;
+  if (!st && !ty && !ft && !fs) return { narrowed: false, states: null, types: null, words: "", short: "" };
   const stW = !st ? "every state" : st.length <= 3 ? andWords(st.map((s) => STATE_NAMES[s] ?? s)) : st.length <= 8 ? andWords(st) : `${st.slice(0, 6).join(", ")} and ${st.length - 6} more states`;
   const stS = !st ? "all states" : st.length <= 4 ? andWords(st) : `${st.slice(0, 3).join(", ")} and ${st.length - 3} more`;
   const tyW = !ty ? "every type of insurance" : ty.length <= 3 ? andWords(ty.map((t) => lowerName(t.name))) : `${ty.length} types of insurance`;
   const tyS = !ty ? "all types" : ty.length <= 2 ? andWords(ty.map((t) => lowerName(t.name))) : `${ty.length} types of insurance`;
-  return { narrowed: true, states: st, types: ty, words: fit(`${stW}, ${tyW}`, 160), short: fit(`${stS}, ${tyS}`, 60) };
+  if (!ft && !fs) return { narrowed: true, states: st, types: ty, words: fit(`${stW}, ${tyW}`, 160), short: fit(`${stS}, ${tyS}`, 60) };
+  // with a filing type or a status, only the parts narrowed, with semicolons: "FL and TX; homeowners; rate filings; approved"
+  const words = [st ? stW : "", ty ? tyW : "", ft ? fpFtWords(ft, 3) : "", fs ? fpStWords(fs, 3) : ""].filter(Boolean).join("; ");
+  const short = [st ? stS : "", ty ? tyS : "", ft ? fpFtWords(ft, 2) : "", fs ? fpStWords(fs, 2) : ""].filter(Boolean).join("; ");
+  return { narrowed: true, states: st, types: ty, filingTypes: ft, statuses: fs, words: fit(words, 160), short: fit(short, 60), leftOut: fpLeftOut(ft, fs) };
 }
+/** What the scope leaves out, from the facts (none for facts not narrowed by filing type or status). */
+export function fpOutOf(f: { scope?: FpScope }): FpLeftOut {
+  const s = fpScopeIn(f), l = s.leftOut;
+  return l && typeof l === "object" ? { rate: !!l.rate, rule: !!l.rule, form: !!l.form, approved: !!l.approved, unapproved: !!l.unapproved, statuses: !!l.statuses } : fpLeftOut(s.filingTypes, s.statuses);
+}
+/** Why a part of the profile is left out by the narrowing: "The profile was narrowed to rate filings, so form and rule
+    filings weren't searched." kinds: of rate, rule and form; or "status" for what depends on every status. */
+export function fpOutWhy(f: { scope?: FpScope }, kinds: ("rate" | "rule" | "form")[] | "status"): string {
+  const s = fpScopeIn(f);
+  if (kinds === "status") return `The profile was narrowed to ${s.statuses?.length ? fpStWords(s.statuses, 3) : "some statuses"}, so not every status was searched.`;
+  return `The profile was narrowed to ${s.filingTypes?.length ? fpFtWords(s.filingTypes, 3) : "some filing types"}, so ${andWords(kinds)} filings weren't searched.`;
+}
+/** "says nothing about other ...": states or types of insurance, as before; all four kinds when a filing type or a
+    status was chosen. */
+export const fpOther = (s: FpScope) => (s.filingTypes?.length || s.statuses?.length ? "states, types of insurance, filing types or statuses" : "states or types of insurance");
 
 /** The company or group a filings profile covers, from the company list: its name and the S&P ids the search takes. */
 export type FpTarget = { kind: "company" | "group"; name: string; groupName: string | null; companyIds: number[]; institutionIds: number[]; companies: number; noId: number; tooBig: boolean };
@@ -1328,7 +1374,12 @@ export function fpMarketRow(ids: { companyIds: number[]; institutionIds: number[
     insurance in each, the busiest states first, at most FP_MARKET_PAIRS), the index's filings over the part of the
     profile's period it covers. Reads the app's own database only: no S&P request. Never throws: what can't be done is
     said in reason. */
-export async function fpMarketFacts(db: Db, ids: { companyIds: number[]; institutionIds: number[] }, name: string, rows: Filing[], period: { from: string; to: string }): Promise<FpMarket> {
+export async function fpMarketFacts(db: Db, ids: { companyIds: number[]; institutionIds: number[] }, name: string, rows: Filing[], period: { from: string; to: string }, scope?: FpScope): Promise<FpMarket> {
+  // a profile narrowed by filing type or status sets the company against the index's filings of the same kinds: matched
+  // by S&P's ids, which the index keeps for each filing (filing_type_id, filing_status_id), or by name when it has none
+  const ft = scope?.filingTypes ?? null, fs = scope?.statuses ?? null;
+  const has = (list: { id: number; name: string }[] | null, id: unknown, nm: unknown) => !list || (id !== null && id !== undefined && id !== "" ? list.some((x) => sameId(x.id, id)) : typeof nm === "string" && list.some((x) => x.name.trim().toLowerCase() === nm.trim().toLowerCase()));
+  const alike = (r: IndexRow) => has(ft, r.filing_type_id, r.filing_type) && has(fs, r.filing_status_id, r.filing_status);
   const none = (reason: string, indexed: string[] = []): FpMarket => ({ checked: true, reason, rows: [], coverage: [], indexed });
   if (!db.indexStates || !db.queryIndex) return none("The market index isn't set up on this site, so the company can't be set against the market.");
   let states: IndexState[];
@@ -1361,15 +1412,16 @@ export async function fpMarketFacts(db: Db, ids: { companyIds: number[]; institu
   try {
     for (const p of chosen) {
       const s = states.find((x) => x.state === p.state)!, o = overlap(s), got: IndexRow[] = [];
-      let total = 0;
+      let total = 0, read = 0;
       for (let offset = 0; offset < FP_MARKET_ROWS; offset += 500) {
         const r = await db.queryIndex({ state: p.state, from: o.from, to: o.to, typeOfInsurance: p.toi, filingType: null, status: null, words: [], rateAbove: null, rateBelow: null, group: "rows", limit: 500, offset });
         total = Number(r.total) || 0;
         const part = (r.rows ?? []) as IndexRow[];
-        got.push(...part);
-        if (part.length < 500 || got.length >= total) break;
+        got.push(...part.filter(alike));
+        read += part.length;
+        if (part.length < 500 || read >= total) break;
       }
-      out.push(fpMarketRow(ids, p.state, p.toi, o.from, o.to, got, total > got.length));
+      out.push(fpMarketRow(ids, p.state, p.toi, o.from, o.to, got, total > read));
       if (!coverage.some((c) => c.state === s.state)) coverage.push({ state: s.state, from: s.from_date, to: s.to_date, lastComplete: String(s.last_complete_at).slice(0, 10), covered: s.companies_covered, missed: s.companies_missed });
     }
   } catch { return none("The market index couldn't be read just now, so the company isn't set against the market. Try again later.", indexed); }
@@ -1412,16 +1464,18 @@ export async function buildFilingsFacts(ctx: FpCtx, ask: FpAsk): Promise<{ facts
   const listed = [...new Set((ref?.options ?? []).map((x) => String(x.id).trim().toUpperCase()).filter((s) => /^[A-Z]{2}$/.test(s)))].slice(0, 60);
   // "Narrow it down": only the states and types of insurance asked for, checked against S&P's saved lists (free)
   const scope = await fpNarrowScope(ctx.db, ask, listed, ctx.now());
-  const params: SearchParams = { companyIds: t.companyIds, institutionIds: t.institutionIds, states: (scope.states ?? (listed.length ? listed : US_STATES)).slice().sort(), filingStatusIds: [], typeOfInsuranceIds: (scope.types ?? []).map((x) => x.id), filingTypeIds: [], spStatEntityIds: [], trackingNumbers: [], from, to };
+  // no status chosen: none sent, so the search asks S&P for every status in its list, as it always has
+  const params: SearchParams = { companyIds: t.companyIds, institutionIds: t.institutionIds, states: (scope.states ?? (listed.length ? listed : US_STATES)).slice().sort(), filingStatusIds: (scope.statuses ?? []).map((x) => x.id), typeOfInsuranceIds: (scope.types ?? []).map((x) => x.id), filingTypeIds: (scope.filingTypes ?? []).map((x) => x.id), spStatEntityIds: [], trackingNumbers: [], from, to };
   // unlisted: a profile's search is saved but kept out of the shared Recent searches list (it names who was profiled)
   const found = await savedOrFreshSearch(ctx.api, ctx.db, params, { now: ctx.start, maxRequests: FP_MAX_SP_REQUESTS - FP_OVERHEAD, deadline: ctx.deadline, clock: ctx.now, unlisted: true });
   // the saved summaries of the company's filings and the market index: the app's own database, free; neither stops
   // the profile (a summary or an index that can't be read is said on the plan)
   const digests = await fpSavedDigests(ctx.db, found.rows);
-  const market = await fpMarketFacts(ctx.db, t, t.name, found.rows, { from, to });
+  const market = await fpMarketFacts(ctx.db, t, t.name, found.rows, { from, to }, scope);
   const facts = filingsFactsFrom(t, { rows: found.rows, capped: found.capped, fromStore: found.fromStore, fetchedAt: found.fetchedAt }, { asOf, years: ask.years, from, to, statesSearched: params.states.length, scope }, { states: params.states, digests, market });
   // the search itself, for the page to tell Ask Claude what is on screen (never sent to Claude with the draft)
-  return { facts, search: { companyIds: t.companyIds, institutionIds: t.institutionIds, states: params.states, ...(params.typeOfInsuranceIds.length ? { typeOfInsuranceIds: params.typeOfInsuranceIds } : {}), from, to }, candidates: fpCandidates(found.rows, digests) };
+  return { facts, search: { companyIds: t.companyIds, institutionIds: t.institutionIds, states: params.states, ...(params.typeOfInsuranceIds.length ? { typeOfInsuranceIds: params.typeOfInsuranceIds } : {}),
+    ...(params.filingTypeIds.length ? { filingTypeIds: params.filingTypeIds } : {}), ...(scope.statuses?.length ? { filingStatusIds: params.filingStatusIds } : {}), from, to }, candidates: fpCandidates(found.rows, digests) };
 }
 
 /** The narrowing asked for, checked before any S&P search: a state must be in S&P's list of filing states when that
@@ -1443,7 +1497,20 @@ export async function fpNarrowScope(db: Db, ask: Partial<FpNarrow>, listed: stri
     }
     types = ask.typeOfInsuranceIds.map((id) => ({ id, name: opts.find((o) => o.id === id)?.name || `type of insurance id ${id}` }));
   }
-  return fpScopeOf(states, types);
+  // filing types and statuses: checked against S&P's saved lists in the same way, and named from them
+  const named = async (ids: number[] | undefined, field: "serffFilingType" | "filingStatus", what: string, list: string) => {
+    if (!ids?.length) return null;
+    const ref = await getReference(null, db, field, { now });
+    const opts = (ref?.options ?? []).map((o) => ({ id: Number(String(o.id).trim()), name: clean(o.name, 80) ?? "" })).filter((o) => Number.isInteger(o.id));
+    if (opts.length) {
+      const off = ids.filter((id) => !opts.some((o) => o.id === id));
+      if (off.length) throw new FpRefused("bad", `${cap1(what)} ${off.length === 1 ? "id" : "ids"} ${andWords(off.map(String))} ${off.length === 1 ? "isn't" : "aren't"} in S&P's list of ${list}. Choose again from the list.`);
+    }
+    return ids.map((id) => ({ id, name: opts.find((o) => o.id === id)?.name || `${what} id ${id}` }));
+  };
+  const ftypes = await named(ask.filingTypeIds, "serffFilingType", "filing type", "filing types");
+  const statuses = await named(ask.filingStatusIds, "filingStatus", "status", "filing statuses");
+  return fpScopeOf(states, types, ftypes, statuses);
 }
 
 // ---------- the text of a filings profile ----------
@@ -1474,11 +1541,14 @@ export function filingsPlainText(f: FilingsFacts): FpText {
   const p = (lead: string, text: string): Point => ({ lead: fit(lead, LIMITS.lead), text: fit(text, LIMITS.point) });
   const sec = (title: string, points: Point[]): Section => ({ title: fit(title, LIMITS.title), points });
   const period = periodWords(f), over = yearsWords(f.period.years), sc = fpScopeIn(f), inSc = sc.narrowed ? ` in ${sc.words}` : "";
-  const none = sc.narrowed ? `S&P returned nothing for this search of ${sc.words} (${period}). That says nothing about other states or types of insurance, and doesn't show that nothing was filed.`
+  const none = sc.narrowed ? `S&P returned nothing for this search of ${sc.words} (${period}). That says nothing about other ${fpOther(sc)}, and doesn't show that nothing was filed.`
     : `S&P returned nothing for this search (${period}). That doesn't show that nothing was filed.`;
   const early = f.search.capped ? " The search stopped early, so there may be more." : "";
   const top = f.states.rows[0], big = f.largest, all = f.regulator.all, R = f.rates;
   const where = (x: { state: string | null; toi: string | null }) => `${x.state ?? "a state n/d"}${x.toi ? ` (${x.toi})` : ""}`;
+  // what the narrowing by filing type or status leaves out: said as left out, never counted as 0 or "none returned"
+  const L = fpOutOf(f), outK = (["rate", "rule", "form"] as const).filter((k) => L[k]);
+  const left = (title: string, why: string) => sec(title, [p("Left out", why)]);
 
   if (!T.filings) {
     const nothing = (title: string) => sec(title, [p("Nothing returned", none)]);
@@ -1492,11 +1562,14 @@ export function filingsPlainText(f: FilingsFacts): FpText {
     });
   }
   const summary: Point[] = [
-    p("Filings", `S&P returned ${many(T.filings, "filing")}${inSc} published ${period}: ${cnt(T.rate)} rate, ${cnt(T.rule)} rule and ${cnt(T.form)} form.${early}`),
+    p("Filings", outK.length
+      ? `S&P returned ${many(T.filings, "filing")}${inSc} published ${period}${(["rate", "rule", "form"] as const).filter((k) => !L[k]).length ? `: ${andWords((["rate", "rule", "form"] as const).filter((k) => !L[k]).map((k) => `${cnt(T[k])} ${k}`))}` : ""}. ${fpOutWhy(f, [...outK])}${early}`
+      : `S&P returned ${many(T.filings, "filing")}${inSc} published ${period}: ${cnt(T.rate)} rate, ${cnt(T.rule)} rule and ${cnt(T.form)} form.${early}`),
     p("States", top ? `Filings in ${many(T.states, "state")}; the most in ${top.state} (${cnt(top.n)}).` : "States n/d."),
-    big ? p("Largest rate change", `${fmt.pct(big.rate)} in ${where(big)}, published ${d(big.date)}, ${status(big.status)}${notApprovedNote(big)}.`) : p("Rate changes", "No filing in this search carries an overall rate impact in S&P's data."),
+    big ? p("Largest rate change", `${fmt.pct(big.rate)} in ${where(big)}, published ${d(big.date)}, ${status(big.status)}${notApprovedNote(big)}.`) : L.rate ? p("Rate changes", `Left out. ${fpOutWhy(f, ["rate"])}`) : p("Rate changes", "No filing in this search carries an overall rate impact in S&P's data."),
   ];
-  if (f.approval.rateFilings) summary.push(p("Approvals", `${cnt(f.approval.approved)} of ${many(f.approval.rateFilings, "rate filing")} (${fmt.pct(f.approval.share)}) show an approved status.`));
+  // approved against not approved means nothing when only some statuses were searched
+  if (f.approval.rateFilings && !L.statuses) summary.push(p("Approvals", `${cnt(f.approval.approved)} of ${many(f.approval.rateFilings, "rate filing")} (${fmt.pct(f.approval.share)}) show an approved status.`));
   if (T.latest) summary.push(p("Latest filing", `Published ${d(T.latest)}.`));
   if (all) summary.push(p("With the regulator", `About ${many(all.median, "day")} from submitted to published, the median over ${many(all.n, "filing")} (approximate).`));
   // what the saved summaries and the market index add: the points an analyst reads first, before the later ones above
@@ -1504,10 +1577,10 @@ export function filingsPlainText(f: FilingsFacts): FpText {
   summary.splice(3, 0, ...rich.summary);
 
   const latestPt = R.points.length ? R.points[R.points.length - 1] : null;
-  const rates = sec(R.withImpact ? (R.lo === R.hi ? `Overall rate changes of ${fmt.pct(R.lo)}` : `Overall rate changes from ${fmt.pct(R.lo)} to ${fmt.pct(R.hi)}`) : "Rate filings by state and type of insurance", R.withImpact ? [
+  const rates = L.rate && !R.filings ? left("Rate changes left out by the narrowing", fpOutWhy(f, ["rate"])) : sec(R.withImpact ? (R.lo === R.hi ? `Overall rate changes of ${fmt.pct(R.lo)}` : `Overall rate changes from ${fmt.pct(R.lo)} to ${fmt.pct(R.hi)}`) : "Rate filings by state and type of insurance", R.withImpact ? [
     p("Range", `${R.lo === R.hi ? fmt.pct(R.lo) : `From ${fmt.pct(R.lo)} to ${fmt.pct(R.hi)}`} across ${many(R.withImpact, "filing")}; each is S&P's overall figure for the filing, not weighted by premium.`),
     R.notApproved ? p("Not approved", `${many(R.notApproved, "filing with a rate impact isn't", "filings with a rate impact aren't")} approved; ${R.notApproved === 1 ? "its figure" : "their figures"} may be the change asked for.`)
-      : p("Approved", "Every filing with a rate impact shows an approved status."),
+      : p("Approved", L.unapproved ? `Every filing with a rate impact shows an approved status; the profile was narrowed to ${fpStWords(sc.statuses ?? [], 3)}.` : "Every filing with a rate impact shows an approved status."),
     ...(latestPt ? [p("Latest", `${fmt.pct(latestPt.rate)} in ${where(latestPt)}, published ${d(latestPt.date)}, ${status(latestPt.status)}.`)] : []),
   ] : [p("Rate changes", R.filings ? `None of the ${many(R.filings, "rate filing")} carries an overall rate impact in S&P's data.` : "S&P returned no rate filings for this search.")]);
 
@@ -1526,7 +1599,7 @@ export function filingsPlainText(f: FilingsFacts): FpText {
   ]);
 
   const lf = f.latest.rows[0];
-  const forms = sec(f.latest.total ? `${many(f.latest.total, "form or rule filing", "form and rule filings")}; latest ${d(lf?.published ?? null)}` : "Latest form and rule filings", f.latest.total && lf ? [
+  const forms = L.form && L.rule && !f.latest.total ? left("Form and rule filings left out by the narrowing", fpOutWhy(f, ["form", "rule"])) : sec(f.latest.total ? `${many(f.latest.total, "form or rule filing", "form and rule filings")}; latest ${d(lf?.published ?? null)}` : "Latest form and rule filings", f.latest.total && lf ? [
     p("Latest", `${lf.type ?? "Filing type n/d"} filing in ${where(lf)}, published ${d(lf.published)}, ${status(lf.status)}.`),
     p("In the period", `${many(f.latest.total, "form or rule filing", "form and rule filings")} of ${many(T.filings, "filing")}.`),
   ] : [p("None returned", "S&P returned no form or rule filings for this search.")]);
@@ -1557,8 +1630,9 @@ const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
     types of insurance. */
 const mentionsStates = (text: string, sc: FpScope) => !sc.states || sc.states.some((s) => new RegExp(`\\b${s}\\b`).test(text) || (!!STATE_NAMES[s] && text.toLowerCase().includes(STATE_NAMES[s].toLowerCase())));
 const mentionsTypes = (text: string, sc: FpScope) => !sc.types || sc.types.some((x) => !!x.name && text.toLowerCase().includes(x.name.toLowerCase()));
+const mentionsList = (text: string, list: { name: string }[] | null | undefined) => !list?.length || list.some((x) => !!x.name && text.toLowerCase().includes(x.name.toLowerCase()));
 export function fpMentionsScope(text: string, sc: FpScope): boolean {
-  return mentionsStates(text, sc) && mentionsTypes(text, sc);
+  return mentionsStates(text, sc) && mentionsTypes(text, sc) && mentionsList(text, sc.filingTypes) && mentionsList(text, sc.statuses);
 }
 /** Every title and the cover of a narrowed profile name the scope: a title that doesn't gets the part it misses added
     when it fits ("Most filings in FL: 9 of 16 (homeowners)", "Latest change an increase in 2 of 2 states (FL, TX
@@ -1570,10 +1644,12 @@ export function fpScoped(f: { scope?: FpScope }, text: FpText): FpText {
   const stS = sc.states ? (sc.states.length <= 4 ? andWords(sc.states) : `${sc.states.slice(0, 3).join(", ")} and ${sc.states.length - 3} more`) : "";
   const stC = sc.states ? (sc.states.length <= 4 ? sc.states.join(", ") : stS) : "";
   const tyS = sc.types ? (sc.types.length <= 2 ? andWords(sc.types.map((x) => lowerName(x.name))) : `${sc.types.length} types of insurance`) : "";
+  const ftS = sc.filingTypes?.length ? fpFtWords(sc.filingTypes, 2) : "", fsS = sc.statuses?.length ? fpStWords(sc.statuses, 2) : "";
   const title = (t: string) => {
-    const st = !mentionsStates(t, sc), ty = !mentionsTypes(t, sc);
-    if (!st && !ty) return t;
-    for (const tag of [[st ? stS : "", ty ? tyS : ""].filter(Boolean).join(", "), [st ? stC : "", ty ? tyS : ""].filter(Boolean).join(" ")]) {
+    const st = !mentionsStates(t, sc), ty = !mentionsTypes(t, sc), ft = !mentionsList(t, sc.filingTypes), fs = !mentionsList(t, sc.statuses);
+    if (!st && !ty && !ft && !fs) return t;
+    const more = ft || fs, sep = more ? "; " : ", ";
+    for (const tag of [[st ? stS : "", ty ? tyS : "", ft ? ftS : "", fs ? fsS : ""].filter(Boolean).join(sep), [st ? stC : "", ty ? tyS : "", ft ? ftS : "", fs ? fsS : ""].filter(Boolean).join(more ? "; " : " ")]) {
       const x = `${t} (${tag})`;
       if (x.length <= LIMITS.title - 1) return x;   // a character spare: the slide's title must also fit its width
     }
@@ -1592,13 +1668,14 @@ function fpRichText(f: FilingsFacts, p: (lead: string, text: string) => Point, s
   const d = (s: string | null) => fmt.date(s, f.asOf), S = fpRichOf(f), U = S.summaries, summary: Point[] = [];
   const where = (x: { state: string | null; toi: string | null }) => `${x.state ?? "a state n/d"}${x.toi ? ` (${x.toi})` : ""}`;
   const by = (x: { filingNo: string | null; page?: number | null }) => `${x.filingNo ?? "filing number n/d"}${x.page ? `, page ${x.page}` : ""}`;
-  const noSummaries = (what: string) => U.checked ? (U.rate.summarised ? `None of the ${many(U.rate.summarised, "summarised rate filing")} states ${what}.` : `No rate filing of this company has a saved summary yet, so ${what} isn't known.`) : (U.note ?? "Saved summaries weren't looked up.");
+  const L = fpOutOf(f), leftOut = (title: string, why: string) => sec(title, [p("Left out", why)]);
+  const noSummaries = (what: string) => L.rate && !U.rate.filings ? fpOutWhy(f, ["rate"]) : U.checked ? (U.rate.summarised ? `None of the ${many(U.rate.summarised, "summarised rate filing")} states ${what}.` : `No rate filing of this company has a saved summary yet, so ${what} isn't known.`) : (U.note ?? "Saved summaries weren't looked up.");
 
   // the latest overall rate change in each state
   const st = f.states.rows.filter((r) => r.latest), up = st.filter((r) => r.latest!.rate > 0), down = st.filter((r) => r.latest!.rate < 0);
   const hiS = [...st].sort((a, b) => b.latest!.rate - a.latest!.rate)[0], loS = [...st].sort((a, b) => a.latest!.rate - b.latest!.rate)[0];
   const noRate = f.states.rows.length - st.length;
-  const rateMap = sec(st.length ? `Latest change an increase in ${cnt(up.length)} of ${many(st.length, "state")}` : "Latest rate change by state", st.length ? [
+  const rateMap = L.rate && !st.length ? leftOut("Rate changes by state left out by the narrowing", fpOutWhy(f, ["rate"])) : sec(st.length ? `Latest change an increase in ${cnt(up.length)} of ${many(st.length, "state")}` : "Latest rate change by state", st.length ? [
     p("Highest", `${hiS.state}: ${fmt.pct(hiS.latest!.rate)}, published ${d(hiS.latest!.date)}, ${status(hiS.latest!.status)}${notApprovedNote(hiS.latest!)}.`),
     ...(loS !== hiS ? [p("Lowest", `${loS.state}: ${fmt.pct(loS.latest!.rate)}, published ${d(loS.latest!.date)}, ${status(loS.latest!.status)}.`)] : []),
     p("Direction", `${cnt(up.length)} up, ${cnt(down.length)} down, ${cnt(st.length - up.length - down.length)} unchanged${noRate ? `; ${many(noRate, "state")} with filings but no rate impact in S&P's data` : ""}.`),
@@ -1606,7 +1683,7 @@ function fpRichText(f: FilingsFacts, p: (lead: string, text: string) => Point, s
 
   // exposure: premium and policyholders the rate filings state
   const E = S.exposure, top = E.latest[0];
-  const exposure = sec(E.latestPremium !== null ? `Latest rate filings state ${fmt.usd(E.latestPremium)} of premium affected` : E.latestPolicyholders !== null ? `Latest rate filings cover ${many(E.latestPolicyholders, "policyholder")}` : "Premium and policyholders the rate filings state", E.total ? [
+  const exposure = L.rate && !U.rate.filings ? leftOut("Premium and policyholders left out by the narrowing", fpOutWhy(f, ["rate"])) : sec(E.latestPremium !== null ? `Latest rate filings state ${fmt.usd(E.latestPremium)} of premium affected` : E.latestPolicyholders !== null ? `Latest rate filings cover ${many(E.latestPolicyholders, "policyholder")}` : "Premium and policyholders the rate filings state", E.total ? [
     ...(top ? [p("Largest book", `${where(top)}: ${top.premium !== null ? `${fmt.usd(top.premium)} of written premium` : "premium n/d"}${top.policyholders !== null ? `, ${many(top.policyholders, "policyholder")}` : ""} (${by(top)}).`)] : []),
     p("What it is", `What each rate filing says about the book it covers, from ${many(E.total, "summarised filing")}; not statutory premium.${E.latest.length > 1 && E.latestPremium !== null ? " The total adds the latest filing for each state and type (derived)." : ""}`),
     ...(U.rate.filings > U.rate.summarised ? [p("Not yet read", `${many(U.rate.filings - U.rate.summarised, "rate filing has", "rate filings have")} no saved summary.`)] : []),
@@ -1619,7 +1696,7 @@ function fpRichText(f: FilingsFacts, p: (lead: string, text: string) => Point, s
   const gap = ind.filter((r) => (r.indicatedPct as number) > filed(r) + 0.05);
   const lcm = A.find((r) => typeof r.lossCostMultiplier === "number" || r.lossCostRef), asm = A.find((r) => ["lossTrendPct", "expensePct", "targetLossRatio", "projectedLossRatio"].some((k) => typeof r[k as keyof FpAdequacy] === "number"));
   const i0 = ind[0];
-  const adequacy = sec(ind.length ? (gap.length ? `Indicated above filed in ${cnt(gap.length)} of ${many(ind.length, "rate filing")}` : `Filed at or above indicated in ${many(ind.length, "rate filing")}`) : A.length ? `${many(A.length, "rate filing")} with adequacy figures` : "Rate adequacy and loss costs", A.length ? [
+  const adequacy = L.rate && !U.rate.filings ? leftOut("Rate adequacy left out by the narrowing", fpOutWhy(f, ["rate"])) : sec(ind.length ? (gap.length ? `Indicated above filed in ${cnt(gap.length)} of ${many(ind.length, "rate filing")}` : `Filed at or above indicated in ${many(ind.length, "rate filing")}`) : A.length ? `${many(A.length, "rate filing")} with adequacy figures` : "Rate adequacy and loss costs", A.length ? [
     ...(i0 ? [p("Indicated and filed", `${where(i0)}: indicated ${fmt.pct(i0.indicatedPct as number)}, filed ${fmt.pct(filed(i0))}${typeof i0.approvedPct === "number" ? `, approved ${fmt.pct(i0.approvedPct)}` : ""} (${by({ filingNo: i0.filingNo, page: i0.pages.indicatedPct ?? i0.page })}).`)] : []),
     ...(lcm ? [p("Loss costs", `${where(lcm)}: ${lcm.lossCostRef ? `adopts ${lcm.lossCostRef}` : "loss costs adopted"}${typeof lcm.lossCostMultiplier === "number" ? `, multiplier ${lcm.lossCostMultiplier.toFixed(3)}` : ""} (${by({ filingNo: lcm.filingNo, page: lcm.pages.lossCostMultiplier ?? lcm.pages.lossCostRef ?? lcm.page })}).`)] : []),
     ...(asm ? [p("Assumptions", `${where(asm)}: ${[typeof asm.lossTrendPct === "number" ? `loss trend ${fmt.pct(asm.lossTrendPct)}` : "", typeof asm.targetLossRatio === "number" ? `target loss ratio ${fmt.pct(asm.targetLossRatio)}` : "", typeof asm.projectedLossRatio === "number" ? `projected loss ratio ${fmt.pct(asm.projectedLossRatio)}` : "", typeof asm.expensePct === "number" ? `expenses ${fmt.pct(asm.expensePct)}` : ""].filter(Boolean).join(", ")} (${asm.filingNo ?? "filing number n/d"}).`)] : []),
@@ -1631,7 +1708,7 @@ function fpRichText(f: FilingsFacts, p: (lead: string, text: string) => Point, s
   const G = S.programs, segs = new Map<string, number>();
   for (const x of G.programs) segs.set(x.segment ?? "segment n/d", (segs.get(x.segment ?? "segment n/d") ?? 0) + 1);
   const f0 = G.forms[0];
-  const programs = sec(G.programsTotal || G.formsTotal ? `${many(G.programsTotal, "program")} and ${many(G.formsTotal, "form")} in the saved summaries` : "Programs and forms", G.programsTotal || G.formsTotal ? [
+  const programs = L.form && !G.programsTotal && !G.formsTotal ? leftOut("Programs and forms left out by the narrowing", `${fpOutWhy(f, ["form"])}${G.summaries ? ` The ${many(G.summaries, "saved summary", "saved summaries")} of the filings searched name no program or form.` : ""}`) : sec(G.programsTotal || G.formsTotal ? `${many(G.programsTotal, "program")} and ${many(G.formsTotal, "form")} in the saved summaries` : "Programs and forms", G.programsTotal || G.formsTotal ? [
     ...(G.programsTotal ? [p("Segments", [...segs.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${cnt(v)}`).join(", ") + ".")] : []),
     ...(f0 ? [p("Latest forms", `${f0.number}${f0.title ? `, ${f0.title}` : ""}, in ${f0.state ?? "a state n/d"}, published ${d(f0.published)} (${by(f0)}).`)] : []),
     p("Where from", `From ${many(G.summaries, "saved summary", "saved summaries")}; each item names its filing and page.`),
@@ -1641,8 +1718,9 @@ function fpRichText(f: FilingsFacts, p: (lead: string, text: string) => Point, s
   const M = S.market, m0 = M.rows[0];
   const mrow = (r: FpMarketRow) => `${r.state} ${r.toi}: ${cnt(r.carrier.filings)} of ${many(r.market.filings, "filing")} (${fmt.pct(r.share)})${r.rank ? `, rank ${cnt(r.rank)} of ${many(r.market.companies, "company", "companies")}` : ""}${r.market.median !== null ? `; index median rate change ${fmt.pct(r.market.median)} (derived)` : ""}${r.carrier.latest ? `, its latest ${fmt.pct(r.carrier.latest.rate)}` : ""}.`;
   const market = sec(m0 ? `${fmt.pct(m0.share)} of indexed ${m0.state} ${m0.toi} filings` : "Against the market", m0 ? [
-    ...M.rows.slice(0, 2).map((r, i) => p(i ? "Also" : "Share", mrow(r))),
+    ...M.rows.slice(0, fpScopeIn(f).filingTypes?.length || fpScopeIn(f).statuses?.length ? 1 : 2).map((r, i) => p(i ? "Also" : "Share", mrow(r))),
     p("Coverage", "The market index holds the companies in the app's company list only, so it isn't the whole market."),
+    ...(fpScopeIn(f).filingTypes?.length || fpScopeIn(f).statuses?.length ? [p("Narrowed alike", `The index's filings are counted for ${[fpScopeIn(f).filingTypes?.length ? fpFtWords(fpScopeIn(f).filingTypes!, 3) : "", fpScopeIn(f).statuses?.length ? fpStWords(fpScopeIn(f).statuses!, 3) : ""].filter(Boolean).join("; ")} only, as the company's are.`)] : []),
   ] : [p("Not compared", M.reason || "The market index wasn't looked up.")]);
   if (m0) summary.push(p("Against the market", mrow(m0)));
   return { summary, rateMap, exposure, adequacy, programs, market };
@@ -1681,7 +1759,13 @@ export function fpQuestions(f: FilingsFacts): { title: string; text: string }[] 
   const slow = f.regulator.rows.filter((x) => x.state && x.n >= 2).sort((x, y) => y.median - x.median)[0];
   if (slow && slow.median >= 90) out.push({ title: "Regulatory timing", text: `Filings in ${slow.state} took about ${many(slow.median, "day")} from submitted to published (median, approximate). How does that delay affect rate adequacy?` });
   if (f.search.capped) out.push({ title: "Complete filing record", text: "The search stopped before S&P sent every filing. Can management provide a full list of filings for the period?" });
-  out.push(
+  const L = fpOutOf(f);
+  if (L.rate) out.push(
+    { title: "Product plan", text: `Which programs and forms are planned for the coming year${inSc}, and why?` },
+    { title: "Rate filings", text: `This profile covers ${sc.words} only. What rate changes sit alongside these filings, and what loss trend do they assume?` },
+  );
+  if (L.rate) out.push({ title: "Filings in progress", text: `Which filings${inSc} are with regulators now that S&P's data doesn't show yet?` });
+  else out.push(
     { title: "Rate plan", text: sc.narrowed ? `What rate changes are planned for the coming year${inSc}, and what loss trend do they assume?` : "What rate changes are planned for the coming year, by state and line, and what loss trend do they assume?" },
     { title: "Premium behind the rates", text: "How much premium do these rate filings cover? S&P's overall figure for each filing isn't weighted by premium." },
     { title: "Filings in progress", text: `Which filings${inSc} are with regulators now that S&P's data doesn't show yet?` },
@@ -1765,7 +1849,8 @@ export function fpAllowedFigures(f: FilingsFacts): Record<FpFigure["kind"], numb
   const named: Partial<Record<FpFigure["kind"], number[]>> = {};
   const sc = fpScopeIn(f);
   n(sc.states?.length, sc.types?.length);
-  for (const t of [...S.programs.forms.flatMap((x) => [x.number, x.edition, x.title]), ...S.programs.programs.map((x) => x.name), ...S.adequacy.rows.map((r) => r.lossCostRef), ...(sc.types ?? []).map((x) => x.name), sc.words, sc.short]) {
+  n(sc.filingTypes?.length, sc.statuses?.length);
+  for (const t of [...S.programs.forms.flatMap((x) => [x.number, x.edition, x.title]), ...S.programs.programs.map((x) => x.name), ...S.adequacy.rows.map((r) => r.lossCostRef), ...(sc.types ?? []).map((x) => x.name), ...(sc.filingTypes ?? []).map((x) => x.name), ...(sc.statuses ?? []).map((x) => x.name), sc.words, sc.short]) {
     if (t) for (const g of fpFiguresIn(t)) (named[g.kind] ??= []).push(Math.abs(g.value));
   }
   for (const s of dates) years.add(Number(s.slice(0, 4)));
@@ -1806,6 +1891,7 @@ Figures
 - Write percentages to one decimal (4.5%), negatives in parentheses ((1.5%)), dates like "5 Nov" (with the year when it isn't the year of asOf), and "n/d" for anything missing.
 - An empty result means S&P returned nothing for the search. It doesn't show that nothing was filed.
 - When scope.narrowed is true, the search covered only the states and types of insurance in scope (scope.words). Name that scope in the cover subtitle, in every title (scope.short fits) and in the summary's first point, and never write as if the figures were the whole company's. An empty result then says nothing about other states or types of insurance.
+- When scope.filingTypes or scope.statuses is there, only those filing types or statuses were searched (scope.leftOut says which of rate, rule and form filings, and whether approved ones, that leaves out). A section about filings that were left out says they were left out by the narrowing, naming it; never write a zero, "none" or "S&P returned nothing" for them, and never set approved against not approved when only some statuses were searched.
 - The facts have no filing descriptions. Don't say what a filing changes or why it was made; you can't know.
 - exposure, adequacy and programs come from saved summaries of single filings: each figure is what that filing states for the book it covers. Name the filing (its filingNo) when you cite one. Never call a premium figure the company's premium, size or market share; it isn't statutory data. Dollar amounts are US dollars: write them in $M to one decimal ($12.3M).
 - market comes from the app's market index, which holds the companies in the app's company list only: it isn't the whole market, so say "the index", never "the market" alone. Its quartiles and median are worked out by the app (derived).
@@ -1831,10 +1917,13 @@ export function checkFilingsDraft(raw: unknown, facts: FilingsFacts, plain: FpTe
   const str = (v: unknown, max: number): string | null => { if (typeof v !== "string") return null; const s = tidy(v); return s ? fit(s, max) : null; };
   const figuresOk = (strings: string[]) => strings.every((s) => fpUnmatched(s, allowed).length === 0);
   const text: FpText = { ...structuredClone(plain), by: "claude", note: null };
+  // a section the narrowing left out keeps the plain words that say so: Claude's could read as a zero or "none"
+  const out = fpOutSections(facts);
 
   const cover = doc.cover as Record<string, unknown> | undefined, sub = str(cover?.subtitle, LIMITS.subtitle);
   if (!sub) replaced.shape++; else if (!figuresOk([sub])) replaced.figures++; else { text.cover = { subtitle: sub }; replaced.kept++; }
   for (const name of FP_SECTIONS) {
+    if (out.has(name)) continue;
     const s = doc[name] as Record<string, unknown> | undefined, [min, max] = FP_POINT_COUNTS[name];
     const title = str(s?.title, LIMITS.title);
     const points = Array.isArray(s?.points) ? (s!.points as unknown[]).map((pt) => {
@@ -1864,6 +1953,18 @@ export function checkFilingsDraft(raw: unknown, facts: FilingsFacts, plain: FpTe
   if (!replaced.kept) return { text: { ...plain, by: "plain", note: [NOTES.unusable, ...notes].join(" ") }, replaced };
   text.note = notes.length ? notes.join(" ") : null;
   return { text: fpScoped(facts, text), replaced };
+}
+
+/** The sections of a filings profile that the narrowing by filing type or status leaves without figures. */
+export function fpOutSections(f: FilingsFacts): Set<FpSection> {
+  const L = fpOutOf(f), S2 = fpRichOf(f), out = new Set<FpSection>();
+  if (!f.totals.filings) return out;
+  if (L.rate && !f.rates.filings) out.add("rates");
+  if (L.rate && !f.states.rows.some((r) => r.latest)) out.add("rateMap");
+  if (L.rate && !S2.summaries.rate.filings) { out.add("exposure"); out.add("adequacy"); }
+  if (L.form && L.rule && !f.latest.total) out.add("forms");
+  if (L.form && !S2.programs.programsTotal && !S2.programs.formsTotal) out.add("programs");
+  return out;
 }
 
 /** Claude's text for a filings profile, or the plain text with a note: as draftText. */
