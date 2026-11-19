@@ -86,8 +86,8 @@ const SITE = "https://investors.calloway.example";
 
 // ---------- pick: presentations, the file-name-first rule and generic links ----------
 {
-  const axisLike = F(SITE + "/files/Calloway-Q2-2026-Investor-Presentation.pdf", "Presentation of Q2 2026 Press Release");
-  ok("file name first: a file named '...Investor-Presentation...pdf' is a deck though its link says 'Press Release'", same(picked([axisLike], "deck", 2, 2026), [axisLike.url]));
+  const namedDeck = F(SITE + "/files/Calloway-Q2-2026-Investor-Presentation.pdf", "Presentation of Q2 2026 Press Release");
+  ok("file name first: a file named '...Investor-Presentation...pdf' is a deck though its link says 'Press Release'", same(picked([namedDeck], "deck", 2, 2026), [namedDeck.url]));
   const release = F(SITE + "/files/Calloway-Q2-2026-Press-Release.pdf", "Presentation of Q2 2026 Press Release");
   ok("without the file name, 'press release' in the link excludes it", !picked([release], "deck", 2, 2026).length);
   const decks = [
