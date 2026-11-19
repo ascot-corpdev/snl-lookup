@@ -1836,6 +1836,9 @@ export function fpAllowedFigures(f: FilingsFacts): Record<FpFigure["kind"], numb
     n(r.lossCostMultiplier, r.page, ...Object.values(r.pages)); dt(r.published);
   }
   n(S.adequacy.total, S.adequacy.summarised, S.adequacy.rows.length);
+  // the plain text's "indicated above filed in 7 of 8 rate filings" (fpRichText): those two counts too
+  const ind = S.adequacy.rows.filter((r) => typeof r.indicatedPct === "number" && (typeof r.requestedPct === "number" || typeof r.overallPct === "number"));
+  n(ind.length, ind.filter((r) => (r.indicatedPct as number) > ((typeof r.requestedPct === "number" ? r.requestedPct : r.overallPct) as number) + 0.05).length);
   for (const x of S.programs.programs) { n(x.page); dt(x.published); }
   for (const x of S.programs.forms) { n(x.page); dt(x.published); }
   n(S.programs.programsTotal, S.programs.formsTotal, S.programs.summaries);

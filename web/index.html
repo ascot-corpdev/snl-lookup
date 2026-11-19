@@ -4017,7 +4017,7 @@ const nwRunScope = sc => nwScope(sc&&Array.isArray(sc.states)?sc.states:[], nwOb
 function nwKeep(k){ const st=nwStates(k), ti=nwTois(k), ft=nwFtypes(k), fs=nwFstats(k), two=a=>a.map(t=>({id:t.id, name:t.name}));
   return {states:st.length?st:null, tois:two(ti), ...(ft.length?{ftypes:two(ft)}:{}), ...(fs.length?{fstats:two(fs)}:{})}; }
 // the ids a scope sends to the filings function: filingTypeIds and filingStatusIds, only when chosen
-function nwIdsOf(scope){ const ids=a=>nwObjs(a).map(t=>Number(t.id)).filter(Number.isInteger), ft=ids(scope&&scope.ftypes), fs=ids(scope&&scope.fstats);
+function nwIdsOf(scope){ const ids=a=>nwObjs(a).map(t=>Number(t.id)).filter(Number.isInteger).sort((x,y)=>x-y), ft=ids(scope&&scope.ftypes), fs=ids(scope&&scope.fstats);
   return {...(ft.length?{filingTypeIds:ft}:{}), ...(fs.length?{filingStatusIds:fs}:{})}; }
 /* What a scope leaves out, for the sections that depend on it. UNCONFIRMED, as snapKinds and snapApproved are: a chosen
    filing type counts as rate, rule or form when its S&P name says so, and a chosen status as approved when it says so. */
