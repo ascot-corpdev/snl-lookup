@@ -28,7 +28,7 @@ import { type Spgmi, SpgmiError } from "./spgmi.ts";
 import { type Mapping, savedOrFreshStatutory, STAT_FIELDS, type StatField, type StatFieldId, type StatResult } from "./statutory.ts";
 import { addUsage, answerUsage, DEFAULT_MODEL, FALLBACK_BETA, makeClient, newState, type Segment } from "./chat.ts";
 import type { IndexRow, IndexState } from "./db.ts";
-import { type Digest, DIGEST_VERSION, digestOf, formKey, RATE_MORE_KEYS, type RateMoreKey, savedDigests, versionOf } from "./digest.ts";
+import { claudeProblem, type Digest, DIGEST_VERSION, digestOf, formKey, RATE_MORE_KEYS, type RateMoreKey, savedDigests, versionOf } from "./digest.ts";
 
 // ---------- limits ----------
 
@@ -726,6 +726,9 @@ export const NOTES = {
   busy: "Claude is busy, so the plain text is shown. Try again in a minute.",
   key: "The Anthropic API key on Supabase is missing or invalid, so the plain text is shown (README, step 6).",
   unreachable: "Claude couldn't be reached, so the plain text is shown. Try again shortly.",
+  overloaded: "Claude is overloaded just now, so the plain text is shown. Try again in a few minutes.",
+  refused: "Claude's API didn't accept the request, so the plain text is shown. This is a fault in the site: tell the site owner.",
+  fault: "Claude's text couldn't be asked for because of a fault in the site, so the plain text is shown. Tell the site owner.",
   figures: "Some of Claude's text was replaced with the plain text because a figure in it couldn't be matched to the company's figures.",
   shape: "Some of Claude's text didn't fit the slides, so the plain text is used there.",
 };
@@ -818,9 +821,7 @@ async function askClaude<T extends { by: "plain" | "claude"; note: string | null
     if (timedOut) return fallback(NOTES.timeout);
     if (e instanceof Anthropic.APIError) console.error(`Anthropic API error ${e.status ?? "(no status)"}: ${e.message}`);
     else console.error(e);
-    if (e instanceof Anthropic.RateLimitError) return fallback(NOTES.busy);
-    if (e instanceof Anthropic.AuthenticationError) return fallback(NOTES.key);
-    return fallback(NOTES.unreachable);
+    return fallback(claudeProblem(e, NOTES));
   } finally {
     clearTimeout(timer);
   }
