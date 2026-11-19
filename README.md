@@ -648,11 +648,24 @@ Run the tests (they need [Deno](https://deno.com) for the function suites):
 npm test
 ```
 
+Every suite one after another takes about 20 minutes, most of it the browser suites. To run part of them, name them or ask for one part:
+
+```bash
+npm test -- filings chat
+```
+
+```bash
+npm test -- --shard=2/4
+```
+
+On GitHub the suites run as four parts on separate machines at the same time, and a pull request shows one check, `test`, which is green only when every part passed. `tests/shards.mjs` shares the suites out so that every suite is in exactly one part and the parts take about as long as each other, using how long each suite took when last timed (`tests/durations.json`). A new suite needs nothing: it is given a time from its size until it is timed. To time the suites again after adding several, run `npm test -- --timings` and commit the file. To change the number of parts, change the list of parts in `.github/workflows/tests.yml`.
+
 ## Notes
 
 - **Saved results.** A search, a reference list or a statutory query is saved the first time and reopened from Supabase after that, with the date it was fetched. Refresh asks S&P again.
 - **Recent searches.** The Filings view lists the searches anyone on the team has run, newest first. Clicking one fills the form and opens its saved result, so it costs no S&P request; Refresh asks S&P again.
 - **Empty results.** When S&P returns nothing for a state or a company, the app says exactly that. It never says no filings exist.
+- **Progress bars.** A search or long step shows a bar. It fills only by what the page is told (parts, searches, summaries or batches done, with "about" while the total is an estimate); a single call shows a moving band and, after a few seconds, the time so far. A stopped search keeps its bar where it got to, marked "Stopped"; a failed one is marked "Didn't finish" and is never shown full. Waits under a second show no bar.
 - **Documents.** Usually PDFs. Claude reads a whole document of up to 150 pages, or any range of up to 150 pages of a longer one, and up to 200 pages for one question. Its answer says which pages of how many it read, and page citations use the filing's own page numbers. When S&P gives no page count, or the file's pages are packed so they can't be counted directly, the app opens the file to count them. Password-protected or damaged files that need cutting are refused with a plain message; open them from the Filings view.
 - **Follow-up questions** in the same conversation carry the earlier questions and answers, not the documents. Claude re-reads a document if it needs it again (1 S&P request).
 - **Bulk download** (the "API Drive" delivery in S&P's API specification) needs separate credentials and is not used.

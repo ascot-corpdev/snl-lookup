@@ -179,7 +179,6 @@ label.f em,.f em{font-weight:normal;font-style:normal;color:var(--muted)}
 .matches li+li{border-top:1px solid var(--grid)}
 .matches li>div{min-width:0;flex:1 1 220px;overflow-wrap:anywhere}
 /* Searches in parts (big-searches): where a search has got to, under the "Searching" line */
-.bsprog{display:block;margin-top:4px;font-weight:bold}
 /* Recent searches: a compact bar above the form, opening to a list of saved searches that reopen in a click */
 .recent{border:1px solid var(--grid);background:var(--alt);padding:8px 12px;display:flex;flex-direction:column;gap:8px;min-width:0}
 .recent-h{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;min-width:0}
@@ -576,8 +575,6 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 /* Market index (#market) */
 .mkmgr{gap:12px}
 .mkopen{border:1px solid var(--grid);padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-width:0}
-.mkbar{height:8px;background:var(--tile);border:1px solid var(--grid)}
-.mkbar span{display:block;height:100%;background:var(--magenta)}
 .mklist{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:8px;min-width:0}
 .mklist li{min-width:0;overflow-wrap:anywhere}
 .mkli{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;justify-content:space-between;min-width:0}
@@ -607,6 +604,28 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 @media (max-width:900px){.fgrid.three .mkwords{grid-column:auto}}
 .nwshown span,.nwwide span{flex:1 1 260px;min-width:0;overflow-wrap:anywhere}
 @media (max-width:700px){.nwgrid{grid-template-columns:1fr}.nwpanel .stpick{grid-template-columns:1fr}}
+/* Progress bars (pbHTML): one slim bar for every wait. Blue while going; a band that moves when nothing says how far;
+   grey and "Stopped" when the reader stopped it; hatched magenta and "Didn't finish" when it failed. The words sit
+   beside the bar, and under it on a phone. */
+.pb,.banner>.pb,.info>.pb{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;min-width:0;flex:1 1 100%}
+.pb-track{position:relative;display:block;flex:0 0 240px;max-width:100%;height:8px;background:var(--surface);border:1px solid var(--grid);overflow:hidden}
+.pb-fill{position:absolute;left:0;top:0;bottom:0;display:block;background:var(--blue)}
+.pb-ind .pb-fill{width:30%;animation:pbslide 1.6s ease-in-out infinite}
+@keyframes pbslide{from{transform:translateX(-100%)}to{transform:translateX(340%)}}
+.pb-stopped .pb-fill{background:var(--muted)}
+.pb-failed .pb-track{border-color:var(--magenta)}
+.pb-failed .pb-fill{background:repeating-linear-gradient(135deg,var(--magenta) 0 3px,#F7B3DA 3px 6px)}
+.pb-text{flex:1 1 220px;min-width:0;font-size:12px;color:var(--ink);overflow-wrap:anywhere}
+.pb-badge{font-weight:bold}
+.pb-failed .pb-badge{color:var(--magenta)}
+.pb-time{color:var(--muted)}
+.pb-text>span+.pb-time,.pb-note+.pb-time{margin-left:.4em}
+.pb-late{animation:pbwait 1ms var(--pbd,0ms) backwards}
+@keyframes pbwait{from,to{visibility:hidden}}
+.pb.sm{display:inline-flex;flex:0 1 auto;vertical-align:middle;margin-left:8px}
+.pb.sm .pb-track{flex-basis:96px;height:6px}
+@media (max-width:560px){.pb-track{flex:1 1 100%}.pb.sm .pb-track{flex:0 0 72px}}
+@media (prefers-reduced-motion:reduce){.pb-ind .pb-fill{animation:none;width:100%;transform:none;background:repeating-linear-gradient(135deg,var(--blue) 0 3px,transparent 3px 9px);opacity:.55}}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
@@ -880,7 +899,7 @@ function connButtonHTML(){
 }
 async function runConnCheck(){
   if(S.conn&&S.conn.busy) return;
-  S.conn={busy:true}; render();
+  S.conn={busy:true}; pbStart("conn"); render();
   const r=await callFn("snl-filings",{action:"check"});
   if(!S.session) return;
   if(r.data){
@@ -902,7 +921,8 @@ function connText(r){
   return lines.join("\n");
 }
 function connHTML(){
-  const c=S.conn; if(!c||c.busy) return "";
+  const c=S.conn; if(!c) return "";
+  if(c.busy) return `<div class="wrap"><div class="info conn" id="connBusy" role="status"><span><b>Checking the S&amp;P connection.</b> It signs in to S&amp;P and loads the four lists, using at most five S&amp;P requests.</span>${pbHTML("conn", {name:"Connection check"})}</div></div>`;
   const close=`<button type="button" class="btn sm ghost" data-act="conn-close">Close</button>`;
   if(c.err) return `<div class="wrap"><div class="banner conn" id="connPanel" role="alert" tabindex="-1"><span><b>Couldn't run the S&amp;P connection check.</b> ${esc(c.err)}</span><span class="inline"><button type="button" class="btn sm" data-act="conn-check">Try again</button>${close}</span></div></div>`;
   const r=c.report;
@@ -939,7 +959,7 @@ function liveButtonHTML(){
 }
 async function runLiveCheck(){
   if(S.live&&S.live.busy) return;
-  S.live={busy:true, focus:true}; render();
+  S.live={busy:true, focus:true}; pbStart("live"); render();
   const r=await callFn("snl-filings",{action:"diagnose"});
   if(!S.session) return;
   if(r.data){
@@ -969,7 +989,7 @@ function liveText(r){
 function liveHTML(){
   const c=S.live; if(!c) return "";
   const close=`<button type="button" class="btn sm ghost" data-act="live-close">Close</button>`;
-  if(c.busy) return `<div class="wrap"><div class="info conn live" id="livePanel" role="status" tabindex="-1"><span><b>Running the Live check.</b> It signs in to S&amp;P, runs one small search and opens one document, using at most six S&amp;P requests. This can take a minute.</span></div></div>`;
+  if(c.busy) return `<div class="wrap"><div class="info conn live" id="livePanel" role="status" tabindex="-1"><span><b>Running the Live check.</b> It signs in to S&amp;P, runs one small search and opens one document, using at most six S&amp;P requests. This can take a minute.</span>${pbHTML("live", {name:"Live check"})}</div></div>`;
   if(c.err) return `<div class="wrap"><div class="banner conn live" id="livePanel" role="alert" tabindex="-1"><span><b>Couldn't run the Live check.</b> ${esc(c.err)}</span><span class="inline"><button type="button" class="btn sm" data-act="live-check">Try again</button>${close}</span></div></div>`;
   const r=c.report, acct=r.account==="production"?"Production":"Trial";
   const groups=LIVE_GROUPS.map(([g,label])=>{
@@ -1190,7 +1210,7 @@ const chipLabel = c => `${c.kind==="companyId"?"company":"institution"} id ${c.i
 function companyPickerHTML(){
   const f=S.f, numeric=/^\d{1,12}$/.test((f.asked||"").trim()) && f.matches!==null;
   let found="";
-  if(f.resolving) found=`<p class="t2" role="status">Looking for the company…</p>`;
+  if(f.resolving) found=`<p class="t2" role="status">Looking for the company…${pbHTML("find-filings", {name:"Looking up companies", small:true})}</p>`;
   else if(f.matches!==null){
     // A company has an S&P company id, an institution id, or both. "Add" uses the company id when there is one.
     const rows=f.matches.map(m=>{ const hasCo=!blank(m.companyId), hasIn=!blank(m.institutionId);
@@ -1252,7 +1272,7 @@ function filingsFormHTML(){
     ${f.formErr?`<p class="err" id="formErr" role="alert">${esc(f.formErr)}</p>`:""}
     <div class="toolbar"><button class="btn primary" data-act="search" ${f.busy?"disabled":""}>${f.busy?"Searching…":"Search filings"}</button>
       <span class="t2 grow" id="f_est">${esc(est)}</span>
-      <button type="button" class="btn sm ghost" data-act="refs-refresh" ${S.refsLoading?"disabled":""} title="Fetches S&amp;P's lists of states, types of insurance, filing types and statuses again (four S&amp;P requests)">${S.refsLoading?"Refreshing lists…":"Refresh lists"}</button></div>
+      <button type="button" class="btn sm ghost" data-act="refs-refresh" ${S.refsLoading?"disabled":""} title="Fetches S&amp;P's lists of states, types of insurance, filing types and statuses again (four S&amp;P requests)">${S.refsLoading?"Refreshing lists…":"Refresh lists"}</button>${S.refsLoading?pbHTML("refs", {name:"Loading S&P's lists", small:true}):""}</div>
   </form>`;
 }
 async function runSearch(refresh, given, resumeIt){
@@ -1269,8 +1289,8 @@ async function runSearch(refresh, given, resumeIt){
   if(unlistedOn()) payload.unlisted=true; else delete payload.unlisted;   // kept out of Recent searches, or not, as the tick says now
   f.formErr=""; f.busy=true; f.err=null;
   // a wide search comes in parts (searchParts): progress shows as they arrive, and Stop keeps what has arrived
-  const ctl=bsControl(), resume=resumeIt?f.resume:null; f.ctl=ctl; f.prog=resume?bsProgress(resume):null; f.resume=null; f.carrying=!!resume; render();
-  const r=await searchParts(payload, {ctl, resume, onPart:p=>{ if(f.ctl===ctl){ f.prog=p; render(); } }});
+  const ctl=bsControl(), resume=resumeIt?f.resume:null; f.ctl=ctl; f.prog=resume?bsProgress(resume):null; f.resume=null; f.carrying=!!resume; pbStart("filings"); render();
+  const r=await searchParts(payload, {ctl, resume, onPart:p=>{ if(f.ctl===ctl){ f.prog=p; render(); } }, onRetry:p=>{ if(f.ctl===ctl){ f.prog=p; render(); } }});
   if(f.ctl!==ctl) return;   // a newer search took over
   f.busy=false; f.ctl=null; f.prog=null; f.carrying=false;
   if(!S.session) return;
@@ -1282,6 +1302,102 @@ async function runSearch(refresh, given, resumeIt){
   } else if(r.err!=="signin") f.err=r;
   render();
 }
+
+/* ---------- Progress bars: one slim bar for every wait (progress) ----------
+   pbHTML(key, o) draws the bar of the wait called key, in one of two kinds, and only ever says what the page knows:
+   - with a fraction (o.done of o.of, or o.frac from 0 to 1) when the page is told how far a wait has got: parts of a
+     search, searches of a comparison, summaries made of summaries asked for, batches of a sweep. o.exact===false marks
+     an estimated total ("about 8 parts"): the bar is held where it was rather than going back when the estimate grows,
+     never reaches the end before the wait does, and the words beside it say "about".
+   - without one (indeterminate) when a call simply takes a while: a band moves along the bar (CSS only, still for a
+     reader who asks for less motion) and, from PB_TIME_FROM seconds, the words say how long it has been so far.
+   o.state: "run" (default), "retry" (a part is being asked for again), "stopped" (by the reader) or "failed": a
+   stopped or failed bar stays where it got to, in grey or hatched magenta, with the word beside it, never full.
+   A finished wait's bar goes with the wait: the result that replaces it is the sign it is done, everywhere alike.
+   A bar is drawn hidden and shows only once its wait has lasted PB_SHOW_MS, so a result from a saved copy, which
+   comes back sooner, never flashes one up. Screen readers hear one polite line (#pbSay) at each quarter of a bar with
+   a fraction, when a part is asked for again, and every minute or so of a long wait without one; never every tick.
+   pbStart(key) when a long wait starts, so its time and its held fraction survive the reader leaving the view and
+   coming back; a short wait needs no pbStart. The one timer (once a second, for the time so far) runs only while a
+   bar of a wait is on the page: it stops when the view changes, when the wait ends and on sign-out (pbReset). */
+const PB_SHOW_MS = 800;      // a wait shorter than this shows no bar
+const PB_TIME_FROM = 3;      // seconds before the time so far shows beside a bar without a fraction
+const PB_LOOP_MS = 1600;     // one pass of the moving band: .pb-ind in the CSS
+const PB = {w:{}, timer:null, queued:false};
+function pbStart(key){ PB.w[key]={t0:performance.now(), hi:0, q:0, said:"", told:0, pinned:true}; }
+function pbTimeText(s){
+  if(!(s>=PB_TIME_FROM)) return "";
+  const m=Math.floor(s/60), r=s%60;
+  return `${m ? plural(m,"minute")+(r?" "+plural(r,"second"):"") : plural(r,"second")} so far`;
+}
+function pbHTML(key, o={}){
+  const now=performance.now(), st=o.state||"run", going=st==="run"||st==="retry";
+  let w=o.now ? null : PB.w[key];
+  if(!o.now && (!w || (isNum(o.t0) && w.t0!==+o.t0))) w=PB.w[key]={t0:isNum(o.t0)?+o.t0:now, hi:0, q:0, said:"", told:0};
+  const of=isNum(o.of)&&+o.of>0 ? +o.of : null;
+  let frac = isNum(o.frac) ? +o.frac : of!==null&&isNum(o.done) ? +o.done/(o.exact===false ? Math.max(of, +o.done+1) : of) : null;
+  if(frac!==null){
+    frac=Math.max(0, Math.min(1, frac));
+    if(o.exact===false && going) frac=Math.min(Math.max(frac, w?w.hi:0), 0.99);   // an estimate: never back, never full before the end
+    if(w) w.hi=frac;
+  }
+  const ind=frac===null, pct=ind?null:Math.round(frac*100);
+  const badge = o.badge!==undefined ? o.badge : st==="stopped" ? "Stopped" : st==="failed" ? "Didn't finish" : "";
+  const timed = ind && going && o.time!==false && !!w;
+  const base = [badge, o.say||o.text||(ind?"Working":`${pct}% done`), o.note].filter(Boolean).join(". ").replace(/\.\./g,".");
+  if(w){
+    w.name=o.name||""; w.ind=timed;
+    if(!ind && going && Math.floor(frac*4)>w.q && frac<1){ w.q=Math.floor(frac*4); pbSay(`${w.name}: ${base}`); }
+    if(st==="retry" && o.note && w.said!==o.note){ w.said=o.note; pbSay(`${w.name}: ${o.note}`); }
+    pbQueue();
+  }
+  // the same wait draws the same HTML, so a panel that redraws only on a change doesn't redraw for the bar; the time
+  // so far, where the band has got to and how long it stays hidden are put on the drawn bar by pbDress
+  const late = !!w && now-w.t0 < PB_SHOW_MS, words = badge||o.text||o.note||timed;
+  return `<span class="pb${ind?" pb-ind":""} pb-${esc(st)}${o.small?" sm":""}" data-pb="${esc(key)}"><span class="pb-track${o.cls?" "+esc(o.cls):""}${late?" pb-late":""}" role="progressbar" aria-label="${esc(o.name||"Progress")}"${ind?"":` aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"`} aria-valuetext="${esc(base)}"${o.desc?` aria-describedby="${esc(o.desc)}"`:""} data-pb-vt="${esc(base)}"><span class="pb-fill"${ind?"":` style="width:${pct}%"`}></span></span>`
+    + (words ? `<span class="pb-text">${badge?`<b class="pb-badge">${esc(badge)}</b> `:""}${o.text?`<span${o.textId?` id="${esc(o.textId)}"`:""}>${esc(o.text)}</span>`:""}${o.note?` <span class="pb-note"${o.noteId?` id="${esc(o.noteId)}"`:""}>${esc(o.note)}</span>`:""}${timed?`<span class="pb-time" aria-hidden="true"></span>`:""}</span>` : "")
+    + `</span>`;
+}
+// after the page is drawn: forget short waits whose bar has gone, and run the timer only while a wait's bar is shown
+function pbQueue(){ if(PB.queued) return; PB.queued=true; queueMicrotask(()=>{ PB.queued=false; pbSync(); }); }
+function pbSync(){
+  let shown=0; const now=performance.now();
+  for(const k of Object.keys(PB.w)){
+    const els=document.querySelectorAll(`[data-pb="${CSS.escape(k)}"]`);
+    PB.w[k].shown=els.length>0;
+    if(els.length){ shown++; for(const el of els) pbDress(el, PB.w[k], now); }
+    else if(!PB.w[k].pinned) delete PB.w[k];
+  }
+  if(shown && !PB.timer) PB.timer=setInterval(pbTick, 1000);
+  if(!shown && PB.timer){ clearInterval(PB.timer); PB.timer=null; }
+}
+function pbDress(el, w, now){
+  const t=w.ind ? pbTimeText(Math.floor((now-w.t0)/1000)) : "", bar=el.querySelector('[role="progressbar"]'), tm=el.querySelector(".pb-time");
+  if(tm && tm.textContent!==t) tm.textContent=t;
+  if(bar && w.ind){ const v=[bar.dataset.pbVt, t].filter(Boolean).join(", "); if(bar.getAttribute("aria-valuetext")!==v) bar.setAttribute("aria-valuetext", v); }
+  if(el.dataset.pbOn) return;
+  el.dataset.pbOn="1";   // a bar just drawn: its band carries on from where it was, and it stays hidden for what is left of PB_SHOW_MS
+  const fill=el.querySelector(".pb-fill");
+  if(fill && w.ind) fill.style.animationDelay=`-${Math.round((now-w.t0)%PB_LOOP_MS)}ms`;
+  if(bar && bar.classList.contains("pb-late")) bar.style.setProperty("--pbd", `${Math.max(0, Math.ceil(PB_SHOW_MS-(now-w.t0)))}ms`);
+}
+function pbTick(){
+  pbSync(); if(!PB.timer) return;
+  const now=performance.now();
+  for(const w of Object.values(PB.w)){
+    if(!w.ind || !w.shown) continue;
+    const s=Math.floor((now-w.t0)/1000), mark = s<30 ? 0 : s<60 ? 30 : Math.floor(s/60)*60;   // at 30 seconds, then each whole minute
+    if(mark>w.told){ w.told=mark; pbSay(`${w.name}: still working, ${pbTimeText(s)}.`); }
+  }
+}
+function pbSay(text){
+  let el=document.getElementById("pbSay");
+  if(!el){ el=document.createElement("div"); el.id="pbSay"; el.className="sr"; el.setAttribute("role","status"); el.setAttribute("aria-live","polite"); document.body.appendChild(el); }
+  el.textContent=text;
+}
+function pbReset(){ PB.w={}; if(PB.timer){ clearInterval(PB.timer); PB.timer=null; } const el=document.getElementById("pbSay"); if(el) el.textContent=""; }
+const pbTicking = () => !!PB.timer;
+pbSay("");   // the polite line is on the page before its first message, so screen readers follow it
 
 /* ---------- Searches in parts (big-searches) ----------
    One call to the filings function holds at most 2,000 filings (STEP_ROWS in _shared/filings.ts), so a wider search
@@ -1327,13 +1443,32 @@ function bsProgText(p){
   if(!p || !p.done || !p.of || p.of<2) return "";
   return `${count(p.done)} of ${p.exact?"":"about "}${count(p.of)} parts, ${plural(p.filings,"filing")} so far.`;
 }
-function bsProgHTML(p){ const t=bsProgText(p); return t?` <span class="bsprog" id="bsProg">${esc(t)}</span>`:""; }
+/* The bar of a search in parts (pbHTML): a fraction of parts once the first part says there are several ("about"
+   while the total is an estimate), and no fraction before that or for a search in one part. part: for a comparison
+   or a set of searches, {at, of}: search at of of, so the bar fills by searches done plus the share of parts in. */
+function bsBarHTML(key, p, name, part){
+  const t=bsProgText(p), parts = p && p.done && p.of>1 ? {done:p.done, of:p.of, exact:p.exact} : null;
+  const note = p && p.retry ? (p.of>1||p.retry>1 ? `Part ${count(p.retry)} didn't come back, so it is being asked for again.` : "The answer didn't come back, so it is being asked for again.") : "";
+  const o={name, text:t, textId:"bsProg", note, noteId:"bsRetry", state:note?"retry":"run"};
+  if(part && part.of>1){
+    const share = parts ? Math.min(parts.done/(parts.exact ? parts.of : Math.max(parts.of, parts.done+1)), 1) : 0;
+    return pbHTML(key, {...o, frac:(part.at-1+share)/part.of, exact:parts?parts.exact:true});
+  }
+  return pbHTML(key, {...o, ...(parts||{})});
+}
+/* Where a stopped or failed search in parts got to, from its last part: a bar that stays there (Carry on is beside it). */
+function bsStoppedBarHTML(r){
+  const of=isNum(r.parts)?+r.parts:isNum(r.partsAbout)?+r.partsAbout:null, done=isNum(r.part)?+r.part:0;
+  if(!of || of<2 || !done) return "";
+  return pbHTML("filings-incomplete", {name:"Filings search", now:true, done, of:isNum(r.parts)?of:Math.max(of, done+1), state:r.incomplete.why==="failed"?"failed":"stopped", say:r.incomplete.text});
+}
 // one part is the function's own answer, kept exactly as sent; several are put together
 function bsResult(st){ return {...st.last, rows:st.n>1 ? st.acc.rows.slice().sort(bsNewest) : st.last.rows, more:false, cursor:null}; }
 /* Runs a search, in as many parts as it comes in. Returns what callFn returns for one search ({data} or {err, msg,
    ...}), with data holding every part. When it can't finish (stopped, or a part failed twice) data is what arrived,
    marked capped and incomplete (incomplete.text says why, also first in its notes), and resume carries on from there.
-   o.ctl: from bsControl, to stop; o.onPart(progress) after each part; o.resume: a resume from an earlier answer. */
+   o.ctl: from bsControl, to stop; o.onPart(progress) after each part; o.resume: a resume from an earlier answer;
+   o.onRetry(progress with retry: the part's number) when a part is about to be asked for again (for the progress bar). */
 async function searchParts(payload, o={}){
   const ctl=o.ctl||{}, base={...payload}; delete base.cursor;
   const st=o.resume ? {acc:o.resume.acc, last:o.resume.last, cursor:o.resume.cursor, n:o.resume.n} : {acc:{by:new Map(), rows:[]}, last:null, cursor:null, n:0};
@@ -1354,7 +1489,7 @@ async function searchParts(payload, o={}){
     }
     const e=r.data ? {err:"bad_answer", msg:"The filings function sent back something the page can't read. Try again."} : r;
     if(e.err==="signin") return e;
-    if(tries<1 && bsRetryable(e)){ tries++; await new Promise(res=>setTimeout(res, BS_RETRY_MS)); continue; }
+    if(tries<1 && bsRetryable(e)){ tries++; if(o.onRetry) o.onRetry({...bsProgress(st), retry:(st.n||0)+1}); await new Promise(res=>setTimeout(res, BS_RETRY_MS)); continue; }
     if(!st.last) return e;   // nothing came back: the search failed as a whole, as one call would
     return bsIncomplete(st, {why:"failed", err:e});
   }
@@ -1376,7 +1511,7 @@ function bsStopHTML(){ const f=S.f; return f.ctl ? `<button type="button" class=
 function bsIncompleteHTML(r){
   const f=S.f, failed=r.incomplete.why==="failed";
   const lead=failed ? "Not all of the search came back." : "You stopped the search.";
-  return `<div class="banner" id="incomplete" role="alert"><span><b>${lead}</b> ${esc(r.incomplete.text)} ${plural(Array.isArray(r.rows)?r.rows.length:0,"filing")} arrived and ${Array.isArray(r.rows)&&r.rows.length===1?"is":"are"} shown below; the counts and exports cover only these.</span>${f.resume?`<button type="button" class="btn sm" id="searchResume" data-act="search-resume">${failed?"Try again":"Carry on"}</button>`:""}</div>`;
+  return `<div class="banner" id="incomplete" role="alert"><span><b>${lead}</b> ${esc(r.incomplete.text)} ${plural(Array.isArray(r.rows)?r.rows.length:0,"filing")} arrived and ${Array.isArray(r.rows)&&r.rows.length===1?"is":"are"} shown below; the counts and exports cover only these.</span>${f.resume?`<button type="button" class="btn sm" id="searchResume" data-act="search-resume">${failed?"Try again":"Carry on"}</button>`:""}${bsStoppedBarHTML(r)}</div>`;
 }
 
 /* ---------- Filings: results ---------- */
@@ -1441,14 +1576,14 @@ function filingRowHTML({r,key}){
 }
 function filingsResultsHTML(){
   const f=S.f, r=f.res;
-  if(f.busy && !r) return `<div class="banner" role="status" id="searching"><span>Searching S&amp;P's filings… A long date range can take a minute. After that the results are saved for everyone until someone clicks Refresh.${bsProgHTML(f.prog)}</span>${bsStopHTML()}</div>`;
+  if(f.busy && !r) return `<div class="banner" role="status" id="searching"><span>Searching S&amp;P's filings… A long date range can take a minute. After that the results are saved for everyone until someone clicks Refresh.</span>${bsStopHTML()}${bsBarHTML("filings", f.prog, "Filings search")}</div>`;
   if(!r) return f.err ? problemHTML(f.err, "Couldn't run the search.", "search-retry")
     : `<div class="empty" id="noSearch"><p>Choose companies, states and dates, then search. Results are saved, so the same search opens at once next time.</p></div>`;
   const all=Array.isArray(r.rows)?r.rows:[], notes=Array.isArray(r.notes)?r.notes.filter(n=>!blank(n)).slice(r.incomplete?1:0):[], p=r.params||f.last||{};
   const total=isNum(r.total)?+r.total:all.length, rows=visibleRows(), shown=rows.slice(0,f.shown);
   let h=`<h2 class="sec">Results</h2>`;
   h+=`<p class="sub" id="resSummary" style="margin:0">${total?`<b>${plural(total,"filing")}</b>`:`<b>S&amp;P returned nothing</b> for filings`}${p.from&&p.to?` published from ${fmtDay(p.from)} to ${fmtDay(p.to)}`:""}${Array.isArray(p.states)&&p.states.length?` in ${esc(p.states.join(", "))}`:""}.</p>`;
-  if(f.busy) h+=`<div class="banner" role="status" id="refreshing"><span>${f.carrying?"Carrying on with the search… The filings below are those that had arrived; the rest are added when the search finishes.":`Asking S&amp;P again… The results below are from ${fmtAt(r.fetchedAt)} until the new ones arrive.`}${bsProgHTML(f.prog)}</span>${bsStopHTML()}</div>`;
+  if(f.busy) h+=`<div class="banner" role="status" id="refreshing"><span>${f.carrying?"Carrying on with the search… The filings below are those that had arrived; the rest are added when the search finishes.":`Asking S&amp;P again… The results below are from ${fmtAt(r.fetchedAt)} until the new ones arrive.`}</span>${bsStopHTML()}${bsBarHTML("filings", f.prog, "Filings search")}</div>`;
   else if(f.err) h+=problemHTML(f.err, "Couldn't refresh the search.", "search-refresh");
   else if(r.fromStore) h+=`<div class="info" id="fromStore" role="status"><span>From the last fetch on ${fmtAt(r.fetchedAt)}.</span><button class="btn sm" data-act="search-refresh">Refresh</button></div>`;
   if(r.incomplete && !f.busy) h+=bsIncompleteHTML(r);
@@ -1678,7 +1813,7 @@ function watchSaveRecipients(){
 }
 async function watchCheckNow(){
   const w=S.w; if(w.checking) return;
-  w.checking=true; w.runNote=null; render();
+  w.checking=true; w.runNote=null; pbStart("watch"); render();
   const r=await callFn("snl-watch",{action:"run"});
   if(!S.session || S.w!==w) return;
   w.checking=false;
@@ -1748,7 +1883,7 @@ function watchHTML(){
   let h=`<section class="tcard watch" id="watch" aria-label="Watchlist">${head(summary)}`;
   if(w.runNote){ const n=w.runNote, bad=n.status==="failed"||n.status==="error";
     h+=`<div class="${bad?"banner":"info"}" id="wRun" role="${bad?"alert":"status"}"><span>${bad?"<b>The check didn't finish.</b> ":""}${esc(n.message||"")}${isNum(n.requests)&&+n.requests?` ${plural(n.requests,"S&amp;P request")} used.`:""}</span></div>`; }
-  if(running) h+=`<div class="info" id="wRunning" role="status"><span><b>A check is running.</b> It asks S&amp;P for filings published in the last ${count(st&&st.windowDays||14)} days. This can take a minute.</span></div>`;
+  if(running) h+=`<div class="info" id="wRunning" role="status"><span><b>A check is running.</b> It asks S&amp;P for filings published in the last ${count(st&&st.windowDays||14)} days. This can take a minute.</span>${pbHTML(w.checking?"watch":"watch-other", {name:"Watchlist check", time:w.checking})}</div>`;
   if(empty) h+=`<div class="empty" id="wEmpty"><p><b>Nothing is watched yet.</b> ${cd?"Choose companies and states in the search form below, then add them here.":"Corp Dev can add companies and states to watch."}</p>${cd?`<button type="button" class="btn" data-act="w-add" ${w.saving?"disabled":""}>Add the companies and states chosen below</button>`:""}</div>`;
   else {
     const cos=w.allCos?list.companies:list.companies.slice(0,WATCH_CHIPS), label=c=>c.name||`${c.kind==="companyId"?"Company":"Institution"} id ${c.id}`;
@@ -1906,7 +2041,7 @@ function dgClose(){
 }
 async function dgMake(){
   const g=dgOf(), dr=g.dr; if(!dr || dr.making || !dr.row) return;
-  dr.making=true; dr.err=null; dr.confirm=false; render();
+  dr.making=true; dr.err=null; dr.confirm=false; pbStart("dg-make"); render();
   const r=await callFn("snl-digest", {action:"make", filing:dgMakeBody(dr.row), refresh:!!dr.digest});
   if(g.dr!==dr) return;
   dr.making=false;
@@ -1960,7 +2095,7 @@ function dgDrawerHTML(){
   const sub = d ? [d.company, d.state, d.typeOfInsurance, d.filingType].filter(x=>!blank(x)).join(", ") : [companiesOf(r)[0]&&companiesOf(r)[0].companyName, r.serffFilingStateId, r.typeOfInsurance, r.serffFilingType].filter(x=>!blank(x)).join(", ");
   let body="", foot="";
   if(dr.loading) body=`<p class="t2" id="dgLoading" role="status">Looking for a saved summary…</p>`;
-  else if(dr.making) body=`<div class="banner" id="dgMaking" role="status"><span><b>Claude is reading the filing.</b> This takes a minute or two. You can close this and come back: the summary is saved when it is ready.</span></div>`;
+  else if(dr.making) body=`<div class="banner" id="dgMaking" role="status"><span><b>Claude is reading the filing.</b> This takes a minute or two. You can close this and come back: the summary is saved when it is ready.</span>${pbHTML("dg-make", {name:"Making the summary"})}</div>`;
   else {
     if(dr.err){
       const e=dr.err, setup = e.err==="not_deployed"||e.err==="no_tables"||e.err==="not_configured";
@@ -1999,7 +2134,7 @@ function dgSearchHTML(){
   if(!F.open) return `<section class="recent dgs" id="dgFind" aria-label="Search saved summaries">${head}</section>`;
   let body=`<form id="dgFindForm" novalidate><label class="f">Form number, program or words<input type="search" id="dg_q" value="${esc(F.q)}" maxlength="200" placeholder="For example CHO 30 01, or private client" autocomplete="off"></label>
     <label class="f" style="flex:0 1 180px">State<select id="dg_state"><option value="">All states</option>${stateOptions().map(s=>`<option value="${esc(s.id)}"${F.state===s.id?" selected":""}>${esc(s.name)}</option>`).join("")}</select></label>
-    <button type="submit" class="btn primary" ${F.busy?"disabled":""}>${F.busy?"Searching…":"Search"}</button></form>`;
+    <button type="submit" class="btn primary" ${F.busy?"disabled":""}>${F.busy?"Searching…":"Search"}</button>${F.busy?pbHTML("dg-find", {name:"Searching saved summaries", small:true}):""}</form>`;
   if(F.err){ const e=F.err, setup=e.err==="not_deployed"||e.err==="no_tables"; body+= setup ? `<div class="info" id="dgFindErr" role="status"><span><b>Summaries aren't set up yet.</b> ${esc(errText(e))}</span></div>` : `<div class="banner" id="dgFindErr" role="alert"><span><b>Couldn't search the saved summaries.</b> ${esc(errText(e))}</span></div>`; }
   const res=F.res;
   if(res){
@@ -2102,6 +2237,7 @@ async function askQuestion(){
   const screen=askScreen();
   const t={question:q, told:askToldText(screen, true), status:"starting", progress:[], partial:"", result:null, error:"", calm:false, jobId:null, lastContinue:0, note:"", contNote:""};
   t.asked=new Date().toISOString();   // shown in the exported or copied answer
+  t.t0=performance.now();   // the progress bar's time so far: only for a question asked on this page
   a.turns.push(t); a.draft=""; a.scroll="bottom"; renderAsk();
   const r=await callFn("snl-chat",{action:"ask", question:q, ...(history.length?{history}:{}), ...(screen?{screen}:{})});
   if(!S.session || !S.ask.turns.includes(t)) return;
@@ -2341,6 +2477,7 @@ function turnHTML(t, ti){
   if(t.status==="done") return wrap(`<div class="ccmsg a done">${answerHTML(t, ti)}</div>`);
   const lead={starting:"Sending your question…", queued:"Waiting to start…", running:"Claude is working on this.", paused:"Claude is picking this up again."}[t.status]||"Claude is working on this.";
   return wrap(`<div class="ccmsg a run" role="status"><p style="margin:0"><b>${lead}</b> Keep this tab open until the answer finishes. It can take a few minutes when Claude reads filing documents. You can close this panel and carry on working.</p>
+    ${pbHTML("ask-"+ti, {name:"Claude's answer", ...(isNum(t.t0)?{t0:t.t0}:{time:false})})}
     ${t.progress.length?`<ol class="steps">${t.progress.map(s=>`<li>${esc(s&&s.text)}${s&&s.at?`<span>${esc(fmtTime(s.at))}</span>`:""}</li>`).join("")}</ol>`:""}
     ${t.partial?`<div class="partial">${md(t.partial)}</div>`:""}${t.note||t.contNote?`<p class="t2 runnote">${esc(t.note||t.contNote)}</p>`:""}</div>`);
 }
@@ -2735,7 +2872,7 @@ async function runStat(refresh){
     const problem=statProblem(); if(problem){ st.formErr=problem; render(); return; }
     payload={action:"query", kind:st.kind, codes:statCodes(), fromYear:+st.fromYear, toYear:+st.toYear}; st.last=payload; st.res=null; st.ent={}; st.resNames={...statFind().names[st.kind]};
   }
-  st.formErr=""; st.busy=true; st.err=null; render();
+  st.formErr=""; st.busy=true; st.err=null; pbStart("stat"); render();
   const r=await callFn("snl-statutory", payload);
   st.busy=false;
   if(!S.session) return;
@@ -2791,11 +2928,11 @@ function statBlockHTML(res, field){
 }
 function statResultsHTML(){
   const st=S.st, res=st.res;
-  if(st.busy && !res) return `<div class="banner" role="status"><span>Fetching statutory data from Snowflake… This can take a minute. After that the figures are saved for everyone until someone clicks Refresh.</span></div>`;
+  if(st.busy && !res) return `<div class="banner" role="status"><span>Fetching statutory data from Snowflake… This can take a minute. After that the figures are saved for everyone until someone clicks Refresh.</span>${pbHTML("stat", {name:"Statutory query"})}</div>`;
   if(!res) return st.err ? problemHTML(st.err, "Couldn't fetch the statutory data.", "stat-retry") : `<div class="empty" id="statEmpty"><p>Type the NAIC code of the company you want, then any peers, and choose the years. The first code is the subject; the rest sit beside it for comparison. Don't know a code? Find the company or group by name above.</p></div>`;
   const fields=Array.isArray(res.fields)?res.fields:[], loaded=Array.isArray(res.loaded)?res.loaded:[];
   let h=`<h2 class="sec">Results</h2>`;
-  if(st.busy) h+=`<div class="banner" role="status"><span>Asking Snowflake again… The figures below are from ${fmtAt(res.fetchedAt)} until the new ones arrive.</span></div>`;
+  if(st.busy) h+=`<div class="banner" role="status"><span>Asking Snowflake again… The figures below are from ${fmtAt(res.fetchedAt)} until the new ones arrive.</span>${pbHTML("stat", {name:"Statutory query"})}</div>`;
   else if(st.err) h+=problemHTML(st.err, "Couldn't refresh the statutory data.", "stat-refresh");
   else if(res.fromStore) h+=`<div class="info" id="statFromStore" role="status"><span>From the last fetch on ${fmtAt(res.fetchedAt)}.</span><button class="btn sm" data-act="stat-refresh">Refresh</button></div>`;
   if(res.truncated) h+=`<div class="banner" id="statTruncated" role="alert"><span><b>These figures are incomplete.</b> Snowflake returned more rows than one request allows. Use fewer codes or fewer years.</span></div>`;
@@ -2855,11 +2992,11 @@ function setupHTML(){
     ${fields.length?`<div class="counts" id="suFields"><b>Figures the app shows:</b>${fields.map(f=>`<span><code>${esc(f.id)}</code> ${esc(f.label)} ${f.mapped?"(mapped)":"(not mapped)"}</span>`).join("")}</div>`:""}
     <div class="f"><label for="su_like">1. Find the view <em>optional: part of a view name</em></label>
       <div class="toolbar"><div class="grow"><input type="text" id="su_like" data-bind="st.setup.like" value="${esc(su.like)}" autocomplete="off" spellcheck="false" placeholder="For example PREMIUM"></div>
-        <button type="button" class="btn" data-act="su-views" ${su.viewsBusy?"disabled":""}>${su.viewsBusy?"Listing…":"List views"}</button>${su.views?`<button type="button" class="btn sm ghost" data-act="su-views" data-refresh="1">Ask Snowflake again</button>`:""}</div>
+        <button type="button" class="btn" data-act="su-views" ${su.viewsBusy?"disabled":""}>${su.viewsBusy?"Listing…":"List views"}</button>${su.viewsBusy?pbHTML("su-views", {name:"Listing the views", small:true}):""}${su.views?`<button type="button" class="btn sm ghost" data-act="su-views" data-refresh="1">Ask Snowflake again</button>`:""}</div>
       ${su.viewsErr?problemHTML(su.viewsErr, "Couldn't list the views.", ""):""}
       ${su.views?(su.views.length?`<div class="tbl-wrap" style="max-height:260px;overflow:auto"><table id="suViews"><thead><tr><th>View</th><th>Type</th><th>What S&amp;P says about it</th></tr></thead><tbody>${su.views.map(v=>`<tr><td><button type="button" class="lnk" data-act="su-view" data-name="${esc(v.name)}">${esc(v.name)}</button></td><td>${esc(v.type||"n/d")}</td><td>${blank(v.comment)?"n/d":esc(v.comment)}</td></tr>`).join("")}</tbody></table></div>`:`<p class="t2">No views match. That may mean the Snowflake login can't see them yet.</p>`):""}</div>
     ${su.view?`<div class="f"><span>2. Columns in ${esc(su.view)}</span>
-      ${su.colsBusy?`<p class="t2" role="status">Listing the columns…</p>`:""}${su.colsErr?problemHTML(su.colsErr, "Couldn't list the columns.", ""):""}
+      ${su.colsBusy?`<p class="t2" role="status">Listing the columns…${pbHTML("su-cols", {name:"Listing the columns", small:true})}</p>`:""}${su.colsErr?problemHTML(su.colsErr, "Couldn't list the columns.", ""):""}
       ${su.cols?(su.cols.length?`<div class="tbl-wrap" style="max-height:260px;overflow:auto"><table id="suCols"><thead><tr><th>Column</th><th>Type</th><th>What S&amp;P says about it</th></tr></thead><tbody>${sortRows(su.cols, c=>isNum(c.position)?+c.position:null, 1).map(c=>`<tr><td><code>${esc(c.name)}</code></td><td>${esc(c.type||"n/d")}</td><td>${blank(c.comment)?"n/d":esc(c.comment)}</td></tr>`).join("")}</tbody></table></div>`:`<p class="t2">This view has no columns the login can see.</p>`):""}</div>`:""}
     <div class="f"><label for="su_map">${su.view?"3":"2"}. The mapping <em>JSON: for each figure, the view, the columns for the company or group code, the year and the value, and the line or state column where there is one</em></label>
       ${su.mapBusy?`<p class="t2" role="status">Loading the saved mapping…</p>`:`<textarea class="code" id="su_map" data-bind="st.setup.text" spellcheck="false" autocapitalize="off">${esc(su.text||"")}</textarea>`}
@@ -2933,7 +3070,7 @@ function statFinderHTML(){
   const st=S.st, nf=statFind(), group=st.kind==="group", codes=statCodes(), asked=nf.asked;
   const calm=t=>`<div class="info" id="st_findNote" role="status"><span>${t}</span></div>`;
   let found="";
-  if(nf.busy) found=`<p class="t2" id="st_finding" role="status">Looking for matches…</p>`;
+  if(nf.busy) found=`<p class="t2" id="st_finding" role="status">Looking for matches…${pbHTML("find-stat", {name:"Looking up companies", small:true})}</p>`;
   else if(nf.matches!==null && !nf.matches.length) found=calm(`No company in the app's company list matches "${esc(asked)}". Try a shorter part of the name, or type the NAIC ${group?"group":"company"} code in the box above.`);
   else if(nf.matches!==null && group){
     const groups=statGroups(nf.matches), loose=nf.matches.length-groups.reduce((a,g)=>a+g.n,0);
@@ -3305,7 +3442,7 @@ function pfChosenHTML(){
 function pfFinderHTML(){
   const pf=S.pf, fd=pf.find, group=pf.kind==="group";
   let found="";
-  if(fd.busy) found=`<p class="t2" role="status">Looking for matches…</p>`;
+  if(fd.busy) found=`<p class="t2" role="status">Looking for matches…${pbHTML("find-pf", {name:"Looking up companies", small:true})}</p>`;
   else if(fd.matches!==null && !fd.matches.length) found=`<div class="info" id="pf_noMatch" role="status"><span>No company in the app's company list matches "${esc(fd.asked)}". Try a shorter part of the name, or type the NAIC code above.</span></div>`;
   else if(fd.matches!==null && group){
     const gs=statGroups(fd.matches).filter(g=>naicOk(g.code));
@@ -3329,7 +3466,7 @@ async function pfFacts(){
   const pf=S.pf; if(pf.busy) return;
   const code=pf.code.trim(), kind=pf.kind;
   if(!naicOk(code)){ pf.formErr = code ? "NAIC codes are numbers of up to 6 digits, like 90001." : `Choose a ${kind}: find it by name, or type its NAIC ${kind} code.`; render(); return; }
-  pf.formErr=""; pfReset(pf); pf.busy="facts"; pf.asked={kind, code, name:pf.name}; render();
+  pf.formErr=""; pfReset(pf); pf.busy="facts"; pbStart("pf-facts"); pf.asked={kind, code, name:pf.name}; render();
   const r=await callFn("snl-profile",{action:"facts", kind, code});
   if(!S.session || S.pf!==pf) return;
   pf.busy="";
@@ -3348,7 +3485,7 @@ async function pfPlan(pf){
 async function pfSample(){
   const pf=S.pf; if(pf.busy || pf.fp.busy) return;
   pf.mode="full";   // the full profile's sample shows in the full profile
-  pfReset(pf); pf.busy="sample"; pf.asked=null; render();
+  pfReset(pf); pf.busy="sample"; pbStart("pf-sample"); pf.asked=null; render();
   const r=await callFn("snl-profile",{action:"sample"});
   if(!S.session || S.pf!==pf) return;
   pf.busy="";
@@ -3363,7 +3500,7 @@ async function pfBuild(plain){
   if(!pfHasTemplate()){ pf.buildErr=tplErrText("nofile"); render(); return; }
   if(plain){ pf.draft=false; pf.draftErr=null; }
   if(!plain && pfDraftWanted() && !pf.drafted){
-    pf.busy="draft"; pf.draftErr=null; pf.built=null; pf.buildErr=""; render();
+    pf.busy="draft"; pbStart("pf-draft"); pf.draftErr=null; pf.built=null; pf.buildErr=""; render();
     const e=pf.res.facts.entity||{};
     const r=await callFn("snl-profile",{action:"draft", kind:e.kind==="group"?"group":"company", code:String(e.code??"")});
     if(!S.session || S.pf!==pf) return;
@@ -3381,7 +3518,7 @@ function pfFileName(spec){
   return n ? (/\.pptx$/i.test(n) ? n : n+".pptx") : `profile-${TODAY()}.pptx`;
 }
 async function pfMake(pf){
-  pf.busy="build"; pf.buildErr=""; pf.built=null; render();
+  pf.busy="build"; pbStart("pf-build"); pf.buildErr=""; pf.built=null; render();
   const use = pf.drafted && pfDraftWanted() ? pf.drafted : pf.res;
   const fail=msg=>{ if(!S.session || S.pf!==pf) return; pf.busy=""; pf.buildErr=msg; render(); };
   let bytes; try{ bytes=await templateBytes(pf); }catch(e){ fail(e.message); return; }
@@ -3455,8 +3592,8 @@ function pfDraftErrText(r){
 }
 function pfOutHTML(){
   const pf=S.pf;
-  if(pf.busy==="facts") return `<div class="info" id="pfBusy" role="status"><span><b>Getting the figures for ${esc(pf.asked&&pf.asked.name||pfEntLabel(pf.asked.kind, pf.asked.code))}…</b> This can take a minute when they haven't been fetched before.</span></div>`;
-  if(pf.busy==="sample") return `<div class="info" id="pfBusy" role="status"><span><b>Getting the sample figures…</b></span></div>`;
+  if(pf.busy==="facts") return `<div class="info" id="pfBusy" role="status"><span><b>Getting the figures for ${esc(pf.asked&&pf.asked.name||pfEntLabel(pf.asked.kind, pf.asked.code))}…</b> This can take a minute when they haven't been fetched before.</span>${pbHTML("pf-facts", {name:"Getting the figures"})}</div>`;
+  if(pf.busy==="sample") return `<div class="info" id="pfBusy" role="status"><span><b>Getting the sample figures…</b></span>${pbHTML("pf-sample", {name:"Getting the sample figures"})}</div>`;
   if(!pf.res){
     if(!pf.err) return "";
     if(pf.err.err==="not_configured"||pf.err.err==="not_mapped") return `<div class="info" id="pfErr" role="status"><span>${esc(errText(pf.err))}</span></div>`;
@@ -3473,8 +3610,8 @@ function pfOutHTML(){
   h+=`<p class="source">Source: ${esc(f.source||"S&P Global Market Intelligence")}. US dollars are shown in $M.</p></section>`;
   // the text, then building
   h+=`<section class="tcard" id="pfBuild" aria-label="Build the PowerPoint file">${pfDraftHTML(pf)}`;
-  if(pf.busy==="draft") h+=`<div class="info" id="pfDrafting" role="status"><span><b>Claude is drafting the slide text…</b> This can take up to two minutes. Keep this tab open.</span></div>`;
-  else if(pf.busy==="build") h+=`<div class="info" id="pfBuilding" role="status"><span><b>Building the PowerPoint file…</b> This takes a few seconds, a little longer the first time.</span></div>`;
+  if(pf.busy==="draft") h+=`<div class="info" id="pfDrafting" role="status"><span><b>Claude is drafting the slide text…</b> This can take up to two minutes. Keep this tab open.</span>${pbHTML("pf-draft", {name:"Claude's draft"})}</div>`;
+  else if(pf.busy==="build") h+=`<div class="info" id="pfBuilding" role="status"><span><b>Building the PowerPoint file…</b> This takes a few seconds, a little longer the first time.</span>${pbHTML("pf-build", {name:"Building the file"})}</div>`;
   if(pf.draftErr){ const r=pf.draftErr, calm=["limit","daily_limit","busy","not_configured"].includes(r.err);
     h+=`<div class="${calm?"info":"banner"}" id="pfDraftErr" role="${calm?"status":"alert"}"><span>${esc(pfDraftErrText(r))}</span><span class="inline"><button type="button" class="btn sm primary" data-act="pf-build-plain" ${pf.busy?"disabled":""}>Build with plain text</button>${r.err==="busy"||!calm?`<button type="button" class="btn sm" data-act="pf-build">Try the draft again</button>`:""}</span></div>`; }
   if(pf.drafted && pf.drafted.text.by!=="claude" && !blank(pf.drafted.text.note) && pfDraftWanted()) h+=`<div class="info" id="pfNote" role="status"><span><b>The slides use plain text.</b> ${esc(pf.drafted.text.note)}</span></div>`;
@@ -3630,7 +3767,7 @@ async function fpFacts(){
   const fp=S.pf.fp; if(fp.busy) return;
   if(!fp.pick){ fp.formErr="Choose a company or a group first: find it by name above."; render(); return; }
   const big=fpTooBig(fp.pick, fp.years); if(big){ fp.formErr=big; render(); return; }
-  fp.formErr=""; fpReset(fp); fp.busy="facts"; fp.asked={pick:JSON.parse(JSON.stringify(fp.pick)), years:fp.years, scope:nwKeep("fp")}; render();
+  fp.formErr=""; fpReset(fp); fp.busy="facts"; pbStart("fp-facts"); fp.asked={pick:JSON.parse(JSON.stringify(fp.pick)), years:fp.years, scope:nwKeep("fp")}; render();
   const r=await callFn("snl-profile", fpBody("filings_facts", fp.asked.pick, fp.asked.years, fp.asked.scope));
   if(!S.session || S.pf.fp!==fp) return;
   fp.busy="";
@@ -3649,7 +3786,7 @@ async function fpPlan(fp){
 }
 async function fpSample(){
   const pf=S.pf, fp=pf.fp; if(fp.busy || pf.busy) return;
-  pf.mode="filings"; fpReset(fp); fp.busy="sample"; fp.asked=null; render();
+  pf.mode="filings"; fpReset(fp); fp.busy="sample"; pbStart("fp-sample"); fp.asked=null; render();
   const r=await callFn("snl-profile",{action:"filings_sample"});
   if(!S.session || S.pf.fp!==fp) return;
   fp.busy="";
@@ -3662,7 +3799,7 @@ async function fpBuild(plain){
   if(!pfHasTemplate()){ fp.buildErr=tplErrText("nofile"); render(); return; }
   if(plain){ fp.draft=false; fp.draftErr=null; }
   if(!plain && fpDraftWanted() && !fp.drafted && fp.asked){
-    fp.busy="draft"; fp.draftErr=null; fp.built=null; fp.buildErr=""; render();
+    fp.busy="draft"; pbStart("fp-draft"); fp.draftErr=null; fp.built=null; fp.buildErr=""; render();
     const r=await callFn("snl-profile", fpBody("filings_draft", fp.asked.pick, fp.asked.years, fp.asked.scope));
     if(!S.session || S.pf.fp!==fp) return;
     pfChatUse(); loadStatus();
@@ -3676,7 +3813,7 @@ async function fpBuild(plain){
 }
 async function fpMake(fp){
   const pf=S.pf;
-  fp.busy="build"; fp.buildErr=""; fp.built=null; render();
+  fp.busy="build"; pbStart("fp-build"); fp.buildErr=""; fp.built=null; render();
   const use = fp.drafted && fpDraftWanted() ? fp.drafted : fp.res;
   const fail=msg=>{ if(!S.session || S.pf.fp!==fp) return; fp.busy=""; fp.buildErr=msg; render(); };
   let bytes; try{ bytes=await templateBytes(pf); }catch(e){ fail(e.message); return; }
@@ -3701,7 +3838,7 @@ function fpScreen(){
 function fpFinderHTML(){
   const fp=S.pf.fp, fd=fp.find;
   let found="";
-  if(fd.busy) found=`<p class="t2" role="status">Looking for matches…</p>`;
+  if(fd.busy) found=`<p class="t2" role="status">Looking for matches…${pbHTML("find-fp", {name:"Looking up companies", small:true})}</p>`;
   else if(fd.matches!==null && !fd.matches.length && !(fd.groups||[]).length) found=`<div class="info" id="fp_noMatch" role="status"><span>No company or group in the app's company list matches "${esc(fd.asked)}". Try a shorter part of the name.</span></div>`;
   else if(fd.matches!==null){
     const groups=(fd.groups||[]).map((g,i)=>{ const n=isNum(g.searchable)?+g.searchable:0, all=isNum(g.companies)?+g.companies:n;
@@ -3753,8 +3890,8 @@ function fpDraftHTML(fp){
 }
 function fpOutHTML(){
   const fp=S.pf.fp;
-  if(fp.busy==="facts") return `<div class="info" id="fpBusy" role="status"><span><b>Getting the filings of ${esc(fp.asked.pick.name)}…</b> A new search asks S&amp;P about one request a second, so this can take a minute or two.</span></div>`;
-  if(fp.busy==="sample") return `<div class="info" id="fpBusy" role="status"><span><b>Getting the sample filings…</b></span></div>`;
+  if(fp.busy==="facts") return `<div class="info" id="fpBusy" role="status"><span><b>Getting the filings of ${esc(fp.asked.pick.name)}…</b> A new search asks S&amp;P about one request a second, so this can take a minute or two.</span>${pbHTML("fp-facts", {name:"Getting the filings"})}</div>`;
+  if(fp.busy==="sample") return `<div class="info" id="fpBusy" role="status"><span><b>Getting the sample filings…</b></span>${pbHTML("fp-sample", {name:"Getting the sample filings"})}</div>`;
   if(!fp.res){
     if(!fp.err) return "";
     if(["not_configured","not_found","too_big"].includes(fp.err.err)) return `<div class="info" id="fpErr" role="status"><span>${esc(errText(fp.err))}</span></div>`;
@@ -3774,8 +3911,8 @@ function fpOutHTML(){
   const used=fp.res.spRequests;
   h+=`<p class="source" id="fpSource">Source: S&amp;P Global Market Intelligence, SNL Insurance Product Filings. Rate impacts are S&amp;P's overall figure for each filing, not weighted by premium; for a filing that isn't approved it may be the change asked for.${sh.fromStore?` From the saved search${sh.fetchedAt?` of ${esc(whenAt(sh.fetchedAt))}`:""}: no new S&amp;P requests.`:isNum(used)?` ${plural(used,"S&amp;P request")} used.`:""}</p></section>`;
   h+=`<section class="tcard" id="fpBuild" aria-label="Build the PowerPoint file">${fpDraftHTML(fp)}`;
-  if(fp.busy==="draft") h+=`<div class="info" id="fpDrafting" role="status"><span><b>Claude is drafting the slide text…</b> This can take up to two minutes. Keep this tab open.</span></div>`;
-  else if(fp.busy==="build") h+=`<div class="info" id="fpBuilding" role="status"><span><b>Building the PowerPoint file…</b> This takes a few seconds, a little longer the first time.</span></div>`;
+  if(fp.busy==="draft") h+=`<div class="info" id="fpDrafting" role="status"><span><b>Claude is drafting the slide text…</b> This can take up to two minutes. Keep this tab open.</span>${pbHTML("fp-draft", {name:"Claude's draft"})}</div>`;
+  else if(fp.busy==="build") h+=`<div class="info" id="fpBuilding" role="status"><span><b>Building the PowerPoint file…</b> This takes a few seconds, a little longer the first time.</span>${pbHTML("fp-build", {name:"Building the file"})}</div>`;
   if(fp.draftErr){ const r=fp.draftErr, calm=["limit","daily_limit","busy","not_configured"].includes(r.err);
     h+=`<div class="${calm?"info":"banner"}" id="fpDraftErr" role="${calm?"status":"alert"}"><span>${esc(pfDraftErrText(r))}</span><span class="inline"><button type="button" class="btn sm primary" data-act="fp-build-plain" ${fp.busy?"disabled":""}>Build with plain text</button>${r.err==="busy"||!calm?`<button type="button" class="btn sm" data-act="fp-build">Try the draft again</button>`:""}</span></div>`; }
   if(fp.drafted && fp.drafted.text.by!=="claude" && !blank(fp.drafted.text.note) && fpDraftWanted()) h+=`<div class="info" id="fpNote" role="status"><span><b>The slides use plain text.</b> ${esc(fp.drafted.text.note)}</span></div>`;
@@ -3862,11 +3999,11 @@ function fpSumHTML(fp){
   const lo=sw&&sw.leftOut&&typeof sw.leftOut==="object"?sw.leftOut:{}, rP=lo.rate&&!R.filings?"rate filings left out by the narrowing":`${count(R.summarised)} of ${plural(R.filings,"rate filing")}`, fP=lo.form&&!F.filings?"form filings left out by the narrowing":`${count(F.summarised)} of ${plural(F.filings,"form filing")}`;
   h+=`<p style="margin:0" id="fpSumHave"><b>Saved summaries:</b> ${rP} and ${fP}${sw?` in ${esc(sw.short)}`:""}${older?`; ${plural(older,"was","were")} made before the newer rate figures (loss costs, indicated change, assumptions) were read, and can be made again`:""}. Saved summaries cost nothing to use.</p>`;
   const mk=fp.mk;
-  if(fp.busy==="refresh") h+=`<div class="info" id="fpRefreshing" role="status"><span><b>Working out the figures again with the new summaries…</b> From the saved search: no new S&amp;P search.</span></div>`;
+  if(fp.busy==="refresh") h+=`<div class="info" id="fpRefreshing" role="status"><span><b>Working out the figures again with the new summaries…</b> From the saved search: no new S&amp;P search.</span>${pbHTML("fp-refresh", {name:"Working out the figures"})}</div>`;
   if(fp.refreshErr) h+=`<div class="banner" id="fpRefreshErr" role="alert"><span><b>The new summaries are saved, but the figures couldn't be worked out again.</b> ${esc(errText(fp.refreshErr))}</span><button type="button" class="btn sm" data-act="fp-refresh-retry">Try again</button></div>`;
   if(mk && mk.busy){
     const cur=mk.cur&&mk.cur.c;
-    return h+`<div class="banner" id="fpSumMaking" role="status"><span><b>Summarising ${count(mk.i)} of ${count(mk.n)}:</b> ${esc(cur?`${cur.filingNo||"a filing"} (${[cur.state, cur.toi].filter(Boolean).join(", ")||"n/d"})`:"")}… Each takes a minute or two. Keep this tab open.</span><button type="button" class="btn sm" data-act="fp-sum-stop" ${mk.stop?"disabled":""}>${mk.stop?"Stopping after this one…":"Stop"}</button></div></section>`;
+    return h+`<div class="banner" id="fpSumMaking" role="status"><span><b>Summarising ${count(mk.i)} of ${count(mk.n)}:</b> ${esc(cur?`${cur.filingNo||"a filing"} (${[cur.state, cur.toi].filter(Boolean).join(", ")||"n/d"})`:"")}… Each takes a minute or two. Keep this tab open.</span><button type="button" class="btn sm" data-act="fp-sum-stop" ${mk.stop?"disabled":""}>${mk.stop?"Stopping after this one…":"Stop"}</button>${pbHTML("fp-make", {name:"Summaries", done:Math.max(0, mk.i-1), of:mk.n, say:`${count(Math.max(0, mk.i-1))} of ${count(mk.n)} summaries done`})}</div></section>`;
   }
   if(fp.dErr && !["not_deployed","no_tables","signin"].includes(fp.dErr.err)) h+=`<div class="banner" id="fpSumErr" role="alert"><span><b>Couldn't check whether summaries can be made.</b> ${esc(errText(fp.dErr))}</span><button type="button" class="btn sm" data-act="fp-sum-retry">Try again</button></div>`;
   const cand=fp.cand||{rate:[],form:[]}, n=fpSumNs(fp), q=fpSumQueue(fp), off=fpSumOff(fp);
@@ -3893,6 +4030,7 @@ function fpSumMadeHTML(mk){
 async function fpSumMake(){
   const fp=S.pf.fp; if(fp.busy || (fp.mk&&fp.mk.busy) || !fp.res || fp.res.facts.sample || fpSumOff(fp)) return;
   const q=fpSumQueue(fp); if(!q.length) return;
+  pbStart("fp-make");
   const mk=fp.mk={busy:true, stop:false, halt:"", n:q.length, i:0, cur:null, items:q.map(c=>({c, state:"queued", why:""})), made:0, usd:0, usdKnown:false, sp:0};
   fp.refreshErr=null; render();
   for(let i=0;i<mk.items.length;i++){
@@ -3919,7 +4057,7 @@ async function fpSumMake(){
 /* The figures again, after new summaries: the same company and period, from the saved search (no new S&P search). */
 async function fpRefresh(fp){
   if(!fp.asked || fp.busy) return;
-  fp.busy="refresh"; fp.refreshErr=null; render();
+  fp.busy="refresh"; pbStart("fp-refresh"); fp.refreshErr=null; render();
   const r=await callFn("snl-profile", fpBody("filings_facts", fp.asked.pick, fp.asked.years, fp.asked.scope));
   if(!S.session || S.pf.fp!==fp) return;
   fp.busy="";
@@ -4336,9 +4474,8 @@ async function snapRun(refresh, given){
     const {from, to}=snapRange(sn.years), nums=k=>sn.pick.ids.filter(c=>c.kind===k).map(c=>Number(c.id)), scope=nwKeep("snap");
     run={pick:JSON.parse(JSON.stringify(sn.pick)), years:sn.years, scope, payload:snapPayload(nums("companyId"), nums("institutionId"), scope, from, to)};
   }
-  sn.formErr=""; sn.busy=true; sn.err=null; if(!refresh) sn.res=null; sn.ran=run; render();
-  sn.prog=null;
-  const r=await searchParts(refresh ? {...run.payload, refresh:true} : run.payload, {onPart:p=>{ if(S.snap===sn){ sn.prog=p; render(); } }});   // a wide search comes in parts (big-searches)
+  sn.formErr=""; sn.busy=true; sn.err=null; if(!refresh) sn.res=null; sn.ran=run; sn.prog=null; pbStart("snap"); render();
+  const r=await searchParts(refresh ? {...run.payload, refresh:true} : run.payload, {onPart:p=>{ if(S.snap===sn){ sn.prog=p; render(); } }, onRetry:p=>{ if(S.snap===sn){ sn.prog=p; render(); } }});   // a wide search comes in parts (big-searches)
   if(!S.session || S.snap!==sn) return;   // signed out, or the session ended, while it ran
   sn.prog=null;
   sn.busy=false;
@@ -4596,7 +4733,7 @@ function snapByCompanyHTML(res, run){
 }
 function snapOutHTML(){
   const sn=S.snap, run=sn.ran, r=sn.res, who=run?run.pick.name:"";
-  if(sn.busy && !r) return `<div class="info" id="snBusy" role="status"><span><b>Getting ${esc(who)}'s filings…</b> A long period can take a minute. After that the result is saved, so it opens at once next time.${bsProgHTML(sn.prog)}</span></div>`;
+  if(sn.busy && !r) return `<div class="info" id="snBusy" role="status"><span><b>Getting ${esc(who)}'s filings…</b> A long period can take a minute. After that the result is saved, so it opens at once next time.</span>${bsBarHTML("snap", sn.prog, "Snapshot search")}</div>`;
   if(!r){
     if(!sn.err) return "";
     if(sn.err.err==="not_configured" || sn.err.err==="not_deployed") return `<div class="info" id="snErr" role="status"><span>${esc(errText(sn.err))}</span></div>`;
@@ -4607,7 +4744,7 @@ function snapOutHTML(){
   snapNsWhy(c, v); snapOutOf(c, v);
   let h=`<div class="snhead" id="snHead"><div><h3 id="snName">${esc(who||"Snapshot")}${sc.narrowed?` <span class="t2" id="snScope">${esc(sc.short)}</span>`:""}</h3><p class="t2" id="snMeta">${esc([pk&&pk.kind==="group"?`Group of ${plural(pk.ids.length,"company","companies")} with S&P ids${pk.noId?`; ${plural(pk.noId,"company","companies")} without one left out`:""}`:pk&&pk.group?`Part of ${pk.group}`:"", `filings published ${fmtDay(p.from)} to ${fmtDay(p.to)}`, sc.states.length?`searched in ${sc.stWords}`:`${plural((r.params&&Array.isArray(r.params.states)?r.params.states:run.payload.states||[]).length,"state")} searched`, sc.tois.length?`${sc.toiWords} only`:"", sc.kinds].filter(Boolean).join(" · "))}</p></div>
     <div class="toolbar"><button type="button" class="btn" id="sn_ask" data-act="snap-ask" data-q="all">Ask Claude about this</button><button type="button" class="btn" id="sn_toFilings" data-act="snap-filings" ${sn.busy?"disabled":""}>See every filing on the Filings view</button><span class="inline"><span class="t2">All filings:</span>${snapExpHTML("filings")}</span></div></div>`;
-  if(sn.busy) h+=`<div class="banner" role="status" id="snRefreshing"><span>Asking S&amp;P again… What is below is from ${fmtAt(r.fetchedAt)} until the new result arrives.${bsProgHTML(sn.prog)}</span></div>`;
+  if(sn.busy) h+=`<div class="banner" role="status" id="snRefreshing"><span>Asking S&amp;P again… What is below is from ${fmtAt(r.fetchedAt)} until the new result arrives.</span>${bsBarHTML("snap", sn.prog, "Snapshot search")}</div>`;
   else if(sn.err) h+=problemHTML(sn.err, "Couldn't refresh the snapshot.", "snap-refresh");
   else if(r.fromStore) h+=`<div class="info" id="snFromStore" role="status"><span>From the saved result fetched ${fmtAt(r.fetchedAt)}, so opening it used no S&amp;P requests.</span><button type="button" class="btn sm" data-act="snap-refresh">Refresh from S&amp;P</button></div>`;
   h+=nwShownHTML("snap", v.sh, c.fs.length, all, v.miss, "snapshot");
@@ -4626,7 +4763,7 @@ function snapOutHTML(){
 function snapFinderHTML(){
   const sn=S.snap, fd=sn.find;
   let found="";
-  if(fd.busy) found=`<p class="t2" role="status">Looking for matches…</p>`;
+  if(fd.busy) found=`<p class="t2" role="status">Looking for matches…${pbHTML("find-snap", {name:"Looking up companies", small:true})}</p>`;
   else if(fd.matches!==null && !fd.matches.length) found=`<div class="info" id="sn_noMatch" role="status"><span>No company in the app's company list matches "${esc(fd.asked)}". Try a shorter part of the name.</span></div>`;
   else if(fd.matches!==null){
     const gs=snapGroups(fd.matches);
@@ -4642,7 +4779,7 @@ function snapFinderHTML(){
 }
 function snapChosenHTML(){
   const sn=S.snap, pk=sn.pick;
-  if(sn.picking) return `<p class="t2" id="sn_chosen" role="status">Listing the companies in ${esc(sn.picking)}…</p>`;
+  if(sn.picking) return `<p class="t2" id="sn_chosen" role="status">Listing the companies in ${esc(sn.picking)}…${pbHTML("pick-snap", {name:"Listing the companies", small:true})}</p>`;
   if(sn.pickErr) return `<p class="err" id="sn_chosen" role="alert">${esc(sn.pickErr)}</p>`;
   if(!pk) return `<p class="t2" id="sn_chosen">Nothing chosen yet.</p>`;
   const detail = pk.kind==="group" ? `group of ${plural(pk.ids.length,"company","companies")} with S&P ids in the company list${pk.noId?`; ${plural(pk.noId,"company has","companies have")} no S&P id and ${pk.noId===1?"is":"are"} left out`:""}`
@@ -4950,11 +5087,11 @@ async function fcRun(){
 // runs every search not yet answered, one after another, then asks for the summaries of what came back
 async function fcSearches(fc){
   const todo=fc.runs.filter(x=>!x.res); if(!todo.length) return;
-  fc.busy=true; render();
+  fc.busy=true; pbStart("fc"); render();
   for(let k=0;k<todo.length;k++){
     const run=todo[k]; run.err=null; fc.step={i:k+1, n:todo.length}; render();
     fc.prog=null;
-    const r=await searchParts(run.payload, {onPart:p=>{ if(S.fc===fc){ fc.prog=p; render(); } }});   // a wide search comes in parts (big-searches)
+    const r=await searchParts(run.payload, {onPart:p=>{ if(S.fc===fc){ fc.prog=p; render(); } }, onRetry:p=>{ if(S.fc===fc){ fc.prog=p; render(); } }});   // a wide search comes in parts (big-searches)
     if(!S.session || S.fc!==fc) return;   // signed out, or the session ended, while it ran
     fc.prog=null;
     if(r.data && Array.isArray(r.data.rows)){ run.res=r.data; takeUsage(r.data); }
@@ -5043,6 +5180,7 @@ function fcWhy(r){
 async function fcMake(){
   const fc=S.fc; if(fc.busy || (fc.mk&&fc.mk.busy) || !fcCanMake(fc)) return;
   const q=fcQueue(fc); if(!q.length){ toast("Every one of those filings already has a saved summary."); return; }
+  pbStart("fc-make");
   const mk=fc.mk={busy:true, stop:false, halt:"", n:q.length, i:0, cur:null, items:q, made:0, usd:0, usdKnown:false, sp:0};
   for(const x of q) fc.results[x.f.dk]={state:"queued"};
   render();
@@ -5189,7 +5327,7 @@ function fcComparisonHTML(fc){
 function fcFinderHTML(){
   const fc=S.fc, fd=fc.find, full=fc.picks.length>=FC_MAX;
   let found="";
-  if(fd.busy) found=`<p class="t2" role="status">Looking for matches…</p>`;
+  if(fd.busy) found=`<p class="t2" role="status">Looking for matches…${pbHTML("find-fc", {name:"Looking up companies", small:true})}</p>`;
   else if(fd.matches!==null && !fd.matches.length && !fd.groups.length) found=`<div class="info" id="fc_noMatch" role="status"><span>No company in the app's company list matches "${esc(fd.asked)}". Try a shorter part of the name.</span></div>`;
   else if(fd.matches!==null){
     const groups=fcGroupList(fd).map((g,i)=>`<li><div><div class="t1">${esc(g.name)}</div><div class="t2">Group · ${g.whole?plural(isNum(g.whole.searchable)?g.whole.searchable:g.whole.members.length,"company","companies")+" with S&amp;P ids":plural(g.n,"matching company","matching companies")}; choosing it takes every member in the company list</div></div><button type="button" class="btn sm" data-act="fc-group" data-i="${i}" ${fc.picking||full?"disabled":""}>Choose group</button></li>`).join("");
@@ -5208,7 +5346,7 @@ function fcChosenHTML(){
   const chips=fc.picks.length ? `<div class="chips" id="fc_chips" aria-label="Chosen carriers">${fc.picks.map((pk,i)=>{ const d=pk.kind==="company" ? `S&P ${pk.ids[0].kind==="companyId"?"company":"institution"} id ${pk.ids[0].id}` : `${pk.kind==="set"?"saved set":"group"} of ${plural(pk.ids.length,"company","companies")}${pk.noId?`; ${count(pk.noId)} without an S&P id left out`:""}`;
       return `<span class="cchip"><span><b>${esc(pk.name)}</b> <span class="t2">${esc(d)}</span></span><button type="button" data-act="fc-remove" data-i="${i}" aria-label="Remove ${esc(pk.name)}" ${fc.busy?"disabled":""}>×</button></span>`; }).join("")}</div>`
     : `<p class="t2" id="fc_none">No carriers chosen yet.</p>`;
-  return `${fc.picking?`<p class="t2" id="fc_picking" role="status">Listing the companies in ${esc(fc.picking)}…</p>`:""}${fc.pickErr?`<p class="err" id="fc_pickErr" role="alert">${esc(fc.pickErr)}</p>`:""}${chips}`;
+  return `${fc.picking?`<p class="t2" id="fc_picking" role="status">Listing the companies in ${esc(fc.picking)}…${pbHTML("pick-fc", {name:"Listing the companies", small:true})}</p>`:""}${fc.pickErr?`<p class="err" id="fc_pickErr" role="alert">${esc(fc.pickErr)}</p>`:""}${chips}`;
 }
 function fcFormHTML(){
   const fc=S.fc, states=stateOptions(), tois=refOptions("typeOfInsurance"), waitRefs=S.refsLoading&&!S.refs;
@@ -5264,7 +5402,7 @@ function fcMakeHTML(fc, cs){
   h+=`<div class="counts" id="fcHave"><b>Saved summaries:</b>${cs.filter(c=>c.list).map(c=>{ const s=c.list.filter(f=>fcDigestOf(fc,f)).length; return `<span data-i="${c.i}">${esc(c.pk.name)}: ${count(s)} of ${count(c.list.length)}, ${count(c.list.length-s)} without</span>`; }).join("")}</div>`;
   if(mk && mk.busy){
     const cur=mk.cur;
-    return h+`<div class="fcmk"><div class="banner" id="fcMaking" role="status"><span><b>Summarising ${count(mk.i)} of ${count(mk.n)}:</b> ${esc(cur?`${filingNoText(cur.f.r)||"a filing"} (${cur.who})`:"")}… Each takes a minute or two. Keep this tab open.</span><button type="button" class="btn sm" data-act="fc-stop" ${mk.stop?"disabled":""}>${mk.stop?"Stopping after this one…":"Stop"}</button></div></div></section>`;
+    return h+`<div class="fcmk"><div class="banner" id="fcMaking" role="status"><span><b>Summarising ${count(mk.i)} of ${count(mk.n)}:</b> ${esc(cur?`${filingNoText(cur.f.r)||"a filing"} (${cur.who})`:"")}… Each takes a minute or two. Keep this tab open.</span><button type="button" class="btn sm" data-act="fc-stop" ${mk.stop?"disabled":""}>${mk.stop?"Stopping after this one…":"Stop"}</button>${pbHTML("fc-make", {name:"Summaries", done:Math.max(0, mk.i-1), of:mk.n, say:`${count(Math.max(0, mk.i-1))} of ${count(mk.n)} summaries done`})}</div></div></section>`;
   }
   h+=`<div class="fcmk"><p style="margin:0" class="t2">Summaries are made once and saved for everyone. Making one reads the front of the filing: 1 S&amp;P request and one Claude read each, and it counts as one of the day's questions. Nothing is summarised until you choose.</p>`;
   h+=`<div class="inline"><label for="fc_n" class="t2"><b>Summarise the latest</b></label><select id="fc_n" data-bind="fc.n" data-live style="width:auto">${Array.from({length:FC_MAKE_MAX},(_,i)=>`<option value="${i+1}" ${n===i+1?"selected":""}>${i+1}</option>`).join("")}</select><span class="t2"><b>for each carrier</b></span></div>`;
@@ -5292,7 +5430,7 @@ function fcOutHTML(){
   const cs=fcCarriers(fc), names=ran.picks.map(p=>p.name);
   let h=`<div class="snhead" id="fcHead"><div><h3 id="fcName">${esc(names.join(", "))}</h3><p class="t2" id="fcMeta">${esc([`${ran.wide?"Form, rule and rate filings":"Form filings"} in ${fcStateName(ran.state)}`, ran.toiName||"type of insurance n/d", `published ${fmtDay(ran.from)} to ${fmtDay(ran.to)}`, "every status"].join(" · "))}</p></div>
     <div class="toolbar"><button type="button" class="btn" id="fc_ask" data-act="fc-ask" ${fc.runs.some(x=>x.res)?"":"disabled"}>Ask Claude about this</button></div></div>`;
-  if(fc.busy) h+=`<div class="info" id="fcBusy" role="status"><span><b>Finding the filings${fc.step&&fc.step.n>1?`: search ${count(fc.step.i)} of ${count(fc.step.n)}`:""}…</b> A long period can take a minute. Each search is saved, so the same one opens at once next time.${bsProgHTML(fc.prog)}</span></div>`;
+  if(fc.busy) h+=`<div class="info" id="fcBusy" role="status"><span><b>Finding the filings${fc.step&&fc.step.n>1?`: search ${count(fc.step.i)} of ${count(fc.step.n)}`:""}…</b> A long period can take a minute. Each search is saved, so the same one opens at once next time.</span>${bsBarHTML("fc", fc.prog, "Finding the filings", fc.step?{at:fc.step.i, of:fc.step.n}:null)}</div>`;
   const failed=fc.runs.filter(x=>x.err);
   if(!fc.busy && failed.length){
     const calm=failed.every(x=>["not_configured","not_deployed"].includes(x.err.err)), who=failed.flatMap(x=>x.carriers.map(i=>ran.picks[i].name));
@@ -5535,14 +5673,14 @@ async function cmpRun(given){
 /* Runs the given searches of the comparison one after another. A search that fails leaves the others as they are,
    so what came back is shown and only the failed searches need trying again. */
 async function cmpGo(cm, which, refresh){
-  cm.formErr=""; cm.busy=true;
+  cm.formErr=""; cm.busy=true; pbStart("cmp");
   for(const i of which){ cm.parts[i].state="wait"; if(!refresh) cm.parts[i].res=null; }
   const unlisted = typeof unlistedOn==="function" && unlistedOn();   // the Filings form's "keep out of Recent searches", when it is on
   for(let k=0; k<which.length; k++){
     const part=cm.parts[which[k]]; cm.step={at:k+1, of:which.length}; part.state="running"; render();
     const body={...part.payload, ...(refresh?{refresh:true}:{}), ...(unlisted?{unlisted:true}:{})};
     cm.prog=null;
-    const r=await searchParts(body, {onPart:p=>{ if(S.cmp===cm){ cm.prog=p; render(); } }});   // a wide search comes in parts (big-searches)
+    const r=await searchParts(body, {onPart:p=>{ if(S.cmp===cm){ cm.prog=p; render(); } }, onRetry:p=>{ if(S.cmp===cm){ cm.prog=p; render(); } }});   // a wide search comes in parts (big-searches)
     if(!S.session || S.cmp!==cm) return;   // signed out, or the session ended, while it ran
     cm.prog=null;
     if(r.data && Array.isArray(r.data.rows)){ part.state="ok"; part.res=r.data; part.err=null; takeUsage(r.data); }
@@ -5747,7 +5885,7 @@ function cmpLatestBlockHTML(c){
 function cmpProgressHTML(cm){
   const st=cm.step, n=cm.parts.length;
   const items=cm.parts.map((p,i)=>`<li class="${p.state==="ok"?"ok":p.state==="err"?"err":""}">Search ${i+1}: ${plural(cmpPartIds(p.payload).length,"company","companies")} <span>${p.state==="ok"?"done":p.state==="err"?"didn't run":p.state==="running"?"running…":"waiting"}</span></li>`).join("");
-  return `<div class="info cmprog" id="cmBusy" role="status"><span><b>${n>1?`Searching ${st?st.at:1} of ${st?st.of:n}…`:"Searching…"}</b> Each search can take a minute or so. Each is saved as it finishes, so the comparison opens at once next time.${bsProgHTML(cm.prog)}</span>${n>1?`<ol>${items}</ol>`:""}</div>`;
+  return `<div class="info cmprog" id="cmBusy" role="status"><span><b>${n>1?`Searching ${st?st.at:1} of ${st?st.of:n}…`:"Searching…"}</b> Each search can take a minute or so. Each is saved as it finishes, so the comparison opens at once next time.</span>${bsBarHTML("cmp", cm.prog, "Comparison", st?{at:st.at, of:st.of}:null)}${n>1?`<ol>${items}</ol>`:""}</div>`;
 }
 // what didn't come back: which searches, and so which carriers, with one Try again for the failed searches only
 function cmpFailedHTML(c, cm){
@@ -5794,7 +5932,7 @@ function cmpOutHTML(){
 function cmpFinderHTML(){
   const cm=S.cmp, fd=cm.find;
   let found="";
-  if(fd.busy) found=`<p class="t2" role="status">Looking for matches…</p>`;
+  if(fd.busy) found=`<p class="t2" role="status">Looking for matches…${pbHTML("find-cmp", {name:"Looking up companies", small:true})}</p>`;
   else if(fd.matches!==null && !fd.matches.length) found=`<div class="info" id="cm_noMatch" role="status"><span>No company in the app's company list matches "${esc(fd.asked)}". Try a shorter part of the name.</span></div>`;
   else if(fd.matches!==null){
     const full=cm.carriers.length>=CMP_MAX;
@@ -5812,7 +5950,7 @@ function cmpChosenHTML(){
   const cm=S.cmp, n=cm.carriers.length;
   const chips=n ? `<div class="chips cmcars" id="cm_cars" aria-label="Chosen carriers">${cm.carriers.map((c,i)=>`<span class="cchip"><span><b>${esc(c.name)}</b> <span class="t2">${esc(c.kind==="group"?`group of ${cmpCos(c)}${c.noId?`; ${c.noId} without an S&P id left out`:""}`:"1 company")}</span></span><button type="button" data-act="cmp-remove" data-i="${i}" aria-label="Remove ${esc(c.name)}" ${cm.busy?"disabled":""}>×</button></span>`).join("")}</div>` : "";
   return `<div class="f"><span>Carriers <em id="cm_count">${n?`${count(n)} of ${CMP_MAX} chosen`:`none chosen yet; choose ${CMP_MIN} to ${CMP_MAX}`}${n===1?`; choose at least one more`:""}</em></span>
-    ${cm.picking?`<p class="t2" id="cm_picking" role="status">Listing the companies in ${esc(cm.picking)}…</p>`:""}${cm.pickErr?`<p class="err" id="cm_pickErr" role="alert">${esc(cm.pickErr)}</p>`:""}${cm.setNote?`<p class="t2" id="cm_setNote">${esc(cm.setNote)}</p>`:""}
+    ${cm.picking?`<p class="t2" id="cm_picking" role="status">Listing the companies in ${esc(cm.picking)}…${pbHTML("pick-cmp", {name:"Listing the companies", small:true})}</p>`:""}${cm.pickErr?`<p class="err" id="cm_pickErr" role="alert">${esc(cm.pickErr)}</p>`:""}${cm.setNote?`<p class="t2" id="cm_setNote">${esc(cm.setNote)}</p>`:""}
     ${chips}${n?`<span><button type="button" class="lnk t2" data-act="cmp-clear" ${cm.busy?"disabled":""}>Clear all</button></span>`:""}</div>`;
 }
 function cmpCostHTML(){
@@ -6250,7 +6388,7 @@ function setsNewHTML(){
 function setFinderHTML(s){
   const ss=S.sets, fd=ss.find;
   let found="";
-  if(fd.busy) found=`<p class="t2" role="status">Looking…</p>`;
+  if(fd.busy) found=`<p class="t2" role="status">Looking…${pbHTML("find-sets", {name:"Looking up companies", small:true})}</p>`;
   else if(fd.matches!==null){
     const gs=fd.groups.map((g,i)=>{ const n=isNum(g.searchable)?+g.searchable:g.members.length, nm=!blank(g.name)?String(g.name):!blank(g.code)?`NAIC group ${g.code}`:"Group", inSet=s.groups.some(x=>x.toLowerCase()===String(!blank(g.name)?g.name:g.code).toLowerCase());
       return `<li><div><div class="t1">${esc(nm)}</div><div class="t2">Whole group, ${esc(plural(n,"company","companies"))} with S&amp;P ids today; kept by name, so its companies are counted again each time the set is used</div></div><span class="inline">${inSet?`<span class="t2">In the set</span>`:`<button type="button" class="btn sm" data-act="sets-add-group" data-i="${i}" ${ss.saving?"disabled":""}>Add group</button>`}</span></li>`; }).join("");
@@ -6347,6 +6485,7 @@ function render(){
   renderConn();
   renderLive();
   renderDigest(); if(S.view==="filings") dgPrefetch();
+  pbQueue();   // progress bars: a wait's timer stops when its bar is no longer on the page
 }
 function renderDrawer(){
   const root=document.getElementById("drawerRoot"), dr=S.session?S.drawer:null;
@@ -6485,7 +6624,7 @@ async function mkSearch(){
   const mk=S.mk; if(mk.busy || !mk.state) return;
   if(mkAskStates().length>MK_MAX_STATES){ mk.err={err:"bad", msg:`Choose at most ${MK_MAX_STATES} states: the index answers up to ${MK_MAX_STATES} at once.`}; render(); return; }
   if(mk.f.from && mk.f.to && mk.f.from>mk.f.to){ mk.err={err:"bad", msg:"The start date is after the end date."}; render(); return; }
-  mk.busy=true; mk.err=null; render();
+  mk.busy=true; mk.err=null; pbStart("mk-search"); render();
   const q=mkQuery({});
   const [rows, byCo]=await Promise.all([callFn("snl-index",{...q, group:"rows", limit:MK_PAGE, offset:0}), callFn("snl-index",{...q, group:"company", limit:100})]);
   if(!S.session || S.mk!==mk) return;
@@ -6550,7 +6689,7 @@ function mkRowHTML(r){
 }
 function mkResultsHTML(){
   const mk=S.mk, r=mk.res;
-  if(mk.busy && !r) return `<div class="banner" role="status" id="mkSearching"><span>Searching the market index…</span></div>`;
+  if(mk.busy && !r) return `<div class="banner" role="status" id="mkSearching"><span>Searching the market index…</span>${pbHTML("mk-search", {name:"Market index search"})}</div>`;
   if(mk.err) return ["not_indexed","out_of_range","bad","needs_update","not_updated"].includes(mk.err.err) ? `<div class="info" id="mkRefused" role="status"><span>${esc(errText(mk.err))}</span></div>` : problemHTML(mk.err, "Couldn't search the index.", "mk-search");
   if(!r) return "";
   const rows=Array.isArray(r.rows)?r.rows:[], total=isNum(r.total)?+r.total:rows.length, notes=Array.isArray(r.notes)?r.notes.filter(n=>!blank(n)):[];
@@ -6609,7 +6748,7 @@ function mkOpenHTML(o){
   const until=o.resume_after&&Date.parse(o.resume_after)>Date.now() ? ` until ${fmtTime(o.resume_after)}` : "";
   return `<div class="mkopen" id="mkOpen">
     <div class="blk-h"><div><b>${esc(what)} of ${esc(o.state)}</b> <span class="t2">${esc(`published ${fmtDay(o.from_date)} to ${fmtDay(o.to_date)}`)}</span></div><span class="pill" id="mkOpenStatus">${esc((MK_STATUS[o.status]||o.status)+until)}</span></div>
-    <div class="mkbar" role="progressbar" aria-label="Sweep progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pctDone}"><span style="width:${pctDone}%"></span></div>
+    ${pbHTML("mk-sweep", {now:true, name:"Sweep progress", cls:"mkbar", frac:pctDone/100, desc:"mkProgress", badge:"", state:o.status==="failed"?"failed":o.status==="held"||o.status==="stopped"?"stopped":"run", say:`${count(o.next_unit)} of ${count(o.units_total)} batches of companies (${pctDone}%)`})}
     <p class="t2" id="mkProgress" style="margin:0">${count(o.next_unit)} of ${count(o.units_total)} batches of companies (${pctDone}%), ${plural(o.requests,"S&amp;P request")} so far, ${plural(o.rows_found,"filing")} found.${+o.companiesMissed?` ${plural(o.companiesMissed,"company","companies")} not covered so far.`:""}</p>
     ${!blank(o.message)?`<p class="t2" id="mkOpenMsg" style="margin:0">${esc(o.message)}</p>`:""}
     ${S.mk.stepping?`<p class="t2" id="mkStepping" role="status" style="margin:0">Asking S&amp;P for the next batches… Each step takes up to a minute. Keep this page open, or the schedule carries it on if it is set up.</p>`:""}
@@ -7040,6 +7179,7 @@ function resetState(){
   S.sets=freshSets();
   S.dg=freshDigests();
   resetMarket();
+  pbReset();
 }
 async function onSignedIn(session){
   const {data, error}=await S.sb.from("profiles").select("username,display_name,role").eq("id", session.user.id).maybeSingle();
