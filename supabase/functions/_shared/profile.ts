@@ -1540,7 +1540,9 @@ export function filingsPlainText(f: FilingsFacts): FpText {
   const asOf = f.asOf, T = f.totals, d = (s: string | null) => fmt.date(s, asOf);
   const p = (lead: string, text: string): Point => ({ lead: fit(lead, LIMITS.lead), text: fit(text, LIMITS.point) });
   const sec = (title: string, points: Point[]): Section => ({ title: fit(title, LIMITS.title), points });
-  const period = periodWords(f), over = yearsWords(f.period.years), sc = fpScopeIn(f), inSc = sc.narrowed ? ` in ${sc.words}` : "";
+  const period = periodWords(f), over = yearsWords(f.period.years), sc = fpScopeIn(f), kinds = !!(sc.filingTypes?.length || sc.statuses?.length);
+  // "in Florida and Texas, homeowners"; with a filing type or status, in brackets: "(rate filings; approved)"
+  const inSc = !sc.narrowed ? "" : kinds ? ` (${sc.words})` : ` in ${sc.words}`;
   const none = sc.narrowed ? `S&P returned nothing for this search of ${sc.words} (${period}). That says nothing about other ${fpOther(sc)}, and doesn't show that nothing was filed.`
     : `S&P returned nothing for this search (${period}). That doesn't show that nothing was filed.`;
   const early = f.search.capped ? " The search stopped early, so there may be more." : "";
@@ -1614,7 +1616,7 @@ export function filingsPlainText(f: FilingsFacts): FpText {
   const subtitle = (sc.narrowed ? `${cap1(sc.short)}: ` : "") + (f.entity.kind === "group" ? `${many(f.entity.companies, "company", "companies")} in the group; ${many(T.filings, "filing")} published ${period}` : `${many(T.filings, "filing")} published ${period}`);
   return fpScoped(f, {
     by: "plain", note: null, cover: { subtitle: fit(subtitle, LIMITS.subtitle) },
-    summary: sec(sc.narrowed && `${many(T.filings, "filing")} in ${sc.short} over ${over}`.length <= LIMITS.title ? `${many(T.filings, "filing")} in ${sc.short} over ${over}` : `${many(T.filings, "filing")} in ${many(T.states, "state")} over ${over}`, summary.slice(0, 6)), rates, states, years, forms, regulator,
+    summary: sec(kinds && `${many(T.filings, "filing")} over ${over} (${sc.short})`.length <= LIMITS.title ? `${many(T.filings, "filing")} over ${over} (${sc.short})` : !kinds && sc.narrowed && `${many(T.filings, "filing")} in ${sc.short} over ${over}`.length <= LIMITS.title ? `${many(T.filings, "filing")} in ${sc.short} over ${over}` : `${many(T.filings, "filing")} in ${many(T.states, "state")} over ${over}`, summary.slice(0, 6)), rates, states, years, forms, regulator,
     rateMap: rich.rateMap, exposure: rich.exposure, adequacy: rich.adequacy, programs: rich.programs, market: rich.market,
     questions: { title: "Key diligence questions", items: fpQuestions(f).map((q) => ({ title: fit(q.title, LIMITS.qTitle), text: fit(q.text, LIMITS.qText) })) },
   });
@@ -1742,7 +1744,7 @@ export function fpRichOf(f: Partial<FpRichFacts>): FpRichFacts {
     depends on a filing's description. */
 export function fpQuestions(f: FilingsFacts): { title: string; text: string }[] {
   const out: { title: string; text: string }[] = [], T = f.totals, R = f.rates, d = (s: string | null) => fmt.date(s, f.asOf);
-  const sc = fpScopeIn(f), inSc = sc.narrowed ? ` in ${sc.words}` : "";
+  const sc = fpScopeIn(f), inSc = !sc.narrowed ? "" : sc.filingTypes?.length || sc.statuses?.length ? ` (${sc.words})` : ` in ${sc.words}`;
   if (!T.filings) out.push({ title: "Filings S&P doesn't show", text: sc.narrowed ? `S&P returned nothing for this search of ${sc.words} over ${yearsWords(f.period.years)}. Which rate, rule and form filings has the company made there?` : `S&P returned nothing for this search over ${yearsWords(f.period.years)}. Which rate, rule and form filings has the company made, and where?` });
   const pend = [...R.points].filter((x) => !x.approved).sort((x, y) => Math.abs(y.rate) - Math.abs(x.rate))[0];
   if (pend) out.push({ title: "Rate requests in progress", text: `${many(R.notApproved, "filing with a rate impact isn't", "filings with a rate impact aren't")} approved, the largest ${fmt.pct(pend.rate)} in ${pend.state ?? "a state n/d"}. What outcome and timing does management expect?` });
