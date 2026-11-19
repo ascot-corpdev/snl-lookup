@@ -90,6 +90,7 @@
  "web/profile.test.cjs": 50,
  "web/profile_e2e.test.cjs": 6,
  "web/profileslides.test.cjs": 1,
+ "web/progress.test.cjs": 65,
  "web/recent.test.cjs": 9,
  "web/sets.test.cjs": 58,
  "web/shell.test.cjs": 15,
