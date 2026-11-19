@@ -3,6 +3,7 @@
 //   npm test -- filings chat  only suites whose file name contains "filings" or "chat"
 //   npm test -- --shard=2/4   the second of four parts (tests/shards.mjs); GitHub runs the parts at the same time
 //   npm test -- --timings     also record how long each suite took in tests/durations.json, which evens out the parts
+//   npm test -- --list        print the suites that would run, one a line, and run nothing
 // Web suites (tests/web/*.test.cjs) drive web/index.html in Chromium against an in-memory Supabase stand-in
 // (tests/web/mock-supabase.js); nothing touches the live database. Function suites (tests/functions/*.ts) run the
 // Supabase Edge Functions under Deno against fake S&P, Snowflake and Claude APIs; they are skipped if Deno isn't installed.
@@ -15,12 +16,13 @@ import { parseShard, planShards } from "./shards.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 mkdirSync(join(here, "out"), { recursive: true });
-let shard = null, timings = false;
+let shard = null, timings = false, list = false;
 const only = [];
 for (const a of process.argv.slice(2)) {
   if (!a.startsWith("--")) { only.push(a); continue; }
   if (a === "--timings") { timings = true; continue; }
-  try { const s = parseShard(a); if (!s) throw new Error(`Unknown option ${a}. The options are --shard=2/4 and --timings.`); shard = s; }
+  if (a === "--list") { list = true; continue; }
+  try { const s = parseShard(a); if (!s) throw new Error(`Unknown option ${a}. The options are --shard=2/4, --timings and --list.`); shard = s; }
   catch (e) { console.error(e.message); process.exit(2); }
 }
 const DURATIONS = join(here, "durations.json");
@@ -43,6 +45,7 @@ const kindOf = (name) => name.split("/")[0];
 const sizeOf = (name) => { try { return statSync(join(here, name)).size; } catch { return 0; } };
 const mine = shard ? new Set(planShards(all.map((s) => ({ name: s.name, kind: kindOf(s.name), size: sizeOf(s.name) })), shard.total, readDurations())[shard.index - 1]) : null;
 const suites = mine ? all.filter((s) => mine.has(s.name)) : all;
+if (list) { console.log(suites.map((s) => s.name).join("\n")); process.exit(0); }
 if (shard) console.log(`Part ${shard.index} of ${shard.total}: ${suites.length} of ${all.length} suites.`);
 
 let failed = 0, passed = 0;

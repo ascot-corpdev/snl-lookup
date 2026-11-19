@@ -16,9 +16,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  # The suites take about 20 minutes one after another, so they run as parts on separate machines at the same time.
+  # tests/shards.mjs decides which suites are in which part (every suite is in exactly one), evened out by how long
+  # each suite took when last timed (tests/durations.json). To change the number of parts, change the list below.
+  suites:
+    name: suites (part ${{ matrix.part }} of ${{ strategy.job-total }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4]
     # Playwright's own image already has Chromium and its system libraries (installing them takes ~10 minutes).
     # Keep its version in step with "playwright" in package.json.
     container:
@@ -37,13 +45,31 @@ jobs:
         with:
           deno-version: v2.5.x
 
-      - name: Run the tests
-        run: npm test
+      - name: Run this part of the tests
+        run: npm test -- --shard=${{ matrix.part }}/${{ strategy.job-total }}
 
       - name: Keep screenshots when something fails
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-output
+          name: test-output-part-${{ matrix.part }}
           path: tests/out/
           retention-days: 7
+
+  # One check with the name the pull request has always shown: green only when every part passed.
+  test:
+    name: test
+    needs: suites
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every part passed
+        env:
+          RESULT: ${{ needs.suites.result }}
+        run: |
+          if [ "$RESULT" != "success" ]; then
+            echo "At least one part of the tests failed or did not finish ($RESULT). Open the failing part above."
+            exit 1
+          fi
+          echo "Every part of the tests passed."

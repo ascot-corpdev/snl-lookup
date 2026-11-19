@@ -648,6 +648,18 @@ Run the tests (they need [Deno](https://deno.com) for the function suites):
 npm test
 ```
 
+Every suite one after another takes about 20 minutes, most of it the browser suites. To run part of them, name them or ask for one part:
+
+```bash
+npm test -- filings chat
+```
+
+```bash
+npm test -- --shard=2/4
+```
+
+On GitHub the suites run as four parts on separate machines at the same time, and a pull request shows one check, `test`, which is green only when every part passed. `tests/shards.mjs` shares the suites out so that every suite is in exactly one part and the parts take about as long as each other, using how long each suite took when last timed (`tests/durations.json`). A new suite needs nothing: it is given a time from its size until it is timed. To time the suites again after adding several, run `npm test -- --timings` and commit the file. To change the number of parts, change the list of parts in `.github/workflows/tests.yml`.
+
 ## Notes
 
 - **Saved results.** A search, a reference list or a statutory query is saved the first time and reopened from Supabase after that, with the date it was fetched. Refresh asks S&P again.
