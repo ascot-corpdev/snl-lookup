@@ -10,6 +10,7 @@ import * as P from "../../supabase/functions/_shared/profile.ts";
 import { forgetTokens } from "../../supabase/functions/_shared/spgmi.ts";
 import { checks, corpdev, env, fakeAnthropic, fakeClock, J, memoryDb, nobody, read, reader, type Reply, req, say } from "./helpers/fakes.ts";
 import { filing, spPage, spStub } from "./helpers/more.ts";
+import { STEP_PAGES } from "../../supabase/functions/_shared/filings.ts";
 
 const { ok, done } = checks();
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -146,8 +147,9 @@ const claudeText = (edit: (t: any, f: any) => void = () => {}) => (body: any): R
   const big = world({ pages: 100 });
   let gated = 0;
   const b = await big.call({ ...CO, years: 1 }, { gate: async () => { gated++; } });
-  ok(`a search with very many pages stops at the hard cap: ${P.FP_MAX_SP_REQUESTS} S&P requests in all (sign-in, two lists, ${P.FP_MAX_SP_REQUESTS - P.FP_OVERHEAD} pages)`,
-    b.status === 200 && big.sp.log.length === P.FP_MAX_SP_REQUESTS && gated === P.FP_MAX_SP_REQUESTS && searches(big).length === P.FP_MAX_SP_REQUESTS - P.FP_OVERHEAD && b.body.spRequests === P.FP_MAX_SP_REQUESTS, { log: big.sp.log.length, gated });
+  // (big-searches) one function call holds at most STEP_ROWS filings, so the search stops there, well inside the hard cap
+  ok(`a search with very many pages stops at the most one call may hold (${STEP_PAGES} pages of 500), inside the hard cap of ${P.FP_MAX_SP_REQUESTS} S&P requests (sign-in, two lists, ${STEP_PAGES} pages)`,
+    b.status === 200 && big.sp.log.length === P.FP_OVERHEAD + STEP_PAGES && gated === P.FP_OVERHEAD + STEP_PAGES && searches(big).length === STEP_PAGES && b.body.spRequests === P.FP_OVERHEAD + STEP_PAGES && b.body.spRequests <= P.FP_MAX_SP_REQUESTS, { log: big.sp.log.length, gated });
   ok("…the facts say the search stopped early, and it isn't saved", b.body.facts.search.capped === true && /stopped early/.test(b.body.text.summary.points[0].text) && ![...big.db.store.values()].some((x) => x.kind === "search"));
   const stuck = world();
   const s = await stuck.call(CO, { gate: async () => { throw new (await import("../../supabase/functions/_shared/spgmi.ts")).SpgmiError("limit", "The app stopped before asking S&P: this hour's limit of 500 S&P requests is used up. It resets at the top of the hour."); } });

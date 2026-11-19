@@ -512,7 +512,7 @@
     var f = facts || {}, T = f.totals || {}, R = f.rates || {}, Y = f.years || {};
     var rows = FP_SLIDES.map(function (s) { return { id: s[0], label: s[1], included: true, reason: "" }; });
     var out = function (id, reason) { rows.forEach(function (r) { if (r.id === id) { r.included = false; r.reason = reason; } }); };
-    if (!num(T.filings) || T.filings <= 0) { ["states", "rateMap", "rates", "exposure", "adequacy", "programs", "market", "years", "forms", "regulator"].forEach(function (id) { out(id, NOTHING); }); return rows; }
+    if (!num(T.filings) || T.filings <= 0) { ["states", "rateMap", "rates", "exposure", "adequacy", "programs", "market", "years", "forms", "regulator"].forEach(function (id) { out(id, fpScope(f) ? fpNothing(f) + ", so there are no filings to show. That says nothing about other states or types of insurance, and doesn't prove nothing was filed." : NOTHING); }); return rows; }
     var X = rich(f), map = usMapOf(opts);
     if (!map) out("rateMap", "The outlines of the states didn't load, so the rate map is left out (the filings by state are a bar chart instead). Reload the page and build again.");
     else if (!fpRows(f, "states").some(function (s) { return s.latest && num(s.latest.rate); })) out("rateMap", "No filing in any state carried an overall rate impact in S&P's data, so there is nothing to shade.");
@@ -520,12 +520,12 @@
     if (!arr(X.A.rows).length) out("adequacy", needSummaries(f, "rate", "an indicated, filed or approved change, loss costs or assumptions"));
     if (!arr(X.G.programs).length && !arr(X.G.forms).length) out("programs", X.U.checked && X.G.summaries ? "The " + plural(X.G.summaries, "saved summary", "saved summaries") + " of this company's filings name no program or form." : needSummaries(f, "form", "a program or a form"));
     if (!arr(X.M.rows).length) out("market", flat(X.M.reason) || "The market index wasn't looked up for this profile.");
-    if (!R.filings) out("rates", "S&P returned no rate filings for this search, so there are no rate changes to show.");
+    if (!R.filings) out("rates", fpNothing(f, "no rate filings") + ", so there are no rate changes to show.");
     else if (!R.withImpact) out("rates", "No filing carried an overall rate impact in S&P's data, so there are no rate changes to chart.");
     else if (!arr(R.points).length) out("rates", "None of the filings with a rate impact has a publish date, so they can't be put in date order.");
     if (!fpRows(f, "states").length) out("states", "None of the filings names a state in S&P's data.");
     if (!arr(Y.totals).some(function (n) { return n > 0; })) out("years", "None of the filings has a publish date in S&P's data.");
-    if (!(f.latest && f.latest.total > 0 && fpRows(f, "latest").length)) out("forms", "S&P returned no form or rule filings for this search.");
+    if (!(f.latest && f.latest.total > 0 && fpRows(f, "latest").length)) out("forms", fpNothing(f, "no form or rule filings") + ".");
     if (!(f.regulator && f.regulator.all)) out("regulator", "None of the filings has both a submitted date and a publish date in S&P's data, so the time with the regulator can't be worked out.");
     return rows;
   }
@@ -533,12 +533,21 @@
   function fpName(f) { var e = f.entity || {}; return flat(e.name) || flat(e.groupName) || (e.kind === "group" ? "The group" : "The company"); }
   function fpThisYear(f) { return (ymd(f.asOf) || {}).y; }
   function fpDate(f, s) { return shortDate(s, fpThisYear(f)); }
+  // what the profile was narrowed to ("Narrow it down"), from the facts (profile.ts fpScopeOf); null when it wasn't
+  function fpScope(f) { var s = f && f.scope; return s && typeof s === "object" && s.narrowed === true && flat(s.words) && flat(s.short) ? { words: flat(s.words), short: flat(s.short) } : null; }
+  // the same, for a header: " (FL and TX, homeowners)"; "" when not narrowed
+  function fpTag(f) { var s = fpScope(f); return s ? " (" + s.short + ")" : ""; }
+  // "S&P returned nothing for this search", naming the scope when narrowed
+  function fpNothing(f, what) { var s = fpScope(f); return "S&P returned " + (what || "nothing") + " for this search" + (s ? " of " + s.words : ""); }
   // a status as S&P gives it, lower case inside a sentence or label when it is a plain word or two
   function statusWord(s) { s = flat(s); return !s ? "status n/d" : /^[A-Za-z][A-Za-z -]*$/.test(s) ? s.toLowerCase() : s; }
   // the source line: S&P, the filings product and the period, then notes, made shorter until it fits on one line
   // claude: say the text was drafted by Claude (the summary and the questions, as on the full profile)
   function fpSource(f, t, notes, claudeNote) {
     var P = f.period || {}, long = longDate(P.from) + " to " + longDate(P.to), short = monthYear(P.from).replace(/^(\w{3})\w*/, "$1") + " to " + monthYear(P.to).replace(/^(\w{3})\w*/, "$1");
+    // a narrowed profile names its scope on every source line, before any note: in words, or shorter when it must fit
+    var sc = fpScope(f);
+    if (sc) { long = long + ", " + sc.words + " only"; short = short + ", " + sc.short; }
     notes = (notes || []).filter(Boolean);
     var claude = claudeNote && t && t.by === "claude", capped = f.search && f.search.capped;
     var tries = [[long, 0], [long, 1], [long, 2], [short, 2], [short, 3]];
@@ -567,14 +576,14 @@
   }
 
   function fpCover(f, t) {
-    var title = fitText(fpName(f), 40, 15, true) + ": filings profile" + (f.sample ? " (sample)" : "");
-    return { kind: "cover", kicker: "Corporate development | " + monthYear(f.asOf), title: title, subtitle: flat(t.cover && t.cover.subtitle) };
+    var title = fitText(fpName(f), 40, 15, true) + ": filings profile" + (f.sample ? " (sample)" : ""), sc = fpScope(f);
+    return { kind: "cover", kicker: "Corporate development | " + monthYear(f.asOf) + (sc ? " | " + sc.short : ""), title: title, subtitle: flat(t.cover && t.cover.subtitle) };
   }
   function fpNothingBox(f, x, y, w) {
     var P = f.period || {};
     return { type: "box", x: x, y: y, w: w, h: 1.6, fill: "EEEEF5", margins: [0.2, 0.2, 0.15, 0.15], anchor: "ctr", name: "Nothing returned",
-      paras: [{ after: 4, runs: [{ text: "S&P returned nothing for this search", size: 16, bold: true, color: NAVY }] },
-              { runs: [{ text: "Filings published " + longDate(P.from) + " to " + longDate(P.to) + " were searched in every state in S&P's list. That doesn't prove nothing was filed.", size: 12, color: NAVY }] }] };
+      paras: [{ after: 4, runs: [{ text: "S&P returned nothing for this search" + fpTag(f), size: 16, bold: true, color: NAVY }] },
+              { runs: [{ text: "Filings published " + longDate(P.from) + " to " + longDate(P.to) + (fpScope(f) ? " were searched in " + fpScope(f).words + " only. That says nothing about other states or types of insurance, and doesn't prove nothing was filed." : " were searched in every state in S&P's list. That doesn't prove nothing was filed."), size: 12, color: NAVY }] }] };
   }
 
   function fpSummary(f, t) {
@@ -583,7 +592,7 @@
     if (!T.filings) {
       items.push(header("Filings", L, TOP, lw), fpNothingBox(f, L, TOP + HDR, lw));
     } else {
-      items.push(header("Key figures", L, TOP, lw));
+      items.push(header("Key figures" + fpTag(f), L, TOP, lw));
       var tiles = [
         [cnt(T.filings), "Filings published in the period"], [cnt(T.rate), "Rate filings"], [cnt(T.rule), "Rule filings"], [cnt(T.form), "Form filings"],
         [cnt(T.states), "States with filings, of " + cnt(f.search && f.search.statesSearched) + " searched"],
@@ -641,7 +650,7 @@
   function fpStates(f, t) {
     var rows = fpRows(f, "states"), T = f.totals || {}, items = [];
     var tableRows = rows.slice(0, Math.floor((BOTTOM - TOP - HDR) / 0.25) - 1), bars = rows.slice(0, 12), star = false;
-    items.push(header("Filings by state" + (rows.length > bars.length ? " (top " + bars.length + " of " + rows.length + ")" : ""), L, TOP, LW));
+    items.push(header("Filings by state" + fpTag(f) + (rows.length > bars.length ? " (top " + bars.length + " of " + rows.length + ")" : ""), L, TOP, LW));
     var ch = Math.min(BOTTOM - TOP - HDR, 0.45 + bars.length * 0.3);
     items.push({ type: "chart", kind: "bar", x: L, y: TOP + HDR, w: LW, h: ch, legend: "none", gap: 50, categories: bars.map(function (r) { return r.state; }),
       series: [ser("Filings", bars.map(function (r) { return r.n; }), NAVY, { pointColors: { 0: MAG } })], labels: { format: "#,##0" }, catSize: 11, name: "Chart states" });
@@ -663,7 +672,7 @@
     var Y = f.years || {}, years = arr(Y.years), types = arr(Y.types), counts = arr(Y.counts), totals = arr(Y.totals), items = [];
     var colors = [NAVY, MAG, BLUE, TEAL, PURPLE, "0081C3"];
     var series = types.map(function (ty, i) { return ser(flat(ty) || "Type n/d", years.map(function (_, yi) { var v = arr(counts[yi])[i]; return num(v) ? v : 0; }), colors[i % colors.length]); });
-    items.push(header("Filings by year published and filing type", L, TOP, LW));
+    items.push(header("Filings by year published and filing type" + fpTag(f), L, TOP, LW));
     var rowsN = years.length + 1, th = rowsN * 0.25, ch = BOTTOM - TOP - HDR - 0.2 - th;
     items.push({ type: "chart", kind: "stackedColumn", x: L, y: TOP + HDR, w: LW, h: ch, categories: years.map(String), series: series, legend: "top", gap: 60, overlap: 100,
       labels: { format: "0;;;", position: "ctr", color: "FFFFFF", size: 10 }, catSize: 11, name: "Chart years" });
@@ -857,7 +866,7 @@
     var legend = mode === "count" ? bins.map(function (b) { return { fill: b.fill, label: b.label }; })
       : RATE_BINS.map(function (b) { return { fill: b.fill, label: b.label }; }).concat([{ fill: NO_RATE_FILL, label: "Filings, no rate impact" }]);
     legend.push({ pattern: NOTHING_FILL, label: "S&P returned nothing" });
-    if (anySearched && Object.keys(usMap).some(function (c) { return /^[A-Z]{2}$/.test(c) && !searched[c] && !by[c]; })) legend.push({ fill: UNSEARCHED_FILL, label: "Not searched" });
+    if (anySearched && Object.keys(usMap).some(function (c) { return /^[A-Z]{2}$/.test(c) && !searched[c] && !by[c]; })) legend.push({ fill: UNSEARCHED_FILL, label: fpScope(f) ? "Not searched (outside the scope)" : "Not searched" });
     return { group: { type: "group", name: mode === "count" ? "Map of filings by state" : "Map of latest rate change by state", items: shapes.concat(labels) }, legend: legend, bottom: my + mh, right: colX + (callouts.length ? callW : 0) };
   }
   // the legend: a swatch (a small freeform square, so a hatch can show) and its label, in rows across the width given
@@ -874,7 +883,7 @@
     var items = [], lw = 7.75, rx = 8.62, rw = R - rx, rows = fpRows(f, "states"), star = false;
     var legendRows = Math.ceil((mode === "count" ? countBins(rows.reduce(function (m, r) { return Math.max(m, r.n || 0); }, 0)).length + 2 : 9) / 3);
     var mapH = BOTTOM - TOP - HDR - 0.12 - legendRows * 0.24;
-    items.push(header(mode === "count" ? "Filings by state, shaded by number of filings" : "Latest overall rate change by state (%)", L, TOP, lw));
+    items.push(header((mode === "count" ? "Filings by state, shaded by number of filings" : "Latest overall rate change by state (%)") + fpTag(f), L, TOP, lw));
     var m = mapItems(f, mode, usMap, L, TOP + HDR, lw, mapH);
     items.push(m.group);
     items.push(legendItems(m.legend, L, m.bottom + 0.1, lw, mode === "count" ? "Key: filings" : "Key: rate change").group);
@@ -897,7 +906,8 @@
     if (BOTTOM - y2 >= 1.2) items = items.concat(takeaways(pointsOf(t, mode === "count" ? "states" : "rateMap"), rx, y2, rw, BOTTOM - y2));
     var notes = [star ? ["* Not approved: the figure may be the change asked for. Rate impacts are S&P's overall figure, not weighted by premium.", "* Not approved: may be the change asked for. Unweighted.", "* Not approved: may be as asked."]
       : ["Rate impacts are S&P's overall figure for the newest filing with one, not weighted by premium.", "Rate impacts: overall, not premium-weighted."],
-      ["Hatched: S&P returned nothing for this search in that state, which doesn't prove nothing was filed.", "Hatched: S&P returned nothing (not proof of none).", "Hatched: nothing returned."]];
+      fpScope(f) ? ["Hatched: S&P returned nothing for this search in that state; grey: not searched, outside this profile's scope.", "Hatched: nothing returned; grey: not searched.", "Grey: not searched."]
+        : ["Hatched: S&P returned nothing for this search in that state, which doesn't prove nothing was filed.", "Hatched: S&P returned nothing (not proof of none).", "Hatched: nothing returned."]];
     if (f.states && f.states.noState) notes.push(cnt(f.states.noState) + " with no state left out.");
     items.push(fpSource(f, t, notes));
     return content(t, mode === "count" ? "states" : "rateMap", mode === "count" ? "Where it files" : "Latest rate change by state", items);

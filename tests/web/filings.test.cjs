@@ -324,9 +324,9 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   t.search=()=>({status:404, empty:true});
   await p.click('button[data-act="search"]'); await p.waitForTimeout(450);
   ok("function not deployed: Corp Dev gets the command", (await t.txt("#results .banner")).includes("The filings function isn't deployed yet. Run: supabase functions deploy snl-filings --no-verify-jwt (see the README)."));
-  t.abortSearch=true;
-  await p.click('button[data-act="search"]'); await p.waitForTimeout(450);
-  ok("no connection: says so plainly", (await t.txt("#results .banner")).startsWith("Couldn't run the search. Couldn't reach the filings function. Check your connection and try again."));
+  t.abortSearch=true; const tried=t.of("search").length;
+  await p.click('button[data-act="search"]'); await p.waitForTimeout(2200);   // (big-searches) a search that gets no answer is tried once more first
+  ok("no connection: tried once more, then says so plainly", (await t.txt("#results .banner")).startsWith("Couldn't run the search. Couldn't reach the filings function. Check your connection and try again.") && t.of("search").length===tried+2);
   t.abortSearch=false;
   await p.press("#f_tracking","Enter"); await p.waitForTimeout(450);
   ok("Enter in the form runs the search", (await t.txt("#results .banner")).includes("isn't deployed yet"));
