@@ -11,7 +11,8 @@
 // POST /functions/v1/snl-statutory  {"action": ...}
 //   status                                     -> {configured, mapped, message, fields}
 //   query    {kind, codes, fromYear?, toYear?, fields?, refresh?}
-//                                              -> {entities, fields: [{id, label, unit, by, rows}], loaded, ...}
+//                                              -> {entities, fields: [{id, label, unit, by, rows}], loaded, pending, ...}
+//            pending: figures that didn't fit in this call ("Not run"); the same query again carries on from there
 //   discover {like?, refresh?} or {view, refresh?}   (Corp Dev only)
 //                                              -> the views, or one view's columns, this account can see
 //            {schemas: true}, {schema, like?} or {schema, view}   (Corp Dev only; the same in another schema)

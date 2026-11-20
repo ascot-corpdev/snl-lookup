@@ -165,7 +165,7 @@ const lookup = (id: string) => toolUse(id, "resolve_entity", { query: "calloway"
   ok("fields that fit in the time are answered", cut.fields[0].rows.length === 1 && cut.fields[0].error === null && cut.fields[1].rows.length === 1);
   ok("fields that don't fit are reported as not run, in plain words, instead of running past the limit", cut.fields[2].rows.length === 0 && cut.fields[2].error === "Not run: the query ran out of time. Run it again, or ask for fewer fields." && cut.fields[3].error?.startsWith("Not run:") && waits.length === 2, cut.fields.map((f: any) => f.error));
   ok("each statement is given no longer than the time that is left", waits[0] === 100_000 && waits[1] === 40_000, waits);
-  ok("a result cut short for time is not saved", cut.saved === false && ![...db.store.values()].some((r) => r.kind === "statutory"));
+  ok("a result cut short for time is not saved (only the figures that came back are kept, each on its own)", cut.saved === false && cut.pending === 2 && ![...db.store.keys()].some((k) => /^statutory:[0-9a-f]{32}$/.test(k)));
 
   const fast = { query: async (statement: string) => ({ columns: [], rows: statement.includes("LOADTRACKER") ? [] : [{ CODE: "91001", NAME: null, YR: "2024", LINE: null, STATE: null, VAL: "1" }], truncated: false, statementHandle: null }) };
   const fresh = await savedOrFreshStatutory(fast as any, db, "DB", "SCH", mapping, q, fields, { now: clock.now });
