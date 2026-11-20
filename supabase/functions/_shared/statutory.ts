@@ -5,6 +5,9 @@
 // NOT confirmed: the name of any Insurance Regulatory view or column. So nothing here names one. The app's
 // fields (below) are mapped to real views and columns in the snl_settings row "statutory_mapping", which Corp
 // Dev fills in after running Discover. buildSql is the one place a mapping becomes SQL.
+// A figure may be read through several joined views in several schemas of the database (FieldMap below); the
+// default schema is the SNOWFLAKE_SCHEMA secret. Which schemas, views, joins and run-date views S&P has is
+// UNCONFIRMED here: it lives only in the owner's saved mapping.
 
 import type { Db } from "./db.ts";
 import { shortHash } from "./http.ts";
@@ -36,53 +39,155 @@ export const MAPPING_ID = "statutory_mapping";
     added for company profiles are there when asked for by name. */
 export const DEFAULT_STAT_FIELDS: StatFieldId[] = ["dpw_by_line", "npw_by_line", "dpw_by_state", "surplus", "loss_ratio", "expense_ratio", "combined_ratio"];
 
-/** How one app field maps to a Snowflake view. Column names are whatever Discover shows for the account.
+/** How one app field maps to Snowflake. Column names are whatever Discover shows for the account.
     scale multiplies the stored value: 1000 when the view holds thousands of dollars, 100 when a ratio is held
-    as a fraction. */
+    as a fraction.
+    A figure can sit in one view, or be read through a chain of joined views in several schemas:
+    - view is "VIEW" (the default schema, the SNOWFLAKE_SCHEMA secret) or "SCHEMA.VIEW"; as names it ("F").
+    - joins (up to 6) each add a view with its own as, joined on columns of views named before it.
+    - every column is "COLUMN" or "ALIAS.COLUMN"; with joins it must be "ALIAS.COLUMN", so nothing is ambiguous.
+    - where conditions: equals, notEquals, in (up to 20 texts), isNull (true or false), month (1 to 12, the month
+      of a date column). Values are always bound, never written into the SQL.
+    - sum: true adds up the value over rows that share everything else (many rows per counterparty).
+    - latest: a column such as a sequence number; only the row with its highest value is kept for each company,
+      year, line, state and item (a restated period keeps only its latest version). */
+export type WhereMap = { column: string; equals?: string; notEquals?: string; in?: string[]; isNull?: boolean; month?: number };
+export type JoinMap = { view: string; as: string; on: { left: string; right: string }[]; kind?: "inner" | "left" };
 export type FieldMap = {
-  view: string;
+  view: string; as?: string; joins?: JoinMap[];
   entity: { company?: string; group?: string; name?: string };
   year: string; yearIsDate?: boolean;
   value: string;
   line?: string; state?: string;
   /** For a field by counterparty (by "item", such as ceded premiums by reinsurer): the column naming it. */
   item?: string;
-  where?: { column: string; equals: string }[];
+  where?: WhereMap[];
+  sum?: boolean; latest?: string;
   scale?: number;
 };
-export type Mapping = { fields: Partial<Record<StatFieldId, FieldMap>> };
+/** loaded: optional. When S&P's database has no LOADTRACKER, the view each schema has with S&P's run dates, and its
+    date column. The app then reports, for each schema a figure came from, the latest date in that view. */
+export type LoadedMap = { view: string; at: string };
+export type Mapping = { fields: Partial<Record<StatFieldId, FieldMap>>; loaded?: LoadedMap };
 
 // A plain name (letters, digits, _ and $), or the same in double quotes for a name that needs its exact case.
 const IDENT = /^(?:[A-Za-z_][A-Za-z0-9_$]{0,127}|"[A-Za-z0-9_$ ]{1,127}")$/;
 const ident = (s: unknown): s is string => typeof s === "string" && IDENT.test(s);
+// An alias for a view in the mapping: short, plain, written into the SQL in double quotes and upper case.
+const ALIAS = /^[A-Za-z][A-Za-z0-9_]{0,29}$/;
+const MAX_JOINS = 6, MAX_ON = 4, MAX_WHERE = 8, MAX_IN = 20, MAX_TEXT = 200;
+const WHERE_OPS = ["equals", "notEquals", "in", "isNull", "month"] as const;
+
+/** "VIEW" or "SCHEMA.VIEW", each part a checked name (a quoted part can't hold a dot, so the split is safe). */
+function viewRef(s: unknown): { schema: string | null; view: string } | null {
+  if (typeof s !== "string") return null;
+  const p = s.split(".");
+  if (p.length === 1 && ident(p[0])) return { schema: null, view: p[0] };
+  if (p.length === 2 && ident(p[0]) && ident(p[1])) return { schema: p[0], view: p[1] };
+  return null;
+}
+/** "COLUMN" or "ALIAS.COLUMN". The alias comes back in upper case, as Snowflake reads an unquoted name. */
+function colRef(s: unknown): { alias: string | null; col: string } | null {
+  if (typeof s !== "string") return null;
+  if (IDENT.test(s)) return { alias: null, col: s };
+  const i = s.indexOf(".");
+  if (i < 0) return null;
+  const a = s.slice(0, i), c = s.slice(i + 1);
+  return ALIAS.test(a) && ident(c) ? { alias: a.toUpperCase(), col: c } : null;
+}
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+
+/** Everything about a field's mapping that doesn't depend on which figure it is. Returns what is wrong, or null. */
+function shapeProblem(f: FieldMap): string | null {
+  if (!viewRef(f.view)) return "view must be a view name";
+  if (f.as !== undefined && !(typeof f.as === "string" && ALIAS.test(f.as))) return "as must be a short name: letters, digits and _, starting with a letter";
+  const joins = f.joins;
+  if (joins !== undefined && (!Array.isArray(joins) || joins.length > MAX_JOINS)) return `joins must be a list of up to ${MAX_JOINS} joins`;
+  const joined = !!joins && joins.length > 0;
+  if (joined && f.as === undefined) return "as is needed on the main view when there are joins, so each column can say which view it is in";
+  // Aliases in the order they are declared: the main view's, then each join's.
+  const order: string[] = f.as === undefined ? [] : [f.as.toUpperCase()];
+  for (const [i, j] of (joins ?? []).entries()) {
+    const at = `joins[${i}]`;
+    if (!isObj(j)) return `${at} must be an object with view, as and on`;
+    if (!viewRef(j.view)) return `${at}.view must be a view name or SCHEMA.VIEW`;
+    if (!(typeof j.as === "string" && ALIAS.test(j.as))) return `${at}.as must be a short name: letters, digits and _, starting with a letter`;
+    if (j.kind !== undefined && j.kind !== "inner" && j.kind !== "left") return `${at}.kind must be "inner" or "left"`;
+    const me = j.as.toUpperCase();
+    if (order.includes(me)) return `alias ${me} is declared more than once`;
+    if (!Array.isArray(j.on) || j.on.length < 1 || j.on.length > MAX_ON) return `${at}.on must be a list of 1 to ${MAX_ON} {left, right} pairs`;
+    const before = [...order];
+    order.push(me);
+    for (const [k, o] of (j.on as unknown[]).entries()) {
+      if (!isObj(o)) return `${at}.on[${k}] must be {left, right}`;
+      const sides: string[] = [];
+      for (const side of ["left", "right"] as const) {
+        const r = colRef(o[side]);
+        if (!r || !r.alias) return `${at}.on[${k}].${side} must be ALIAS.COLUMN`;
+        if (!order.includes(r.alias)) return `${at}.on[${k}].${side} names alias ${r.alias}, which isn't declared`;
+        sides.push(r.alias);
+      }
+      if (!sides.includes(me) || !sides.some((a) => before.includes(a))) return `${at}.on[${k}] must link ${me} to a view named before it`;
+    }
+  }
+  // Every column: a checked name, the alias form when there are joins, and only aliases that are declared.
+  const col = (where: string, v: unknown): string | null => {
+    const r = colRef(v);
+    if (!r) return `${where} must be a column name`;
+    if (joined && !r.alias) return `${where} must be ALIAS.COLUMN when there are joins`;
+    if (r.alias && !order.includes(r.alias)) return `${where} names alias ${r.alias}, which isn't declared`;
+    return null;
+  };
+  if (!isObj(f.entity) || (f.entity.company === undefined && f.entity.group === undefined)) return "entity needs a company or group column";
+  for (const k of ["company", "group", "name"] as const) if (f.entity[k] !== undefined) { const p = col(`entity.${k}`, f.entity[k]); if (p) return p; }
+  for (const k of ["year", "value"] as const) { const p = col(k, f[k]); if (p) return p; }
+  for (const k of ["line", "state", "item", "latest"] as const) if (f[k] !== undefined) { const p = col(k, f[k]); if (p) return p; }
+  if (f.where !== undefined && (!Array.isArray(f.where) || f.where.length > MAX_WHERE)) return `where must be a list of up to ${MAX_WHERE} conditions`;
+  for (const [i, w] of (f.where ?? []).entries()) {
+    const at = `where[${i}]`;
+    if (!isObj(w)) return `${at} must be an object with column and one of equals, notEquals, in, isNull or month`;
+    const p = col(`${at}.column`, w.column); if (p) return p;
+    const ops = WHERE_OPS.filter((k) => w[k] !== undefined);
+    if (ops.length !== 1) return `${at} needs exactly one of equals, notEquals, in, isNull or month`;
+    const text = (v: unknown) => typeof v === "string" && v.length <= MAX_TEXT;
+    const op = ops[0], v = w[op];
+    if ((op === "equals" || op === "notEquals") && !text(v)) return `${at}.${op} must be text of up to ${MAX_TEXT} characters`;
+    if (op === "in" && !(Array.isArray(v) && v.length >= 1 && v.length <= MAX_IN && v.every(text))) return `${at}.in must be a list of 1 to ${MAX_IN} texts of up to ${MAX_TEXT} characters`;
+    if (op === "isNull" && typeof v !== "boolean") return `${at}.isNull must be true or false`;
+    if (op === "month" && !(Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 12)) return `${at}.month must be a whole number from 1 to 12`;
+  }
+  if (f.sum !== undefined && typeof f.sum !== "boolean") return "sum must be true or false";
+  if (f.yearIsDate !== undefined && typeof f.yearIsDate !== "boolean") return "yearIsDate must be true or false";
+  if (f.scale !== undefined && !(typeof f.scale === "number" && Number.isFinite(f.scale) && f.scale !== 0)) return "scale must be a number";
+  return null;
+}
 
 /** Checks one field's mapping. Returns what is wrong, or null. Only checked names ever reach SQL. */
 export function mapProblem(id: StatFieldId, m: unknown): string | null {
   const f = m as FieldMap, by = STAT_FIELDS.find((x) => x.id === id)!.by;
-  if (!f || typeof f !== "object") return "not mapped";
-  if (!ident(f.view)) return "view must be a view name";
-  if (!f.entity || typeof f.entity !== "object" || (!ident(f.entity.company) && !ident(f.entity.group))) return "entity needs a company or group column";
-  for (const k of ["company", "group", "name"] as const) if (f.entity[k] !== undefined && !ident(f.entity[k])) return `entity.${k} must be a column name`;
-  if (!ident(f.year)) return "year must be a column name";
-  if (!ident(f.value)) return "value must be a column name";
-  if (by === "line" && !ident(f.line)) return "line must be a column name";
-  if (by === "state" && !ident(f.state)) return "state must be a column name";
-  if (f.line !== undefined && !ident(f.line)) return "line must be a column name";
-  if (f.state !== undefined && !ident(f.state)) return "state must be a column name";
-  if (by === "item" && !ident(f.item)) return "item must be a column name";
-  if (f.item !== undefined && !ident(f.item)) return "item must be a column name";
-  if (f.where !== undefined && (!Array.isArray(f.where) || f.where.length > 8 || f.where.some((w) => !w || !ident(w.column) || typeof w.equals !== "string" || w.equals.length > 200))) return "where must be a list of {column, equals}";
-  if (f.scale !== undefined && !(typeof f.scale === "number" && Number.isFinite(f.scale) && f.scale !== 0)) return "scale must be a number";
+  if (!isObj(f)) return "not mapped";
+  if (by === "line" && f.line === undefined) return "line must be a column name";
+  if (by === "state" && f.state === undefined) return "state must be a column name";
+  if (by === "item" && f.item === undefined) return "item must be a column name";
+  return shapeProblem(f);
+}
+
+/** Checks the optional loaded entry. Returns what is wrong, or null (also when there is none). */
+export function loadedProblem(l: unknown): string | null {
+  if (l === undefined) return null;
+  if (!isObj(l)) return "loaded must be {view, at}";
+  if (!ident(l.view)) return "loaded.view must be a view name (the same view in each schema, so no schema in front)";
+  if (!ident(l.at)) return "loaded.at must be a column name";
   return null;
 }
 
 export function readMapping(doc: Record<string, unknown> | null): Mapping {
   const fields = doc && typeof doc.fields === "object" && doc.fields ? doc.fields as Mapping["fields"] : {};
-  return { fields };
+  return doc && doc.loaded !== undefined ? { fields, loaded: doc.loaded as LoadedMap } : { fields };
 }
 
 export function fieldStatus(mapping: Mapping) {
-  return STAT_FIELDS.map((f) => ({ ...f, mapped: mapProblem(f.id, mapping.fields[f.id]) === null }));
+  return STAT_FIELDS.map((f) => { const problem = mapProblem(f.id, mapping.fields[f.id]); return { ...f, mapped: problem === null, problem }; });
 }
 
 export type StatQuery = { kind: "company" | "group"; codes: string[]; fromYear: number; toYear: number };
@@ -104,16 +209,35 @@ export function parseStatQuery(b: Record<string, unknown>, thisYear: number): { 
 /** UNCONFIRMED until the mapping is filled in from Discover: turns one mapped field into a read-only SELECT.
     Every name comes from the checked mapping; every value the user typed is bound, never pasted into the SQL. */
 export function buildSql(database: string, schema: string, m: FieldMap, q: StatQuery): { statement: string; bindings: Binding[] } | null {
-  const entityCol = q.kind === "group" ? m.entity.group : m.entity.company;
-  if (!entityCol || !ident(database) || !ident(schema)) return null;
-  const year = m.yearIsDate ? `YEAR(${m.year})` : m.year;
-  const cols = [`${entityCol} AS CODE`, `${m.entity.name ?? "NULL"} AS NAME`, `${year} AS YR`, `${m.line ?? "NULL"} AS LINE`, `${m.state ?? "NULL"} AS STATE`, `${m.value} AS VAL`];
-  if (m.item !== undefined) cols.push(`${m.item} AS ITEM`);   // only fields by counterparty map an item column
-  const bindings: Binding[] = q.codes.map((c) => ({ type: "TEXT", value: c }));
+  const entityRef = q.kind === "group" ? m.entity?.group : m.entity?.company;
+  if (!entityRef || !ident(database) || !ident(schema) || shapeProblem(m)) return null;
+  // Only names that passed the checks above are written in. An alias goes in double quotes, in upper case.
+  const c = (ref: string) => { const r = colRef(ref)!; return r.alias ? `"${r.alias}".${r.col}` : r.col; };
+  const from = (ref: string) => { const r = viewRef(ref)!; return `${database}.${r.schema ?? schema}.${r.view}`; };
+  const entityCol = c(entityRef), year = m.yearIsDate ? `YEAR(${c(m.year)})` : c(m.year);
+  const name = m.entity.name === undefined ? null : c(m.entity.name), line = m.line === undefined ? null : c(m.line), state = m.state === undefined ? null : c(m.state);
+  const item = m.item === undefined ? null : c(m.item), value = c(m.value);
+  const cols = [`${entityCol} AS CODE`, `${name ?? "NULL"} AS NAME`, `${year} AS YR`, `${line ?? "NULL"} AS LINE`, `${state ?? "NULL"} AS STATE`, `${m.sum ? `SUM(${value})` : value} AS VAL`];
+  if (item !== null) cols.push(`${item} AS ITEM`);   // only fields by counterparty map an item column
+  let source = from(m.view) + (m.as === undefined ? "" : ` AS "${m.as.toUpperCase()}"`);
+  for (const j of m.joins ?? []) source += ` ${j.kind === "left" ? "LEFT JOIN" : "JOIN"} ${from(j.view)} AS "${j.as.toUpperCase()}" ON ${j.on.map((o) => `${c(o.left)} = ${c(o.right)}`).join(" AND ")}`;
+  const bindings: Binding[] = q.codes.map((code) => ({ type: "TEXT", value: code }));
   let where = `${entityCol} IN (${q.codes.map(() => "?").join(", ")}) AND ${year} BETWEEN ? AND ?`;
   bindings.push({ type: "FIXED", value: String(q.fromYear) }, { type: "FIXED", value: String(q.toYear) });
-  for (const w of m.where ?? []) { where += ` AND ${w.column} = ?`; bindings.push({ type: "TEXT", value: w.equals }); }
-  return { statement: `SELECT ${cols.join(", ")} FROM ${database}.${schema}.${m.view} WHERE ${where} ORDER BY 1, 3 LIMIT 20000`, bindings };
+  for (const w of m.where ?? []) {
+    const col = c(w.column);
+    if (w.equals !== undefined) { where += ` AND ${col} = ?`; bindings.push({ type: "TEXT", value: w.equals }); }
+    else if (w.notEquals !== undefined) { where += ` AND ${col} <> ?`; bindings.push({ type: "TEXT", value: w.notEquals }); }
+    else if (w.in !== undefined) { where += ` AND ${col} IN (${w.in.map(() => "?").join(", ")})`; bindings.push(...w.in.map((v) => ({ type: "TEXT" as const, value: v }))); }
+    else if (w.isNull !== undefined) where += ` AND ${col} ${w.isNull ? "IS NULL" : "IS NOT NULL"}`;
+    else if (w.month !== undefined) { where += ` AND MONTH(${col}) = ?`; bindings.push({ type: "FIXED", value: String(w.month) }); }
+  }
+  const latest = m.latest === undefined ? null : c(m.latest);
+  // sum: grouped by everything else selected (by position), and by the latest column when there is one.
+  const group = m.sum ? ` GROUP BY 1, 2, 3, 4, 5${item !== null ? ", 7" : ""}${latest ? `, ${latest}` : ""}` : "";
+  const company = !m.sum && m.entity.company !== undefined && m.entity.company !== entityRef ? c(m.entity.company) : null;
+  const keep = latest ? ` QUALIFY ROW_NUMBER() OVER (PARTITION BY ${[entityCol, company, name, year, line, state, item].filter((x) => x !== null).join(", ")} ORDER BY ${latest} DESC) = 1` : "";
+  return { statement: `SELECT ${cols.join(", ")} FROM ${source} WHERE ${where}${group}${keep} ORDER BY 1, 3 LIMIT 20000`, bindings };
 }
 
 export type StatRow = { code: string; year: number; line: string | null; state: string | null; value: number | null; item?: string | null };
@@ -121,6 +245,8 @@ export type StatField = { id: StatFieldId; label: string; unit: "usd" | "pct"; b
 export type StatResult = {
   kind: "company" | "group"; codes: string[]; fromYear: number; toYear: number;
   entities: { code: string; name: string | null }[]; fields: StatField[]; loaded: { view: string; at: string }[]; truncated: boolean; source: string;
+  /** "schema" when loaded lists schemas and their run dates (the mapping's loaded entry), not views from LOADTRACKER. */
+  loadedBy?: "schema";
 };
 
 const bareName = (v: string) => v.replace(/^"|"$/g, "");
@@ -131,7 +257,7 @@ export const storedName = (v: string) => (/^".*"$/.test(v) ? bareName(v) : v.toU
 export async function runStatutory(sf: Snowflake, database: string, schema: string, mapping: Mapping, q: StatQuery, fields: StatFieldId[], time?: { deadline: number; now: () => number }): Promise<StatResult> {
   const names = new Map<string, string | null>(q.codes.map((c) => [c, null]));
   const out: StatField[] = [];
-  const views = new Set<string>();
+  const views = new Set<string>(), schemasUsed = new Set<string>();
   let truncated = false;
   for (const id of fields) {
     const meta = STAT_FIELDS.find((f) => f.id === id)!;
@@ -152,7 +278,8 @@ export async function runStatutory(sf: Snowflake, database: string, schema: stri
     try {
       const res = await sf.query(sql.statement, sql.bindings, Math.max(5_000, Math.min(100_000, left)));
       truncated ||= res.truncated;
-      views.add(bareName(m.view));
+      views.add(bareName(viewRef(m.view)?.view ?? m.view));   // LOADTRACKER names a view without its schema
+      for (const v of [m.view, ...(m.joins ?? []).map((j) => j.view)]) schemasUsed.add(viewRef(v)?.schema ?? schema);
       const rows: StatRow[] = res.rows.map((r) => {
         const code = String(r.CODE ?? "").trim(), raw = r.VAL === null || r.VAL === "" ? NaN : Number(r.VAL);
         if (r.NAME && names.has(code) && !names.get(code)) names.set(code, String(r.NAME));
@@ -167,11 +294,32 @@ export async function runStatutory(sf: Snowflake, database: string, schema: stri
       out.push({ ...base, mapped: true, error: `${e.message.replace(/[.\s]*$/, ".")} Check this field's mapping.`, rows: [] });
     }
   }
+  // With a loaded entry, the run date of each schema a figure came from; without one, LOADTRACKER as before.
+  const bySchema = mapping.loaded !== undefined && loadedProblem(mapping.loaded) === null;
   return {
     ...q, entities: q.codes.map((code) => ({ code, name: names.get(code) ?? null })), fields: out,
-    loaded: views.size ? await loadedAt(sf, database, schema, [...views]) : [], truncated,
+    loaded: bySchema ? (schemasUsed.size ? await loadedBySchema(sf, database, mapping.loaded!, [...schemasUsed]) : []) : views.size ? await loadedAt(sf, database, schema, [...views]) : [],
+    ...(bySchema ? { loadedBy: "schema" as const } : {}), truncated,
     source: "S&P Global Market Intelligence, SNL Insurance Regulatory Data (Snowflake)",
   };
+}
+
+/** UNCONFIRMED: S&P's run-date view and column are whatever the mapping's loaded entry names. For each schema, the
+    latest date in that schema's view, one small statement per schema, in name order. Entries keep the {view, at}
+    shape, with the schema's name as view. A failure here never fails the query: that schema is left out. */
+export async function loadedBySchema(sf: Snowflake, database: string, loaded: LoadedMap, schemas: string[]): Promise<{ view: string; at: string }[]> {
+  if (!ident(database) || loadedProblem(loaded) !== null) return [];
+  const seen = new Map<string, string>();
+  for (const s of schemas) if (ident(s) && !seen.has(storedName(s))) seen.set(storedName(s), s);
+  const out: { view: string; at: string }[] = [];
+  for (const [name, s] of [...seen].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    try {
+      const res = await sf.query(`SELECT MAX(${loaded.at}) AS AT FROM ${database}.${s}.${loaded.view}`, [], 15_000);
+      const at = res.rows[0]?.AT;
+      if (at) out.push({ view: name, at: String(at) });
+    } catch { /* this schema's date is left out */ }
+  }
+  return out;
 }
 
 /** When S&P last loaded each view, from LOADTRACKER. A failure here never fails the query. */
@@ -191,7 +339,7 @@ export async function loadedAt(sf: Snowflake, database: string, schema: string, 
 
 export async function discoverViews(sf: Snowflake, database: string, schema: string, like?: string) {
   if (!ident(database)) throw new SnowflakeError("sql", "SNOWFLAKE_DATABASE isn't a valid name.");
-  const bindings: Binding[] = [{ type: "TEXT", value: bareName(schema).toUpperCase() }];
+  const bindings: Binding[] = [{ type: "TEXT", value: storedName(schema) }];
   let where = "TABLE_SCHEMA = ?";
   if (like) { where += " AND TABLE_NAME ILIKE ?"; bindings.push({ type: "TEXT", value: `%${like.replace(/%/g, "")}%` }); }
   const res = await sf.query(`SELECT TABLE_NAME, TABLE_TYPE, COMMENT FROM ${database}.INFORMATION_SCHEMA.TABLES WHERE ${where} ORDER BY TABLE_NAME LIMIT 5000`, bindings);
@@ -202,8 +350,15 @@ export async function discoverColumns(sf: Snowflake, database: string, schema: s
   if (!ident(database)) throw new SnowflakeError("sql", "SNOWFLAKE_DATABASE isn't a valid name.");
   const res = await sf.query(
     `SELECT COLUMN_NAME, DATA_TYPE, ORDINAL_POSITION, COMMENT FROM ${database}.INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION`,
-    [{ type: "TEXT", value: bareName(schema).toUpperCase() }, { type: "TEXT", value: storedName(view) }]);
+    [{ type: "TEXT", value: storedName(schema) }, { type: "TEXT", value: storedName(view) }]);
   return { view: storedName(view), columns: res.rows.map((r) => ({ name: String(r.COLUMN_NAME), type: String(r.DATA_TYPE ?? ""), position: Number(r.ORDINAL_POSITION), comment: r.COMMENT ?? null })) };
+}
+
+/** The schemas in the database this account can see (S&P keeps entities, financials and so on in separate ones). */
+export async function discoverSchemas(sf: Snowflake, database: string) {
+  if (!ident(database)) throw new SnowflakeError("sql", "SNOWFLAKE_DATABASE isn't a valid name.");
+  const res = await sf.query(`SELECT SCHEMA_NAME, COMMENT FROM ${database}.INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME <> ? ORDER BY SCHEMA_NAME LIMIT 1000`, [{ type: "TEXT", value: "INFORMATION_SCHEMA" }]);
+  return { schemas: res.rows.map((r) => ({ name: String(r.SCHEMA_NAME), comment: r.COMMENT ?? null })), truncated: res.truncated || res.rows.length >= 1000 };
 }
 
 export const NOT_MAPPED = "Snowflake is connected, but the statutory fields aren't mapped to S&P's views yet. A Corp Dev login can do this once on the Statutory view.";
@@ -215,7 +370,9 @@ export type StatAnswer = StatResult & { fetchedAt: string; fromStore: boolean; s
 export async function savedOrFreshStatutory(sf: Snowflake | null, db: Db, database: string, schema: string, mapping: Mapping, q: StatQuery, fields: StatFieldId[],
   opts: { now: number; refresh?: boolean; deadline?: number; clock?: () => number }): Promise<StatAnswer> {
   const asked = [...fields].sort();
-  const id = "statutory:" + await shortHash(JSON.stringify([q.kind, [...q.codes].sort(), q.fromYear, q.toYear, asked, asked.map((f) => mapping.fields[f] ?? null)]));
+  // Each field's whole mapping (joins and where included) is hashed; the loaded entry too, when there is one, so
+  // results saved before it existed keep their ids.
+  const id = "statutory:" + await shortHash(JSON.stringify([q.kind, [...q.codes].sort(), q.fromYear, q.toYear, asked, asked.map((f) => mapping.fields[f] ?? null), ...(mapping.loaded !== undefined ? [{ loaded: mapping.loaded }] : [])]));
   const saved = opts.refresh ? null : await db.getStore(id);
   if (saved) return { ...(saved.doc as unknown as StatResult), fetchedAt: saved.fetched_at, fromStore: true, saved: true };
   if (!sf) throw new SnowflakeError("not_configured", SNOWFLAKE_NOT_CONFIGURED);

@@ -14,11 +14,13 @@
 //                                              -> {entities, fields: [{id, label, unit, by, rows}], loaded, ...}
 //   discover {like?, refresh?} or {view, refresh?}   (Corp Dev only)
 //                                              -> the views, or one view's columns, this account can see
+//            {schemas: true}, {schema, like?} or {schema, view}   (Corp Dev only; the same in another schema)
+//                                              -> the database's schemas, or a schema's views, or a view's columns
 
 import { adminClient, type Env, type Json, readBody, shortHash, sleep, type WhoIs, whoIs, withCors } from "../_shared/http.ts";
 import { type Db, supabaseDb } from "../_shared/db.ts";
 import { credsReady, Snowflake, SNOWFLAKE_NOT_CONFIGURED, snowflakeCreds, SnowflakeError } from "../_shared/snowflake.ts";
-import { discoverColumns, discoverViews, fieldStatus, getMapping, isViewName, NOT_MAPPED, parseStatQuery, savedOrFreshStatutory, storedName } from "../_shared/statutory.ts";
+import { discoverColumns, discoverSchemas, discoverViews, fieldStatus, getMapping, isViewName, loadedProblem, NOT_MAPPED, parseStatQuery, savedOrFreshStatutory, storedName } from "../_shared/statutory.ts";
 
 export type Deps = { env: Env; fetch: typeof fetch; now?: () => number; whoIs?: WhoIs; db?: Db; sleep?: (ms: number) => Promise<void> };
 
@@ -53,7 +55,7 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
   try {
     switch (body.action) {
       case "status":
-        return json(200, { configured, mapped, message: !configured ? SNOWFLAKE_NOT_CONFIGURED : !mapped ? NOT_MAPPED : null, fields });
+        return json(200, { configured, mapped, message: !configured ? SNOWFLAKE_NOT_CONFIGURED : !mapped ? NOT_MAPPED : null, fields, loadedProblem: loadedProblem(mapping.loaded) });
 
       case "query": {
         const parsed = parseStatQuery(body, new Date(now).getUTCFullYear());
@@ -64,6 +66,8 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
 
       case "discover": {
         if (who.role !== "corpdev") return json(403, { error: "forbidden", message: "Only Corp Dev logins can run Discover." });
+        // Another schema than the default: its own saved entries, keyed by the schema as well.
+        if (body.schemas === true || body.schema !== undefined && body.schema !== null) return await discoverElsewhere(body, { db, sf, json, now, database: creds.database });
         const view = body.view === undefined || body.view === null ? null : String(body.view).trim();
         if (view !== null && !isViewName(view)) return json(400, { error: "bad", message: "view must be a view name." });
         const like = typeof body.like === "string" ? body.like.trim().replace(/[^A-Za-z0-9_$]/g, "").slice(0, 60) : "";
@@ -85,6 +89,33 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
     if (answer) return json(answer.status, answer.body);
     throw e;
   }
+}
+
+/** Discover beyond the default schema (Corp Dev only, checked by the caller):
+      {schemas: true}                      -> the schemas in the database
+      {schema, like?} / {schema, view}     -> the views in that schema, or one view's columns there
+    Each answer is saved under an id that hashes the schema with the view or filter, so the same view name in two
+    schemas never shares a saved entry, and none of these share one with the default schema's entries. */
+async function discoverElsewhere(body: Record<string, unknown>, c: { db: Db; sf: Snowflake | null; json: Json; now: number; database: string }): Promise<Response> {
+  const { db, sf, json } = c;
+  let id: string, label: string, run: (sf: Snowflake) => Promise<Record<string, unknown>>;
+  if (body.schemas === true) { id = "discover:schemas"; label = "schemas"; run = (s) => discoverSchemas(s, c.database); }
+  else {
+    const schema = typeof body.schema === "string" ? body.schema.trim() : "";
+    if (!isViewName(schema)) return json(400, { error: "bad", message: "schema must be a schema name." });
+    const view = body.view === undefined || body.view === null ? null : String(body.view).trim();
+    if (view !== null && !isViewName(view)) return json(400, { error: "bad", message: "view must be a view name." });
+    const like = typeof body.like === "string" ? body.like.trim().replace(/[^A-Za-z0-9_$]/g, "").slice(0, 60) : "";
+    id = `discover:in.${await shortHash(JSON.stringify([storedName(schema), view ? "cols" : "views", view ? storedName(view) : like]))}`;
+    label = `${storedName(schema)}.${view ? storedName(view) : "views"}`;
+    run = async (s) => ({ schema: storedName(schema), ...(view ? await discoverColumns(s, c.database, schema, view) : await discoverViews(s, c.database, schema, like || undefined)) });
+  }
+  const saved = body.refresh === true ? null : await db.getStore(id);
+  if (saved) return json(200, { ...saved.doc, fetchedAt: saved.fetched_at, fromStore: true });
+  if (!sf) return json(503, { error: "not_configured", message: SNOWFLAKE_NOT_CONFIGURED });
+  const doc = await run(sf);
+  await db.putStore({ id, kind: "discover", label, doc });
+  return json(200, { ...doc, fetchedAt: new Date(c.now).toISOString(), fromStore: false });
 }
 
 // Tests import handle() with this flag set; in Supabase the server always starts.

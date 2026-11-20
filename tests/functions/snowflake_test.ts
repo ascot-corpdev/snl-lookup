@@ -209,7 +209,8 @@ const HOSTILE = ["X; DROP TABLE Y", 'a"b', "A--", "A/*", "A B", "A.B", "A)", "(S
   let leaks: string[] = [];
   for (const bad of HOSTILE) {
     const tries: [string, unknown][] = [
-      ["view", { ...GOOD, view: bad }], ["entity.company", { ...GOOD, entity: { ...GOOD.entity, company: bad } }], ["entity.group", { ...GOOD, entity: { ...GOOD.entity, group: bad } }], ["entity.name", { ...GOOD, entity: { ...GOOD.entity, name: bad } }],
+      // "A.B" is a view in another schema (SCHEMA.VIEW) now, so the view is tried with three parts instead
+      ["view", { ...GOOD, view: bad === "A.B" ? "A.B.C" : bad }], ["entity.company", { ...GOOD, entity: { ...GOOD.entity, company: bad } }], ["entity.group", { ...GOOD, entity: { ...GOOD.entity, group: bad } }], ["entity.name", { ...GOOD, entity: { ...GOOD.entity, name: bad } }],
       ["year", { ...GOOD, year: bad }], ["value", { ...GOOD, value: bad }], ["line", { ...GOOD, line: bad }], ["state", { ...GOOD, state: bad }], ["where.column", { ...GOOD, where: [{ column: bad, equals: "x" }] }],
     ];
     for (const [where, m] of tries) if (mapProblem("dpw_by_line", m) === null) leaks.push(`${where}=${JSON.stringify(bad)}`);
