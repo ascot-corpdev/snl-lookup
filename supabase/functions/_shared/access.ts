@@ -116,7 +116,9 @@ export class KeyStore {
 }
 
 export type Refusal = "missing" | "malformed" | "algorithm" | "issuer" | "audience" | "expired" | "early" | "key" | "signature" | "no_email" | "keys_unavailable";
-export type Checked = { ok: true; email: string; sub: string } | { ok: false; why: Refusal };
+/** iat and exp are the token's own issue and expiry times (seconds): the same for every request of one Access
+    session, so they tell one sign-in from the next (sign-in notices, signins.ts). iat is null when the token has none. */
+export type Checked = { ok: true; email: string; sub: string; iat: number | null; exp: number } | { ok: false; why: Refusal };
 
 function b64url(s: string): Uint8Array<ArrayBuffer> | null {
   if (!/^[A-Za-z0-9_-]*$/.test(s) || s.length % 4 === 1) return null;
@@ -159,7 +161,7 @@ export async function checkAccessToken(token: string | null | undefined, setting
   if (!good) return { ok: false, why: "signature" };
   const email = cleanEmail(claims.email);
   if (!email) return { ok: false, why: "no_email" };
-  return { ok: true, email, sub: typeof claims.sub === "string" ? claims.sub : "" };
+  return { ok: true, email, sub: typeof claims.sub === "string" ? claims.sub : "", iat: typeof claims.iat === "number" && Number.isFinite(claims.iat) ? claims.iat : null, exp: claims.exp };
 }
 
 // ---------- the Supabase side ----------
@@ -180,7 +182,8 @@ export interface SigninStore {
   saveProfile(p: Profile): Promise<void>;
 }
 
-export type SigninResult = { status: number; body: Record<string, unknown> };
+/** who: on success only, never sent back: the verified sign-in, for the record of sign-ins (signins.ts). */
+export type SigninResult = { status: number; body: Record<string, unknown>; who?: { email: string; role: Role; iat: number | null; exp: number } };
 
 export const MSG = {
   notSetUp: "Cloudflare let you in, but sign-in isn't set up on Supabase yet. Ask the site owner to finish the set-up (README, Cloudflare sign-on).",
@@ -237,6 +240,7 @@ export async function signIn(token: string | null, deps: { env: Env; store: Sign
         accessToken: minted.accessToken, expiresAt: minted.expiresAt, expiresIn: Math.max(0, minted.expiresAt - Math.floor(deps.now / 1000)),
         profile: { id: profile.id, email: checked.email, username: profile.username, displayName: profile.display_name, role: profile.role },
       },
+      who: { email: checked.email, role, iat: checked.iat, exp: checked.exp },
     };
   } catch (e) {
     console.error(`snl-signin: couldn't start a session (${String((e as Error)?.name || "error")})`);

@@ -12,6 +12,10 @@
   if(O.noProfile) delete store.profiles[ME];
   // The team library (migration 0007). noLibrary: true starts without the table, as before the migration is run.
   if(!O.noLibrary) store.snl_library = {};
+  // The record of sign-ins (migration 0011). signins: true starts the table (seed rows into it); without it the table
+  // is missing, as before the migration is run. As its policy does, only a Corp Dev login sees any row.
+  // __mock.failSignins: true and reading it fails, as with no connection.
+  if(O.signins) store.snl_signins = {};
   (O.seed||[]).forEach(([t,id,row]) => { store[t][id] = {id, ...clone(row)}; });
   // More logins, for tests that sign one out and another in: users: {corpdev2:{id:"u2", display_name:"Corp Dev 2", role:"reader"}}
   Object.values(O.users||{}).forEach(u => { store.profiles[u.id] = {username:"", ...clone(u)}; });
@@ -135,6 +139,7 @@
     const match = r => st.eqs.every(([c,v]) => String(r[c]) === String(v)) && st.ins.every(([c,v]) => v.map(String).includes(String(r[c])))
       && st.gtes.every(([c,v]) => String(r[c]) >= String(v)) && st.lts.every(([c,v]) => String(r[c]) < String(v))
       && (table !== "snl_jobs" || (r.owner ?? ME) === M.uid)
+      && (table !== "snl_signins" || (store.profiles[M.uid] && store.profiles[M.uid].role) === "corpdev")
       && (st.ilikes||[]).every(([c,v]) => new RegExp("^"+String(v).split("%").map(w=>w.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join(".*")+"$","is").test(String(r[c]??"")))
       && (st.iss||[]).every(([c,v]) => { const [col, ...ks]=c.split(/->>?/); let x=r[col]; for(const k of ks) x = x!==null && typeof x==="object" && k in x ? x[k] : null; return (x===undefined?null:x)===v || (x!==null && String(x)===String(v)); });
     function run(){
@@ -147,6 +152,7 @@
         return {data:null, error:null};
       }
       if(table === "snl_store") return storeRun();
+      if(table === "snl_signins"){ (M.signinReads=M.signinReads||[]).push(clone({cols:st.cols, gtes:st.gtes, ord:st.ord, range:st.range})); if(M.failSignins) return {data:null, error:{message:"TypeError: Failed to fetch"}}; }
       const byId = st.eqs.some(([c]) => c === "id");
       if(table === "snl_jobs"){ M.jobQueries.push(clone({cols:st.cols, eqs:st.eqs, ins:st.ins, gtes:st.gtes, lts:st.lts, ord:st.ord, lim:st.lim, range:st.range, single:st.single, uid:M.uid}));
         if(!byId){ M.listReads++; if(M.failList || M.failJobs) return {data:null, error:{message:"TypeError: Failed to fetch"}}; } }
