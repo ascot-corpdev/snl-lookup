@@ -6,7 +6,7 @@ A small web app for a Strategy & Corporate Development team at an insurer. It an
 - **Snapshot:** pick one company or a whole group and the last 1, 3 or 5 years, and see its filings on one page: headline counts, a map by state, rate changes over time, filings by year and type, the latest form and rule filings, and the approximate time with the regulator. It is worked out in the browser from one ordinary filings search, which is saved, so reopening a snapshot costs nothing.
 - **Ask Claude:** a panel that opens over either view. Type a question in plain English. Claude is told what is on your screen (the filings search or the statutory figures), searches filings, reads the documents, and answers with page citations, its sources and a comparison table you can export to CSV or Excel. Under every finished answer, **Export answer** downloads the question, answer, table and numbered sources as one Word document, and **Copy answer** copies the same so it pastes into an email or a memo with the table intact. The panel also lists your own questions from the last 30 days under "Past answers".
 - **Earnings:** choose a quarter and find, for each company on the team's earnings watchlist, the 10-Q (10-K) and the earnings 8-K from the SEC, and the financial supplement and investor presentation from its investor pages; download them one at a time or as one zip. It does in the site what the owner's desktop script does, as far as a site can (step 14).
-- **Statutory:** direct and net premiums written by line and state, policyholder surplus, and loss, expense and combined ratios by NAIC company or group code, with peers side by side. This view is built and waiting: it goes live when the Snowflake secrets are set (step 7).
+- **Statutory:** direct and net premiums written by line and state, policyholder surplus, and the loss, loss and LAE, expense and combined ratios by NAIC company or group code, with peers side by side. This view is built and waiting: it goes live when the Snowflake secrets are set (step 7).
 
 It is a standalone app with its own repository and its own Supabase project. It never stores or sends deal, banker or pipeline information. Claude sees only the question typed and what S&P returns.
 
@@ -348,20 +348,53 @@ supabase secrets set SNOWFLAKE_PRIVATE_KEY="$(cat rsa_key.p8)"
 
 **With a programmatic access token instead:** set `SNOWFLAKE_PAT=...` in place of `SNOWFLAKE_USER` and `SNOWFLAKE_PRIVATE_KEY`.
 
-The role, database and schema default to the ones in S&P's Snowflake guide (`XF_SNOWFLAKE_READER_ROLE`, `MI_XPRESSCLOUD`, `XPRESSFEED`). Override them with `SNOWFLAKE_ROLE`, `SNOWFLAKE_DATABASE` and `SNOWFLAKE_SCHEMA` only if S&P says otherwise.
+The role, database and schema default to the ones in S&P's Snowflake guide (`XF_SNOWFLAKE_READER_ROLE`, `MI_XPRESSCLOUD`, `XPRESSFEED`). If your account shows different names, set them:
 
-Then map the fields, once, signed in as a Corp Dev login:
+```bash
+supabase secrets set SNOWFLAKE_ROLE=... SNOWFLAKE_DATABASE=... SNOWFLAKE_SCHEMA=...
+```
 
-1. Open **Statutory**, click **Field set-up**, then **List views**. It lists the views the account can see. Click a view to see its columns.
-2. For each field the app lists (for example policyholder surplus), write which view holds it and which columns hold the NAIC company code, group code, year and value, in the mapping box. Click **Save mapping**.
+`SNOWFLAKE_SCHEMA` is only the schema that Field set-up opens on, and the one used by a figure whose view is written without a schema.
 
-S&P's documents do not give the view or column names for SNL Insurance Regulatory Data, so nothing is assumed in the code. The mapping is saved in Supabase and can be changed any time without touching the code. Listing views or columns wakes the Snowflake warehouse (see [costs](#what-each-action-costs)); each list is saved after the first time. An example of one field (the names here are placeholders, not S&P's):
+Then map the figures, once, signed in as a Corp Dev login:
+
+1. Open **Statutory**, then **Field set-up**. Click **List schemas**, choose a schema, list its views and click a view to see its columns. Type in **Columns containing** to find a column in a wide view.
+2. Paste the mapping into the mapping box and click **Save mapping**. Each figure names its main view (`SCHEMA.VIEW`), any joined views, and the columns for the company code, the year and the value.
+3. If the panel then lists "Part of the saved mapping can't be used yet", fix each entry it names and save again. A figure that isn't in the mapping shows as not mapped; it is never an error.
+
+S&P's documents do not give the view or column names for SNL Insurance Regulatory Data, so nothing is assumed in the code, and S&P's names are never written in this repository. The mapping is saved in Supabase and can be changed any time without touching the code. Listing schemas, views or columns wakes the Snowflake warehouse (see [costs](#what-each-action-costs)); each list is saved after the first time.
+
+**A figure in one view** (the names here are placeholders, not S&P's):
 
 ```json
 { "fields": { "surplus": { "view": "VIEW_NAME", "entity": { "company": "NAIC_COMPANY_COLUMN", "group": "NAIC_GROUP_COLUMN", "name": "NAME_COLUMN" }, "year": "YEAR_COLUMN", "value": "VALUE_COLUMN", "scale": 1000 } } }
 ```
 
-`scale` multiplies the stored value: 1000 when the view holds thousands of dollars, 100 when a ratio is held as a fraction. Fields by line or by state also name a `line` or `state` column. `where` adds fixed filters, such as `[{ "column": "COLUMN", "equals": "value" }]`.
+**A figure read through joined views.** S&P's layout spreads a figure over several views in several schemas: the value in one, the period in another, the company code in a third. The mapping follows the chain (placeholder names again):
+
+```json
+{ "fields": { "npe": {
+  "view": "CORE_FIN.FIN_FLOW_B", "as": "F",
+  "joins": [
+    { "view": "CORE_FIN.FLOW_PERIOD", "as": "FP", "on": [{ "left": "F.FLOW_ID", "right": "FP.FLOW_ID" }] },
+    { "view": "CORE_FIN.STOCK_PERIOD", "as": "SP", "on": [{ "left": "FP.STOCK_PERIOD_ID", "right": "SP.PERIOD_ID" }] },
+    { "view": "ENTITY.ENTITY_LIST", "as": "E", "on": [{ "left": "SP.ENTITY_ID", "right": "E.ENTITY_ID" }] } ],
+  "entity": { "company": "E.NAIC_CD", "name": "E.ENTITY_NAME" },
+  "year": "SP.PERIOD_END", "yearIsDate": true, "value": "F.NPE",
+  "where": [ { "column": "SP.LOB_NAME", "equals": "Total" }, { "column": "FP.ANN_FACTOR", "equals": "1" }, { "column": "SP.PERIOD_END", "month": 12 } ]
+} }, "loaded": { "view": "BATCH_RUN", "at": "RUN_DATE" } }
+```
+
+What each part does:
+
+- **`view`, `as`, `joins`:** the main view and up to 8 joined views, each with a short name of its own. With joins, every column is written `NAME.COLUMN`.
+- **`entity`:** the columns for the NAIC company code, the NAIC group code and the name (`groupName` for a group lookup). A join or condition marked `"when": "group"` is used only for lookups by group code, and `"when": "company"` only for lookups by company code.
+- **`year`, `yearIsDate`, `value`, `plus`:** the year (or a date to take the year from), the value, and up to 4 more columns of the same row to add to it.
+- **`line`, `state`, `stateStrip`, `item`:** the column for the line of business, the state (with a prefix to take off), or the counterparty.
+- **`where`:** up to 12 conditions, each one of `equals`, `notEquals`, `in` (up to 80 values), `isNull`, `month` (12 keeps year-end rows) or `startsWith`. Write numbers in quotes.
+- **`latest`:** keeps only the row with the highest value of a column, such as a sequence number.
+- **`sum`, `distinct`, `scale`:** add up rows that share everything else; drop repeated rows; multiply the stored value (1000 when the view holds thousands of dollars, 100 when a ratio is held as a fraction). `sum` and `distinct` can't be used together.
+- **`loaded`:** the run-date view each schema has and its date column, so the page can say when S&P last updated each part of its database.
 
 ### 8. Keep Supabase awake (optional, free plan only)
 
@@ -650,7 +683,8 @@ Nothing in this list is guessed in the code: each item is either handled both wa
 | **How an account name with an underscore is written in the Snowflake sign-in token.** Snowflake's documentation does not say; the app keeps the underscore. | `jwtAccount` in `_shared/snowflake.ts` | First Snowflake call |
 | **Whether S&P limits API access to fixed IP addresses.** Supabase functions do not have fixed addresses. | n/a | S&P |
 | **The Snowflake reader account**: the account identifier, the service user with key-pair sign-in, and the warehouse name. | Step 7 | S&P |
-| **Every SNL Insurance Regulatory view and column name.** | The mapping (step 7); `buildSql` in `_shared/statutory.ts` | Discover, then Corp Dev |
+| **Every SNL Insurance Regulatory schema, view, column and join.** The owner's mapping was written from sample rows for one company; the code names none of them. Still to see on live data: that the list of lines adds up to the all-lines total for an insurer writing many lines, that group codes return S&P's combined group figures, and that the run-date view gives a sensible date. | The mapping (step 7); `buildSql` and `loadedBySchema` in `_shared/statutory.ts` | The first statutory queries on the live site |
+| **The SQL the joined mapping produces.** Built from Snowflake's documented forms but never run from the build: `QUALIFY ROW_NUMBER()`, `STARTSWITH`, `SELECT DISTINCT`, grouping by position, double-quoted short names, a text value compared with a number column, and listing schemas from `INFORMATION_SCHEMA.SCHEMATA` with the reader role. | `buildSql`, `discoverSchemas` in `_shared/statutory.ts` | The first statutory queries on the live site |
 | **The extra statutory figures a profile uses** (net premiums earned, net income, reserves, reserve development, RBC ratio, ceded premiums by reinsurer and the rest in step 10). They are the app's own names; whether S&P's views hold each one, and in which column, is not known until Discover. | The mapping (step 7) | Discover, then Corp Dev |
 | **The storage rules for the template.** The migration uses the statements Supabase documents for storage policies, but has not been run against a real project. | `0004_profile_template.sql` | First upload of the template |
 | **How the profile comes out on the real template.** It is tested on a made-up stand-in with the same layout names. | `web/deck.js` | The sample profile, opened in PowerPoint |

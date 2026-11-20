@@ -92,7 +92,7 @@ const IDENT = /^(?:[A-Za-z_][A-Za-z0-9_$]{0,127}|"[A-Za-z0-9_$ ]{1,127}")$/;
 const ident = (s: unknown): s is string => typeof s === "string" && IDENT.test(s);
 // An alias for a view in the mapping: short, plain, written into the SQL in double quotes and upper case.
 const ALIAS = /^[A-Za-z][A-Za-z0-9_]{0,29}$/;
-const MAX_JOINS = 8, MAX_ON = 4, MAX_WHERE = 8, MAX_IN = 80, MAX_TEXT = 200, MAX_PLUS = 4;
+const MAX_JOINS = 8, MAX_ON = 4, MAX_WHERE = 12, MAX_IN = 80, MAX_TEXT = 200, MAX_PLUS = 4;
 const WHERE_OPS = ["equals", "notEquals", "in", "isNull", "month", "startsWith"] as const;
 const OPS_WORDS = "equals, notEquals, in, isNull, month or startsWith";
 

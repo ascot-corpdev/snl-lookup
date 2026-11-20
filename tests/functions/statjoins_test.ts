@@ -209,8 +209,8 @@ const OLD: FieldMap = { view: "IR_PREM_LINE", entity: { company: "NAIC_CD", grou
     ["a year with an alias and three parts", { ...BASE, year: "SP.X.PERIOD_END" }, "year must be a column name"],
     ["a line naming an undeclared alias", { ...BASE, line: "Z.LOB" }, "line names alias Z, which isn't declared"],
     ["a latest column that is SQL", { ...BASE, latest: "SP.SEQ DESC, 1" }, "latest must be a column name"],
-    ["a where that isn't a list", { ...BASE, where: { column: "SP.A", equals: "x" } }, "where must be a list of up to 8 conditions"],
-    ["nine where conditions", { ...BASE, where: Array(9).fill({ column: "SP.A", equals: "x" }) }, "where must be a list of up to 8 conditions"],
+    ["a where that isn't a list", { ...BASE, where: { column: "SP.A", equals: "x" } }, "where must be a list of up to 12 conditions"],
+    ["thirteen where conditions", { ...BASE, where: Array(13).fill({ column: "SP.A", equals: "x" }) }, "where must be a list of up to 12 conditions"],
     ["a null where entry", { ...BASE, where: [null] }, "where[0] must be an object with column and one of equals, notEquals, in, isNull, month or startsWith"],
     ["a where column without an alias", { ...BASE, where: [{ column: "LOB_NAME", equals: "Total" }] }, "where[0].column must be ALIAS.COLUMN when there are joins"],
     ["a where column naming an undeclared alias", { ...BASE, where: [{ column: "FP.ANNUALISED", equals: "Y" }] }, "where[0].column names alias FP, which isn't declared"],
@@ -274,8 +274,8 @@ const OLD: FieldMap = { view: "IR_PREM_LINE", entity: { company: "NAIC_CD", grou
   const evil = buildSql(DB, SCH, { ...SURPLUS, where: [{ column: "SP.LOB_NAME", equals: values[0] }, { column: "SP.LOB_NAME", notEquals: values[1] }, { column: "SP.LOB_NAME", in: values.slice(2) }] }, Q)!;
   ok("values of every kind are bound, never written into the SQL", !evil.statement.includes("'") && !evil.statement.includes("DROP") && !evil.statement.includes("%") && same(evil.bindings.slice(4).map((b) => b.value), values) && (evil.statement.match(/\?/g) ?? []).length === evil.bindings.length, evil);
   ok("an alias always goes into the SQL in double quotes and upper case", (buildSql(DB, SCH, { ...SURPLUS, as: "select", joins: SURPLUS.joins!.map((j) => ({ ...j, on: j.on.map((o) => ({ left: o.left.replace(/^S\./, "select."), right: o.right })) })), value: "select.PHS_000" }, Q)?.statement ?? "").includes('FROM MI_XPRESSCLOUD.CORE_FIN.FIN_STOCK_A AS "SELECT" JOIN'));
-  const most = buildSql(DB, SCH, { ...SURPLUS, where: Array.from({ length: 8 }, () => ({ column: "SP.LOB_NAME", in: Array(80).fill("x") })) }, { ...Q, codes: ["1", "2", "3", "4", "5", "6", "7", "8"] })!;
-  ok("the most bindings a mapping can ask for is bounded (8 codes, 2 years, 8 lists of 80)", most.bindings.length === 650 && (most.statement.match(/\?/g) ?? []).length === 650 && most.statement.length < 8000, most.bindings.length);
+  const most = buildSql(DB, SCH, { ...SURPLUS, where: Array.from({ length: 12 }, () => ({ column: "SP.LOB_NAME", in: Array(80).fill("x") })) }, { ...Q, codes: ["1", "2", "3", "4", "5", "6", "7", "8"] })!;
+  ok("the most bindings a mapping can ask for is bounded (8 codes, 2 years, 12 lists of 80)", most.bindings.length === 970 && (most.statement.match(/\?/g) ?? []).length === 970 && most.statement.length < 12000, most.bindings.length);
   ok("hostile plus columns are refused and make no SQL", HOSTILE.every((bad) => mapProblem("npe", { ...NPE, plus: [bad] }) !== null && buildSql(DB, SCH, { ...NPE, plus: [bad] } as any, Q) === null));
   const sw = buildSql(DB, SCH, { ...BY_STATE, where: [{ column: "GEO.STATE_CD", startsWith: "Reported:'; DROP TABLE X; --%_" }] }, Q)!;
   ok("a startsWith value is bound too, with no LIKE wildcards to escape", sw.statement.includes(' AND STARTSWITH("GEO".STATE_CD, ?)') && !sw.statement.includes("DROP") && !sw.statement.includes("LIKE") && sw.bindings.at(-1)!.value === "Reported:'; DROP TABLE X; --%_", sw);
