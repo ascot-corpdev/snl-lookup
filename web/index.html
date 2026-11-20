@@ -2888,22 +2888,65 @@ function statProblem(){
   if(b-a>MAX_STAT_YEARS-1) return `Choose at most ${MAX_STAT_YEARS} years at a time.`;
   return "";
 }
-async function runStat(refresh){
+/* ---------- Statutory figures that come in over several calls (stat-speed) ----------
+   One call to the statutory or profile function has about two minutes. Figures that don't fit come back "Not run" and
+   the answer says how many are still to come (pending); the function keeps every figure that did come back, so the
+   same question asked again carries on from where it stopped. statCarry asks again by itself with the same body (only
+   the first call may ask afresh) while each call brings at least one more figure, up to STAT_CARRY_CALLS calls, so it
+   never loops without progress. ask(first): one call; figs(data): {done, of, pending}; o.ctl (bsControl) stops it,
+   keeping what arrived; o.onPart(figs, data) after each call that left figures to come. The answer is the last call's;
+   with figures still to come it carries stalled: {why: "stopped" | "stuck" | "failed", err, figs}. */
+const STAT_CARRY_CALLS = 6;
+async function statCarry(ask, figs, o={}){
+  const ctl=o.ctl||{}; let last=null, before=Infinity;
+  const stop=()=>last ? {...last, stalled:{why:"stopped", figs:figs(last.data)}} : {err:"stopped", status:0};
+  for(let n=1;;n++){
+    if(ctl.stopped) return stop();
+    const r=await Promise.race([ask(n===1), ctl.wait||new Promise(()=>{})]);
+    if(ctl.stopped) return stop();
+    if(!r.data) return last && r.err!=="signin" ? {...last, stalled:{why:"failed", err:r, figs:figs(last.data)}} : r;
+    const f=figs(r.data);
+    if(!(f.pending>0)) return r;
+    if(f.pending>=before || n>=STAT_CARRY_CALLS) return {...r, stalled:{why:"stuck", figs:f}};
+    before=f.pending; last=r;
+    if(o.onPart) o.onPart(f, r.data);
+  }
+}
+/* How far a statutory answer got: figures that can be run (mapped), how many are still to come. */
+function statFigs(d){
+  const fields=d&&Array.isArray(d.fields)?d.fields:[], of=fields.filter(f=>f&&f.mapped!==false).length, pending=d&&isNum(d.pending)?+d.pending:0;
+  return {done:Math.max(0, of-pending), of, pending};
+}
+const statFigsText = f => `${count(f.done)} of ${count(f.of)} figures`;
+/* The banner of figures still to come once the page has stopped asking: why, and Carry on (the figures in are kept). */
+function statPendingHTML(s, id, act, what, busy){
+  const f=s.figs, why=s.why;
+  const text=`${count(f.pending)} of ${count(f.of)} figures ${why==="stopped"?"weren't fetched":"didn't come back in time"}, so ${what}. ${why==="failed"?errText(s.err)+" ":""}Carry on to ask for them again: the figures that arrived are kept, so it carries on from where it stopped.`;
+  return `<div class="banner" id="${id}" role="alert"><span><b>${why==="stopped"?"You stopped getting the figures.":"Some figures didn't arrive."}</b> ${esc(text)}</span><button type="button" class="btn sm" id="${id}Carry" data-act="${act}" ${busy?"disabled":""}>Carry on</button>${pbHTML(id+"-bar", {name:"Figures", now:true, done:f.done, of:f.of, state:why==="failed"?"failed":"stopped", say:text})}</div>`;
+}
+async function runStat(refresh, carryOn){
   const st=S.st; if(st.busy) return;
   let payload;
-  if(refresh){ if(!st.last) return; payload={...st.last, refresh:true}; }
+  if(carryOn){ if(!st.last || !st.res) return; payload={...st.last}; delete payload.refresh; }   // the figures still to come
+  else if(refresh){ if(!st.last) return; payload={...st.last, refresh:true}; }
   else{
     const problem=statProblem(); if(problem){ st.formErr=problem; render(); return; }
     payload={action:"query", kind:st.kind, codes:statCodes(), fromYear:+st.fromYear, toYear:+st.toYear}; st.last=payload; st.res=null; st.ent={}; st.resNames={...statFind().names[st.kind]};
   }
-  st.formErr=""; st.busy=true; st.err=null; pbStart("stat"); render();
-  const r=await callFn("snl-statutory", payload);
-  st.busy=false;
+  const ctl=bsControl();
+  st.formErr=""; st.busy=true; st.err=null; st.ctl=ctl; st.figs=carryOn?statFigs(st.res):null; pbStart("stat"); render();
+  const r=await statCarry(first=>{ const b={...payload}; if(!first) delete b.refresh; return callFn("snl-statutory", b); }, statFigs,
+    {ctl, onPart:(f, data)=>{ if(st.ctl!==ctl || !S.session) return; st.figs=f; st.res=data; takeUsage(data); render(); }});
+  if(st.ctl!==ctl) return;
+  st.busy=false; st.ctl=null; st.figs=null;
   if(!S.session) return;
-  if(r.data){ st.res=r.data; takeUsage(r.data); loadStatus(); }
+  if(r.data){ st.res=r.stalled?{...r.data, stalled:r.stalled}:r.data; takeUsage(r.data); loadStatus(); }
+  else if(carryOn && st.res && r.err!=="signin") st.res={...st.res, stalled:{why:r.err==="stopped"?"stopped":"failed", err:r, figs:statFigs(st.res)}};   // what had arrived stays
+  else if(r.err==="stopped") toast("Stopped. No figures had come back yet.");
   else if(r.err!=="signin"){ st.err=r; if(r.err==="not_configured"||r.err==="not_mapped") loadStatStatus(); }
   render();
 }
+function stopStat(){ const st=S.st; if(st.busy && st.ctl) st.ctl.stop(); }
 const statVal = (unit, v) => unit==="pct" ? pct(v) : usdM(v);
 const statYears = res => { const a=+res.fromYear, b=+res.toYear, out=[]; if(isFinite(a)&&isFinite(b)) for(let y=a; y<=b && out.length<40; y++) out.push(y); return out; };
 function statEntities(res, field){
@@ -2941,6 +2984,8 @@ function statBlockHTML(res, field){
   const unit=field.unit==="pct"?"%":"$M";
   const head=(extra)=>`<div class="blk-h"><div><h3>${esc(field.label||field.id)} <span class="t2">${unit}</span></h3></div><span class="inline">${extra||""}</span></div>`;
   if(field.mapped===false) return `<section class="blk statblk" data-field="${esc(field.id)}">${head()}<p class="t2">This figure isn't mapped to a Snowflake column yet${isCorpDev()?". Add it in the field set-up below.":". Ask Corp Dev."}</p></section>`;
+  // a figure that didn't fit in the time (stat-speed): still to come, not a fault
+  if(/^Not run:/.test(String(field.error||""))) return `<section class="blk statblk" data-field="${esc(field.id)}">${head()}<p class="t2 statpend">${S.st.busy?"Still to come: it is being asked for again now.":"Not fetched yet: it didn't come back in time. Carry on above to ask for it again."}</p></section>`;
   if(!blank(field.error)) return `<section class="blk statblk" data-field="${esc(field.id)}">${head()}<p class="err" role="alert">${esc(field.error)}</p></section>`;
   const b=statBlock(res, field);
   const exp=`<button class="btn sm" data-act="export" data-what="stat" data-field="${esc(field.id)}" data-fmt="csv">Export CSV</button><button class="btn sm" data-act="export" data-what="stat" data-field="${esc(field.id)}" data-fmt="xlsx">Export XLSX</button>`;
@@ -2956,9 +3001,11 @@ function statResultsHTML(){
   if(!res) return st.err ? problemHTML(st.err, "Couldn't fetch the statutory data.", "stat-retry") : `<div class="empty" id="statEmpty"><p>Type the NAIC code of the company you want, then any peers, and choose the years. The first code is the subject; the rest sit beside it for comparison. Don't know a code? Find the company or group by name above.</p></div>`;
   const fields=Array.isArray(res.fields)?res.fields:[], loaded=Array.isArray(res.loaded)?res.loaded:[];
   let h=`<h2 class="sec">Results</h2>`;
-  if(st.busy) h+=`<div class="banner" role="status"><span>Asking Snowflake again… The figures below are from ${fmtAt(res.fetchedAt)} until the new ones arrive.</span>${pbHTML("stat", {name:"Statutory query"})}</div>`;
+  if(st.busy && st.figs) h+=`<div class="banner" id="statCarry" role="status"><span><b>Getting the rest of the figures…</b> ${statFigsText(st.figs)} so far. The ones that came back are shown below and kept.</span>${pbHTML("stat", {name:"Statutory figures", done:st.figs.done, of:st.figs.of, say:statFigsText(st.figs)})}<button type="button" class="btn sm" id="statStop" data-act="stat-stop" title="Stops asking for the rest. The figures that came back stay.">Stop</button></div>`;
+  else if(st.busy) h+=`<div class="banner" role="status"><span>Asking Snowflake again… The figures below are from ${fmtAt(res.fetchedAt)} until the new ones arrive.</span>${pbHTML("stat", {name:"Statutory query"})}</div>`;
   else if(st.err) h+=problemHTML(st.err, "Couldn't refresh the statutory data.", "stat-refresh");
   else if(res.fromStore) h+=`<div class="info" id="statFromStore" role="status"><span>From the last fetch on ${fmtAt(res.fetchedAt)}.</span><button class="btn sm" data-act="stat-refresh">Refresh</button></div>`;
+  if(!st.busy && isNum(res.pending) && +res.pending>0) h+=statPendingHTML(res.stalled||{why:"stuck", figs:statFigs(res)}, "statPending", "stat-carry", "they show as not fetched below");
   if(res.truncated) h+=`<div class="banner" id="statTruncated" role="alert"><span><b>These figures are incomplete.</b> Snowflake returned more rows than one request allows. Use fewer codes or fewer years.</span></div>`;
   h+=fields.length ? fields.map(f=>statBlockHTML(res, f)).join("") : `<div class="empty"><p>No figures came back for these codes and years. That doesn't prove there are none.</p></div>`;
   // loadedBy "schema": each entry is a part (schema) of S&P's database and the date S&P last updated it
@@ -3550,18 +3597,32 @@ function pfFinderHTML(){
 
 /* ----- the figures, Claude's draft, and the file ----- */
 function pfReset(pf){ pf.res=null; pf.err=null; pf.plan=null; pf.libsErr=""; pf.drafted=null; pf.draftErr=null; pf.built=null; pf.buildErr=""; }
-async function pfFacts(){
+/* The figures, asked for again by themselves while some are still to come (statCarry): carryOn asks for the rest of
+   the figures of the profile on screen. */
+async function pfFacts(carryOn){
   const pf=S.pf; if(pf.busy) return;
-  const code=pf.code.trim(), kind=pf.kind;
-  if(!naicOk(code)){ pf.formErr = code ? "NAIC codes are numbers of up to 6 digits, like 90001." : `Choose a ${kind}: find it by name, or type its NAIC ${kind} code.`; render(); return; }
-  pf.formErr=""; pfReset(pf); pf.busy="facts"; pbStart("pf-facts"); pf.asked={kind, code, name:pf.name}; render();
-  const r=await callFn("snl-profile",{action:"facts", kind, code});
-  if(!S.session || S.pf!==pf) return;
-  pf.busy="";
-  if(r.data && r.data.facts && typeof r.data.facts==="object" && r.data.text){ pfTake(pf, r.data); loadStatus(); }
+  let code=pf.code.trim(), kind=pf.kind;
+  const keep=carryOn && pf.asked && pf.res ? pf.res : null;
+  if(carryOn){ if(!keep) return; ({kind, code}=pf.asked); }
+  else if(!naicOk(code)){ pf.formErr = code ? "NAIC codes are numbers of up to 6 digits, like 90001." : `Choose a ${kind}: find it by name, or type its NAIC ${kind} code.`; render(); return; }
+  const ctl=bsControl();
+  pf.formErr=""; pfReset(pf); pf.busy="facts"; pf.ctl=ctl; pf.figs=keep&&keep.stalled?keep.stalled.figs:null; pbStart("pf-facts"); if(!carryOn) pf.asked={kind, code, name:pf.name}; render();
+  const r=await statCarry(()=>callFn("snl-profile",{action:"facts", kind, code}), pfFigs, {ctl, onPart:f=>{ if(S.pf===pf && pf.ctl===ctl){ pf.figs=f; render(); } }});
+  if(!S.session || S.pf!==pf || pf.ctl!==ctl) return;
+  pf.busy=""; pf.ctl=null; pf.figs=null;
+  if(r.err==="stopped"){ if(keep){ pfTake(pf, keep); pf.res.stalled={...keep.stalled, why:"stopped"}; } else toast("Stopped. No figures had come back yet."); render(); return; }
+  if(!r.data && keep && r.err!=="signin"){ pfTake(pf, keep); pf.res.stalled={...keep.stalled, why:"failed", err:r}; render(); return; }   // what had arrived stays
+  if(r.data && r.data.facts && typeof r.data.facts==="object" && r.data.text){ pfTake(pf, r.data); if(r.stalled) pf.res.stalled=r.stalled; loadStatus(); }
   else if(r.err!=="signin"){ pf.err = r.data ? {err:"bad_answer", msg:"The profile function sent back something the page can't read. Try again."} : r; if(r.err==="not_configured"||r.err==="not_mapped"){ pf.status=null; loadProfileStatus(); } }
   render();
 }
+/* How far a profile's figures got: the function says figures {done, of} and pending only while some are still to come. */
+function pfFigs(d){
+  const p=d&&isNum(d.pending)?+d.pending:0, g=d&&d.figures&&typeof d.figures==="object"?d.figures:{};
+  const of=isNum(g.of)?+g.of:p, done=isNum(g.done)?+g.done:Math.max(0, of-p);
+  return {done, of, pending:p};
+}
+function stopPf(){ const pf=S.pf; if(pf.busy==="facts" && pf.ctl) pf.ctl.stop(); }
 function pfTake(pf, data){ pf.res={facts:data.facts, text:data.text}; pf.plan=null; pf.libsErr=""; if(pfHasData(data.facts)) pfPlan(pf); }
 async function pfPlan(pf){
   try{ await loadProfileLibs(); }catch{ if(S.pf===pf){ pf.libsErr=PF_LIBS_ERR; render(); } return; }
@@ -3651,7 +3712,7 @@ function pfPlanHTML(pf){
     <ol class="pfplan" id="pfPlan">${pf.plan.map(s=>`<li class="${s.included?"in":"out"}"><span class="t1">${esc(s.label||s.id)}</span>${s.included?`<span class="pill in">Included</span>`:`<span class="pfwhy">Left out: ${esc(blank(s.reason)?"its figures aren't available":s.reason)}</span>`}</li>`).join("")}</ol></div>`;
 }
 function pfMissingHTML(f){
-  const miss=(Array.isArray(f.missing)?f.missing:[]).filter(m=>m&&typeof m==="object");
+  const miss=(Array.isArray(f.missing)?f.missing:[]).filter(m=>m&&typeof m==="object" && !/^Not run:/.test(String(m.reason||"")));   // figures still to come have their own banner (pfPending)
   if(!miss.length) return "";
   const items=miss.map(m=>`<li>${esc(m.label||m.field)}${blank(m.reason)?"":` <span class="t2">(${esc(m.reason)})</span>`}</li>`).join("");
   return `<div class="notes" id="pfMissing" role="status"><b>Some figures aren't available, so the slides that need them are left out.</b><ul>${items}</ul>
@@ -3680,6 +3741,7 @@ function pfDraftErrText(r){
 }
 function pfOutHTML(){
   const pf=S.pf;
+  if(pf.busy==="facts" && pf.figs) return `<div class="info" id="pfBusy" role="status"><span><b>Getting the rest of the figures for ${esc(pf.asked&&pf.asked.name||pfEntLabel(pf.asked.kind, pf.asked.code))}…</b> ${statFigsText(pf.figs)} so far. The ones that came back are kept.</span>${pbHTML("pf-facts", {name:"Getting the figures", done:pf.figs.done, of:pf.figs.of, say:statFigsText(pf.figs)})}<button type="button" class="btn sm" id="pfStop" data-act="pf-stop" title="Stops asking for the rest. The figures that came back stay.">Stop</button></div>`;
   if(pf.busy==="facts") return `<div class="info" id="pfBusy" role="status"><span><b>Getting the figures for ${esc(pf.asked&&pf.asked.name||pfEntLabel(pf.asked.kind, pf.asked.code))}…</b> This can take a minute when they haven't been fetched before.</span>${pbHTML("pf-facts", {name:"Getting the figures"})}</div>`;
   if(pf.busy==="sample") return `<div class="info" id="pfBusy" role="status"><span><b>Getting the sample figures…</b></span>${pbHTML("pf-sample", {name:"Getting the sample figures"})}</div>`;
   if(!pf.res){
@@ -3689,9 +3751,10 @@ function pfOutHTML(){
     return `<div id="pfErr">${problemHTML(pf.err, "Couldn't get the figures.", pf.asked?"pf-facts":"pf-sample")}</div>`;
   }
   const f=pf.res.facts, e=f.entity||{};
+  if(!pfHasData(f) && pf.res.stalled) return statPendingHTML(pf.res.stalled, "pfPending", "pf-carry", "nothing can be shown yet", !!pf.busy);
   if(!pfHasData(f)) return `<div class="info" id="pfNoData" role="status"><span><b>S&amp;P returned nothing for this code.</b> No statutory figures came back for ${esc(pfEntLabel(e.kind, e.code))} in the years asked for. Check the code${e.kind==="group"?", or profile one of the group's companies":", or try its NAIC group code"}.</span></div>`;
   const shown=pf.drafted&&pfDraftWanted() ? pf.drafted.facts : f;
-  let h=`<section class="tcard" id="pfContents" aria-label="What the profile will contain">`;
+  let h=(pf.res.stalled?statPendingHTML(pf.res.stalled, "pfPending", "pf-carry", "the profile below doesn't have them yet and the slides that need them are left out", !!pf.busy):"")+`<section class="tcard" id="pfContents" aria-label="What the profile will contain">`;
   if(f.sample) h+=`<div class="info" id="pfSample" role="status"><span><b>This is a sample profile.</b> The company and every figure in it are made up, so you can check how your template comes out.</span></div>`;
   h+=`<div class="blk-h"><div><h3 id="pfName">${esc(pfName(shown))}</h3><p class="t2" id="pfMeta">${esc([pfEntLabel(e.kind, e.code), !blank(e.groupName)&&e.kind!=="group"?`part of ${e.groupName}`:"", `figures for ${pfYears(shown)}`].filter(Boolean).join(" · "))}</p></div></div>`;
   h+=pfHeadlineHTML(shown)+pfPlanHTML(pf)+pfMissingHTML(shown);
@@ -7470,6 +7533,8 @@ document.addEventListener("click", e=>{
     case "stat-search": runStat(false); break;
     case "stat-refresh": runStat(true); break;
     case "stat-retry": runStat(false); break;
+    case "stat-stop": stopStat(); break;
+    case "stat-carry": runStat(false, true); break;
     case "stat-status-retry": loadStatStatus(); break;
     case "st-find": statLookup(); break;
     case "st-add": statAdd(t.dataset.code, t.dataset.name); break;
@@ -7486,6 +7551,8 @@ document.addEventListener("click", e=>{
     case "pf-find": pfLookup(); break;
     case "pf-choose": pfChoose(t.dataset.code, t.dataset.name); break;
     case "pf-facts": pfFacts(); break;
+    case "pf-stop": stopPf(); break;
+    case "pf-carry": pfFacts(true); break;
     case "pf-status-retry": loadProfileStatus(); break;
     case "pf-libs-retry": S.pf.libsErr=""; render(); pfPlan(S.pf); break;
     case "pf-draft": S.pf.draft=!!t.checked; render(); break;
