@@ -26,7 +26,7 @@
   ];
   var LABELS = {
     dpw: "Direct premiums written", npw: "Net premiums written", gpw: "Gross premiums written", npe: "Net premiums earned",
-    loss_ratio: "Loss ratio", expense_ratio: "Expense ratio", combined_ratio: "Combined ratio", net_income: "Net income",
+    loss_ratio: "Loss ratio", loss_lae_ratio: "Loss and LAE ratio", expense_ratio: "Expense ratio", combined_ratio: "Combined ratio", net_income: "Net income",
     surplus: "Surplus", paid_in_capital: "Paid-in capital", total_assets: "Total assets", rbc_ratio: "RBC ratio",
     net_reserves: "Net loss and LAE reserves", pyd: "One-year reserve development", reins_recoverable: "Reinsurance recoverables",
     ceded_by_reinsurer: "Ceded premiums by reinsurer"
@@ -346,13 +346,15 @@
   }
 
   function underwritingSlide(f, t) {
-    var lr = S(f, "loss_ratio"), er = S(f, "expense_ratio"), cr = S(f, "combined_ratio"), ni = S(f, "net_income"), roae = D(f, "roae");
+    var lr = S(f, "loss_ratio"), ll = S(f, "loss_lae_ratio"), er = S(f, "expense_ratio"), cr = S(f, "combined_ratio"), ni = S(f, "net_income"), roae = D(f, "roae");
+    // loss and LAE ratio plus expense ratio is the combined ratio, so it is the one stacked when there is one
+    var base = any(ll) ? ll : lr, baseName = any(ll) ? "Loss and LAE ratio" : "Loss ratio";
     var chart;
-    if (any(lr) && any(er)) {
-      var sums = lr.map(function (v, i) { return (num(v) ? v : 0) + (num(er[i]) ? er[i] : 0); });
+    if (any(base) && any(er)) {
+      var sums = base.map(function (v, i) { return (num(v) ? v : 0) + (num(er[i]) ? er[i] : 0); });
       var max = Math.max(120, Math.ceil(Math.max.apply(null, sums) / 20) * 20);
-      chart = chartBlock("Loss and expense ratios (%)", { kind: "stackedColumn", categories: years(f), legend: "top", gap: 60, overlap: 100,
-        series: [ser("Loss ratio", lr, NAVY), ser("Expense ratio", er, MAG)], labels: { format: "0.0;(0.0);;", position: "ctr", color: "FFFFFF" },
+      chart = chartBlock(any(ll) ? "Combined ratio in its two parts (%)" : "Loss and expense ratios (%)", { kind: "stackedColumn", categories: years(f), legend: "top", gap: 60, overlap: 100,
+        series: [ser(baseName, base, NAVY), ser("Expense ratio", er, MAG)], labels: { format: "0.0;(0.0);;", position: "ctr", color: "FFFFFF" },
         valueAxis: { min: 0, max: max, major: 20, format: "0" } });
     } else {
       var pc = {}; cr.forEach(function (v, i) { if (num(v) && v > 100) pc[i] = MAG; });
@@ -361,6 +363,7 @@
     }
     var rows = [];
     if (any(lr)) rows.push(["Loss ratio (%)", lr, pctCell]);
+    if (any(ll)) rows.push(["Loss and LAE ratio (%)", ll, pctCell]);
     if (any(er)) rows.push(["Expense ratio (%)", er, pctCell]);
     if (any(cr)) rows.push(["Combined ratio (%)", cr, pctCell, adverseOver100, true]);
     if (any(ni)) rows.push(["Net income", ni, millions, negative]);

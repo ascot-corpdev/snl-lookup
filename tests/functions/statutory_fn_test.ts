@@ -40,7 +40,7 @@ function world(secrets: Record<string, string> = PAT, opts: SfOpts & { mapping?:
   const w = world({}, { mapping: null });
   const s = await w.call({ action: "status" });
   ok("status says statutory data isn't set up yet, in plain words", s.status === 200 && s.body.configured === false && s.body.mapped === false && s.body.message === SNOWFLAKE_NOT_CONFIGURED, s.body);
-  ok("status lists every field (the seven the view shows and ten for company profiles), none mapped", s.body.fields.length === 17 && s.body.fields.every((f: any) => f.mapped === false && f.label && f.unit && f.by), s.body.fields);
+  ok("status lists every field (the eight the view shows and ten for company profiles), none mapped", s.body.fields.length === 18 && s.body.fields.every((f: any) => f.mapped === false && f.label && f.unit && f.by), s.body.fields);
   const q = await w.call(QUERY);
   ok("a query answers 503 not_configured with the same message", q.status === 503 && q.body.error === "not_configured" && q.body.message === SNOWFLAKE_NOT_CONFIGURED, q.body);
   const d = await w.call({ action: "discover" });
@@ -80,7 +80,7 @@ function world(secrets: Record<string, string> = PAT, opts: SfOpts & { mapping?:
   const t0 = w.clock.now;
   const r = await w.call(QUERY);
   const f = (id: string) => r.body.fields.find((x: any) => x.id === id);
-  ok("a query answers 200 with one entry for each of the seven fields", r.status === 200 && r.body.fields.length === 7 && r.body.kind === "company" && same(r.body.codes, ["91001", "92001"]) && r.body.fromYear === 2023 && r.body.toYear === 2024, r.body);
+  ok("a query answers 200 with one entry for each of the eight fields", r.status === 200 && r.body.fields.length === 8 && r.body.kind === "company" && same(r.body.codes, ["91001", "92001"]) && r.body.fromYear === 2023 && r.body.toYear === 2024, r.body);
   ok("mapped fields carry rows for the codes and years asked, scaled", same(f("dpw_by_line").rows, [{ code: "91001", year: 2023, line: "Homeowners", state: null, value: 1_200_500 }, { code: "91001", year: 2024, line: "Homeowners", state: null, value: 1_300_000 }, { code: "92001", year: 2024, line: "Homeowners", state: null, value: null }])
     && same(f("surplus").rows.map((x: any) => x.value), [5_000_000, 250_000]), f("dpw_by_line").rows);
   ok("a null value stays null", f("dpw_by_line").rows[2].value === null);
@@ -110,7 +110,7 @@ function world(secrets: Record<string, string> = PAT, opts: SfOpts & { mapping?:
   const off = world({});
   for (const [id, row] of w.db.store) off.db.store.set(id, row);
   const opened = await off.call(QUERY);
-  ok("a saved result still opens when Snowflake isn't set up", opened.status === 200 && opened.body.fromStore === true && opened.body.fields.length === 7 && off.sf.log.length === 0);
+  ok("a saved result still opens when Snowflake isn't set up", opened.status === 200 && opened.body.fromStore === true && opened.body.fields.length === 8 && off.sf.log.length === 0);
   const unmapped = world({}, { mapping: null });
   for (const [id, row] of w.db.store) unmapped.db.store.set(id, row);
   ok("a result saved under a mapping that has since been removed is not reopened", (await unmapped.call(QUERY)).status === 503 && unmapped.sf.log.length === 0);
