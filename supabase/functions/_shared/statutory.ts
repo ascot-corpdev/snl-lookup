@@ -46,12 +46,14 @@ export const DEFAULT_STAT_FIELDS: StatFieldId[] = ["dpw_by_line", "npw_by_line",
     - view is "VIEW" (the default schema, the SNOWFLAKE_SCHEMA secret) or "SCHEMA.VIEW"; as names it ("F").
     - joins (up to 6) each add a view with its own as, joined on columns of views named before it.
     - every column is "COLUMN" or "ALIAS.COLUMN"; with joins it must be "ALIAS.COLUMN", so nothing is ambiguous.
-    - where conditions: equals, notEquals, in (up to 20 texts), isNull (true or false), month (1 to 12, the month
-      of a date column). Values are always bound, never written into the SQL.
+    - where conditions: equals, notEquals, in (up to 80 texts), isNull (true or false), month (1 to 12, the month
+      of a date column), startsWith (text at the start). Values are always bound, never written into the SQL, as
+      text; Snowflake converts a text value to a number when the column is a number.
+    - plus: more columns of the same row added to value. stateStrip: a prefix taken off each state afterwards.
     - sum: true adds up the value over rows that share everything else (many rows per counterparty).
     - latest: a column such as a sequence number; only the row with its highest value is kept for each company,
       year, line, state and item (a restated period keeps only its latest version). */
-export type WhereMap = { column: string; equals?: string; notEquals?: string; in?: string[]; isNull?: boolean; month?: number };
+export type WhereMap = { column: string; equals?: string; notEquals?: string; in?: string[]; isNull?: boolean; month?: number; startsWith?: string };
 export type JoinMap = { view: string; as: string; on: { left: string; right: string }[]; kind?: "inner" | "left" };
 export type FieldMap = {
   view: string; as?: string; joins?: JoinMap[];
@@ -63,6 +65,10 @@ export type FieldMap = {
   item?: string;
   where?: WhereMap[];
   sum?: boolean; latest?: string;
+  /** Up to 4 more columns of the same row added to value (a null counts as zero; null only when all are null). */
+  plus?: string[];
+  /** Text taken off the front of each state before it reaches the page ("Reported:FL" becomes "FL"). */
+  stateStrip?: string;
   scale?: number;
 };
 /** loaded: optional. When S&P's database has no LOADTRACKER, the view each schema has with S&P's run dates, and its
@@ -75,8 +81,9 @@ const IDENT = /^(?:[A-Za-z_][A-Za-z0-9_$]{0,127}|"[A-Za-z0-9_$ ]{1,127}")$/;
 const ident = (s: unknown): s is string => typeof s === "string" && IDENT.test(s);
 // An alias for a view in the mapping: short, plain, written into the SQL in double quotes and upper case.
 const ALIAS = /^[A-Za-z][A-Za-z0-9_]{0,29}$/;
-const MAX_JOINS = 6, MAX_ON = 4, MAX_WHERE = 8, MAX_IN = 20, MAX_TEXT = 200;
-const WHERE_OPS = ["equals", "notEquals", "in", "isNull", "month"] as const;
+const MAX_JOINS = 6, MAX_ON = 4, MAX_WHERE = 8, MAX_IN = 80, MAX_TEXT = 200, MAX_PLUS = 4;
+const WHERE_OPS = ["equals", "notEquals", "in", "isNull", "month", "startsWith"] as const;
+const OPS_WORDS = "equals, notEquals, in, isNull, month or startsWith";
 
 /** "VIEW" or "SCHEMA.VIEW", each part a checked name (a quoted part can't hold a dot, so the split is safe). */
 function viewRef(s: unknown): { schema: string | null; view: string } | null {
@@ -145,17 +152,21 @@ function shapeProblem(f: FieldMap): string | null {
   if (f.where !== undefined && (!Array.isArray(f.where) || f.where.length > MAX_WHERE)) return `where must be a list of up to ${MAX_WHERE} conditions`;
   for (const [i, w] of (f.where ?? []).entries()) {
     const at = `where[${i}]`;
-    if (!isObj(w)) return `${at} must be an object with column and one of equals, notEquals, in, isNull or month`;
+    if (!isObj(w)) return `${at} must be an object with column and one of ${OPS_WORDS}`;
     const p = col(`${at}.column`, w.column); if (p) return p;
     const ops = WHERE_OPS.filter((k) => w[k] !== undefined);
-    if (ops.length !== 1) return `${at} needs exactly one of equals, notEquals, in, isNull or month`;
+    if (ops.length !== 1) return `${at} needs exactly one of ${OPS_WORDS}`;
     const text = (v: unknown) => typeof v === "string" && v.length <= MAX_TEXT;
     const op = ops[0], v = w[op];
     if ((op === "equals" || op === "notEquals") && !text(v)) return `${at}.${op} must be text of up to ${MAX_TEXT} characters`;
+    if (op === "startsWith" && !(text(v) && (v as string).length > 0)) return `${at}.startsWith must be text of 1 to ${MAX_TEXT} characters`;
     if (op === "in" && !(Array.isArray(v) && v.length >= 1 && v.length <= MAX_IN && v.every(text))) return `${at}.in must be a list of 1 to ${MAX_IN} texts of up to ${MAX_TEXT} characters`;
     if (op === "isNull" && typeof v !== "boolean") return `${at}.isNull must be true or false`;
     if (op === "month" && !(Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 12)) return `${at}.month must be a whole number from 1 to 12`;
   }
+  if (f.plus !== undefined && (!Array.isArray(f.plus) || f.plus.length < 1 || f.plus.length > MAX_PLUS)) return `plus must be a list of 1 to ${MAX_PLUS} columns`;
+  for (const [i, x] of (f.plus ?? []).entries()) { const p = col(`plus[${i}]`, x); if (p) return p; }
+  if (f.stateStrip !== undefined && !(typeof f.stateStrip === "string" && f.stateStrip.length >= 1 && f.stateStrip.length <= MAX_TEXT)) return `stateStrip must be text of 1 to ${MAX_TEXT} characters`;
   if (f.sum !== undefined && typeof f.sum !== "boolean") return "sum must be true or false";
   if (f.yearIsDate !== undefined && typeof f.yearIsDate !== "boolean") return "yearIsDate must be true or false";
   if (f.scale !== undefined && !(typeof f.scale === "number" && Number.isFinite(f.scale) && f.scale !== 0)) return "scale must be a number";
@@ -216,7 +227,10 @@ export function buildSql(database: string, schema: string, m: FieldMap, q: StatQ
   const from = (ref: string) => { const r = viewRef(ref)!; return `${database}.${r.schema ?? schema}.${r.view}`; };
   const entityCol = c(entityRef), year = m.yearIsDate ? `YEAR(${c(m.year)})` : c(m.year);
   const name = m.entity.name === undefined ? null : c(m.entity.name), line = m.line === undefined ? null : c(m.line), state = m.state === undefined ? null : c(m.state);
-  const item = m.item === undefined ? null : c(m.item), value = c(m.value);
+  const item = m.item === undefined ? null : c(m.item);
+  // plus: value + each extra column of the same row, a null counted as zero; null when every one is null
+  const adds = [m.value, ...(m.plus ?? [])].map(c);
+  const value = adds.length === 1 ? adds[0] : `CASE WHEN ${adds.map((a) => `${a} IS NULL`).join(" AND ")} THEN NULL ELSE ${adds.map((a) => `COALESCE(${a}, 0)`).join(" + ")} END`;
   const cols = [`${entityCol} AS CODE`, `${name ?? "NULL"} AS NAME`, `${year} AS YR`, `${line ?? "NULL"} AS LINE`, `${state ?? "NULL"} AS STATE`, `${m.sum ? `SUM(${value})` : value} AS VAL`];
   if (item !== null) cols.push(`${item} AS ITEM`);   // only fields by counterparty map an item column
   let source = from(m.view) + (m.as === undefined ? "" : ` AS "${m.as.toUpperCase()}"`);
@@ -231,6 +245,7 @@ export function buildSql(database: string, schema: string, m: FieldMap, q: StatQ
     else if (w.in !== undefined) { where += ` AND ${col} IN (${w.in.map(() => "?").join(", ")})`; bindings.push(...w.in.map((v) => ({ type: "TEXT" as const, value: v }))); }
     else if (w.isNull !== undefined) where += ` AND ${col} ${w.isNull ? "IS NULL" : "IS NOT NULL"}`;
     else if (w.month !== undefined) { where += ` AND MONTH(${col}) = ?`; bindings.push({ type: "FIXED", value: String(w.month) }); }
+    else if (w.startsWith !== undefined) { where += ` AND STARTSWITH(${col}, ?)`; bindings.push({ type: "TEXT", value: w.startsWith }); }
   }
   const latest = m.latest === undefined ? null : c(m.latest);
   // sum: grouped by everything else selected (by position), and by the latest column when there is one.
@@ -284,7 +299,8 @@ export async function runStatutory(sf: Snowflake, database: string, schema: stri
         const code = String(r.CODE ?? "").trim(), raw = r.VAL === null || r.VAL === "" ? NaN : Number(r.VAL);
         if (r.NAME && names.has(code) && !names.get(code)) names.set(code, String(r.NAME));
         const row: StatRow = { code, year: Number(r.YR), line: r.LINE === null ? null : String(r.LINE), state: r.STATE === null ? null : String(r.STATE), value: Number.isFinite(raw) ? Math.round(raw * (m.scale ?? 1) * 1e6) / 1e6 : null };
-        if (meta.by === "item") row.item = r.ITEM === null || r.ITEM === undefined ? null : String(r.ITEM);
+        if (m.stateStrip && row.state !== null && row.state.startsWith(m.stateStrip)) row.state = row.state.slice(m.stateStrip.length);   // "Reported:FL" -> "FL"
+        if (meta.by === "item") row.item =r.ITEM === null || r.ITEM === undefined ? null : String(r.ITEM);
         return row;
       }).filter((r) => Number.isInteger(r.year));
       out.push({ ...base, mapped: true, error: null, rows });

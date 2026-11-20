@@ -14,6 +14,18 @@ export type SchemaTables = Record<string, Row[]>;   // "SCHEMA.VIEW" (as stored)
 const NAME = String.raw`(?:[A-Za-z_][A-Za-z0-9_$]*|"[^"]+")`;
 const REF = String.raw`(?:"[A-Z0-9_]+"\.)?${NAME}`;
 const EXPR = String.raw`(?:(?:YEAR|MONTH)\(${REF}\)|${REF})`;
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+/** Splits a select list on the commas between expressions, not those inside brackets. */
+function splitList(s: string): string[] {
+  const out: string[] = []; let depth = 0, cur = "";
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "(") depth++; else if (ch === ")") depth--;
+    if (ch === "," && depth === 0 && s[i + 1] === " ") { out.push(cur); cur = ""; i++; continue; }
+    cur += ch;
+  }
+  return [...out, cur];
+}
 const err = (message: string, code = "001003") => ({ error: { status: 422, code, message, sqlState: "42000" } });
 
 export type JoinOpts = {
@@ -105,6 +117,14 @@ export function joinReader(o: JoinOpts) {
     const problems: string[] = [];
     const ev = (expr: string, ctx: Ctx): Value => {
       if (expr === "NULL") return null;
+      // value plus other columns: CASE WHEN a IS NULL AND b IS NULL THEN NULL ELSE COALESCE(a, 0) + COALESCE(b, 0) END
+      const sumOf = expr.match(/^CASE WHEN (.+) THEN NULL ELSE (.+) END$/);
+      if (sumOf) {
+        const whens = sumOf[1].split(" AND ").map((x) => x.match(/^(.+) IS NULL$/)), terms = sumOf[2].split(" + ").map((x) => x.match(/^COALESCE\((.+), 0\)$/));
+        if (whens.some((x) => !x) || terms.some((x) => !x) || !same(whens.map((x) => x![1]), terms.map((x) => x![1]))) { problems.push("syntax error in CASE"); return null; }
+        const vals = terms.map((x) => ev(x![1], ctx));
+        return vals.every((v) => v === null) ? null : vals.reduce((a: number, v) => a + (v === null ? 0 : Number(v)), 0);
+      }
       const fn = expr.match(/^(YEAR|MONTH|SUM)\((.+)\)$/);
       if (fn) {
         const v = ev(fn[2], ctx);
@@ -137,6 +157,7 @@ export function joinReader(o: JoinOpts) {
       if ((c = rest.match(new RegExp(String.raw`^(${EXPR}) IN \(([?, ]+)\)`)))) { const e = c[1], vals = bindings.slice(b, b += (c[2].match(/\?/g) ?? []).length).map((x) => x.value); conds.push((x) => { const v = ev(e, x); return v !== null && vals.includes(String(v).trim()); }); }
       else if ((c = rest.match(new RegExp(String.raw`^(${EXPR}) BETWEEN \? AND \?`)))) { const e = c[1], lo = Number(bindings[b++].value), hi = Number(bindings[b++].value); conds.push((x) => { const v = ev(e, x); return v !== null && Number(v) >= lo && Number(v) <= hi; }); }
       else if ((c = rest.match(new RegExp(String.raw`^(${EXPR}) (=|<>) \?`)))) { const e = c[1], op = c[2], want = bindings[b++].value; conds.push((x) => { const v = ev(e, x); return v !== null && (op === "=" ? String(v) === want : String(v) !== want); }); }
+      else if ((c = rest.match(new RegExp(String.raw`^STARTSWITH\((${REF}), \?\)`)))) { const e = c[1], pre = bindings[b++].value; conds.push((x) => { const v = ev(e, x); return v !== null && String(v).startsWith(pre); }); }
       else if ((c = rest.match(new RegExp(String.raw`^(${EXPR}) IS (NOT )?NULL`)))) { const e = c[1], not = !!c[2]; conds.push((x) => (ev(e, x) === null) !== not); }
       else return err(`SQL compilation error: syntax error near '${rest.slice(0, 30)}'.`);
       rest = rest.slice(c[0].length);
@@ -145,7 +166,7 @@ export function joinReader(o: JoinOpts) {
     }
     if (b !== bindings.length) return err(`Bind variable count mismatch (${b} used, ${bindings.length} bound).`, "002049");
 
-    const exprs = list.split(", ").map((e) => e.match(/^(.+) AS ([A-Z]+)$/));
+    const exprs = splitList(list).map((e) => e.match(/^(.+) AS ([A-Z]+)$/));
     if (exprs.some((e) => !e)) return err("SQL compilation error: syntax error in the select list.");
     // check every name once, against the first row's shape, so a wrong column is a 422 even with no rows
     const probe: Ctx = Object.fromEntries(views.map((v) => [v.alias, o.tables[v.key][0] ?? {}]));

@@ -33,28 +33,33 @@ const TABLES: SchemaTables = {
     { PERIOD_ID: 102, ENTITY_ID: 1, PERIOD_END: "2024-12-31", LOB_NAME: "Total", SEQ: 1 },
     { PERIOD_ID: 103, ENTITY_ID: 1, PERIOD_END: "2024-12-31", LOB_NAME: "Total", SEQ: 2 },   // 2024 restated: the latest
     { PERIOD_ID: 104, ENTITY_ID: 1, PERIOD_END: "2024-06-30", LOB_NAME: "Total", SEQ: 1 },   // half year: not a year end
-    { PERIOD_ID: 105, ENTITY_ID: 1, PERIOD_END: "2024-12-31", LOB_NAME: "Homeowners", SEQ: 2 },
-    { PERIOD_ID: 106, ENTITY_ID: 1, PERIOD_END: "2024-12-31", LOB_NAME: "Commercial auto", SEQ: 2 },
+    { PERIOD_ID: 105, ENTITY_ID: 1, PERIOD_END: "2024-12-31", LOB_NAME: "Homeowners", SEQ: 2, LOB_ID: 140 },
+    { PERIOD_ID: 106, ENTITY_ID: 1, PERIOD_END: "2024-12-31", LOB_NAME: "Commercial auto", SEQ: 2, LOB_ID: 150 },
     { PERIOD_ID: 107, ENTITY_ID: 2, PERIOD_END: "2024-12-31", LOB_NAME: "Total", SEQ: 1 },
     { PERIOD_ID: 108, ENTITY_ID: 3, PERIOD_END: "2024-12-31", LOB_NAME: "Total", SEQ: 1 },
     { PERIOD_ID: 109, ENTITY_ID: 3, PERIOD_END: "2024-12-31", LOB_NAME: null, SEQ: 1 },
   ],
   "CORE_FIN.FLOW_PERIOD": [
-    { FLOW_ID: 201, STOCK_PERIOD_ID: 101, ANNUALISED: "Y" }, { FLOW_ID: 202, STOCK_PERIOD_ID: 102, ANNUALISED: "Y" },
-    { FLOW_ID: 203, STOCK_PERIOD_ID: 103, ANNUALISED: "Y" }, { FLOW_ID: 204, STOCK_PERIOD_ID: 104, ANNUALISED: "Y" },
-    { FLOW_ID: 205, STOCK_PERIOD_ID: 105, ANNUALISED: "Y" }, { FLOW_ID: 206, STOCK_PERIOD_ID: 106, ANNUALISED: "Y" },
-    { FLOW_ID: 207, STOCK_PERIOD_ID: 107, ANNUALISED: "Y" }, { FLOW_ID: 208, STOCK_PERIOD_ID: 108, ANNUALISED: "Y" },
-    { FLOW_ID: 209, STOCK_PERIOD_ID: 103, ANNUALISED: "N" },   // a quarter inside the restated year
+    { FLOW_ID: 201, STOCK_PERIOD_ID: 101, ANNUALISED: "Y", ANN_FACTOR: 1 }, { FLOW_ID: 202, STOCK_PERIOD_ID: 102, ANNUALISED: "Y", ANN_FACTOR: 1 },
+    { FLOW_ID: 203, STOCK_PERIOD_ID: 103, ANNUALISED: "Y", ANN_FACTOR: 1 }, { FLOW_ID: 204, STOCK_PERIOD_ID: 104, ANNUALISED: "Y" },
+    { FLOW_ID: 205, STOCK_PERIOD_ID: 105, ANNUALISED: "Y", ANN_FACTOR: 1 }, { FLOW_ID: 206, STOCK_PERIOD_ID: 106, ANNUALISED: "Y", ANN_FACTOR: 1 },
+    { FLOW_ID: 207, STOCK_PERIOD_ID: 107, ANNUALISED: "Y" }, { FLOW_ID: 208, STOCK_PERIOD_ID: 108, ANNUALISED: "Y", ANN_FACTOR: 1 },
+    { FLOW_ID: 209, STOCK_PERIOD_ID: 103, ANNUALISED: "N", ANN_FACTOR: 0.25 },   // a quarter inside the restated year
     { FLOW_ID: 210, STOCK_PERIOD_ID: 109, ANNUALISED: "Y" },
   ],
   "CORE_FIN.FIN_FLOW_B": [
     { FLOW_ID: 201, NPE_000: 1000, DPW_000: 1200, LOSS_RATIO: 0.6 }, { FLOW_ID: 202, NPE_000: 1100, DPW_000: 1250, LOSS_RATIO: 0.62 },
     { FLOW_ID: 203, NPE_000: 1150, DPW_000: 1300, LOSS_RATIO: 0.61 }, { FLOW_ID: 204, NPE_000: 500, DPW_000: 600, LOSS_RATIO: 0.5 },
     { FLOW_ID: 205, NPE_000: 400, DPW_000: 420, LOSS_RATIO: null }, { FLOW_ID: 206, NPE_000: 300, DPW_000: 310, LOSS_RATIO: null },
-    { FLOW_ID: 207, NPE_000: 250, DPW_000: 260, LOSS_RATIO: 0.7 }, { FLOW_ID: 208, NPE_000: 900, DPW_000: 950, LOSS_RATIO: 0.55 },
+    { FLOW_ID: 207, NPE_000: 250, DPW_000: 260, LOSS_RATIO: 0.7 }, { FLOW_ID: 208, NPE_000: 900, DPW_000: 950, LOSS_RATIO: 99999999999999 },   // S&P-style "meaningless" sentinel
     { FLOW_ID: 209, NPE_000: 280, DPW_000: 290, LOSS_RATIO: 0.4 }, { FLOW_ID: 210, NPE_000: 1, DPW_000: 1, LOSS_RATIO: 0.01 },
   ],
-  "CORE_FIN.FIN_STOCK_A": [{ PERIOD_ID: 101, PHS_000: 5000 }, { PERIOD_ID: 102, PHS_000: 5500 }, { PERIOD_ID: 103, PHS_000: 5600 }, { PERIOD_ID: 104, PHS_000: 5200 }, { PERIOD_ID: 107, PHS_000: 800 }, { PERIOD_ID: 108, PHS_000: 3000 }],
+  "CORE_FIN.FIN_STOCK_A": [{ PERIOD_ID: 101, PHS_000: 5000, CAP_STOCK_000: 10, PAID_IN_000: 90 }, { PERIOD_ID: 102, PHS_000: 5500, CAP_STOCK_000: 5, PAID_IN_000: null }, { PERIOD_ID: 103, PHS_000: 5600, CAP_STOCK_000: null, PAID_IN_000: 200 },
+    { PERIOD_ID: 104, PHS_000: 5200, CAP_STOCK_000: 1, PAID_IN_000: 1 }, { PERIOD_ID: 107, PHS_000: 800, CAP_STOCK_000: 2, PAID_IN_000: 3 }, { PERIOD_ID: 108, PHS_000: 3000, CAP_STOCK_000: null, PAID_IN_000: null }],
+  "CORE_FIN.GEO_REGION": [
+    { FLOW_ID: 203, REGION: "Reported:FL", DPW_000: 700 }, { FLOW_ID: 203, REGION: "Reported:TX", DPW_000: 450 }, { FLOW_ID: 203, REGION: "Region:Southeast", DPW_000: 1150 },
+    { FLOW_ID: 203, REGION: "Zone:3", DPW_000: 5 }, { FLOW_ID: 208, REGION: "Reported:FL", DPW_000: 900 },
+  ],
   "CORE_FIN.GEO_FLOW": [
     { FLOW_ID: 203, STATE_CD: "FL", DPW_000: 700 }, { FLOW_ID: 203, STATE_CD: "TX", DPW_000: 450 }, { FLOW_ID: 208, STATE_CD: "FL", DPW_000: 900 },
     { FLOW_ID: 209, STATE_CD: "FL", DPW_000: 10 },   // not annualised
@@ -193,22 +198,33 @@ const OLD: FieldMap = { view: "IR_PREM_LINE", entity: { company: "NAIC_CD", grou
     ["a latest column that is SQL", { ...BASE, latest: "SP.SEQ DESC, 1" }, "latest must be a column name"],
     ["a where that isn't a list", { ...BASE, where: { column: "SP.A", equals: "x" } }, "where must be a list of up to 8 conditions"],
     ["nine where conditions", { ...BASE, where: Array(9).fill({ column: "SP.A", equals: "x" }) }, "where must be a list of up to 8 conditions"],
-    ["a null where entry", { ...BASE, where: [null] }, "where[0] must be an object with column and one of equals, notEquals, in, isNull or month"],
+    ["a null where entry", { ...BASE, where: [null] }, "where[0] must be an object with column and one of equals, notEquals, in, isNull, month or startsWith"],
     ["a where column without an alias", { ...BASE, where: [{ column: "LOB_NAME", equals: "Total" }] }, "where[0].column must be ALIAS.COLUMN when there are joins"],
     ["a where column naming an undeclared alias", { ...BASE, where: [{ column: "FP.ANNUALISED", equals: "Y" }] }, "where[0].column names alias FP, which isn't declared"],
-    ["a where with no operator", { ...BASE, where: [{ column: "SP.A" }] }, "where[0] needs exactly one of equals, notEquals, in, isNull or month"],
-    ["a where with two operators", { ...BASE, where: [{ column: "SP.A", equals: "x", notEquals: "y" }] }, "where[0] needs exactly one of equals, notEquals, in, isNull or month"],
+    ["a where with no operator", { ...BASE, where: [{ column: "SP.A" }] }, "where[0] needs exactly one of equals, notEquals, in, isNull, month or startsWith"],
+    ["a where with two operators", { ...BASE, where: [{ column: "SP.A", equals: "x", notEquals: "y" }] }, "where[0] needs exactly one of equals, notEquals, in, isNull, month or startsWith"],
     ["an equals that isn't text", { ...BASE, where: [{ column: "SP.A", equals: 5 }] }, "where[0].equals must be text of up to 200 characters"],
     ["a notEquals of 201 characters", { ...BASE, where: [{ column: "SP.A", notEquals: "x".repeat(201) }] }, "where[0].notEquals must be text of up to 200 characters"],
-    ["an empty in list", { ...BASE, where: [{ column: "SP.A", in: [] }] }, "where[0].in must be a list of 1 to 20 texts of up to 200 characters"],
-    ["an in list of 21", { ...BASE, where: [{ column: "SP.A", in: Array(21).fill("x") }] }, "where[0].in must be a list of 1 to 20 texts of up to 200 characters"],
-    ["an in list with a number", { ...BASE, where: [{ column: "SP.A", in: ["x", 1] }] }, "where[0].in must be a list of 1 to 20 texts of up to 200 characters"],
-    ["an in that is text", { ...BASE, where: [{ column: "SP.A", in: "x" }] }, "where[0].in must be a list of 1 to 20 texts of up to 200 characters"],
+    ["an empty in list", { ...BASE, where: [{ column: "SP.A", in: [] }] }, "where[0].in must be a list of 1 to 80 texts of up to 200 characters"],
+    ["an in list of 81", { ...BASE, where: [{ column: "SP.A", in: Array(81).fill("x") }] }, "where[0].in must be a list of 1 to 80 texts of up to 200 characters"],
+    ["an in list with a number", { ...BASE, where: [{ column: "SP.A", in: ["x", 1] }] }, "where[0].in must be a list of 1 to 80 texts of up to 200 characters"],
+    ["an in that is text", { ...BASE, where: [{ column: "SP.A", in: "x" }] }, "where[0].in must be a list of 1 to 80 texts of up to 200 characters"],
     ["an isNull that is text", { ...BASE, where: [{ column: "SP.A", isNull: "true" }] }, "where[0].isNull must be true or false"],
     ["a month of 13", { ...BASE, where: [{ column: "SP.A", month: 13 }] }, "where[0].month must be a whole number from 1 to 12"],
     ["a month of 0", { ...BASE, where: [{ column: "SP.A", month: 0 }] }, "where[0].month must be a whole number from 1 to 12"],
     ["a month with a fraction", { ...BASE, where: [{ column: "SP.A", month: 6.5 }] }, "where[0].month must be a whole number from 1 to 12"],
     ["a month that is text", { ...BASE, where: [{ column: "SP.A", month: "12" }] }, "where[0].month must be a whole number from 1 to 12"],
+    ["an empty startsWith", { ...BASE, where: [{ column: "SP.A", startsWith: "" }] }, "where[0].startsWith must be text of 1 to 200 characters"],
+    ["a startsWith that is a number", { ...BASE, where: [{ column: "SP.A", startsWith: 5 }] }, "where[0].startsWith must be text of 1 to 200 characters"],
+    ["a startsWith of 201 characters", { ...BASE, where: [{ column: "SP.A", startsWith: "x".repeat(201) }] }, "where[0].startsWith must be text of 1 to 200 characters"],
+    ["plus that isn't a list", { ...BASE, plus: "S.B" }, "plus must be a list of 1 to 4 columns"],
+    ["an empty plus", { ...BASE, plus: [] }, "plus must be a list of 1 to 4 columns"],
+    ["plus of five columns", { ...BASE, plus: Array(5).fill("S.B") }, "plus must be a list of 1 to 4 columns"],
+    ["a plus column without an alias", { ...BASE, plus: ["PAID_IN"] }, "plus[0] must be ALIAS.COLUMN when there are joins"],
+    ["a plus column naming an undeclared alias", { ...BASE, plus: ["S.A", "Z.B"] }, "plus[1] names alias Z, which isn't declared"],
+    ["a plus column that is SQL", { ...BASE, plus: ["S.A) + (1"] }, "plus[0] must be a column name"],
+    ["an empty stateStrip", { ...BASE, stateStrip: "" }, "stateStrip must be text of 1 to 200 characters"],
+    ["a stateStrip that is a list", { ...BASE, stateStrip: ["Reported:"] }, "stateStrip must be text of 1 to 200 characters"],
     ["a sum that is text", { ...BASE, sum: "yes" }, "sum must be true or false"],
     ["a yearIsDate that is text", { ...BASE, yearIsDate: "true" }, "yearIsDate must be true or false"],
     ["a scale of zero", { ...BASE, scale: 0 }, "scale must be a number"],
@@ -245,8 +261,11 @@ const OLD: FieldMap = { view: "IR_PREM_LINE", entity: { company: "NAIC_CD", grou
   const evil = buildSql(DB, SCH, { ...SURPLUS, where: [{ column: "SP.LOB_NAME", equals: values[0] }, { column: "SP.LOB_NAME", notEquals: values[1] }, { column: "SP.LOB_NAME", in: values.slice(2) }] }, Q)!;
   ok("values of every kind are bound, never written into the SQL", !evil.statement.includes("'") && !evil.statement.includes("DROP") && !evil.statement.includes("%") && same(evil.bindings.slice(4).map((b) => b.value), values) && (evil.statement.match(/\?/g) ?? []).length === evil.bindings.length, evil);
   ok("an alias always goes into the SQL in double quotes and upper case", (buildSql(DB, SCH, { ...SURPLUS, as: "select", joins: SURPLUS.joins!.map((j) => ({ ...j, on: j.on.map((o) => ({ left: o.left.replace(/^S\./, "select."), right: o.right })) })), value: "select.PHS_000" }, Q)?.statement ?? "").includes('FROM MI_XPRESSCLOUD.CORE_FIN.FIN_STOCK_A AS "SELECT" JOIN'));
-  const most = buildSql(DB, SCH, { ...SURPLUS, where: Array.from({ length: 8 }, () => ({ column: "SP.LOB_NAME", in: Array(20).fill("x") })) }, { ...Q, codes: ["1", "2", "3", "4", "5", "6", "7", "8"] })!;
-  ok("the most bindings a mapping can ask for is small and bounded (8 codes, 2 years, 8 lists of 20)", most.bindings.length === 170 && (most.statement.match(/\?/g) ?? []).length === 170 && most.statement.length < 4000, most.bindings.length);
+  const most = buildSql(DB, SCH, { ...SURPLUS, where: Array.from({ length: 8 }, () => ({ column: "SP.LOB_NAME", in: Array(80).fill("x") })) }, { ...Q, codes: ["1", "2", "3", "4", "5", "6", "7", "8"] })!;
+  ok("the most bindings a mapping can ask for is bounded (8 codes, 2 years, 8 lists of 80)", most.bindings.length === 650 && (most.statement.match(/\?/g) ?? []).length === 650 && most.statement.length < 8000, most.bindings.length);
+  ok("hostile plus columns are refused and make no SQL", HOSTILE.every((bad) => mapProblem("npe", { ...NPE, plus: [bad] }) !== null && buildSql(DB, SCH, { ...NPE, plus: [bad] } as any, Q) === null));
+  const sw = buildSql(DB, SCH, { ...BY_STATE, where: [{ column: "GEO.STATE_CD", startsWith: "Reported:'; DROP TABLE X; --%_" }] }, Q)!;
+  ok("a startsWith value is bound too, with no LIKE wildcards to escape", sw.statement.includes(' AND STARTSWITH("GEO".STATE_CD, ?)') && !sw.statement.includes("DROP") && !sw.statement.includes("LIKE") && sw.bindings.at(-1)!.value === "Reported:'; DROP TABLE X; --%_", sw);
   for (const [db, sc] of [["MI; DROP", SCH], [DB, 'X"; --'], [DB, "A.B"]]) ok(`a database or default schema of ${JSON.stringify([db, sc])} makes no SQL`, buildSql(db, sc, NPE, Q) === null);
   ok("a quoted schema or view with spaces is fine, and kept exactly", buildSql(DB, SCH, { ...OLD, view: '"Core Fin"."Prem Line"' }, Q)!.statement.includes(' FROM MI_XPRESSCLOUD."Core Fin"."Prem Line" WHERE '));
   ok("a mapping with a hostile part never reaches SQL even if mapProblem is skipped", buildSql(DB, SCH, { ...NPE, joins: [{ ...CHAIN[0], on: [{ left: "F.FLOW_ID) OR (1=1", right: "FP.FLOW_ID" }] }] } as any, Q) === null);
@@ -264,7 +283,7 @@ const OLD: FieldMap = { view: "IR_PREM_LINE", entity: { company: "NAIC_CD", grou
   ok("a summed by-item figure: rows for each reinsurer added up, the superseded version left out, an empty value not counted as zero", same(sortRows(f("ceded_by_reinsurer").rows), sortRows([
     { code: "12345", year: 2023, line: null, state: null, value: 80_000, item: "Nonesuch Re" }, { code: "12345", year: 2024, line: null, state: null, value: 150_000, item: "Nonesuch Re" },
     { code: "12345", year: 2024, line: null, state: null, value: 30_000, item: "Nonesuch Mutual Re" }, { code: "23456", year: 2024, line: null, state: null, value: 12_000, item: "Nonesuch Re" }])), f("ceded_by_reinsurer").rows);
-  ok("a ratio held as a fraction comes back as a percentage", same(f("loss_ratio").rows.map((x) => x.value), [60, 61, 55]), f("loss_ratio").rows);
+  ok("a ratio held as a fraction comes back as a percentage (the sentinel too, until it is excluded)", same(f("loss_ratio").rows.map((x) => x.value), [60, 61, 9999999999999900]), f("loss_ratio").rows);
   ok("a figure with no mapping is reported as not mapped", f("gpw").mapped === false && f("gpw").error === null && f("gpw").rows.length === 0);
   ok("every mapped figure ran without error", r.fields.filter((x) => x.mapped).every((x) => x.error === null), r.fields.map((x) => [x.id, x.error]));
   ok("company names come from the joined entity view", same(r.entities, [{ code: "12345", name: "Calloway Insurance Co" }, { code: "23456", name: "Tarrow Mutual Insurance Co" }]), r.entities);
@@ -298,6 +317,38 @@ const OLD: FieldMap = { view: "IR_PREM_LINE", entity: { company: "NAIC_CD", grou
     ok(`loaded ${JSON.stringify(l)}: ${says ?? "fine"}`, loadedProblem(l) === says, loadedProblem(l));
   ok("readMapping keeps the loaded entry, and leaves it out when there is none", same(readMapping({ fields: {}, loaded: { view: "B", at: "D" } }), { fields: {}, loaded: { view: "B", at: "D" } }) && same(readMapping({ fields: {} }), { fields: {} }));
   ok("fieldStatus gives each figure's problem, null when it is mapped", (() => { const s = fieldStatus({ fields: { surplus: SURPLUS, npe: { ...NPE, value: "PHS" } } }); return s.find((x) => x.id === "surplus")!.problem === null && s.find((x) => x.id === "npe")!.problem === "value must be ALIAS.COLUMN when there are joins" && s.find((x) => x.id === "gpw")!.problem === "not mapped"; })());
+}
+
+// ---------- startsWith with stateStrip, plus, an in list of 80, numeric columns against bound text ----------
+const BY_REGION: FieldMap = { ...BY_STATE, view: "CORE_FIN.GEO_REGION", state: "GEO.REGION", where: [...BY_STATE.where!, { column: "GEO.REGION", startsWith: "Reported:" }], stateStrip: "Reported:" };
+const PAID_IN: FieldMap = { ...SURPLUS, value: "S.CAP_STOCK_000", plus: ["S.PAID_IN_000"], latest: "SP.SEQ", scale: 1000 };
+{
+  const s = buildSql(DB, SCH, BY_REGION, Q)!;
+  ok("startsWith becomes STARTSWITH(column, ?) with the prefix bound", s.statement.includes(' AND "SP".LOB_NAME IS NOT NULL AND STARTSWITH("GEO".REGION, ?) QUALIFY ') && same(s.bindings.slice(-1), [T("Reported:")]) && !s.statement.includes("Reported"), s.statement);
+  ok("stateStrip never reaches the SQL", !buildSql(DB, SCH, { ...BY_REGION, stateStrip: "'; DROP" }, Q)!.statement.includes("DROP"));
+  const pl = buildSql(DB, SCH, PAID_IN, Q)!;
+  ok("plus: the exact value expression, a null counted as zero but all nulls null", pl.statement.includes('CASE WHEN "S".CAP_STOCK_000 IS NULL AND "S".PAID_IN_000 IS NULL THEN NULL ELSE COALESCE("S".CAP_STOCK_000, 0) + COALESCE("S".PAID_IN_000, 0) END AS VAL'), pl.statement);
+  const pls = buildSql(DB, SCH, { ...PAID_IN, sum: true, latest: undefined, plus: ["S.PAID_IN_000", "S.PHS_000"] }, Q)!;
+  ok("plus with sum: the whole expression is summed, with up to four extra columns", pls.statement.includes('SUM(CASE WHEN "S".CAP_STOCK_000 IS NULL AND "S".PAID_IN_000 IS NULL AND "S".PHS_000 IS NULL THEN NULL ELSE COALESCE("S".CAP_STOCK_000, 0) + COALESCE("S".PAID_IN_000, 0) + COALESCE("S".PHS_000, 0) END) AS VAL') && / GROUP BY 1, 2, 3, 4, 5 ORDER BY/.test(pls.statement), pls.statement);
+  ok("plus on a single view without aliases works too", buildSql(DB, SCH, { ...OLD, plus: ["NPW_000"] }, Q)!.statement.includes("CASE WHEN DPW_000 IS NULL AND NPW_000 IS NULL THEN NULL ELSE COALESCE(DPW_000, 0) + COALESCE(NPW_000, 0) END AS VAL"));
+  const ids = [...Array.from({ length: 79 }, (_, i) => String(1000 + i)), "140"];
+  const byIds: FieldMap = { ...BY_LINE, where: [{ column: "SP.LOB_ID", in: ids }, { column: "FP.ANN_FACTOR", equals: "1" }, { column: "SP.PERIOD_END", month: 12 }] };
+  ok("an in list of 80 is allowed, and every value is bound as text", mapProblem("dpw_by_line", byIds) === null && (() => { const b = buildSql(DB, SCH, byIds, Q)!; return b.bindings.filter((x) => x.type === "TEXT").length === 2 + 80 + 1 && b.statement.includes(`"SP".LOB_ID IN (${Array(80).fill("?").join(", ")})`) && !b.statement.includes("140"); })());
+
+  const w = world();
+  const r = await runStatutory(w.api, w.creds.database, w.creds.schema, { fields: { dpw_by_state: BY_REGION, paid_in_capital: PAID_IN, dpw_by_line: byIds,
+    npe: { ...NPE, where: [{ column: "SP.LOB_NAME", equals: "Total" }, { column: "FP.ANN_FACTOR", equals: "1" }, { column: "SP.PERIOD_END", month: 12 }] },
+    loss_ratio: { ...LOSS, where: [...LOSS.where!, { column: "F.LOSS_RATIO", notEquals: "99999999999999" }] },
+    surplus: { ...PAID_IN, sum: true, latest: undefined } } }, Q, ["dpw_by_state", "paid_in_capital", "dpw_by_line", "npe", "loss_ratio", "surplus"]);
+  const f = (id: string) => r.fields.find((x) => x.id === id)!;
+  ok("startsWith keeps only the state rows, and stateStrip takes the prefix off", same(sortRows(f("dpw_by_state").rows), sortRows([{ code: "12345", year: 2024, line: null, state: "FL", value: 700_000 }, { code: "12345", year: 2024, line: null, state: "TX", value: 450_000 }, { code: "23456", year: 2024, line: null, state: "FL", value: 900_000 }])), f("dpw_by_state").rows);
+  ok("plus adds the two columns of one row, a null counting as zero, null when both are null, then scale", same(f("paid_in_capital").rows.map((x) => [x.code, x.year, x.value]), [["12345", 2023, 100_000], ["12345", 2024, 200_000], ["23456", 2024, null]]), f("paid_in_capital").rows);
+  ok("plus with sum adds the rows up too (both 2024 versions here), still null when nothing is there", same(f("surplus").rows.map((x) => [x.code, x.year, x.value]), [["12345", 2023, 100_000], ["12345", 2024, 205_000], ["23456", 2024, null]]), f("surplus").rows);
+  ok("in on a number column with bound text values picks the lines by id", same(f("dpw_by_line").rows.map((x) => [x.line, x.value]), [["Homeowners", 420_000]]), f("dpw_by_line").rows);
+  ok("equals on a number column (an annualisation factor of 1) with a bound text value", same(f("npe").rows.map((x) => x.value), [1_000_000, 1_150_000, 900_000]), f("npe").rows);
+  ok("notEquals on the value column leaves out the sentinel", same(f("loss_ratio").rows.map((x) => [x.code, x.value]), [["12345", 60], ["12345", 61]]), f("loss_ratio").rows);
+  const loose = await runStatutory(w.api, w.creds.database, w.creds.schema, { fields: { dpw_by_state: { ...BY_REGION, where: BY_STATE.where } } }, Q, ["dpw_by_state"]);
+  ok("without the startsWith condition, a state that doesn't start with the prefix is left as it is", same(sortRows(loose.fields[0].rows.map((x) => x.state)), sortRows(["FL", "TX", "Region:Southeast", "Zone:3", "FL"])), loose.fields[0].rows);
 }
 
 // ---------- the saved-result id ----------
@@ -354,7 +405,7 @@ function fnWorld(mapping: unknown = MAPPING) {
   const fresh = await w.call({ action: "discover", schemas: true, refresh: true }), sent2: number = w.sf.statements.length;
   ok("the schema list opens from the store the second time, and refresh asks again", again.body.fromStore === true && sent1 === 1 && fresh.body.fromStore === false && sent2 === 2, { sent1, sent2 });
   const v = await w.call({ action: "discover", schema: "core_fin" });
-  ok("Discover lists the views in a chosen schema, naming the schema", v.status === 200 && v.body.schema === "CORE_FIN" && same(v.body.views.map((x: any) => x.name), ["BATCH_RUN", "FIN_FLOW_A", "FIN_FLOW_B", "FIN_STOCK_A", "FLOW_PERIOD", "GEO_FLOW", "STOCK_PERIOD"]) && same(w.sf.statements.at(-1)!.bindings, [T("CORE_FIN")]), v.body);
+  ok("Discover lists the views in a chosen schema, naming the schema", v.status === 200 && v.body.schema === "CORE_FIN" && same(v.body.views.map((x: any) => x.name), ["BATCH_RUN", "FIN_FLOW_A", "FIN_FLOW_B", "FIN_STOCK_A", "FLOW_PERIOD", "GEO_FLOW", "GEO_REGION", "STOCK_PERIOD"]) && same(w.sf.statements.at(-1)!.bindings, [T("CORE_FIN")]), v.body);
   const vl = await w.call({ action: "discover", schema: "CORE_FIN", like: "flow_" });
   ok("a name filter works in a chosen schema", same(vl.body.views.map((x: any) => x.name), ["FIN_FLOW_A", "FIN_FLOW_B", "FLOW_PERIOD"]) && same(w.sf.statements.at(-1)!.bindings, [T("CORE_FIN"), T("%flow_%")]), vl.body);
   const e = await w.call({ action: "discover", schema: "ENTITY" });

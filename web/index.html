@@ -2961,7 +2961,8 @@ function statResultsHTML(){
   else if(res.fromStore) h+=`<div class="info" id="statFromStore" role="status"><span>From the last fetch on ${fmtAt(res.fetchedAt)}.</span><button class="btn sm" data-act="stat-refresh">Refresh</button></div>`;
   if(res.truncated) h+=`<div class="banner" id="statTruncated" role="alert"><span><b>These figures are incomplete.</b> Snowflake returned more rows than one request allows. Use fewer codes or fewer years.</span></div>`;
   h+=fields.length ? fields.map(f=>statBlockHTML(res, f)).join("") : `<div class="empty"><p>No figures came back for these codes and years. That doesn't prove there are none.</p></div>`;
-  h+=`<p class="source" id="statSource">${loaded.map(l=>`S&amp;P last loaded ${esc(l.view)} on ${fmtAt(l.at)!=="n/d"?fmtAt(l.at):esc(blank(l.at)?"n/d":l.at)}.`).join(" ")} Source: ${esc(res.source||"S&P Global Market Intelligence statutory data")}, fetched ${fmtAt(res.fetchedAt)}. US dollars are shown in $M.</p>`;
+  // loadedBy "schema": each entry is a part (schema) of S&P's database and the date S&P last updated it
+  h+=`<p class="source" id="statSource">${loaded.map(l=>`${res.loadedBy==="schema"?`S&amp;P last updated the ${esc(l.view)} part of its database on`:`S&amp;P last loaded ${esc(l.view)} on`} ${fmtAt(l.at)!=="n/d"?fmtAt(l.at):esc(blank(l.at)?"n/d":l.at)}.`).join(" ")} Source: ${esc(res.source||"S&P Global Market Intelligence statutory data")}, fetched ${fmtAt(res.fetchedAt)}. US dollars are shown in $M.</p>`;
   return h;
 }
 /* One-off set-up for Corp Dev: look at Snowflake's views and columns, then save which column holds each figure. */
@@ -2979,14 +2980,68 @@ async function openSetup(){
 }
 async function discover(view, refresh){
   const su=S.st.setup;
-  if(view){ su.view=view; su.cols=null; su.colsErr=null; su.colsBusy=true; } else { su.views=null; su.viewsErr=null; su.viewsBusy=true; }
+  if(view){ su.view=view; su.viewSchema=su.schema||""; su.cols=null; su.colsErr=null; su.colsBusy=true; } else { su.views=null; su.viewsErr=null; su.viewsBusy=true; }
   render();
   const like=su.like.trim();
-  const r=await callFn("snl-statutory",{action:"discover", ...(view?{view}:like?{like}:{}), ...(refresh?{refresh:true}:{})});
+  const r=await callFn("snl-statutory",{action:"discover", ...(su.schema?{schema:su.schema}:{}), ...(view?{view}:like?{like}:{}), ...(refresh?{refresh:true}:{})});
   if(!S.session) return;
   if(view){ if(su.view!==view) return; su.colsBusy=false; if(r.data) su.cols=Array.isArray(r.data.columns)?r.data.columns:[]; else if(r.err!=="signin") su.colsErr=r; }
   else { su.viewsBusy=false; if(r.data) su.views=Array.isArray(r.data.views)?r.data.views:[]; else if(r.err!=="signin") su.viewsErr=r; }
   render();
+}
+/* Field set-up across schemas: S&P keeps companies, financials, reinsurance and so on in separate schemas. Corp Dev
+   lists them, picks one (or stays in the default schema, the SNOWFLAKE_SCHEMA secret) and lists its views there. */
+async function suListSchemas(refresh){
+  const su=S.st.setup; su.schemas=null; su.schemasErr=null; su.schemasBusy=true; render();
+  const r=await callFn("snl-statutory",{action:"discover", schemas:true, ...(refresh?{refresh:true}:{})});
+  if(!S.session) return;
+  su.schemasBusy=false; if(r.data) su.schemas=Array.isArray(r.data.schemas)?r.data.schemas:[]; else if(r.err!=="signin") su.schemasErr=r;
+  render();
+}
+function suPickSchema(name){
+  const su=S.st.setup; if((su.schema||"")===name) return;
+  su.schema=name; su.views=null; su.viewsErr=null; su.view=null; su.cols=null; su.colsErr=null; su.colLike="";
+  render(); discover(null, false);
+}
+function suSchemaHTML(){
+  const su=S.st.setup, now=su.schema||"";
+  const pick=(name, label)=>`<button type="button" class="btn sm${now===name?"":" ghost"}" data-act="su-schema" data-name="${esc(name)}" aria-pressed="${now===name}">${label}</button>`;
+  return `<div class="f" id="suSchema"><span>Schema <em>S&amp;P keeps companies, financials and reinsurance in separate schemas; views are listed from the one chosen here</em></span>
+    <div class="toolbar"><span class="t2" id="suSchemaNow" style="overflow-wrap:anywhere">Looking in ${now?`<b>${esc(now)}</b>`:"<b>the default schema</b> (the SNOWFLAKE_SCHEMA secret)"}.</span>
+      <button type="button" class="btn sm" data-act="su-schemas" ${su.schemasBusy?"disabled":""}>${su.schemasBusy?"Listing…":"List schemas"}</button>${su.schemas?`<button type="button" class="btn sm ghost" data-act="su-schemas" data-refresh="1">Ask Snowflake again</button>`:""}</div>
+    ${su.schemasErr?problemHTML(su.schemasErr, "Couldn't list the schemas.", ""):""}
+    ${su.schemas?(su.schemas.length?`<div id="suSchemas" role="group" aria-label="Schemas" style="display:flex;flex-wrap:wrap;gap:6px;min-width:0">${pick("", "Default schema")}${su.schemas.map(s=>pick(String(s.name), esc(s.name))).join("")}</div>`:`<p class="t2">No schemas came back. That may mean the Snowflake login can't see them yet.</p>`):""}</div>`;
+}
+/* The columns of the chosen view, narrowed by the "columns containing" box (wide views have 900 or more). */
+function suColsHTML(){
+  const su=S.st.setup, all=Array.isArray(su.cols)?su.cols:[], q=String(su.colLike||"").trim().toLowerCase();
+  const shown=q?all.filter(c=>String(c.name||"").toLowerCase().includes(q)||String(c.comment||"").toLowerCase().includes(q)):all;
+  const note=q?`<p class="t2" id="suColsCount" role="status">${shown.length===all.length?`All ${count(all.length)} columns contain "${esc(q)}".`:`Showing ${count(shown.length)} of ${count(all.length)} columns.`}</p>`:"";
+  if(!shown.length) return note+`<p class="t2" id="suColsNone">No column name or description contains "${esc(q)}".</p>`;
+  return note+`<div class="tbl-wrap" style="max-height:360px;overflow:auto"><table id="suCols"><thead><tr><th>Column</th><th>Type</th><th>What S&amp;P says about it</th></tr></thead><tbody>${sortRows(shown, c=>isNum(c.position)?+c.position:null, 1).map(c=>`<tr><td style="overflow-wrap:anywhere"><code>${esc(c.name)}</code></td><td>${esc(c.type||"n/d")}</td><td>${blank(c.comment)?"n/d":esc(c.comment)}</td></tr>`).join("")}</tbody></table></div>`;
+}
+/* After saving: why each figure in the mapping can't be used yet, as the function checked it. */
+function suProblemsHTML(){
+  const s=S.st.status, fields=s&&Array.isArray(s.fields)?s.fields:[];
+  const bad=fields.filter(f=>!f.mapped && !blank(f.problem) && f.problem!=="not mapped");
+  const lp=s&&!blank(s.loadedProblem)?s.loadedProblem:"";
+  if(!bad.length && !lp) return "";
+  return `<div class="notes" id="suProblems" role="status"><b>Part of the saved mapping can't be used yet</b><ul>${bad.map(f=>`<li><code>${esc(f.id)}</code> ${esc(f.label||"")}: ${esc(f.problem)}. Fix this entry and save again.</li>`).join("")}${lp?`<li><code>loaded</code>: ${esc(lp)}. Until it is fixed, the dates S&amp;P last loaded each view are shown instead.</li>`:""}</ul></div>`;
+}
+function suHelpHTML(){
+  const ex={fields:{npe:{view:"CORE_FIN.FIN_FLOW_B", as:"F", joins:[{view:"CORE_FIN.FLOW_PERIOD", as:"FP", on:[{left:"F.PERIOD_ID", right:"FP.PERIOD_ID"}]},{view:"CORE_FIN.STOCK_PERIOD", as:"SP", on:[{left:"FP.STOCK_PERIOD_ID", right:"SP.PERIOD_ID"}]},{view:"ENTITY.ENTITY_LIST", as:"E", on:[{left:"SP.ENTITY_ID", right:"E.ENTITY_ID"}]}],
+    entity:{company:"E.NAIC_CD", group:"E.GROUP_CD", name:"E.ENTITY_NAME"}, year:"SP.PERIOD_END", yearIsDate:true, value:"F.NPE_000", where:[{column:"SP.LOB_NAME", equals:"Total"},{column:"FP.ANNUALISED", equals:"Y"},{column:"SP.PERIOD_END", month:12}], latest:"SP.SEQ", scale:1000}}, loaded:{view:"BATCH_RUN_VIEW", at:"RUN_DATE"}};
+  return `<details id="suHelp"><summary>How to map a figure that is spread over several views</summary>
+    <ul style="margin:6px 0;padding-left:18px">
+      <li><b>view</b> is the view that holds the figure: <code>VIEW</code> in the default schema, or <code>SCHEMA.VIEW</code> in another. Give it a short name with <b>as</b>.</li>
+      <li><b>joins</b> (up to 6) bring in more views, each with its own <b>as</b>, joined <b>on</b> columns of a view named before it. Add <code>"kind": "left"</code> to keep rows that have no match.</li>
+      <li>With joins, write every column as <code>NAME.COLUMN</code>, where NAME is a view's <b>as</b>: the company, group and name columns, year, value, line, state and item.</li>
+      <li><b>where</b> keeps only some rows: <code>equals</code>, <code>notEquals</code>, <code>in</code> (a list of up to 80), <code>isNull</code> (true or false), <code>month</code> (the month of a date column, 12 for year-end rows), or <code>startsWith</code> (text the value begins with). Write numbers in quotes, like <code>"140"</code>: they still match a number column.</li>
+      <li><b>plus</b> adds up to 4 more columns of the same row to the value, such as two parts of paid-in capital; an empty one counts as zero. <b>stateStrip</b> takes text off the front of each state, so <code>"Reported:FL"</code> shows as FL.</li>
+      <li><b>yearIsDate</b> takes the year from a date. <b>latest</b> keeps only the row with the highest value in that column, such as a sequence number, for each company and year. <b>sum</b> adds up rows that share everything else, such as many rows for one reinsurer.</li>
+      <li><b>loaded</b> (optional, beside <b>fields</b>): the view each schema has with S&amp;P's run dates, and its date column. The results then say when S&amp;P last updated each schema a figure came from.</li>
+    </ul>
+    <p class="t2" style="margin:0">A made-up example:</p><pre class="code" id="suExample" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto;margin:4px 0 0">${esc(JSON.stringify(ex, null, 2))}</pre></details>`;
 }
 function mappingProblem(text){
   let doc; try{ doc=JSON.parse(text); }catch(e){ return {problem:"This isn't valid JSON yet: "+String(e&&e.message||e).replace(/^JSON\.parse: /,"")+"."}; }
@@ -2995,6 +3050,12 @@ function mappingProblem(text){
   if(!obj(doc.fields)) return {problem:'The mapping needs a "fields" object, with one entry for each figure.'};
   const bad=Object.keys(doc.fields).find(k=>!obj(doc.fields[k]));
   if(bad!==undefined) return {problem:`The entry for "${bad}" must be an object with view, entity, year and value.`};
+  for(const [k,f] of Object.entries(doc.fields)){
+    if(f.joins!==undefined && !Array.isArray(f.joins)) return {problem:`The entry for "${k}" has "joins" that isn't a list. Write it as [{"view": ..., "as": ..., "on": [...]}].`};
+    if(f.joins!==undefined && f.joins.length>6) return {problem:`The entry for "${k}" has ${f.joins.length} joins. A figure can join at most 6 views.`};
+    if(f.where!==undefined && !Array.isArray(f.where)) return {problem:`The entry for "${k}" has "where" that isn't a list. Write it as [{"column": ..., "equals": ...}].`};
+  }
+  if(doc.loaded!==undefined && !obj(doc.loaded)) return {problem:'The "loaded" entry must be an object, like {"view": "...", "at": "..."}.'};
   if(text.length>200000) return {problem:"The mapping is too large to save."};
   return {doc};
 }
@@ -3014,15 +3075,17 @@ function setupHTML(){
     <div><h3>One-off set-up: tell the app where each figure lives in Snowflake</h3>
       <p class="t2">Do this once, after S&amp;P creates the Snowflake account. Only Corp Dev logins see this panel. Find the view and columns that hold each figure, then save them in the mapping below.</p></div>
     ${fields.length?`<div class="counts" id="suFields"><b>Figures the app shows:</b>${fields.map(f=>`<span><code>${esc(f.id)}</code> ${esc(f.label)} ${f.mapped?"(mapped)":"(not mapped)"}</span>`).join("")}</div>`:""}
+    ${suProblemsHTML()}${suSchemaHTML()}
     <div class="f"><label for="su_like">1. Find the view <em>optional: part of a view name</em></label>
       <div class="toolbar"><div class="grow"><input type="text" id="su_like" data-bind="st.setup.like" value="${esc(su.like)}" autocomplete="off" spellcheck="false" placeholder="For example PREMIUM"></div>
         <button type="button" class="btn" data-act="su-views" ${su.viewsBusy?"disabled":""}>${su.viewsBusy?"Listing…":"List views"}</button>${su.viewsBusy?pbHTML("su-views", {name:"Listing the views", small:true}):""}${su.views?`<button type="button" class="btn sm ghost" data-act="su-views" data-refresh="1">Ask Snowflake again</button>`:""}</div>
       ${su.viewsErr?problemHTML(su.viewsErr, "Couldn't list the views.", ""):""}
       ${su.views?(su.views.length?`<div class="tbl-wrap" style="max-height:260px;overflow:auto"><table id="suViews"><thead><tr><th>View</th><th>Type</th><th>What S&amp;P says about it</th></tr></thead><tbody>${su.views.map(v=>`<tr><td><button type="button" class="lnk" data-act="su-view" data-name="${esc(v.name)}">${esc(v.name)}</button></td><td>${esc(v.type||"n/d")}</td><td>${blank(v.comment)?"n/d":esc(v.comment)}</td></tr>`).join("")}</tbody></table></div>`:`<p class="t2">No views match. That may mean the Snowflake login can't see them yet.</p>`):""}</div>
-    ${su.view?`<div class="f"><span>2. Columns in ${esc(su.view)}</span>
+    ${su.view?`<div class="f"><span style="overflow-wrap:anywhere">2. Columns in ${esc(su.viewSchema?su.viewSchema+"."+su.view:su.view)}${su.viewSchema?` <em>write the view as ${esc(su.viewSchema+"."+su.view)} in the mapping</em>`:""}</span>
       ${su.colsBusy?`<p class="t2" role="status">Listing the columns…${pbHTML("su-cols", {name:"Listing the columns", small:true})}</p>`:""}${su.colsErr?problemHTML(su.colsErr, "Couldn't list the columns.", ""):""}
-      ${su.cols?(su.cols.length?`<div class="tbl-wrap" style="max-height:260px;overflow:auto"><table id="suCols"><thead><tr><th>Column</th><th>Type</th><th>What S&amp;P says about it</th></tr></thead><tbody>${sortRows(su.cols, c=>isNum(c.position)?+c.position:null, 1).map(c=>`<tr><td><code>${esc(c.name)}</code></td><td>${esc(c.type||"n/d")}</td><td>${blank(c.comment)?"n/d":esc(c.comment)}</td></tr>`).join("")}</tbody></table></div>`:`<p class="t2">This view has no columns the login can see.</p>`):""}</div>`:""}
-    <div class="f"><label for="su_map">${su.view?"3":"2"}. The mapping <em>JSON: for each figure, the view, the columns for the company or group code, the year and the value, and the line or state column where there is one</em></label>
+      ${su.cols?(su.cols.length?`<input type="search" id="su_colLike" data-bind="st.setup.colLike" value="${esc(su.colLike||"")}" autocomplete="off" spellcheck="false" placeholder="Columns containing…" aria-label="Show only columns containing" style="max-width:360px"><div id="suColsBox" style="min-width:0">${suColsHTML()}</div>`:`<p class="t2">This view has no columns the login can see.</p>`):""}</div>`:""}
+    <div class="f"><label for="su_map">${su.view?"3":"2"}. The mapping <em>JSON: for each figure, the view, the columns for the company or group code, the year and the value, and the line or state column where there is one. A figure spread over several views, or in another schema, uses joins: see below</em></label>
+      ${suHelpHTML()}
       ${su.mapBusy?`<p class="t2" role="status">Loading the saved mapping…</p>`:`<textarea class="code" id="su_map" data-bind="st.setup.text" spellcheck="false" autocapitalize="off">${esc(su.text||"")}</textarea>`}
       ${su.mapErr?`<p class="err" id="suErr" role="alert">${esc(su.mapErr)}</p>`:""}
       <div class="inline"><button type="button" class="btn primary" data-act="su-save" ${su.saving||su.mapBusy?"disabled":""}>${su.saving?"Saving…":"Save mapping"}</button><span class="t2">Saving replaces the mapping for everyone.</span></div></div>
@@ -7414,6 +7477,8 @@ document.addEventListener("click", e=>{
     case "su-toggle": if(st.setup.open){ st.setup.open=false; render(); } else openSetup(); break;
     case "su-views": discover(null, !!t.dataset.refresh); break;
     case "su-view": discover(t.dataset.name, false); break;
+    case "su-schemas": suListSchemas(!!t.dataset.refresh); break;
+    case "su-schema": suPickSchema(t.dataset.name||""); break;
     case "su-save": saveMapping(); break;
 
     case "pf-kind": S.pf.kind=t.dataset.k==="group"?"group":"company"; S.pf.name=""; S.pf.find.matches=null; S.pf.formErr=""; render(); break;
@@ -7545,6 +7610,7 @@ function onInput(e){
   setPath(path, t.value);
   if("live" in t.dataset){ if(path==="f.filter") S.f.shown=PAGE; render(); }
   else if(path==="st.codes"){ const el=document.getElementById("st_named"); if(el) el.innerHTML=statNamedHTML(); }   // names beside the codes, without a rebuild while typing
+  else if(path==="st.setup.colLike"){ const el=document.getElementById("suColsBox"); if(el) el.innerHTML=suColsHTML(); }   // the column list narrows while typing
   else if(path==="f.from" || path==="f.to"){ const est=document.getElementById("f_est"); if(est) est.textContent=estimateText(); }   // no rebuild while a date is being typed
 }
 document.addEventListener("input", onInput);
