@@ -5,6 +5,7 @@ A small web app for a Strategy & Corporate Development team at an insurer. It an
 - **Filings:** search S&P's SNL Insurance Product Filings (rate, rule and form filings) by company, state, type of insurance, filing type and date. See the rate impact and description, and open the filing's original document. States are chosen on a map of the United States or from the list beside it.
 - **Snapshot:** pick one company or a whole group and the last 1, 3 or 5 years, and see its filings on one page: headline counts, a map by state, rate changes over time, filings by year and type, the latest form and rule filings, and the approximate time with the regulator. It is worked out in the browser from one ordinary filings search, which is saved, so reopening a snapshot costs nothing.
 - **Ask Claude:** a panel that opens over either view. Type a question in plain English. Claude is told what is on your screen (the filings search or the statutory figures), searches filings, reads the documents, and answers with page citations, its sources and a comparison table you can export to CSV or Excel. Under every finished answer, **Export answer** downloads the question, answer, table and numbered sources as one Word document, and **Copy answer** copies the same so it pastes into an email or a memo with the table intact. The panel also lists your own questions from the last 30 days under "Past answers".
+- **Earnings:** choose a quarter and find, for each company on the team's earnings watchlist, the 10-Q (10-K) and the earnings 8-K from the SEC, and the financial supplement and investor presentation from its investor pages; download them one at a time or as one zip. It does in the site what the owner's desktop script does, as far as a site can (step 14).
 - **Statutory:** direct and net premiums written by line and state, policyholder surplus, and loss, expense and combined ratios by NAIC company or group code, with peers side by side. This view is built and waiting: it goes live when the Snowflake secrets are set (step 7).
 
 It is a standalone app with its own repository and its own Supabase project. It never stores or sends deal, banker or pipeline information. Claude sees only the question typed and what S&P returns.
@@ -25,6 +26,7 @@ House rules for anyone changing the code are in [.github/copilot-instructions.md
 | `snl-profile` | Supabase Edge Function | Optional. The figures and the text for a company profile. |
 | `snl-digest` | Supabase Edge Function | Optional. Filing summaries: made once, saved, and searched. |
 | `snl-index` | Supabase Edge Function | Optional. The market index: sweeps a state for every listed company and answers from what it kept. |
+| `snl-earnings` | Supabase Edge Function | Optional. Earnings: a quarter's results documents for the companies on the earnings watchlist, from SEC EDGAR and their investor pages. Holds the SEC contact. |
 | `web/deck.js`, `web/profile-slides.js` | The browser | Build the profile as a PowerPoint file on your template. The file is made in the browser and never stored on the server. |
 | `supabase/migrations/0001_snl.sql` | Supabase Postgres | Logins and roles, saved S&P results, the S&P request counter, Claude answers in progress. |
 | `supabase/migrations/0003_watchlist.sql` | Supabase Postgres | Optional. The filings the watchlist found and the record of its checks. |
@@ -499,6 +501,28 @@ Anyone can save one of their own finished answers from Claude where every login 
    supabase functions deploy snl-chat --no-verify-jwt
    ```
 
+### 14. Earnings (optional)
+
+The **Earnings** tab finds a quarter's results documents for the companies on the earnings watchlist, one company at a time: from SEC EDGAR the 10-Q (10-K or 20-F for the fourth quarter), the first earnings 8-K after the quarter end (item 2.02) with its EX-99 exhibits, and a foreign filer's results 6-K; from each company's investor pages the financial supplement, the investor presentation and a 10-Q PDF; for London names with no SEC filings, the interim or annual report and the results release or trading update. The rules are the desktop script's, ported unchanged. What is found is saved and opens again without asking anyone until **Refresh**. Each document downloads through the function, or **Download this quarter** gives one zip laid out as the script lays out folders: `3Q26 Financial Statements/<company>/<the script's file name>`. Documents that have appeared since your last look at a quarter in this browser are marked New.
+
+What it cannot do, because a site can't drive a browser as the script does: an investor site that turns away automated requests shows as "Site refused" with the page to open yourself, and a list a site fills in with JavaScript can't be seen ("Not found on the pages read"). SEC filings are saved as the SEC's own web pages (`.htm`, with a line that makes their images and links load from sec.gov when opened online), not PDFs. The desktop script remains the way to get everything.
+
+1. Set the contact the SEC asks automated tools to send: your organisation's name and a contact email, for example `Organisation Name name@your-company.example`. It goes only to the SEC and is never shown on the page. Until it is set, the tab says "not set up yet" and nothing is fetched from anywhere.
+
+   ```bash
+   supabase secrets set SEC_CONTACT=...
+   ```
+
+2. Deploy the function:
+
+   ```bash
+   supabase functions deploy snl-earnings --no-verify-jwt
+   ```
+
+3. Load the watchlist. Signed in as a Corp Dev login, open **Earnings**, open **Load the list from the desktop script** at the bottom, paste the script's `companies` list (from its opening `[` to its closing `]`, or the whole block between the triple quotes of `BUILT_IN_CONFIG`), and click **Check the list**. Each entry that can't be used, or an address that can't be fetched, gets its own message; then **Load these companies**. Change, add or remove companies there later. The list is kept in the app's settings in Supabase (`earnings_watchlist`), never in this repository. Every login can see it, as carrier sets; it holds names, tickers and addresses, and nothing about why a company is on it.
+
+**Fetching other people's sites safely.** Every address comes from the watchlist or from links on those pages, so each is treated as hostile: https only, on the usual port; no IP addresses, `localhost`, `.local`, `.internal` or one-word site names, before and after every redirect (at most four, each checked, and each site name's address checked too); at most 3 MB and 15 seconds a page, 60 MB for a file passed through, which streams rather than being held. Investor sites get none of the app's keys or cookies and never the SEC contact. The page never hands the function an address: it names a company on the watchlist, or a document by the id the function gave it.
+
 ### Needing no set-up
 
 - **Narrow it down.** Snapshot, Compare, Market and the filings profile each take four optional filters: states, type of insurance, filing type and filing status. With no status chosen, every status in S&P's list is searched. A section that depends on a filing type or status the narrowing excluded says it was left out by the narrowing, and never shows a zero or "S&P returned nothing": narrowed to rate filings, the form and rule figures say "Left out", and a profile deck leaves those slides out with the reason. Programs and forms takes a status filter too. Chosen before a search, they are what S&P (or the index) is asked for. On Snapshot and Compare the same filters also narrow what is on screen after a search, at once and without asking S&P again, with "Show everything" to undo it. Every heading, note, export and deck slide says what it was narrowed to, and an empty result says it shows nothing about other states or types. Narrowing does not reduce the number of S&P requests, which depends on companies and years; it reduces how many filings come back. After updating, deploy `snl-profile` and `snl-index` again. Several states or types at once on the Market view also needs `0009_market_filters.sql`, and its filing type and status lists need `0010_market_more_filters.sql` (step 12).
@@ -538,6 +562,7 @@ After step 5:
 | Summarising a filing | 1 for the document (2 with a fresh sign-in). 0 for a summary already saved, for searching summaries, and for summaries made after an answer that read the filing. |
 | A market index sweep | About 300 for one state for one year with 2,700 companies; about 900 for three years. Searching the index: 0. |
 | Building a profile | At most 6 for its filings page (sign-in, the reference lists if they aren't saved, and up to 3 pages of results). 0 when the same profile was built earlier that day. The statutory figures use no S&P request. |
+| Earnings: finding or downloading documents | 0. The Earnings tab uses no S&P request and no Claude. |
 | Asking Claude | Whatever Claude looks up: the searches above plus 1 for each document it reads, and 2 the first time for the lists of insurance types and filing types if they aren't saved yet. One question is capped at 150 S&P requests, 24 lookups, 8 documents or parts of documents, 150 pages a read and 200 document pages in all. A filing longer than 150 pages is read in parts, starting with its front pages; each part costs 1 S&P request, and the answer says which pages of how many were read. |
 
 The app waits its turn so calls are at least a second apart, and stops with a plain message, before calling S&P, when the hour's or day's limit is used up. A search that would need more than 60 S&P requests (40 inside a Claude answer) is refused before any is spent, with the reason. A search with very many pages of results, or one where S&P answers slowly, stops early and says the results are incomplete; an incomplete result is never saved. Each login can have one Claude answer running at a time.
@@ -551,6 +576,15 @@ The app waits its turn so calls are at least a second apart, and stops with a pl
 
 **Snowflake credits.** S&P's guide says an X-Small warehouse uses 1 credit an hour while it runs. Snowflake bills a minimum of one minute each time the warehouse wakes, so a statutory query (up to 8 short statements) costs about 0.02 credit, and Discover about the same. A repeated query opens from the saved result and costs nothing, whether it comes from the Statutory view or from Claude. In a reader account the provider (S&P) pays for credits; ask S&P whether use is capped or recharged.
 
+**Earnings** (the SEC and investor sites charge nothing; the SEC asks for at most 10 requests a second, and the app keeps to 5):
+
+| Action | What it uses |
+| --- | --- |
+| Finding one company's documents | One function call. About 3 SEC requests (its list of filings and two filing index pages), up to 8 more for a foreign filer's 6-Ks, plus the SEC's tickers file about once a week; up to 14 investor pages; at most two minutes. A watchlist of 27 companies is 27 calls and about 80 to 100 SEC requests. |
+| The same company and quarter again | 0 requests: it opens from what was saved, until Refresh. Opening a quarter is one call. |
+| Downloading a document | One function call and one request to where the document is. A zip of the quarter is one call a file. |
+| Claude tokens, S&P requests | None. |
+
 **Supabase and GitHub Pages:** free at this size.
 
 ## Supabase limits that matter
@@ -562,7 +596,7 @@ From Supabase's documentation in November 2026.
 | How long one function call may run, background work included | 150 seconds | 400 seconds | A Claude answer runs in slices. Each reply from Claude must fit inside one call; a lookup asked for when the time is nearly up is put off to the next call. |
 | CPU time per call | 2 seconds | 2 seconds | Fine: the functions mostly wait on S&P and Claude. Cutting a page range out of a long PDF takes 0.1 to 0.3 seconds; one call spends at most 1 second cutting and puts further reads off to its next call. |
 | Memory | 256 MB | 256 MB | A filing document of up to 60 MB passes through. Cutting 150 pages out of a made-up 57 MB, 900-page filing peaked at about 177 MB. A search holds at most 2,000 filings in one function call (about 2.4 MB, peaking near 110 MB of memory on made-up rows); a wider search comes in parts that the page puts together. |
-| Time to first response | 150 seconds | 150 seconds | A search is capped at 60 S&P requests to stay inside this. |
+| Time to first response | 150 seconds | 150 seconds | A search is capped at 60 S&P requests to stay inside this. Earnings looks at one company a call and stops reading investor pages with time to spare, so a call ends within about two minutes. |
 | Function calls a month | 500,000 | 2 million | Far above this app's use. |
 | Database size | 500 MB | 8 GB | Each saved part of a search is at most 2,000 filings, about 2.4 MB (500 filings is about 0.4 MB). A wide search is saved in parts and opens again without asking S&P. |
 | Pausing | After a week with no activity | Never | Step 8 keeps a free project awake. |
@@ -628,6 +662,7 @@ Nothing in this list is guessed in the code: each item is either handled both wa
 | **Narrowing by filing type and status, live.** Which filings count as rate, rule and form rests on S&P's filing type names (`snapKinds`, `fpKinds`), still a guess, and the "left out by the narrowing" wording builds on it. Unconfirmed: that a filing's status id matches S&P's status list the way its filing type id was seen to; how many filing type and status names a real index holds; that `0010_market_more_filters.sql` behaves on the live project as it did on a local Postgres. | `web/index.html`, `_shared/profile.ts`, `0010_market_more_filters.sql` | The first Snapshot narrowed to rate filings, and the first Market search by status |
 | **Narrowing by type of insurance, live.** That S&P's `typeOfInsuranceId` filter returns only those types, and that the type names on returned filings match S&P's reference list (narrowing what is on screen matches on the name). That `0009_market_filters.sql` is fast enough on a full index; it was measured on a few rows only. | `web/index.html`, `0009_market_filters.sql` | The first narrowed Snapshot and Market search |
 | **Filing summaries against Anthropic's live API.** A summary is asked for in a fixed shape, and Anthropic refuses a shape with more than 16 fields that may be empty, 24 optional fields or 20 strict tools. On 18 Nov 2026 the summary shape had 39 such fields and every summary failed; it now has 8, and `tests/functions/claudelimits_test.ts` counts every shape the app sends against those limits. Unconfirmed until the next live summary: that Anthropic accepts the smaller shape together with the uploaded file and the fallback setting. If it refuses, the page now shows Anthropic's own reason. | `_shared/digest.ts` | The next summary made on the live site |
+| **Earnings against the real SEC and real investor sites.** Built and tested on made-up answers in the shapes the owner's script reads (the tickers file, `data.sec.gov` submissions, filing index pages); the SEC's own guidance pages could not be reached from where this was built. Unconfirmed: that the SEC accepts the requests with `SEC_CONTACT` as the User-Agent from Supabase's addresses; how many investor sites refuse a plain request or fill their lists with JavaScript; whether Supabase's Edge Runtime lets the function look up a site name's address (`Deno.resolveDns`) to refuse private ones (without it each address is still checked by name); that a quarter more than about a year back is in the SEC's "recent" filings list for a busy filer (older pages of that list aren't read, as in the script); how saved `.htm` filings look when opened. | `_shared/earnings.ts`, `snl-earnings` | The first Find on the live site, compared with the desktop script's table for the same quarter |
 | **Claude reading real filings.** Tested against a stand-in for Anthropic's API only. Watch the first live answer: the page citations, the cost and how long each step takes. | `_shared/chat.ts` | First live answer |
 
 S&P's "SNL Insurance Product Filings User Guide" was not available when this was built. The code follows the summary of it in the build brief and S&P's public API specification.

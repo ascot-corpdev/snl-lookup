@@ -35,6 +35,11 @@ verify_jwt = false
 [functions.snl-signin]
 verify_jwt = false
 
+# Earnings: a watchlist company's quarterly results documents from SEC EDGAR and its investor pages. Needs the secret
+# SEC_CONTACT (the organisation and a contact email the SEC asks automated tools to send). No S&P, no Claude.
+[functions.snl-earnings]
+verify_jwt = false
+
 # Lets background tasks run under `supabase functions serve` on your own machine.
 [edge_runtime]
 policy = "per_worker"
