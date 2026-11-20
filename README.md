@@ -396,6 +396,8 @@ What each part does:
 - **`sum`, `distinct`, `scale`:** add up rows that share everything else; drop repeated rows; multiply the stored value (1000 when the view holds thousands of dollars, 100 when a ratio is held as a fraction). `sum` and `distinct` can't be used together.
 - **`loaded`:** the run-date view each schema has and its date column, so the page can say when S&P last updated each part of its database.
 
+**Big statutory queries come in over several calls.** Each figure is fetched with its own statement, six at a time, and on S&P's wide views one statement takes about ten seconds. A figure that doesn't fit in the two minutes a call has comes back as "not run", and every figure that did come back is kept. The Statutory view and the profile's Get figures then ask again by themselves, up to six times while more figures arrive, with a progress bar and Stop. If a call brings nothing new they stop and offer Carry on. Ask Claude is told to ask again the same way. Nothing to set up.
+
 ### 8. Keep Supabase awake (optional, free plan only)
 
 The free plan pauses a project after about a week with no activity. To prevent that, run `supabase/migrations/0002_keepalive.sql` in the **SQL editor**. The "Keep Supabase awake" workflow then calls it once a day. It returns only the time and reads no data. Skip this on a paid plan.
@@ -607,7 +609,7 @@ The app waits its turn so calls are at least a second apart, and stops with a pl
 - Claude's text for a profile: one short request with no documents, a few cents. It counts as one question.
 - Under each answer the page shows what it cost in US dollars, worked out from Anthropic's list prices for the model that served each request, with the tokens read and written and the S&P requests used. A model not in the price list shows "cost n/d". The line under the question box shows the questions asked today and what they cost. These are estimates; the Anthropic console is the record of what was charged. To update a price, edit `PRICES` in `supabase/functions/_shared/chat.ts`.
 
-**Snowflake credits.** S&P's guide says an X-Small warehouse uses 1 credit an hour while it runs. Snowflake bills a minimum of one minute each time the warehouse wakes, so a statutory query (up to 8 short statements) costs about 0.02 credit, and Discover about the same. A repeated query opens from the saved result and costs nothing, whether it comes from the Statutory view or from Claude. In a reader account the provider (S&P) pays for credits; ask S&P whether use is capped or recharged.
+**Snowflake credits.** S&P's guide says an X-Small warehouse uses 1 credit an hour while it runs. Snowflake bills a minimum of one minute each time the warehouse wakes, so a statutory query (one short statement for each figure asked for, up to 18, six at a time, plus one or a few for the run dates; figures already fetched are reused, so asking again runs only the ones still missing) costs about 0.02 credit, and Discover about the same. A repeated query opens from the saved result and costs nothing, whether it comes from the Statutory view or from Claude. In a reader account the provider (S&P) pays for credits; ask S&P whether use is capped or recharged.
 
 **Earnings** (the SEC and investor sites charge nothing; the SEC asks for at most 10 requests a second, and the app keeps to 5):
 

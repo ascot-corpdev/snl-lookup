@@ -1229,7 +1229,9 @@ function makeTools(ctx: ChatCtx, st: ChatState, api: Spgmi | null, client: Anthr
     // The same saved results the Statutory view uses: a query already run costs no Snowflake time.
     const out = await savedOrFreshStatutory(sf, db, sfCreds.database, sfCreds.schema, mapping, parsed.q, parsed.fields, { now: ctx.now(), deadline: sliceEnd + SPARE_MS, clock: ctx.now });
     st.lookups.push({ tool: "query_statutory", detail: `${parsed.q.kind} ${parsed.q.codes.join(", ")}, ${parsed.q.fromYear} to ${parsed.q.toYear}` });
-    return { result: { ...out, fields: out.fields.map((f) => ({ ...f, rows: f.rows.slice(0, 600), note: !f.mapped ? "This field isn't mapped to a Snowflake view yet." : f.rows.length > 600 ? "Only the first 600 rows are shown." : null })), units: "usd fields are US dollars; pct fields are percentages" } };
+    // Figures that didn't fit in this step are pending: the ones that came back are kept, so asking again carries on.
+    const pending = out.pending > 0 ? { note: `${out.pending === 1 ? "1 figure" : `${out.pending} figures`} didn't come back in time and show as "Not run". The figures that did come back are kept: call query_statutory again with the same inputs to get the rest.` } : {};
+    return { result: { ...out, fields: out.fields.map((f) => ({ ...f, rows: f.rows.slice(0, 600), note: !f.mapped ? "This field isn't mapped to a Snowflake view yet." : f.rows.length > 600 ? "Only the first 600 rows are shown." : null })), units: "usd fields are US dollars; pct fields are percentages", ...pending } };
   }
 
   return {

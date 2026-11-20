@@ -89,7 +89,7 @@ function world(secrets: Record<string, string> = PAT, opts: SfOpts & { mapping?:
   ok("company names come back for the codes asked", same(r.body.entities, [{ code: "91001", name: "Calloway Insurance Co" }, { code: "92001", name: "Tarrow Mutual Insurance Co" }]));
   ok("LOADTRACKER supplies when each view was loaded", same(r.body.loaded, [{ view: "IR_PREM_LINE", at: "2026-11-01T04:00:00" }, { view: "IR_SURPLUS", at: "2026-10-20T04:00:00" }]), r.body.loaded);
   ok("the answer says where it came from and that it is fresh and saved", r.body.source.includes("SNL Insurance Regulatory Data") && r.body.fromStore === false && r.body.saved === true && r.body.fetchedAt === new Date(t0).toISOString());
-  ok("the saved row passes the database's checks", saved.length === 1 && saved[0].kind === "statutory" && saved[0].problem === null && /^statutory:[0-9a-f]{32}$/.test(saved[0].id), saved);
+  ok("the saved row passes the database's checks", saved.filter((s) => /^statutory:[0-9a-f]{32}$/.test(s.id)).length === 1 && saved.every((s) => s.kind === "statutory" && s.problem === null), saved);
   ok("the SQL was sent with the codes and years bound, not written in", w.sf.statements.length === 4 && w.sf.statements.every((s) => !/91001|92001|2023|2024/.test(s.statement)) && same(w.sf.statements[0].bindings, [{ type: "TEXT", value: "91001" }, { type: "TEXT", value: "92001" }, { type: "FIXED", value: "2023" }, { type: "FIXED", value: "2024" }]), w.sf.statements.map((s) => s.statement));
   ok("Snowflake was sent the SQL API's headers and the default database, schema and role", w.sf.log.every((c) => c.headers.authorization === "Bearer test-pat-not-a-secret" && c.headers["x-snowflake-authorization-token-type"] === "PROGRAMMATIC_ACCESS_TOKEN" && c.headers.accept === "application/json")
     && w.sf.statements.every((s) => s.body.database === "MI_XPRESSCLOUD" && s.body.schema === "XPRESSFEED" && s.body.role === "XF_SNOWFLAKE_READER_ROLE" && s.body.warehouse === "WH_TEST"));
@@ -101,7 +101,7 @@ function world(secrets: Record<string, string> = PAT, opts: SfOpts & { mapping?:
   const fresh = await w.call({ ...QUERY, refresh: true });
   ok("refresh asks Snowflake again", fresh.body.fromStore === false && w.sf.log.length === n + 4 && fresh.body.fetchedAt === new Date(w.clock.now).toISOString());
   const other = await w.call({ ...QUERY, fields: ["surplus"] });
-  ok("a different set of fields is a different saved result", other.body.fromStore === false && other.body.fields.length === 1 && other.body.fields[0].id === "surplus");
+  ok("a different set of fields is a different saved result (its figure, saved on its own, is reused)", other.body.fromStore === true && other.body.fields.length === 1 && other.body.fields[0].id === "surplus");
   ok("a reader may run a query", (await w.call({ ...QUERY, toYear: 2025 }, { whoIs: reader })).status === 200);
   const grp = await w.call({ action: "query", kind: "group", codes: ["9100"], fromYear: 2024, toYear: 2024, fields: ["dpw_by_line", "surplus"] });
   ok("a group query uses the group column, and says which fields can't be looked up by group", same(grp.body.fields[0].rows.map((x: any) => [x.code, x.value]), [["9100", 1_300_000]]) && grp.body.fields[1].mapped === false && /no group column mapped/.test(grp.body.fields[1].error), grp.body.fields);
@@ -136,7 +136,7 @@ function world(secrets: Record<string, string> = PAT, opts: SfOpts & { mapping?:
   const bad = world({ ...secrets, SNOWFLAKE_PRIVATE_KEY: other.pem }, { host: "ab12345.us-east-1.snowflakecomputing.com", tables: TABLES, auth: { publicKey: key.publicKey, account: "ab12345", user: "svc_snl" } });
   const e = await bad.call(QUERY);
   ok("a key Snowflake doesn't know fails the whole query as a sign-in problem, in plain words", e.status === 502 && e.body.error === "snowflake_signin" && e.body.message.startsWith("Snowflake didn't accept the sign-in (401). Check SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER and the key or token on Supabase."), e.body);
-  ok("a failed sign-in is not saved as a result and is tried once", bad.db.store.size === 0 && bad.sf.log.length === 1);
+  ok("a failed sign-in is not saved as a result and each statement is tried once", bad.db.store.size === 0 && bad.sf.log.length === 3);
   ok("the answer never repeats the key", !JSON.stringify(e.body).includes(other.pem.slice(40, 80)));
   const garbage = world({ ...secrets, SNOWFLAKE_PRIVATE_KEY: "not-a-key" }, { tables: TABLES });
   const g = await garbage.call(QUERY);
@@ -145,7 +145,7 @@ function world(secrets: Record<string, string> = PAT, opts: SfOpts & { mapping?:
 
 // ---------- what each Snowflake failure looks like to the page ----------
 {
-  for (const [sfStatus, status, error, says] of [[401, 502, "snowflake_signin", /didn't accept the sign-in/], [500, 502, "snowflake_server", /Snowflake answered 500/], [503, 502, "snowflake_server", /Snowflake answered 503/], [408, 502, "snowflake_timeout", /ran out of time/]] as const) {
+  for (const [sfStatus, status, error, says] of [[401, 502, "snowflake_signin", /didn't accept the sign-in/], [500, 502, "snowflake_server", /Snowflake answered 500/], [503, 502, "snowflake_server", /Snowflake answered 503/]] as const) {
     const w = world();
     w.sf.failNext.push({ status: sfStatus, body: { message: "detail" } });
     const r = await w.call(QUERY);
@@ -157,16 +157,22 @@ function world(secrets: Record<string, string> = PAT, opts: SfOpts & { mapping?:
   let r = await w.call(QUERY);
   ok("one 429 from Snowflake is absorbed: the function waits and the query succeeds", r.status === 200 && w.clock.slept.includes(3000), { status: r.status, slept: w.clock.slept });
   w = world();
-  w.sf.failNext.push({ status: 429 }, { status: 429 });
+  w.sf.failNext.push(...Array.from({ length: 6 }, () => ({ status: 429 })));   // two for each statement running at once
   r = await w.call(QUERY);
   ok("two 429s reach the page as 429 snowflake_busy", r.status === 429 && r.body.error === "snowflake_busy" && r.body.message === "Snowflake is busy (429). Wait a minute and try again.", r.body);
   w = world();
   r = await w.call(QUERY, { fetch: (() => Promise.reject(new TypeError("socket hang up"))) as unknown as typeof fetch });
   ok("Snowflake unreachable reaches the page as a plain network message", r.status === 502 && r.body.error === "snowflake_network" && r.body.message === "Couldn't reach Snowflake. Try again in a few minutes.", r.body);
+  // a figure that runs out of time is that figure's "Not run", not a failed query; nothing whole is saved
+  w = world();
+  w.sf.failNext.push({ status: 408, body: { message: "detail" } });
+  r = await w.call(QUERY);
+  ok("a Snowflake 408 on one figure leaves the others, marks it Not run and says one is pending", r.status === 200 && r.body.pending === 1 && r.body.saved === false && r.body.fields[0].error.startsWith("Not run:") && r.body.fields.find((f: any) => f.id === "surplus").rows.length === 2, r.body);
+  ok("after a Snowflake 408 the whole answer isn't saved", ![...w.db.store.keys()].some((k) => /^statutory:[0-9a-f]{32}$/.test(k)));
   w = world();
   w.sf.slowNext = 10_000;
   r = await w.call(QUERY);
-  ok("a query that never finishes reaches the page as a timeout, and is cancelled", r.status === 502 && r.body.error === "snowflake_timeout" && w.sf.cancelled.length === 1, r.body);
+  ok("a statement that never finishes is cancelled, and its figure is Not run", r.status === 200 && r.body.pending === 1 && r.body.fields[0].error.startsWith("Not run:") && w.sf.cancelled.length === 1, r.body);
   ok("snowflakeAnswer leaves other errors alone", statutory.snowflakeAnswer(new Error("x")) === null && statutory.snowflakeAnswer(new SnowflakeError("not_configured", "m")).status === 503);
 
   // Corp Dev sees "Check this field's mapping", corrects the mapping, and runs the same query again.
