@@ -682,7 +682,7 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
       <button class="btn sm ghost" id="pwBtn" data-act="change-pw" hidden>Change password</button>
       <button class="btn sm" id="signoutBtn" data-act="signout" hidden>Sign out</button>
       <div class="whomenu" id="whoMenu" role="menu" hidden><div class="wm-n" id="whoMenuName"></div>
-        <button role="menuitem" data-act="change-pw">Change password</button><button role="menuitem" data-act="si-open" id="siMenu" hidden>Recent sign-ins</button><button role="menuitem" data-act="signout">Sign out</button></div>
+        <button role="menuitem" data-act="change-pw">Change password</button><button role="menuitem" data-act="signout">Sign out</button></div>
     </div>
     <nav class="tabs" aria-label="Views" id="tabs" hidden>
       <a href="#filings" data-view="filings">Filings</a>
@@ -1128,7 +1128,10 @@ function signinsHTML(){
   </div></section></div>`;
 }
 function renderSignins(){
-  const m=document.getElementById("siMenu"); if(m) m.hidden=!siShown();
+  // The menu item exists only for Corp Dev on the Cloudflare site, just above Sign out.
+  const m=document.getElementById("siMenu");
+  if(siShown() && !m){ const out=document.querySelector('#whoMenu [data-act="signout"]'); if(out) out.insertAdjacentHTML("beforebegin", `<button role="menuitem" data-act="si-open" id="siMenu">Recent sign-ins</button>`); }
+  else if(!siShown() && m) m.remove();
   const root=document.getElementById("signinsRoot"), h=siShown()?signinsHTML():"";
   if(renderSignins.shown!==h){ root.innerHTML=h; renderSignins.shown=h; }
   if(S.si&&S.si.focus&&h){ S.si.focus=false; document.getElementById("siPanel")?.focus({preventScroll:false}); }
