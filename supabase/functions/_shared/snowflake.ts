@@ -139,7 +139,7 @@ export class Snowflake {
       if (!handle) throw new SnowflakeError("server", "Snowflake said the query is still running but gave no way to check on it. Try again.");
       if (this.io.now() - started > waitMs) {
         try { await (await this.send(`${this.base}/api/v2/statements/${handle}/cancel`, { method: "POST" })).body?.cancel(); } catch { /* best effort */ }
-        throw new SnowflakeError("timeout", "The Snowflake query took too long and was cancelled. Narrow it (fewer companies or years) and try again.");
+        throw new SnowflakeError("timeout", "The Snowflake query took too long and was cancelled. Try again in a minute.");
       }
       await this.io.sleep(POLL_MS);
       res = await this.send(`${this.base}/api/v2/statements/${handle}`, { method: "GET" });
@@ -169,7 +169,7 @@ export class Snowflake {
     const said = words ? ` Snowflake said: ${words}${/[.!?]$/.test(words) ? "" : "."}` : "";
     if (res.status === 401) throw new SnowflakeError("signin", `Snowflake didn't accept the sign-in (401). Check SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER and the key or token on Supabase.${said}`, 401);
     if (res.status === 422) throw new SnowflakeError("sql", `Snowflake couldn't run the query (422).${said}`, 422);
-    if (res.status === 408) throw new SnowflakeError("timeout", "The Snowflake query ran out of time. Narrow it and try again.", 408);
+    if (res.status === 408) throw new SnowflakeError("timeout", "The Snowflake query ran out of time. Try again in a minute.", 408);
     if (res.status === 429) throw new SnowflakeError("busy", "Snowflake is busy (429). Wait a minute and try again.", 429);
     throw new SnowflakeError("server", `Snowflake answered ${res.status}.${said} Try again in a few minutes.`, res.status);
   }

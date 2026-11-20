@@ -383,12 +383,18 @@ export type BuildCtx = {
 };
 
 /** The facts for one company or group: saved or fresh statutory figures (Snowflake errors such as not_configured and
-    not_mapped are thrown, as snl-statutory gives them), the company list, and the filings. */
-export async function buildFacts(ctx: BuildCtx, q: { kind: "company" | "group"; code: string; toYear: number }): Promise<Facts> {
+    not_mapped are thrown, as snl-statutory gives them), the company list, and the filings.
+    figures, when given, is told how many of the figures that can be run came back (done of of) and how many are still
+    pending: those didn't fit in this call, and asking again carries on from where it stopped. */
+export async function buildFacts(ctx: BuildCtx, q: { kind: "company" | "group"; code: string; toYear: number }, figures?: { done?: number; of?: number; pending?: number }): Promise<Facts> {
   const asOf = new Date(ctx.start).toISOString().slice(0, 10);
   const fromYear = q.toYear - (PROFILE_QUERY_YEARS - 1);
   const stat = await savedOrFreshStatutory(ctx.sf, ctx.db, ctx.database, ctx.schema, ctx.mapping, { kind: q.kind, codes: [q.code], fromYear, toYear: q.toYear }, PROFILE_FIELDS,
     { now: ctx.start, deadline: ctx.start + PROFILE_STAT_MS, clock: ctx.now });
+  if (figures) {
+    const of = stat.fields.filter((f) => f.mapped).length, pending = stat.pending ?? 0;
+    Object.assign(figures, { done: of - pending, of, pending });
+  }
   const dir = await lookUpDirectory(ctx.db, q.kind, q.code);
   const filings = await profileFilings(ctx.api, ctx.db, dir, q.kind, asOf, { now: ctx.now, deadline: ctx.start + PROFILE_FILINGS_MS });
   return factsFrom(stat, dir, filings, { kind: q.kind, code: q.code, asOf, fromYear, toYear: q.toYear });
@@ -731,6 +737,7 @@ export const NOTES = {
   fault: "Claude's text couldn't be asked for because of a fault in the site, so the plain text is shown. Tell the site owner.",
   figures: "Some of Claude's text was replaced with the plain text because a figure in it couldn't be matched to the company's figures.",
   shape: "Some of Claude's text didn't fit the slides, so the plain text is used there.",
+  pending: "Claude didn't write the text because some figures hadn't come back yet, so the plain text is shown. Get the figures again: it carries on from where it stopped. Then draft with Claude.",
 };
 
 /** House style on one string: one line, no em dashes. */

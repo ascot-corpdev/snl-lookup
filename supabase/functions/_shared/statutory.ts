@@ -338,56 +338,112 @@ const bareName = (v: string) => v.replace(/^"|"$/g, "");
 /** The name as Snowflake stores it: exactly as written when it is in double quotes, otherwise upper case. */
 export const storedName = (v: string) => (/^".*"$/.test(v) ? bareName(v) : v.toUpperCase());
 
-/** Runs each requested field as one Snowflake statement and shapes the rows for the page and for Claude. */
-export async function runStatutory(sf: Snowflake, database: string, schema: string, mapping: Mapping, q: StatQuery, fields: StatFieldId[], time?: { deadline: number; now: () => number }): Promise<StatResult> {
-  const names = new Map<string, string | null>(q.codes.map((c) => [c, null]));
-  const out: StatField[] = [];
-  const views = new Set<string>(), schemasUsed = new Set<string>();
-  let truncated = false;
-  for (const id of fields) {
+/** How many figures' statements run at once: each is a join across big shared views that takes several seconds, so
+    one after another they don't fit in one function call. */
+export const STAT_POOL = 6;
+/** A statement isn't started with less time than this left in the call: it would only be cancelled. */
+export const STAT_MIN_MS = 8_000;
+/** Every figure that didn't fit in the time starts with this; savedOrFreshStatutory counts them as still to come. */
+export const NOT_RUN_PREFIX = "Not run:";
+export const NOT_RUN = `${NOT_RUN_PREFIX} the query ran out of time. Run it again, or ask for fewer fields.`;
+const notRun = (f: StatField) => !!f.error?.startsWith(NOT_RUN_PREFIX);
+
+/** One figure as it came back: its field, the entity names its rows carried, whether it was cut at the row limit,
+    and where it was read from (the main view for LOADTRACKER, every schema for the run-date view). */
+export type FigurePart = { field: StatField; names: Record<string, string>; truncated: boolean; view: string | null; schemas: string[] };
+
+/** Runs jobs at most n at a time; the answers keep the jobs' order. A job that throws stops new ones from starting;
+    those already running are waited for (their own failures are dropped), then the first error is thrown. */
+async function inPool<T>(n: number, jobs: (() => Promise<T>)[]): Promise<T[]> {
+  const out: T[] = new Array(jobs.length);
+  let next = 0, failed: { e: unknown } | null = null;
+  const worker = async () => {
+    while (!failed && next < jobs.length) {
+      const i = next++;
+      try { out[i] = await jobs[i](); } catch (e) { if (!failed) failed = { e }; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(n, jobs.length) }, worker));
+  if (failed) throw (failed as { e: unknown }).e;
+  return out;
+}
+
+/** Each requested field as one Snowflake statement, STAT_POOL at a time, in the order asked. A figure that runs out
+    of time (Snowflake's 408, or a statement given up on) is that figure's NOT_RUN, as is one that would start with
+    less than STAT_MIN_MS left; sign-in, set-up, network and busy failures stop the whole query. */
+async function runFigures(sf: Snowflake, database: string, schema: string, mapping: Mapping, q: StatQuery, fields: StatFieldId[], time?: { deadline: number; now: () => number }): Promise<FigurePart[]> {
+  const parts: FigurePart[] = new Array(fields.length), jobs: (() => Promise<void>)[] = [];
+  const part = (field: StatField): FigurePart => ({ field, names: {}, truncated: false, view: null, schemas: [] });
+  for (const [i, id] of fields.entries()) {
     const meta = STAT_FIELDS.find((f) => f.id === id)!;
     const m = mapping.fields[id];
     const problem = mapProblem(id, m);
     const base = { id, label: meta.label, unit: meta.unit, by: meta.by };
-    if (problem || !m) { out.push({ ...base, mapped: false, error: null, rows: [] }); continue; }
+    if (problem || !m) { parts[i] = part({ ...base, mapped: false, error: null, rows: [] }); continue; }
     const sql = buildSql(database, schema, meta.by === "item" ? m : { ...m, item: undefined }, q);
     if (!sql) {
       const error = !ident(database) || !ident(schema) ? "SNOWFLAKE_DATABASE or SNOWFLAKE_SCHEMA isn't a valid name. Check those two secrets on Supabase."
         : `This field has no ${q.kind} column mapped, so it can't be looked up by ${q.kind} code.`;
-      out.push({ ...base, mapped: false, error, rows: [] });
+      parts[i] = part({ ...base, mapped: false, error, rows: [] });
       continue;
     }
-    // A function call may only run so long: fields that don't fit are reported, not left hanging.
-    const left = time ? time.deadline - time.now() : Infinity;
-    if (left <= 0) { out.push({ ...base, mapped: true, error: "Not run: the query ran out of time. Run it again, or ask for fewer fields.", rows: [] }); continue; }
-    try {
-      const res = await sf.query(sql.statement, sql.bindings, Math.max(5_000, Math.min(100_000, left)));
-      truncated ||= res.truncated;
-      views.add(bareName(viewRef(m.view)?.view ?? m.view));   // LOADTRACKER names a view without its schema
-      for (const v of [m.view, ...(m.joins ?? []).map((j) => j.view)]) schemasUsed.add(viewRef(v)?.schema ?? schema);
-      const rows: StatRow[] = res.rows.map((r) => {
-        const code = String(r.CODE ?? "").trim(), raw = r.VAL === null || r.VAL === "" ? NaN : Number(r.VAL);
-        if (r.NAME && names.has(code) && !names.get(code)) names.set(code, String(r.NAME));
-        const row: StatRow = { code, year: Number(r.YR), line: r.LINE === null ? null : String(r.LINE), state: r.STATE === null ? null : String(r.STATE), value: Number.isFinite(raw) ? Math.round(raw * (m.scale ?? 1) * 1e6) / 1e6 : null };
-        if (m.stateStrip && row.state !== null && row.state.startsWith(m.stateStrip)) row.state = row.state.slice(m.stateStrip.length);   // "Reported:FL" -> "FL"
-        if (meta.by === "item") row.item =r.ITEM === null || r.ITEM === undefined ? null : String(r.ITEM);
-        return row;
-      }).filter((r) => Number.isInteger(r.year));
-      out.push({ ...base, mapped: true, error: null, rows });
-    } catch (e) {
-      // Sign-in and set-up failures stop the whole query; a field whose SQL fails is reported on its own.
-      if (!(e instanceof SnowflakeError) || e.code !== "sql") throw e;
-      out.push({ ...base, mapped: true, error: `${e.message.replace(/[.\s]*$/, ".")} Check this field's mapping.`, rows: [] });
-    }
+    jobs.push(async () => {
+      // A function call may only run so long: fields that don't fit are reported, not left hanging.
+      const left = time ? time.deadline - time.now() : Infinity;
+      if (left < STAT_MIN_MS) { parts[i] = part({ ...base, mapped: true, error: NOT_RUN, rows: [] }); return; }
+      try {
+        const res = await sf.query(sql.statement, sql.bindings, Math.min(100_000, left));
+        const names: Record<string, string> = {};
+        const rows: StatRow[] = res.rows.map((r) => {
+          const code = String(r.CODE ?? "").trim(), raw = r.VAL === null || r.VAL === "" ? NaN : Number(r.VAL);
+          if (r.NAME && q.codes.includes(code) && !names[code]) names[code] = String(r.NAME);
+          const row: StatRow = { code, year: Number(r.YR), line: r.LINE === null ? null : String(r.LINE), state: r.STATE === null ? null : String(r.STATE), value: Number.isFinite(raw) ? Math.round(raw * (m.scale ?? 1) * 1e6) / 1e6 : null };
+          if (m.stateStrip && row.state !== null && row.state.startsWith(m.stateStrip)) row.state = row.state.slice(m.stateStrip.length);   // "Reported:FL" -> "FL"
+          if (meta.by === "item") row.item =r.ITEM === null || r.ITEM === undefined ? null : String(r.ITEM);
+          return row;
+        }).filter((r) => Number.isInteger(r.year));
+        parts[i] = {
+          field: { ...base, mapped: true, error: null, rows }, names, truncated: res.truncated,
+          view: bareName(viewRef(m.view)?.view ?? m.view),   // LOADTRACKER names a view without its schema
+          schemas: [m.view, ...(m.joins ?? []).map((j) => j.view)].map((v) => viewRef(v)?.schema ?? schema),
+        };
+      } catch (e) {
+        // Sign-in and set-up failures stop the whole query; a field whose SQL fails, or that runs out of time, is
+        // reported on its own.
+        if (e instanceof SnowflakeError && e.code === "timeout") { parts[i] = part({ ...base, mapped: true, error: NOT_RUN, rows: [] }); return; }
+        if (!(e instanceof SnowflakeError) || e.code !== "sql") throw e;
+        parts[i] = part({ ...base, mapped: true, error: `${e.message.replace(/[.\s]*$/, ".")} Check this field's mapping.`, rows: [] });
+      }
+    });
+  }
+  await inPool(STAT_POOL, jobs);
+  return parts;
+}
+
+/** The answer from its figures, in the order given: names, truncated and the run dates of every view or schema used. */
+async function assemble(sf: Snowflake, database: string, schema: string, mapping: Mapping, q: StatQuery, parts: FigurePart[]): Promise<StatResult> {
+  const names = new Map<string, string | null>(q.codes.map((c) => [c, null]));
+  const views = new Set<string>(), schemasUsed = new Set<string>();
+  let truncated = false;
+  for (const p of parts) {
+    truncated ||= p.truncated;
+    for (const [code, name] of Object.entries(p.names)) if (names.has(code) && !names.get(code)) names.set(code, name);
+    if (p.view !== null) views.add(p.view);
+    for (const s of p.schemas) schemasUsed.add(s);
   }
   // With a loaded entry, the run date of each schema a figure came from; without one, LOADTRACKER as before.
   const bySchema = mapping.loaded !== undefined && loadedProblem(mapping.loaded) === null;
   return {
-    ...q, entities: q.codes.map((code) => ({ code, name: names.get(code) ?? null })), fields: out,
+    ...q, entities: q.codes.map((code) => ({ code, name: names.get(code) ?? null })), fields: parts.map((p) => p.field),
     loaded: bySchema ? (schemasUsed.size ? await loadedBySchema(sf, database, mapping.loaded!, [...schemasUsed]) : []) : views.size ? await loadedAt(sf, database, schema, [...views]) : [],
     ...(bySchema ? { loadedBy: "schema" as const } : {}), truncated,
     source: "S&P Global Market Intelligence, SNL Insurance Regulatory Data (Snowflake)",
   };
+}
+
+/** Runs each requested field as one Snowflake statement (several at once) and shapes the rows for the page and for Claude. */
+export async function runStatutory(sf: Snowflake, database: string, schema: string, mapping: Mapping, q: StatQuery, fields: StatFieldId[], time?: { deadline: number; now: () => number }): Promise<StatResult> {
+  return assemble(sf, database, schema, mapping, q, await runFigures(sf, database, schema, mapping, q, fields, time));
 }
 
 /** UNCONFIRMED: S&P's run-date view and column are whatever the mapping's loaded entry names. For each schema, the
@@ -397,15 +453,15 @@ export async function loadedBySchema(sf: Snowflake, database: string, loaded: Lo
   if (!ident(database) || loadedProblem(loaded) !== null) return [];
   const seen = new Map<string, string>();
   for (const s of schemas) if (ident(s) && !seen.has(storedName(s))) seen.set(storedName(s), s);
-  const out: { view: string; at: string }[] = [];
-  for (const [name, s] of [...seen].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+  // several at once (STAT_POOL), answered in name order
+  const found = await inPool(STAT_POOL, [...seen].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([name, s]) => async () => {
     try {
       const res = await sf.query(`SELECT MAX(${loaded.at}) AS AT FROM ${database}.${s}.${loaded.view}`, [], 15_000);
       const at = res.rows[0]?.AT;
-      if (at) out.push({ view: name, at: String(at) });
-    } catch { /* this schema's date is left out */ }
-  }
-  return out;
+      return at ? { view: name, at: String(at) } : null;
+    } catch { return null; /* this schema's date is left out */ }
+  }));
+  return found.filter((x): x is { view: string; at: string } => x !== null);
 }
 
 /** When S&P last loaded each view, from LOADTRACKER. A failure here never fails the query. */
@@ -448,11 +504,31 @@ export async function discoverSchemas(sf: Snowflake, database: string) {
 }
 
 export const NOT_MAPPED = "Snowflake is connected, but the statutory fields aren't mapped to S&P's views yet. A Corp Dev login can do this once on the Statutory view.";
-export type StatAnswer = StatResult & { fetchedAt: string; fromStore: boolean; saved: boolean };
+/** pending: figures still "Not run" (the time ran out before they came back); asking again with the same question
+    carries on from where it stopped, as each figure that came back is kept. */
+export type StatAnswer = StatResult & { fetchedAt: string; fromStore: boolean; saved: boolean; pending: number };
+
+/** The saved entry of one figure of a question: kind, sorted codes, years, the figure, that figure's whole mapping and
+    the mapping's loaded entry when there is one. Two companies, years or kinds never share one. */
+export async function figureStoreId(mapping: Mapping, q: StatQuery, f: StatFieldId): Promise<string> {
+  return "statutory:f." + await shortHash(JSON.stringify(["figure", q.kind, [...q.codes].sort(), q.fromYear, q.toYear, f, mapping.fields[f] ?? null, ...(mapping.loaded !== undefined ? [{ loaded: mapping.loaded }] : [])]));
+}
+type SavedFigure = FigurePart & { fetchedAt: string };
+/** A saved figure as it was put, or null for anything else (a figure later overwritten by a refresh that didn't reach it). */
+function readFigure(doc: unknown, f: StatFieldId): SavedFigure | null {
+  const d = doc as Partial<SavedFigure> | null;
+  if (!d || typeof d !== "object" || !d.field || d.field.id !== f || !Array.isArray(d.field.rows) || d.field.error !== null || typeof d.fetchedAt !== "string") return null;
+  return { field: d.field, names: d.names && typeof d.names === "object" ? d.names : {}, truncated: d.truncated === true, view: typeof d.view === "string" ? d.view : null, schemas: Array.isArray(d.schemas) ? d.schemas : [], fetchedAt: d.fetchedAt };
+}
+/** What replaces a saved entry that a refresh couldn't get to again, so the next call runs it afresh. */
+const SUPERSEDED = { superseded: true };
 
 /** A statutory query as the page and Claude both run it: the saved result when there is one (unless refresh),
     otherwise Snowflake. The mapping is part of the saved result's id, so a corrected mapping is used straight
-    away. sf is null when Snowflake isn't set up. */
+    away. sf is null when Snowflake isn't set up.
+    Each figure that comes back is also saved on its own (figureStoreId), and only figures not saved are run, so a
+    question too big for one call is answered over several: each answer says how many figures are still pending. The
+    whole answer is saved, as before, once nothing is pending. */
 export async function savedOrFreshStatutory(sf: Snowflake | null, db: Db, database: string, schema: string, mapping: Mapping, q: StatQuery, fields: StatFieldId[],
   opts: { now: number; refresh?: boolean; deadline?: number; clock?: () => number }): Promise<StatAnswer> {
   const asked = [...fields].sort();
@@ -460,14 +536,46 @@ export async function savedOrFreshStatutory(sf: Snowflake | null, db: Db, databa
   // results saved before it existed keep their ids.
   const id = "statutory:" + await shortHash(JSON.stringify([q.kind, [...q.codes].sort(), q.fromYear, q.toYear, asked, asked.map((f) => mapping.fields[f] ?? null), ...(mapping.loaded !== undefined ? [{ loaded: mapping.loaded }] : [])]));
   const saved = opts.refresh ? null : await db.getStore(id);
-  if (saved) return { ...(saved.doc as unknown as StatResult), fetchedAt: saved.fetched_at, fromStore: true, saved: true };
+  if (saved && (saved.doc as Record<string, unknown>).superseded !== true) {
+    const doc = saved.doc as unknown as StatResult & { fetchedAt?: unknown };
+    return { ...doc, fetchedAt: typeof doc.fetchedAt === "string" ? doc.fetchedAt : saved.fetched_at, fromStore: true, saved: true, pending: 0 };
+  }
   if (!sf) throw new SnowflakeError("not_configured", SNOWFLAKE_NOT_CONFIGURED);
   if (!fieldStatus(mapping).some((f) => f.mapped)) throw new SnowflakeError("not_mapped", NOT_MAPPED);
-  const result = await runStatutory(sf, database, schema, mapping, q, fields, opts.deadline !== undefined ? { deadline: opts.deadline, now: opts.clock ?? Date.now } : undefined);
-  // A result cut short by the time limit isn't saved, so the next try asks Snowflake again.
-  const cut = result.fields.some((f) => f.error?.startsWith("Not run:"));
-  const wasSaved = cut ? false : await db.putStore({ id, kind: "statutory", label: `${q.kind} ${q.codes.join(",")} ${q.fromYear}-${q.toYear}`, doc: result });
-  return { ...result, fetchedAt: new Date(opts.now).toISOString(), fromStore: false, saved: wasSaved };
+  const now = new Date(opts.now).toISOString();
+  // The figures saved earlier (unless refresh); only the rest are asked of Snowflake.
+  const figIds = await Promise.all(fields.map((f) => figureStoreId(mapping, q, f)));
+  const kept: (SavedFigure | null)[] = opts.refresh ? fields.map(() => null)
+    : await Promise.all(fields.map(async (f, i) => (mapProblem(f, mapping.fields[f]) ? null : readFigure((await db.getStore(figIds[i]))?.doc ?? null, f))));
+  const toRun = fields.filter((_, i) => !kept[i]);
+  const fresh = toRun.length ? await runFigures(sf, database, schema, mapping, q, toRun, opts.deadline !== undefined ? { deadline: opts.deadline, now: opts.clock ?? Date.now } : undefined) : [];
+  let k = 0;
+  const parts: FigurePart[] = fields.map((_, i) => kept[i] ?? fresh[k++]);
+  const label = `${q.kind} ${q.codes.join(",")} ${q.fromYear}-${q.toYear}`;
+  // Each figure that came back without an error is kept, so the next call carries on from here.
+  const pendingIds: string[] = [];
+  await Promise.all(fields.map((f, i) => {
+    if (kept[i]) return null;
+    const p = parts[i];
+    if (notRun(p.field)) { pendingIds.push(figIds[i]); return null; }
+    if (!p.field.mapped || p.field.error !== null) return null;
+    const doc: SavedFigure = { ...p, fetchedAt: now };
+    return db.putStore({ id: figIds[i], kind: "statutory", label: `${label} ${f}`, doc: doc as unknown as Record<string, unknown> });
+  }));
+  const result = await assemble(sf, database, schema, mapping, q, parts);
+  const pending = parts.filter((p) => notRun(p.field)).length;
+  // A mixed answer is as old as its oldest figure.
+  const fetchedAt = kept.reduce((a, s) => (s && s.fetchedAt < a ? s.fetchedAt : a), now);
+  // From the store when every figure there is came from it: nothing was asked of Snowflake but the run dates.
+  const fromStore = kept.some(Boolean) && fresh.every((p) => !p.field.mapped);
+  let wasSaved = false;
+  if (pending === 0) wasSaved = await db.putStore({ id, kind: "statutory", label, doc: { ...result, fetchedAt } as unknown as Record<string, unknown> });
+  else if (opts.refresh) {
+    // A refresh that didn't get to every figure: the older whole answer and the older copies of the figures it
+    // didn't reach are set aside, so carrying on runs them afresh instead of mixing in the old ones.
+    await Promise.all([id, ...pendingIds].map((x) => db.putStore({ id: x, kind: "statutory", label, doc: SUPERSEDED })));
+  }
+  return { ...result, fetchedAt, fromStore, saved: wasSaved, pending };
 }
 
 export async function getMapping(db: Db): Promise<Mapping> { return readMapping(await db.getSetting(MAPPING_ID)); }

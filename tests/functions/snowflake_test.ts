@@ -167,7 +167,7 @@ const answer = (reply: { columns: string[]; rows: (string | number | null)[][] }
   const cases: [number, unknown, string, RegExp][] = [
     [401, { code: "390144", message: "JWT token is invalid." }, "signin", /^Snowflake didn't accept the sign-in \(401\)\. Check SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER and the key or token on Supabase\. Snowflake said: JWT token is invalid\.$/],
     [422, { code: "002003", message: "SQL compilation error:\nObject 'X' does not exist or not authorized.", sqlState: "42S02" }, "sql", /^Snowflake couldn't run the query \(422\)\. Snowflake said: SQL compilation error: Object 'X' does not exist or not authorized\.$/],
-    [408, { message: "Statement timed out" }, "timeout", /^The Snowflake query ran out of time\. Narrow it and try again\.$/],
+    [408, { message: "Statement timed out" }, "timeout", /^The Snowflake query ran out of time\. Try again in a minute\.$/],
     [500, { message: "Internal error" }, "server", /^Snowflake answered 500\. Snowflake said: Internal error Try again in a few minutes\.$|^Snowflake answered 500\. Snowflake said: Internal error\. Try again in a few minutes\.$/],
     [503, "<html>unavailable</html>", "server", /^Snowflake answered 503\. Try again in a few minutes\.$/],
     [403, { message: "Role not granted" }, "server", /^Snowflake answered 403\./],
@@ -360,12 +360,19 @@ const LOADED = { IR_PREM_LINE: "2026-11-01T04:00:00", IR_RATIOS: "2026-10-15T04:
   }
 }
 {
-  // failures that stop the whole query
-  for (const [status, code] of [[401, "signin"], [500, "server"], [408, "timeout"]] as const) {
+  // failures that stop the whole query (both statements run at once, so each is sent once and neither is retried)
+  for (const [status, code] of [[401, "signin"], [500, "server"]] as const) {
     const w = world(PAT, { tables: TABLES, loaded: LOADED });
     w.sf.failNext.push({ status, body: { message: "nope" } });
     const e = await caught(runStatutory(w.api, w.creds.database, w.creds.schema, MAPPING, Q, ["dpw_by_line", "surplus"]));
-    ok(`a ${status} from Snowflake fails the whole query with a plain "${code}" message, not field by field`, e instanceof SnowflakeError && e.code === code && w.sf.log.length === 1, e?.message);
+    ok(`a ${status} from Snowflake fails the whole query with a plain "${code}" message, not field by field`, e instanceof SnowflakeError && e.code === code && w.sf.log.length === 2, e?.message);
+  }
+  {
+    // a 408 is that figure running out of time: it is "Not run", and the other figure is not failed by it
+    const w = world(PAT, { tables: TABLES, loaded: LOADED });
+    w.sf.failNext.push({ status: 408, body: { message: "nope" } });
+    const r = await runStatutory(w.api, w.creds.database, w.creds.schema, MAPPING, Q, ["dpw_by_line", "surplus"]);
+    ok(`a 408 from Snowflake marks that figure "Not run" and leaves the other one intact`, r.fields[0].error?.startsWith("Not run:") === true && r.fields[0].rows.length === 0 && r.fields[1].error === null && r.fields[1].rows.length === 1, r.fields.map((f) => f.error));
   }
   let w = world(PAT, { tables: TABLES });   // no LOADTRACKER in this account
   let r = await runStatutory(w.api, w.creds.database, w.creds.schema, MAPPING, Q, ["dpw_by_line"]);

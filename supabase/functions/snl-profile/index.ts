@@ -15,6 +15,9 @@
 //   draft {kind, code, toYear?}  -> {facts, text, usage, jobId}: Claude's text, or the plain text with a note
 //     A draft counts as one of the login's questions for the day and is kept as a finished answer in snl_jobs, so the
 //     day's count and cost, "Past answers" and the 30-day clean-up all include it.
+//   When some statutory figures didn't fit in the call, facts and draft also carry pending (how many are still to
+//   come) and figures {done, of}; asking again carries on from where it stopped. A draft with figures pending isn't
+//   sent to Claude, isn't counted and isn't saved: it gives the plain text with a note saying so.
 // The filings profile, from S&P filings alone (no statutory data). who is {kind:"company", companyId | institutionId}
 // or {kind:"group", group: the group's name in the company list}; years is 1, 3 or 5:
 //   filings_sample                     -> {facts, text}: a made-up group, no S&P or Claude call
@@ -31,7 +34,7 @@ import { type Db, supabaseDb } from "../_shared/db.ts";
 import { credsReady, Snowflake, snowflakeCreds, SnowflakeError } from "../_shared/snowflake.ts";
 import { fieldStatus, getMapping } from "../_shared/statutory.ts";
 import { type Gate, makeGate, planLimits, Spgmi, SpgmiError } from "../_shared/spgmi.ts";
-import { answerLines, buildFacts, clean, DRAFT_TIME_MS, draftText, plainText, PROFILE_CALL_MS, PROFILE_MAX_SP_REQUESTS, PROFILE_QUERY_YEARS, sampleFacts } from "../_shared/profile.ts";
+import { answerLines, buildFacts, clean, DRAFT_TIME_MS, draftText, NOTES, plainText, PROFILE_CALL_MS, PROFILE_MAX_SP_REQUESTS, PROFILE_QUERY_YEARS, sampleFacts } from "../_shared/profile.ts";
 import { buildFilingsFacts, draftFilingsText, filingsAnswerLines, filingsPlainText, filingsSampleFacts, FP_DRAFT_SEARCH_MS, FP_MAX_SP_REQUESTS, FP_SEARCH_MS, FpRefused, parseFilingsProfile } from "../_shared/profile.ts";
 
 export type Deps = {
@@ -148,14 +151,19 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
   const sf = sfConfigured ? new Snowflake(sfCreds, { fetch: deps.fetch, now: clock, sleep: wait }) : null;
 
   let facts;
+  const figures: { done?: number; of?: number; pending?: number } = {};
   try {
-    facts = await buildFacts({ db, sf, database: sfCreds.database, schema: sfCreds.schema, mapping, api, now: clock, start }, parsed);
+    facts = await buildFacts({ db, sf, database: sfCreds.database, schema: sfCreds.schema, mapping, api, now: clock, start }, parsed, figures);
   } catch (e) {
     const answer = snowflakeAnswer(e);
     if (answer) return json(answer.status, answer.body);
     throw e;
   }
-  if (!drafting) return json(200, { facts, text: plainText(facts) });
+  // Figures that didn't fit in this call: the answer says how many are still to come (the page asks again, and the
+  // figures that came back are kept, so it carries on). Claude isn't asked to write from figures still missing.
+  const pending = figures.pending ? { pending: figures.pending, figures: { done: figures.done, of: figures.of } } : {};
+  if (!drafting) return json(200, { facts, text: plainText(facts), ...pending });
+  if (figures.pending) return json(200, { facts, text: { ...plainText(facts), note: NOTES.pending }, ...pending });
 
   // The draft is recorded as one of the login's answers: it counts against the daily limit, and its cost is in the
   // day's total. The row is created only now, so a profile that couldn't be built isn't counted.

@@ -466,7 +466,7 @@ const GROUPED: FieldMap = {
   const saved = watchStore(db);
   const run = (m: Mapping) => savedOrFreshStatutory(api, db, DB, SCH, m, Q, ["surplus"], { now: clock.now });
   const a = await run(MAPPING);
-  ok("a joined result is saved and passes the database's checks", a.saved === true && saved.length === 1 && saved[0].problem === null, saved);
+  ok("a joined result is saved and passes the database's checks", a.saved === true && saved.filter((s) => /^statutory:[0-9a-f]{32}$/.test(s.id)).length === 1 && saved.every((s) => s.problem === null), saved);
   ok("the same mapping opens from the store", (await run(MAPPING)).fromStore === true);
   const changedJoin = await run({ ...MAPPING, fields: { ...MAPPING.fields, surplus: { ...SURPLUS, joins: [{ ...SURPLUS.joins![0], kind: "left" }, SURPLUS.joins![1]] } } });
   ok("changing a join is a new saved result, so a corrected mapping is used straight away", changedJoin.fromStore === false);
