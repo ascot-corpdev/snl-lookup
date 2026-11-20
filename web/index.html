@@ -649,6 +649,22 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 .ea-msgs{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;font-size:13px}
 .ea-msgs li{overflow-wrap:anywhere}
 @media (max-width:700px){.ea .eatbl .c-co{min-width:0}.ea-docs .btn{margin:4px 0 0}}
+/* Recent sign-ins (Corp Dev, Cloudflare sign-on): who signed in lately, under the strip, opened from the account menu */
+#signinsRoot .wrap{padding-block:0 10px}
+.si>div{flex:1 1 100%;min-width:0;display:flex;flex-direction:column;gap:8px}
+.si h3{margin:0;font-size:14px}
+.si p{margin:0}
+.si table{background:var(--surface)}
+.si td{overflow-wrap:anywhere}
+.si .si-when{white-space:nowrap}
+@media (max-width:700px){
+  .si thead{display:none}
+  .si tr{display:block;border-top:1px solid var(--grid);padding:6px 0}
+  .si td{display:block;border:0;padding:2px 10px}
+  .si td:first-child{font-weight:bold}
+  .si td[data-l]::before{content:attr(data-l) ": ";color:var(--muted)}
+  .si .si-when{white-space:normal}
+}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
@@ -666,7 +682,7 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
       <button class="btn sm ghost" id="pwBtn" data-act="change-pw" hidden>Change password</button>
       <button class="btn sm" id="signoutBtn" data-act="signout" hidden>Sign out</button>
       <div class="whomenu" id="whoMenu" role="menu" hidden><div class="wm-n" id="whoMenuName"></div>
-        <button role="menuitem" data-act="change-pw">Change password</button><button role="menuitem" data-act="signout">Sign out</button></div>
+        <button role="menuitem" data-act="change-pw">Change password</button><button role="menuitem" data-act="si-open" id="siMenu" hidden>Recent sign-ins</button><button role="menuitem" data-act="signout">Sign out</button></div>
     </div>
     <nav class="tabs" aria-label="Views" id="tabs" hidden>
       <a href="#filings" data-view="filings">Filings</a>
@@ -682,6 +698,7 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 <div class="strip" id="strip" hidden><div class="wrap" id="stripIn" role="status" aria-label="S&amp;P usage and data freshness"></div></div>
 <div id="connRoot"></div>
 <div id="liveRoot"></div>
+<div id="signinsRoot"></div>
 
 <main><div class="wrap" id="view"></div></main>
 <footer class="foot"><div class="wrap"><span id="footOrg">2026</span><span>Confidential: strategy and corporate development use only. Data: S&amp;P Global Market Intelligence.</span></div></footer>
@@ -1042,6 +1059,79 @@ async function copyLive(){
   const r=S.live&&S.live.report; if(!r) return;
   try{ await navigator.clipboard.writeText(liveText(r)); toast("Copied. Paste it into a message to whoever maintains the app."); }
   catch{ S.live.showText=true; renderLive(); const t=document.getElementById("liveText"); if(t){ t.focus(); t.select(); } toast("Couldn't copy here. Select the text below and copy it."); }
+}
+
+/* ---------- Recent sign-ins (Corp Dev, Cloudflare sign-on only): who signed in over the last 30 days, from
+   public.snl_signins (migration 0011), which only Corp Dev can read, and whether the owner is emailed about them
+   (snl-signin's status action, which gives counts only). Opened from the account menu, shown under the strip. ---------- */
+FN["snl-signin"]="the sign-in function";
+const SI_PAGE=20, SI_DAYS=30, SI_COLS="email,role,first_seen_at,last_seen_at";
+S.si=null;   // {rows, more, loading, err, missing, status, statusErr, focus}
+const siShown = () => !!S.session && CF_SIGNON && isCorpDev();
+const siWhen = s => { const d=fmtAt(s), t=fmtTime(s); return d==="n/d" ? "n/d" : t ? `${d}, ${t}` : d; };
+const siMissing = e => !!e && (e.code==="PGRST205" || e.code==="42P01" || /snl_signins/.test(String(e.message||"")) && /could not find|does not exist|schema cache/i.test(String(e.message||"")));
+function siOpen(){
+  if(!siShown()) return;
+  S.si={rows:[], more:false, loading:true, err:"", missing:false, status:null, statusErr:"", statusOld:false, focus:true};
+  render(); siLoad(false); siStatus();
+}
+async function siLoad(more){
+  const si=S.si; if(!si) return;
+  const from=more ? si.rows.length : 0;
+  si.loading=true; si.err=""; if(!more) si.rows=[]; renderSignins();
+  let data=null, error=null;
+  try{ ({data, error}=await S.sb.from("snl_signins").select(SI_COLS).gte("first_seen_at", new Date(Date.now()-SI_DAYS*DAY).toISOString()).order("first_seen_at",{ascending:false}).range(from, from+SI_PAGE)); }catch(e){ error=e||{}; }
+  if(S.si!==si) return;   // closed or signed out meanwhile
+  si.loading=false;
+  if(error){ if(siMissing(error)) si.missing=true; else si.err="Couldn't load recent sign-ins. Check your connection and try again."; }
+  else { const got=Array.isArray(data)?data:[]; si.missing=false; si.more=got.length>SI_PAGE; si.rows=si.rows.concat(got.slice(0, SI_PAGE)); }
+  renderSignins();
+}
+async function siStatus(){
+  const si=S.si; if(!si) return;
+  const r=await callFn("snl-signin",{action:"status"});
+  if(S.si!==si) return;
+  if(r.data){ si.status=r.data; if(r.data.recorded===false) si.missing=true; }
+  else if(r.err==="bad") si.statusOld=true;   // an older snl-signin that knows only "session"
+  else if(r.err!=="signin") si.statusErr=errText(r);
+  renderSignins();
+}
+/* One line on the email notices: on, or off and what is missing. */
+function siNoticeText(si){
+  if(si.statusOld) return "Couldn't tell whether email notices are on: the sign-in function on Supabase is an older version. Deploy it again: supabase functions deploy snl-signin --no-verify-jwt.";
+  if(si.statusErr) return `Couldn't tell whether email notices are on. ${si.statusErr}`;
+  const st=si.status; if(!st) return "Checking whether email notices are on…";
+  const n=st.notices||{};
+  if(st.recorded===false) return "Email notices start once migration 0011 has been run.";
+  if(n.on) return `Email notices are on: each new sign-in by someone not on the admin list is emailed to ${plural(n.recipients,"address","addresses")}.${n.fromSet===false?" WATCH_FROM isn't set on Supabase, so Resend delivers only to its own account's address.":""}`;
+  if(n.why==="off") return "Email notices are off: SNL_SIGNIN_NOTICES is set to off on Supabase. Sign-ins are still recorded.";
+  if(n.why==="no_key") return "Email notices are off: RESEND_API_KEY isn't set on Supabase (README, Sign-in notices).";
+  if(n.why==="no_recipients") return "Email notices are off: there is no one to send them to. Set SNL_NOTIFY_EMAILS or SNL_ADMIN_EMAILS on Supabase.";
+  return "Email notices are off.";
+}
+function signinsHTML(){
+  const si=S.si; if(!si) return "";
+  const close=`<button type="button" class="btn sm ghost" data-act="si-close">Close</button>`;
+  let body;
+  if(si.missing) body=`<p id="siEmpty">Run migration 0011 to start recording sign-ins. In the Supabase SQL editor, run <code>supabase/migrations/0011_signins.sql</code> (README, Sign-in notices).</p>`;
+  else if(si.err) body=`<p id="siErr" role="alert">${esc(si.err)} <button type="button" class="lnk" data-act="si-retry">Try again</button></p>`;
+  else if(si.loading && !si.rows.length) body=`<p id="siLoading">Loading recent sign-ins…</p>`;
+  else if(!si.rows.length) body=`<p id="siEmpty">No sign-ins recorded yet.</p>`;
+  else body=`<table id="siTable"><thead><tr><th>Person</th><th>Role</th><th>First seen</th><th>Last seen</th></tr></thead><tbody>${si.rows.map(r=>
+    `<tr><td>${esc(r.email)}</td><td data-l="Role">${esc(ROLES[r.role]||"n/d")}</td><td class="si-when" data-l="First seen">${esc(siWhen(r.first_seen_at))}</td><td class="si-when" data-l="Last seen">${esc(siWhen(r.last_seen_at))}</td></tr>`).join("")}</tbody></table>`
+    + (si.more||si.loading ? `<div class="inline"><button type="button" class="btn sm" data-act="si-more" id="siMore" ${si.loading?"disabled":""}>${si.loading?"Loading…":"Show more"}</button></div>` : "");
+  return `<div class="wrap"><section class="info si" id="siPanel" tabindex="-1" aria-label="Recent sign-ins"><div>
+    <div class="inline" style="justify-content:space-between"><h3>Recent sign-ins</h3>${close}</div>
+    <p class="t2" id="siNotices">${esc(siNoticeText(si))}</p>
+    ${body}
+    <p class="t2">Sign-ins through Cloudflare over the last ${SI_DAYS} days, newest first. Each sign-in is kept for 90 days.</p>
+  </div></section></div>`;
+}
+function renderSignins(){
+  const m=document.getElementById("siMenu"); if(m) m.hidden=!siShown();
+  const root=document.getElementById("signinsRoot"), h=siShown()?signinsHTML():"";
+  if(renderSignins.shown!==h){ root.innerHTML=h; renderSignins.shown=h; }
+  if(S.si&&S.si.focus&&h){ S.si.focus=false; document.getElementById("siPanel")?.focus({preventScroll:false}); }
 }
 
 /* ---------- Filings: the search form ---------- */
@@ -6627,7 +6717,7 @@ function render(){
   document.body.classList.toggle("signed", on);
   renderSets();
   const keep=keepUi("view");
-  if(!on){ v.innerHTML=loginHTML(); keep(); renderDrawer(); renderAsk(); renderConn(); renderLive(); renderDigest(); return; }
+  if(!on){ v.innerHTML=loginHTML(); keep(); renderDrawer(); renderAsk(); renderConn(); renderLive(); renderSignins(); renderDigest(); return; }
   const tab = S.view==="forms" ? "compare" : S.view;   // Programs and forms is the Compare tab's second page
   document.querySelectorAll("nav.tabs a").forEach(a=>a.setAttribute("aria-current", a.dataset.view===tab ? "page" : "false"));
   document.getElementById("stripIn").innerHTML=stripHTML();
@@ -6635,6 +6725,7 @@ function render(){
   keep(); renderDrawer(); renderAsk();
   renderConn();
   renderLive();
+  renderSignins();
   renderDigest(); if(S.view==="filings") dgPrefetch();
   pbQueue();   // progress bars: a wait's timer stops when its bar is no longer on the page
 }
@@ -7455,6 +7546,10 @@ document.addEventListener("click", e=>{
     case "live-check": runLiveCheck(); break;
     case "live-copy": copyLive(); break;
     case "live-close": S.live=null; render(); document.getElementById("liveBtn")?.focus(); break;
+    case "si-open": siOpen(); break;
+    case "si-close": S.si=null; render(); document.getElementById("whoDot")?.focus(); break;
+    case "si-more": siLoad(true); break;
+    case "si-retry": siLoad(false); break;
 
     case "co-find": resolveCompany(); break;
     case "co-add": addChip(t.dataset.kind, t.dataset.id, t.dataset.name); break;
@@ -7725,6 +7820,7 @@ function resetState(){
   S.chatUse=null; S.chatUseAt=0;
   S.conn=null;
   S.live=null;
+  S.si=null;
   S.past=freshPast();
   S.lib=freshLib();
   S.w=freshWatch();
