@@ -41,7 +41,7 @@ ok("a username fits the profiles table", ["jane.doe@calloway.example", "J@callow
 ok("emails are lower-cased and checked for shape", cleanEmail(" Jane@Calloway.Example ") === "jane@calloway.example" && [null, 5, "", "jane", "jane@", "a b@c.d", "x@y", "<a@b.c>"].every((v) => cleanEmail(v) === null));
 
 // ---------- the token ----------
-ok("a good token passes and gives the verified email", JSON.stringify(await check(await kit.token())) === JSON.stringify({ ok: true, email: "jane.doe@calloway.example", sub: "00000000-made-up-sub" }));
+ok("a good token passes and gives the verified email", JSON.stringify(await check(await kit.token())) === JSON.stringify({ ok: true, email: "jane.doe@calloway.example", sub: "00000000-made-up-sub", iat: SEC, exp: SEC + 3600 }));
 ok("an audience given as a plain string passes", why(await check(await kit.token({ claims: { aud: kit.aud } }))) === "ok");
 ok("any one of several configured audiences passes", why(await check(await kit.token(), keys(), { team: kit.team, auds: ["other", kit.aud] })) === "ok");
 ok("a token for another application is refused", why(await check(await kit.token({ claims: { aud: ["aud-someone-else"] } }))) === "audience" && why(await check(await kit.token({ claims: { aud: [] } }))) === "audience" && why(await check(await kit.token({ drop: ["aud"] }))) === "audience");

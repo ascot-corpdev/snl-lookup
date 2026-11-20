@@ -14,6 +14,7 @@ import { batches, type Cell, entitiesFrom, type Filing, filingNumberText, getRef
 import { STEP_ROWS } from "./filings.ts";
 import { type Env } from "./http.ts";
 import { NOT_CONFIGURED, Spgmi, SpgmiError } from "./spgmi.ts";
+import { sendEmail } from "./mail.ts";
 
 export const WATCH_ID = "watchlist";
 export const WATCH_WINDOW_DAYS = 14;      // a check looks at filings published in the last 14 days
@@ -374,18 +375,8 @@ export function watchEmail(rows: FoundFiling[], opts: { now: number; site: strin
   return { subject: `SNL lookup: ${plural(rows.length, "new filing")} on the watchlist${nMarked ? `, ${nMarked.toLocaleString("en-US")} worth a closer look` : ""}`, text };
 }
 
-export const RESEND_URL = "https://api.resend.com/emails";
-
-/** Sends the email through Resend. Returns how many it went to, or the reason it wasn't sent. */
-export async function sendEmail(fetchFn: typeof fetch, env: Env, to: string[], mail: { subject: string; text: string }): Promise<{ sent: number } | { error: string }> {
-  const from = (env("WATCH_FROM") || "").trim() || "SNL lookup <onboarding@resend.dev>";
-  let res: Response;
-  try {
-    res = await fetchFn(RESEND_URL, { method: "POST", headers: { "Authorization": `Bearer ${env("RESEND_API_KEY")}`, "Content-Type": "application/json" }, body: JSON.stringify({ from, to, subject: mail.subject, text: mail.text }) });
-  } catch { return { error: "The email couldn't be sent: Resend didn't answer." }; }
-  await res.body?.cancel();
-  return res.ok ? { sent: to.length } : { error: `The email couldn't be sent: Resend answered ${res.status}. Check RESEND_API_KEY and WATCH_FROM on Supabase.` };
-}
+// Sending through Resend lives in mail.ts, shared with sign-in notices; named here too, as before.
+export { RESEND_URL, sendEmail } from "./mail.ts";
 
 // ---------- a check ----------
 

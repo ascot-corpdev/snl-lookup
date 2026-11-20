@@ -565,6 +565,45 @@ What it cannot do, because a site can't drive a browser as the script does: an i
 - **Carrier sets.** Corp Dev logins save named sets of companies and whole groups from the **Carrier sets** button beside the company pickers. Every login can see and use them on the Filings form, the Snapshot, Compare, Programs and forms and the watchlist, and Claude checks a matching saved set instead of choosing carriers itself. Sets are visible to every login, so a set shows which companies the team follows. A group is kept by name and expanded to its member companies each time the set is used.
 - **Ask about a Snapshot.** "Ask Claude about this" on a finished Snapshot writes a question from what is on screen and puts it in the box; nothing is sent until you press Ask.
 
+### 15. Sign-in notices (optional, Cloudflare sign-on only)
+
+Emails you when someone else signs in through Cloudflare, and keeps a list of sign-ins that Corp Dev can see in the account menu under **Recent sign-ins**. One sign-in is one Cloudflare session: reloading the page or the hourly renewal doesn't count again. Your own sign-ins (addresses in `SNL_ADMIN_EMAILS`) are listed but never emailed. Signing in never fails or waits because of this. The password sign-in on GitHub Pages isn't covered.
+
+1. **SQL editor:** run `supabase/migrations/0011_signins.sql`. Only Corp Dev logins can read the list; only the function writes it. Sign-ins are kept for 90 days.
+2. Email uses the same Resend settings as the watchlist (step 9). Skip these if they are already set.
+
+   ```bash
+   supabase secrets set RESEND_API_KEY=...
+   ```
+
+   ```bash
+   supabase secrets set WATCH_FROM="SNL lookup <watch@yourco.com>"
+   ```
+
+   Optional: send the notices to other addresses (comma-separated) instead of `SNL_ADMIN_EMAILS`.
+
+   ```bash
+   supabase secrets set SNL_NOTIFY_EMAILS=...
+   ```
+
+   To stop the emails but keep the list:
+
+   ```bash
+   supabase secrets set SNL_SIGNIN_NOTICES=off
+   ```
+
+3. Deploy the function and the site.
+
+   ```bash
+   supabase functions deploy snl-signin --no-verify-jwt
+   ```
+
+   ```bash
+   npx wrangler deploy
+   ```
+
+The **Recent sign-ins** card says whether notices are on and, if not, what is missing. Until step 1 is done, nothing is recorded or emailed and the card says to run the migration.
+
 ## The first live search
 
 After step 5:
@@ -700,6 +739,7 @@ Nothing in this list is guessed in the code: each item is either handled both wa
 | **Filing summaries against Anthropic's live API.** A summary is asked for in a fixed shape, and Anthropic refuses a shape with more than 16 fields that may be empty, 24 optional fields or 20 strict tools. On 18 Nov 2026 the summary shape had 39 such fields and every summary failed; it now has 8, and `tests/functions/claudelimits_test.ts` counts every shape the app sends against those limits. Unconfirmed until the next live summary: that Anthropic accepts the smaller shape together with the uploaded file and the fallback setting. If it refuses, the page now shows Anthropic's own reason. | `_shared/digest.ts` | The next summary made on the live site |
 | **Earnings against the real SEC and real investor sites.** Built and tested on made-up answers in the shapes the owner's script reads (the tickers file, `data.sec.gov` submissions, filing index pages); the SEC's own guidance pages could not be reached from where this was built. Unconfirmed: that the SEC accepts the requests with `SEC_CONTACT` as the User-Agent from Supabase's addresses; how many investor sites refuse a plain request or fill their lists with JavaScript; whether Supabase's Edge Runtime lets the function look up a site name's address (`Deno.resolveDns`) to refuse private ones (without it each address is still checked by name); that a quarter more than about a year back is in the SEC's "recent" filings list for a busy filer (older pages of that list aren't read, as in the script); how saved `.htm` filings look when opened. | `_shared/earnings.ts`, `snl-earnings` | The first Find on the live site, compared with the desktop script's table for the same quarter |
 | **Claude reading real filings.** Tested against a stand-in for Anthropic's API only. Watch the first live answer: the page citations, the cost and how long each step takes. | `_shared/chat.ts` | First live answer |
+| **That Cloudflare keeps one token for a whole sign-in.** A sign-in is counted once for each issue time of Cloudflare's token for the site. If Cloudflare reissues that token more often than once a session, each reissue would count as a new sign-in, with its own email. | `_shared/signins.ts` | The first days of notices on the live site |
 
 S&P's "SNL Insurance Product Filings User Guide" was not available when this was built. The code follows the summary of it in the build brief and S&P's public API specification.
 
@@ -744,4 +784,5 @@ On GitHub the suites run as four parts on separate machines at the same time, an
 - **Searching a whole group.** Type a group's name in the company finder and choose "Add all" on the group: one search takes up to 100 companies. S&P counts one request for each 10 companies for each 365 days of dates, and one search may use at most 60 (Claude: 40). A 69-company group costs about 7 requests a year: 12 months, 3 or 5 years run; 10 years is refused, with a message saying how many years or companies would fit.
 - **Keeping a search out of Recent searches.** Tick "Keep this search out of Recent searches" on the Filings form. The result is still saved, so the same search costs nothing again, but it isn't listed. Whoever last fetches a search from S&P decides whether it is listed; opening a saved result changes nothing. This hides a search from the list, not from the database: any login can still read saved results there. Searches that Claude runs inside an answer, and the search behind a company profile, are always kept out of the list.
 - **One answer at a time.** A login with an answer in progress is asked to wait before asking another. If its tab was closed, open the app again to pick it up, or a new question is accepted ten minutes later.
+- **Sign-in notices.** Colleagues' email addresses and sign-in times are kept for 90 days in your Supabase project, readable only by Corp Dev logins; each new sign-in by someone else sends one email through Resend.
 - **Housekeeping.** Finished answers are removed after 30 days, and leftovers from abandoned answers are cleared whenever someone opens the app.
