@@ -56,7 +56,7 @@ const labelOf = (id: string) => STAT_FIELDS.find((f) => f.id === id)?.label ?? i
 
 // ---------- the facts (contract 1) ----------
 
-export const SERIES = ["dpw", "npw", "gpw", "npe", "loss_ratio", "expense_ratio", "combined_ratio", "net_income", "surplus", "paid_in_capital", "total_assets", "rbc_ratio", "net_reserves", "pyd", "reins_recoverable"] as const;
+export const SERIES = ["dpw", "npw", "gpw", "npe", "loss_ratio", "loss_lae_ratio", "expense_ratio", "combined_ratio", "net_income", "surplus", "paid_in_capital", "total_assets", "rbc_ratio", "net_reserves", "pyd", "reins_recoverable"] as const;
 export type SeriesId = typeof SERIES[number];
 type Arr = (number | null)[];
 export type MixLine = { name: string; dpw: number | null; npw: number | null; share: number | null };
@@ -199,7 +199,7 @@ export function factsFrom(stat: StatResult | null, dir: Directory, filings: Fact
   if (!series.dpw && !problem("dpw_by_state")) { put("dpw", lineTotals("dpw_by_state"), "dpw_by_state"); }
   if (!problem("npw_by_line")) put("npw", lineTotals("npw_by_line"), "npw_by_line");
   const yearlyProblems = new Map<string, string>();
-  for (const id of ["gpw", "npe", "loss_ratio", "expense_ratio", "combined_ratio", "net_income", "surplus", "paid_in_capital", "total_assets", "rbc_ratio", "net_reserves", "pyd", "reins_recoverable"] as const) {
+  for (const id of ["gpw", "npe", "loss_ratio", "loss_lae_ratio", "expense_ratio", "combined_ratio", "net_income", "surplus", "paid_in_capital", "total_assets", "rbc_ratio", "net_reserves", "pyd", "reins_recoverable"] as const) {
     if (problem(id)) continue;
     const y = yearly(field(id));
     if (y.problem) { yearlyProblems.set(id, y.problem); continue; }
@@ -476,12 +476,12 @@ export function plainText(facts: Facts): ProfileText {
     p("Largest state", state ? `${state.state}: ${fmt.pct(state.share)} of direct premiums in ${facts.mix!.year}${facts.mix!.top3StateShare !== null && facts.mix!.top3StateShare !== undefined ? `; the top three states ${fmt.pct(facts.mix!.top3StateShare)}` : ""} (derived).` : "Premiums by state n/d."),
   ]);
 
-  const lr = L(s.loss_ratio), er = L(s.expense_ratio), cr = L(s.combined_ratio);
-  const found = [lr, er, cr].filter((x): x is { v: number; y: number } => !!x), ly = found.length ? Math.max(...found.map((x) => x.y)) : null;
+  const lr = L(s.loss_ratio), ll = L(s.loss_lae_ratio), er = L(s.expense_ratio), cr = L(s.combined_ratio);
+  const found = [lr, ll, er, cr].filter((x): x is { v: number; y: number } => !!x), ly = found.length ? Math.max(...found.map((x) => x.y)) : null;
   const inLy = (x: { v: number; y: number } | null) => (x && x.y === ly ? x.v : null);
   const underwriting = sec(`Underwriting results, ${range}`, [
     p("Combined ratio", uw),
-    p("Latest year", ly !== null ? `In ${ly}: loss ratio ${fmt.pct(inLy(lr))}, expense ratio ${fmt.pct(inLy(er))}, combined ratio ${fmt.pct(inLy(cr))}.` : "Loss and expense ratios n/d."),
+    p("Latest year", ly !== null ? `In ${ly}: loss ratio ${fmt.pct(inLy(lr))}, ${ll ? `loss and LAE ratio ${fmt.pct(inLy(ll))}, ` : ""}expense ratio ${fmt.pct(inLy(er))}, combined ratio ${fmt.pct(inLy(cr))}.` : "Loss and expense ratios n/d."),
     p("Weighted average", d.combined_avg_weighted !== undefined ? `Weighted by net premiums earned, the combined ratio averaged ${fmt.pct(d.combined_avg_weighted)} (derived).` : "Combined ratio weighted by net premiums earned n/d."),
     p("Net income", profit),
   ]);
@@ -558,7 +558,7 @@ export function sampleFacts(today: string): Facts {
   const M = 1e6;
   const series: Partial<Record<SeriesId, Arr>> = {
     dpw: [74.2, 83.6, 96.1, 108.9, 122.5].map((v) => v * M), npw: [51.3, 56.8, 63.0, 70.4, 79.6].map((v) => v * M), gpw: [78.9, 88.7, 101.8, 115.2, 129.4].map((v) => v * M),
-    npe: [48.6, 54.1, 60.2, 67.3, 75.8].map((v) => v * M), loss_ratio: [64.1, 71.8, 69.5, 62.3, 60.7], expense_ratio: [33.2, 32.6, 31.9, 31.4, 30.8], combined_ratio: [97.3, 104.4, 101.4, 93.7, 91.5],
+    npe: [48.6, 54.1, 60.2, 67.3, 75.8].map((v) => v * M), loss_ratio: [53.4, 60.9, 58.8, 51.6, 50.2], loss_lae_ratio: [64.1, 71.8, 69.5, 62.3, 60.7], expense_ratio: [33.2, 32.6, 31.9, 31.4, 30.8], combined_ratio: [97.3, 104.4, 101.4, 93.7, 91.5],
     net_income: [3.1, -4.6, -1.2, 5.8, 7.9].map((v) => v * M), surplus: [41.5, 38.2, 40.6, 47.9, 56.3].map((v) => v * M), paid_in_capital: [45.0, 45.0, 48.0, 50.0, 50.0].map((v) => v * M),
     total_assets: [152.4, 166.0, 181.7, 199.2, 218.8].map((v) => v * M), rbc_ratio: [412.0, 356.5, 371.2, 398.4, 431.0], net_reserves: [39.4, 45.8, 50.1, 53.6, 57.2].map((v) => v * M),
     pyd: [-0.8, 2.6, 1.4, -0.5, -1.1].map((v) => v * M), reins_recoverable: [21.6, 25.3, 28.8, 30.1, 33.4].map((v) => v * M),
@@ -570,7 +570,7 @@ export function sampleFacts(today: string): Facts {
     fields: STAT_FIELDS.map((f) => {
       const by = (i: number) => ({ code: "90001", year: years[i], line: null as string | null, state: null as string | null });
       let out: StatField["rows"] = [];
-      const key: Record<string, SeriesId> = { gpw: "gpw", npe: "npe", loss_ratio: "loss_ratio", expense_ratio: "expense_ratio", combined_ratio: "combined_ratio", net_income: "net_income", surplus: "surplus", paid_in_capital: "paid_in_capital", total_assets: "total_assets", rbc_ratio: "rbc_ratio", net_reserves: "net_reserves", pyd: "pyd", reins_recoverable: "reins_recoverable" };
+      const key: Record<string, SeriesId> = { gpw: "gpw", npe: "npe", loss_ratio: "loss_ratio", loss_lae_ratio: "loss_lae_ratio", expense_ratio: "expense_ratio", combined_ratio: "combined_ratio", net_income: "net_income", surplus: "surplus", paid_in_capital: "paid_in_capital", total_assets: "total_assets", rbc_ratio: "rbc_ratio", net_reserves: "net_reserves", pyd: "pyd", reins_recoverable: "reins_recoverable" };
       if (key[f.id]) out = series[key[f.id]]!.map((v, i) => ({ ...by(i), value: v }));
       // By line and by state: each year scaled so its total is that year's direct (or net) premiums.
       const spread = (parts: number[], total: number) => {

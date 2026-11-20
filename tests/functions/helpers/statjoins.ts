@@ -75,7 +75,8 @@ export function joinReader(o: JoinOpts) {
     const tail = statement.match(/ ORDER BY 1, 3 LIMIT (\d+)$/);
     const iFrom = statement.indexOf(" FROM "), iWhere = statement.indexOf(" WHERE ");
     if (!tail || iFrom < 0 || iWhere < 0) return err("SQL compilation error: syntax error, unexpected statement.");
-    const list = statement.slice(7, iFrom), source = statement.slice(iFrom + 6, iWhere);
+    const distinct = statement.startsWith("SELECT DISTINCT ");
+    const list = statement.slice(distinct ? 16 : 7, iFrom), source = statement.slice(iFrom + 6, iWhere);
     let rest = statement.slice(iWhere + 7, statement.length - tail[0].length);
     let qualify = "", group = "";
     const iQ = rest.indexOf(" QUALIFY "); if (iQ >= 0) { qualify = rest.slice(iQ + 9); rest = rest.slice(0, iQ); }
@@ -192,16 +193,22 @@ export function joinReader(o: JoinOpts) {
     }
     // QUALIFY ROW_NUMBER() OVER (PARTITION BY ... ORDER BY x DESC) = 1
     if (qualify) {
-      const q = qualify.match(/^ROW_NUMBER\(\) OVER \(PARTITION BY (.+) ORDER BY (.+) DESC\) = 1$/);
-      if (!q) return err("SQL compilation error: syntax error in QUALIFY.");
+      const q = qualify.match(/^ROW_NUMBER\(\) OVER \(PARTITION BY (.+) ORDER BY (.+)\) = 1$/);
+      const keys = q ? q[2].split(", ").map((k) => k.match(/^(.+) DESC$/)) : [];
+      if (!q || keys.some((k) => !k)) return err("SQL compilation error: syntax error in QUALIFY.");
+      // the first key decides first; text such as a date compares as text, numbers as numbers
+      const cmp = (a: Value, b: Value) => (a === b ? 0 : a === null ? -1 : b === null ? 1 : typeof a === "number" && typeof b === "number" ? a - b : String(a) < String(b) ? -1 : 1);
+      const better = (x: Out, y: Out) => { for (const k of keys) { const d = cmp(ev(k![1], x.ctx), ev(k![1], y.ctx)); if (d) return d > 0; } return false; };
       const best = new Map<string, Out>();
       for (const x of out) {
         const k = JSON.stringify(q[1].split(", ").map((p) => ev(p, x.ctx))), cur = best.get(k);
-        if (!cur || Number(ev(q[2], x.ctx)) > Number(ev(q[2], cur.ctx))) best.set(k, x);
+        if (!cur || better(x, cur)) best.set(k, x);
       }
       out = [...best.values()];
     }
-    const rows = out.map((x) => x.vals);
+    let rows = out.map((x) => x.vals);
+    // DISTINCT comes after QUALIFY, as in Snowflake
+    if (distinct) rows = [...new Map(rows.map((r) => [JSON.stringify(r), r])).values()];
     rows.sort((a, z) => (String(a[0]) < String(z[0]) ? -1 : String(a[0]) > String(z[0]) ? 1 : 0) || Number(a[2]) - Number(z[2]));
     return { columns: exprs.map((e) => e![2]), rows: rows.slice(0, Number(tail[1])) };
   }

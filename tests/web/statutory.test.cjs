@@ -47,7 +47,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   // ----- not set up yet -----
   let t=await open({}, {statStatus:OFF}); let p=t.p;
   ok("not set up: the function's message, calmly", (await t.txt("#statOff"))===STAT.statusOff.message && (await p.getAttribute("#statOff","role"))==="status" && !(await p.$("#view [role=alert]")), await t.txt("#statOff"));
-  ok("not set up: says what will appear", same(await t.all("#statComing li"),["Direct and net premiums written, by line of business and by state","Policyholder surplus","Loss, expense and combined ratios for the last five years","The same figures for peers, side by side, by NAIC company or group code"]));
+  ok("not set up: says what will appear", same(await t.all("#statComing li"),["Direct and net premiums written, by line of business and by state","Policyholder surplus","Loss ratio, loss and LAE ratio, expense ratio and combined ratio for the last five years (loss and LAE ratio plus expense ratio is the combined ratio)","The same figures for peers, side by side, by NAIC company or group code"]));
   ok("not set up: nothing to click, even for Corp Dev", !(await p.$("#statForm")) && !(await p.$("#setup")) && (await p.$$("#view button, #view input, #view select, #view textarea")).length===0);
   ok("status asked once, with the login's token and the publishable key", same(t.of("snl-statutory","status").map(c=>c.body),[{action:"status"}]) && t.of("snl-statutory","status")[0].auth==="Bearer t" && t.of("snl-statutory","status")[0].apikey==="sb_publishable_k");
   ok("the strip agrees", (await t.txt("#s_stat"))==="Statutory data: not set up yet");

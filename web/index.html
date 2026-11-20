@@ -3034,9 +3034,10 @@ function suHelpHTML(){
   return `<details id="suHelp"><summary>How to map a figure that is spread over several views</summary>
     <ul style="margin:6px 0;padding-left:18px">
       <li><b>view</b> is the view that holds the figure: <code>VIEW</code> in the default schema, or <code>SCHEMA.VIEW</code> in another. Give it a short name with <b>as</b>.</li>
-      <li><b>joins</b> (up to 6) bring in more views, each with its own <b>as</b>, joined <b>on</b> columns of a view named before it. Add <code>"kind": "left"</code> to keep rows that have no match.</li>
+      <li><b>joins</b> (up to 8) bring in more views, each with its own <b>as</b>, joined <b>on</b> columns of a view named before it. Add <code>"kind": "left"</code> to keep rows that have no match.</li>
       <li>With joins, write every column as <code>NAME.COLUMN</code>, where NAME is a view's <b>as</b>: the company, group and name columns, year, value, line, state and item.</li>
       <li><b>where</b> keeps only some rows: <code>equals</code>, <code>notEquals</code>, <code>in</code> (a list of up to 80), <code>isNull</code> (true or false), <code>month</code> (the month of a date column, 12 for year-end rows), or <code>startsWith</code> (text the value begins with). Write numbers in quotes, like <code>"140"</code>: they still match a number column.</li>
+      <li>For group lookups: a join or a where entry with <code>"when": "group"</code> is used only when looking up by NAIC group code, and <code>"when": "company"</code> only by company code, so a company lookup never goes through a group's member list. <b>entity.groupName</b> is the group's name column. <b>distinct</b> (true) removes the repeated rows a member list brings; it can't be used with <b>sum</b>.</li>
       <li><b>plus</b> adds up to 4 more columns of the same row to the value, such as two parts of paid-in capital; an empty one counts as zero. <b>stateStrip</b> takes text off the front of each state, so <code>"Reported:FL"</code> shows as FL.</li>
       <li><b>yearIsDate</b> takes the year from a date. <b>latest</b> keeps only the row with the highest value in that column, such as a sequence number, for each company and year. <b>sum</b> adds up rows that share everything else, such as many rows for one reinsurer.</li>
       <li><b>loaded</b> (optional, beside <b>fields</b>): the view each schema has with S&amp;P's run dates, and its date column. The results then say when S&amp;P last updated each schema a figure came from.</li>
@@ -3052,7 +3053,7 @@ function mappingProblem(text){
   if(bad!==undefined) return {problem:`The entry for "${bad}" must be an object with view, entity, year and value.`};
   for(const [k,f] of Object.entries(doc.fields)){
     if(f.joins!==undefined && !Array.isArray(f.joins)) return {problem:`The entry for "${k}" has "joins" that isn't a list. Write it as [{"view": ..., "as": ..., "on": [...]}].`};
-    if(f.joins!==undefined && f.joins.length>6) return {problem:`The entry for "${k}" has ${f.joins.length} joins. A figure can join at most 6 views.`};
+    if(f.joins!==undefined && f.joins.length>8) return {problem:`The entry for "${k}" has ${f.joins.length} joins. A figure can join at most 8 views.`};
     if(f.where!==undefined && !Array.isArray(f.where)) return {problem:`The entry for "${k}" has "where" that isn't a list. Write it as [{"column": ..., "equals": ...}].`};
   }
   if(doc.loaded!==undefined && !obj(doc.loaded)) return {problem:'The "loaded" entry must be an object, like {"view": "...", "at": "..."}.'};
@@ -3186,11 +3187,11 @@ function statFinderHTML(){
 function renderStatutory(){
   const st=S.st, s=st.status;
   const head=`<div><h2 class="action-title">Statutory financials by NAIC company or group</h2>
-    <p class="sub">Premiums written by line and by state, policyholder surplus, and loss, expense and combined ratios over five years, with peers alongside.</p></div>`;
+    <p class="sub">Premiums written by line and by state, policyholder surplus, and loss, loss and LAE, expense and combined ratios over five years, with peers alongside. The loss and LAE ratio plus the expense ratio is the combined ratio.</p></div>`;
   if(!s) return head + (st.statusErr ? problemHTML(st.statusErr, "Couldn't check the statutory data.", "stat-status-retry") : `<div class="banner" role="status"><span>Checking whether statutory data is set up…</span></div>`);
   if(!s.configured) return head+`<div class="info" id="statOff" role="status"><span>${blank(s.message)?"<b>Statutory data isn't set up yet.</b> It needs a Snowflake reader account from S&amp;P.":esc(s.message)}</span></div>
     <section class="tcard" id="statComing"><h3>What will appear here</h3><ul style="margin:0;padding-left:18px">
-      <li>Direct and net premiums written, by line of business and by state</li><li>Policyholder surplus</li><li>Loss, expense and combined ratios for the last five years</li><li>The same figures for peers, side by side, by NAIC company or group code</li></ul>
+      <li>Direct and net premiums written, by line of business and by state</li><li>Policyholder surplus</li><li>Loss ratio, loss and LAE ratio, expense ratio and combined ratio for the last five years (loss and LAE ratio plus expense ratio is the combined ratio)</li><li>The same figures for peers, side by side, by NAIC company or group code</li></ul>
       <p class="t2">Nothing on this view works until then. Filings and questions about filings don't depend on it.</p></section>`;
   const setupBtn = isCorpDev() ? `<button type="button" class="btn sm ghost" data-act="su-toggle" aria-expanded="${st.setup.open}">${st.setup.open?"Hide field set-up":"Field set-up"}</button>` : "";
   if(!s.mapped) return head+`<div class="info" id="statUnmapped" role="status"><span>${blank(s.message)?"<b>Snowflake is connected, but the statutory fields aren't mapped yet.</b>":esc(s.message)}${isCorpDev()?"":" Ask Corp Dev to finish the set-up."}</span>${isCorpDev()&&!st.setup.open?`<button class="btn sm" data-act="su-toggle">Start the set-up</button>`:""}</div>${isCorpDev()&&st.setup.open?setupHTML():""}`;

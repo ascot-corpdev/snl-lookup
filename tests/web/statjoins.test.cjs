@@ -94,7 +94,7 @@ const WIDE=Array.from({length:950},(_,i)=>({name:i===0?"PERIOD_ID":i===1?"NPE_00
   // ----- pasting and saving a joined mapping -----
   const save=async text=>{ await p.fill("#su_map",text); await p.click('button[data-act="su-save"]'); await p.waitForTimeout(300); return t.txt("#suErr"); };
   ok("the page's own check: joins must be a list", (await save('{"fields":{"npe":{"view":"CORE_FIN.FIN_FLOW_B","joins":{"view":"X"}}}}'))==='The entry for "npe" has "joins" that isn\'t a list. Write it as [{"view": ..., "as": ..., "on": [...]}].');
-  ok("the page's own check: at most 6 joins", (await save(JSON.stringify({fields:{npe:{view:"V", joins:Array(7).fill({view:"V",as:"A",on:[]})}}})))==='The entry for "npe" has 7 joins. A figure can join at most 6 views.');
+  ok("the page's own check: at most 8 joins", (await save(JSON.stringify({fields:{npe:{view:"V", joins:Array(9).fill({view:"V",as:"A",on:[]})}}})))==='The entry for "npe" has 9 joins. A figure can join at most 8 views.');
   ok("the page's own check: where must be a list", (await save('{"fields":{"npe":{"view":"V","where":{"column":"A","equals":"b"}}}}'))==='The entry for "npe" has "where" that isn\'t a list. Write it as [{"column": ..., "equals": ...}].');
   ok("the page's own check: loaded must be an object", (await save('{"fields":{},"loaded":"BATCH_RUN"}'))==='The "loaded" entry must be an object, like {"view": "...", "at": "..."}.');
   ok("nothing was saved while the mapping was wrong", (await p.evaluate(()=>__mock.log.filter(l=>l.op==="upsert").length))===0);
@@ -133,6 +133,30 @@ const WIDE=Array.from({length:950},(_,i)=>({name:i===0?"PERIOD_ID":i===1?"NPE_00
   await p.click('button[data-act="su-schemas"]'); await p.waitForTimeout(300);
   ok("no schemas: says what that may mean", (await t.txt("#suSchema")).includes("No schemas came back. That may mean the Snowflake login can't see them yet."));
   await t.ctx.close();
+
+  // ----- the loss and LAE ratio on the Statutory view and on the profile's underwriting slide -----
+  t=await open({}, {statStatus:()=>({status:200, body:{...copy(SJ.statusSaved), loadedProblem:null}}), query:()=>({status:200, body:{...copy(SJ.query), fields:[
+    {id:"loss_ratio", label:"Loss ratio", unit:"pct", by:"year", mapped:true, error:null, rows:[{code:"12345", year:2024, line:null, state:null, value:50.2}]},
+    {id:"loss_lae_ratio", label:"Loss and LAE ratio", unit:"pct", by:"year", mapped:false, error:null, rows:[]}]}})}); p=t.p;
+  await p.fill("#st_codes","12345"); await p.click('button[data-act="stat-search"]'); await p.waitForTimeout(450);
+  ok("an unmapped loss and LAE ratio shows as not mapped, beside the loss ratio, with no error", same(await p.$$eval(".statblk",e=>e.map(x=>x.dataset.field)),["loss_ratio","loss_lae_ratio"]) && (await t.txt('.statblk[data-field="loss_lae_ratio"] p'))==="This figure isn't mapped to a Snowflake column yet. Add it in the field set-up below." && !(await p.$('.statblk[data-field="loss_lae_ratio"] .err')));
+  ok("the view says plainly that loss and LAE ratio plus expense ratio is the combined ratio", (await t.txt("#view .sub")).includes("The loss and LAE ratio plus the expense ratio is the combined ratio."));
+  await t.ctx.close();
+  {
+    const ctx=await b.newContext(); const sp=await ctx.newPage(); sp.on("pageerror",e=>errs.push(String(e)));
+    await sp.setContent("<html><body></body></html>");
+    await sp.addScriptTag({path:path.join(__dirname,"../../node_modules/jszip/dist/jszip.min.js")}); await sp.addScriptTag({path:WEB+"/deck.js"}); await sp.addScriptTag({path:WEB+"/profile-slides.js"});
+    const base=FIX("profile_facts.json");
+    const uw=async facts=>sp.evaluate(([f,t])=>{ const s=SNLProfile.spec(f,t).slides.find(x=>x.id==="underwriting"); return {chart:s.items.find(i=>i.type==="chart"), table:s.items.find(i=>i.type==="table"), all:JSON.stringify(s)}; }, [facts, base.text]);
+    const before=await uw(base.facts);
+    ok("profile slide without the loss and LAE ratio: loss and expense ratios stacked, as before", same(before.chart.series.map(x=>x.name),["Loss ratio","Expense ratio"]) && !before.all.includes("LAE ratio"));
+    const lr=base.facts.series.loss_ratio;
+    const withLl={...copy(base.facts), series:{...copy(base.facts.series), loss_lae_ratio:lr.map((v,i)=>v===null?null:Math.round((v+8)*10)/10)}};
+    const after=await uw(withLl);
+    ok("profile slide with it: the loss and LAE ratio and the expense ratio are stacked, as the parts of the combined ratio", same(after.chart.series.map(x=>x.name),["Loss and LAE ratio","Expense ratio"]) && after.all.includes("Combined ratio in its two parts (%)"));
+    ok("its table gives the loss ratio and the loss and LAE ratio, one under the other", (()=>{ const names=after.table.rows.map(r=>typeof r[0]==="string"?r[0]:r[0]&&r[0].text); const i=names.indexOf("Loss ratio (%)"); return i>=0 && names[i+1]==="Loss and LAE ratio (%)"; })(), after.table.rows.map(r=>r[0]));
+    await ctx.close();
+  }
 
   // ----- a reader sees none of it -----
   t=await open({role:"reader"}, {statStatus:()=>({status:200, body:{...copy(SJ.statusSaved), loadedProblem:null}})}); p=t.p;

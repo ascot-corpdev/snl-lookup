@@ -19,6 +19,8 @@ export const STAT_FIELDS = [
   { id: "dpw_by_state", label: "Direct premiums written by state", unit: "usd", by: "state" },
   { id: "surplus", label: "Policyholder surplus", unit: "usd", by: "year" },
   { id: "loss_ratio", label: "Loss ratio", unit: "pct", by: "year" },
+  // Losses plus loss adjustment expenses (LAE) to premiums. Loss and LAE ratio plus expense ratio is the combined ratio.
+  { id: "loss_lae_ratio", label: "Loss and LAE ratio", unit: "pct", by: "year" },
   { id: "expense_ratio", label: "Expense ratio", unit: "pct", by: "year" },
   { id: "combined_ratio", label: "Combined ratio", unit: "pct", by: "year" },
   // Added for company profiles. App-level names only: the owner maps each to S&P's real view and column.
@@ -37,14 +39,14 @@ export type StatFieldId = typeof STAT_FIELDS[number]["id"];
 export const MAPPING_ID = "statutory_mapping";
 /** The fields a query gets when it names none: the original seven, which the Statutory view shows. The fields
     added for company profiles are there when asked for by name. */
-export const DEFAULT_STAT_FIELDS: StatFieldId[] = ["dpw_by_line", "npw_by_line", "dpw_by_state", "surplus", "loss_ratio", "expense_ratio", "combined_ratio"];
+export const DEFAULT_STAT_FIELDS: StatFieldId[] = ["dpw_by_line", "npw_by_line", "dpw_by_state", "surplus", "loss_ratio", "loss_lae_ratio", "expense_ratio", "combined_ratio"];
 
 /** How one app field maps to Snowflake. Column names are whatever Discover shows for the account.
     scale multiplies the stored value: 1000 when the view holds thousands of dollars, 100 when a ratio is held
     as a fraction.
     A figure can sit in one view, or be read through a chain of joined views in several schemas:
     - view is "VIEW" (the default schema, the SNOWFLAKE_SCHEMA secret) or "SCHEMA.VIEW"; as names it ("F").
-    - joins (up to 6) each add a view with its own as, joined on columns of views named before it.
+    - joins (up to 8) each add a view with its own as, joined on columns of views named before it.
     - every column is "COLUMN" or "ALIAS.COLUMN"; with joins it must be "ALIAS.COLUMN", so nothing is ambiguous.
     - where conditions: equals, notEquals, in (up to 80 texts), isNull (true or false), month (1 to 12, the month
       of a date column), startsWith (text at the start). Values are always bound, never written into the SQL, as
@@ -52,19 +54,28 @@ export const DEFAULT_STAT_FIELDS: StatFieldId[] = ["dpw_by_line", "npw_by_line",
     - plus: more columns of the same row added to value. stateStrip: a prefix taken off each state afterwards.
     - sum: true adds up the value over rows that share everything else (many rows per counterparty).
     - latest: a column such as a sequence number; only the row with its highest value is kept for each company,
-      year, line, state and item (a restated period keeps only its latest version). */
-export type WhereMap = { column: string; equals?: string; notEquals?: string; in?: string[]; isNull?: boolean; month?: number; startsWith?: string };
-export type JoinMap = { view: string; as: string; on: { left: string; right: string }[]; kind?: "inner" | "left" };
+      year, line, state and item (a restated period keeps only its latest version). Up to 3 columns may be listed,
+      the first deciding first.
+    - joins[] and where[] entries (and latest columns) may say when: "company" or "group", to be used only for that
+      kind of lookup; a group lookup can then go through a membership view that a company lookup never touches.
+      entity.groupName names the group's name column. distinct: true removes the repeated rows such a join fans
+      out to (not with sum, which would add up only one of two real rows that happen to be equal). */
+/** when: "company" or "group" uses the entry only for that kind of lookup; without it, the entry is always used. */
+export type WhereMap = { column: string; equals?: string; notEquals?: string; in?: string[]; isNull?: boolean; month?: number; startsWith?: string; when?: "company" | "group" };
+export type JoinMap = { view: string; as: string; on: { left: string; right: string }[]; kind?: "inner" | "left"; when?: "company" | "group" };
 export type FieldMap = {
   view: string; as?: string; joins?: JoinMap[];
-  entity: { company?: string; group?: string; name?: string };
+  /** groupName: the name column for group lookups (falls back to name). */
+  entity: { company?: string; group?: string; name?: string; groupName?: string };
   year: string; yearIsDate?: boolean;
   value: string;
   line?: string; state?: string;
   /** For a field by counterparty (by "item", such as ceded premiums by reinsurer): the column naming it. */
   item?: string;
   where?: WhereMap[];
-  sum?: boolean; latest?: string;
+  sum?: boolean; latest?: string | (string | { column: string; when?: "company" | "group" })[];
+  /** SELECT DISTINCT: collapses the repeated rows a join to a list of group members fans out to. Not with sum. */
+  distinct?: boolean;
   /** Up to 4 more columns of the same row added to value (a null counts as zero; null only when all are null). */
   plus?: string[];
   /** Text taken off the front of each state before it reaches the page ("Reported:FL" becomes "FL"). */
@@ -81,7 +92,7 @@ const IDENT = /^(?:[A-Za-z_][A-Za-z0-9_$]{0,127}|"[A-Za-z0-9_$ ]{1,127}")$/;
 const ident = (s: unknown): s is string => typeof s === "string" && IDENT.test(s);
 // An alias for a view in the mapping: short, plain, written into the SQL in double quotes and upper case.
 const ALIAS = /^[A-Za-z][A-Za-z0-9_]{0,29}$/;
-const MAX_JOINS = 6, MAX_ON = 4, MAX_WHERE = 8, MAX_IN = 80, MAX_TEXT = 200, MAX_PLUS = 4;
+const MAX_JOINS = 8, MAX_ON = 4, MAX_WHERE = 8, MAX_IN = 80, MAX_TEXT = 200, MAX_PLUS = 4;
 const WHERE_OPS = ["equals", "notEquals", "in", "isNull", "month", "startsWith"] as const;
 const OPS_WORDS = "equals, notEquals, in, isNull, month or startsWith";
 
@@ -104,7 +115,21 @@ function colRef(s: unknown): { alias: string | null; col: string } | null {
 }
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
-/** Everything about a field's mapping that doesn't depend on which figure it is. Returns what is wrong, or null. */
+type Kind = "company" | "group";
+/** Whether a joins[] or where[] entry (or a latest column) is used for this kind of lookup: always without when. */
+const usedFor = (x: unknown, k: Kind) => !isObj(x) || x.when === undefined || x.when === k;
+const otherKind = (k: Kind): Kind => (k === "company" ? "group" : "company");
+/** latest as a list of {column, when?}: a single column, or up to 3 (each "ALIAS.COLUMN" or {column, when}). */
+function latestList(f: FieldMap): { column: unknown; when?: unknown }[] {
+  const l = f.latest as unknown;
+  if (l === undefined) return [];
+  return (Array.isArray(l) ? l : [l]).map((x) => (isObj(x) ? { column: x.column, when: x.when } : { column: x }));
+}
+
+/** Everything about a field's mapping that doesn't depend on which figure it is. Returns what is wrong, or null.
+    A joins[] or where[] entry with when: "company" or "group" is used only for that kind of lookup, so the alias
+    checks run once for each kind the mapping can be looked up by (company when it has entity.company, group when
+    it has entity.group). */
 function shapeProblem(f: FieldMap): string | null {
   if (!viewRef(f.view)) return "view must be a view name";
   if (f.as !== undefined && !(typeof f.as === "string" && ALIAS.test(f.as))) return "as must be a short name: letters, digits and _, starting with a letter";
@@ -112,48 +137,83 @@ function shapeProblem(f: FieldMap): string | null {
   if (joins !== undefined && (!Array.isArray(joins) || joins.length > MAX_JOINS)) return `joins must be a list of up to ${MAX_JOINS} joins`;
   const joined = !!joins && joins.length > 0;
   if (joined && f.as === undefined) return "as is needed on the main view when there are joins, so each column can say which view it is in";
-  // Aliases in the order they are declared: the main view's, then each join's.
+  const whenOk = (w: unknown) => w === undefined || w === "company" || w === "group";
+  // Every alias, in the order declared (the main view's, then each join's), whatever kind of lookup it is for.
   const order: string[] = f.as === undefined ? [] : [f.as.toUpperCase()];
+  const whenOf = new Map<string, unknown>();
   for (const [i, j] of (joins ?? []).entries()) {
     const at = `joins[${i}]`;
     if (!isObj(j)) return `${at} must be an object with view, as and on`;
     if (!viewRef(j.view)) return `${at}.view must be a view name or SCHEMA.VIEW`;
     if (!(typeof j.as === "string" && ALIAS.test(j.as))) return `${at}.as must be a short name: letters, digits and _, starting with a letter`;
     if (j.kind !== undefined && j.kind !== "inner" && j.kind !== "left") return `${at}.kind must be "inner" or "left"`;
+    if (!whenOk(j.when)) return `${at}.when must be "company" or "group"`;
     const me = j.as.toUpperCase();
     if (order.includes(me)) return `alias ${me} is declared more than once`;
     if (!Array.isArray(j.on) || j.on.length < 1 || j.on.length > MAX_ON) return `${at}.on must be a list of 1 to ${MAX_ON} {left, right} pairs`;
-    const before = [...order];
     order.push(me);
+    whenOf.set(me, j.when);
     for (const [k, o] of (j.on as unknown[]).entries()) {
       if (!isObj(o)) return `${at}.on[${k}] must be {left, right}`;
-      const sides: string[] = [];
       for (const side of ["left", "right"] as const) {
         const r = colRef(o[side]);
         if (!r || !r.alias) return `${at}.on[${k}].${side} must be ALIAS.COLUMN`;
         if (!order.includes(r.alias)) return `${at}.on[${k}].${side} names alias ${r.alias}, which isn't declared`;
-        sides.push(r.alias);
       }
-      if (!sides.includes(me) || !sides.some((a) => before.includes(a))) return `${at}.on[${k}] must link ${me} to a view named before it`;
     }
   }
-  // Every column: a checked name, the alias form when there are joins, and only aliases that are declared.
-  const col = (where: string, v: unknown): string | null => {
+  if (!isObj(f.entity) || (f.entity.company === undefined && f.entity.group === undefined)) return "entity needs a company or group column";
+  const kinds: Kind[] = (["company", "group"] as const).filter((k) => f.entity[k] !== undefined);
+  // The aliases each kind of lookup has, and each join's links checked within that kind's chain.
+  const has = new Map<Kind, string[]>();
+  for (const kind of kinds) {
+    const mine: string[] = f.as === undefined ? [] : [f.as.toUpperCase()];
+    for (const [i, j] of (joins ?? []).entries()) {
+      if (!usedFor(j, kind)) continue;
+      const me = j.as.toUpperCase(), before = [...mine];
+      mine.push(me);
+      for (const [k, o] of j.on.entries()) {
+        const sides: string[] = [];
+        for (const side of ["left", "right"] as const) {
+          const a = colRef(o[side])!.alias!;
+          if (!mine.includes(a)) return `joins[${i}].on[${k}].${side} names alias ${a}, which is only joined for ${otherKind(kind)} lookups`;
+          sides.push(a);
+        }
+        if (!sides.includes(me) || !sides.some((a) => before.includes(a))) return `joins[${i}].on[${k}] must link ${me} to a view named before it`;
+      }
+    }
+    has.set(kind, mine);
+  }
+  // Every column: a checked name, the alias form when there are joins, and only aliases the lookup has.
+  const col = (where: string, v: unknown, forKinds: Kind[] = kinds): string | null => {
     const r = colRef(v);
     if (!r) return `${where} must be a column name`;
     if (joined && !r.alias) return `${where} must be ALIAS.COLUMN when there are joins`;
     if (r.alias && !order.includes(r.alias)) return `${where} names alias ${r.alias}, which isn't declared`;
+    for (const k of forKinds) if (r.alias && !has.get(k)!.includes(r.alias)) return `${where} names alias ${r.alias}, which is only joined for ${otherKind(k)} lookups`;
     return null;
   };
-  if (!isObj(f.entity) || (f.entity.company === undefined && f.entity.group === undefined)) return "entity needs a company or group column";
-  for (const k of ["company", "group", "name"] as const) if (f.entity[k] !== undefined) { const p = col(`entity.${k}`, f.entity[k]); if (p) return p; }
+  const inKinds = (ks: Kind[]) => kinds.filter((k) => ks.includes(k));
+  const ent = f.entity as Record<string, unknown>;
+  const entityKinds: Record<string, Kind[]> = { company: ["company"], group: ["group"], name: ent.groupName === undefined ? ["company", "group"] : ["company"], groupName: ["group"] };
+  for (const k of ["company", "group", "name", "groupName"] as const) if (ent[k] !== undefined) { const p = col(`entity.${k}`, ent[k], inKinds(entityKinds[k])); if (p) return p; }
   for (const k of ["year", "value"] as const) { const p = col(k, f[k]); if (p) return p; }
-  for (const k of ["line", "state", "item", "latest"] as const) if (f[k] !== undefined) { const p = col(k, f[k]); if (p) return p; }
+  for (const k of ["line", "state", "item"] as const) if (f[k] !== undefined) { const p = col(k, f[k]); if (p) return p; }
+  if (f.latest !== undefined) {
+    const l = latestList(f), one = !Array.isArray(f.latest as unknown);
+    if (!one && (l.length < 1 || l.length > 3)) return "latest must be a column, or a list of 1 to 3 columns";
+    for (const [i, x] of l.entries()) {
+      const at = one ? "latest" : `latest[${i}]`;
+      if (!whenOk(x.when)) return `${at}.when must be "company" or "group"`;
+      const p = col(one ? at : at + (isObj((f.latest as unknown[])[i]) ? ".column" : ""), x.column, kinds.filter((k) => usedFor(x, k))); if (p) return p;
+    }
+  }
   if (f.where !== undefined && (!Array.isArray(f.where) || f.where.length > MAX_WHERE)) return `where must be a list of up to ${MAX_WHERE} conditions`;
   for (const [i, w] of (f.where ?? []).entries()) {
     const at = `where[${i}]`;
     if (!isObj(w)) return `${at} must be an object with column and one of ${OPS_WORDS}`;
-    const p = col(`${at}.column`, w.column); if (p) return p;
+    if (!whenOk(w.when)) return `${at}.when must be "company" or "group"`;
+    const p = col(`${at}.column`, w.column, kinds.filter((k) => usedFor(w, k))); if (p) return p;
     const ops = WHERE_OPS.filter((k) => w[k] !== undefined);
     if (ops.length !== 1) return `${at} needs exactly one of ${OPS_WORDS}`;
     const text = (v: unknown) => typeof v === "string" && v.length <= MAX_TEXT;
@@ -168,6 +228,9 @@ function shapeProblem(f: FieldMap): string | null {
   for (const [i, x] of (f.plus ?? []).entries()) { const p = col(`plus[${i}]`, x); if (p) return p; }
   if (f.stateStrip !== undefined && !(typeof f.stateStrip === "string" && f.stateStrip.length >= 1 && f.stateStrip.length <= MAX_TEXT)) return `stateStrip must be text of 1 to ${MAX_TEXT} characters`;
   if (f.sum !== undefined && typeof f.sum !== "boolean") return "sum must be true or false";
+  if (f.distinct !== undefined && typeof f.distinct !== "boolean") return "distinct must be true or false";
+  // Adding up after removing repeated rows would also drop real rows that happen to carry the same figures.
+  if (f.sum && f.distinct) return "sum and distinct can't be used together: removing repeated rows before adding up would also drop real rows that happen to have the same figures";
   if (f.yearIsDate !== undefined && typeof f.yearIsDate !== "boolean") return "yearIsDate must be true or false";
   if (f.scale !== undefined && !(typeof f.scale === "number" && Number.isFinite(f.scale) && f.scale !== 0)) return "scale must be a number";
   return null;
@@ -226,19 +289,23 @@ export function buildSql(database: string, schema: string, m: FieldMap, q: StatQ
   const c = (ref: string) => { const r = colRef(ref)!; return r.alias ? `"${r.alias}".${r.col}` : r.col; };
   const from = (ref: string) => { const r = viewRef(ref)!; return `${database}.${r.schema ?? schema}.${r.view}`; };
   const entityCol = c(entityRef), year = m.yearIsDate ? `YEAR(${c(m.year)})` : c(m.year);
-  const name = m.entity.name === undefined ? null : c(m.entity.name), line = m.line === undefined ? null : c(m.line), state = m.state === undefined ? null : c(m.state);
+  // A group lookup uses only the joins and conditions for every lookup and those marked when: "group"; a company
+  // lookup likewise. So a company lookup never goes through a group's membership view.
+  const joins = (m.joins ?? []).filter((j) => usedFor(j, q.kind)), conds = (m.where ?? []).filter((w) => usedFor(w, q.kind));
+  const nameRef = q.kind === "group" ? m.entity.groupName ?? m.entity.name : m.entity.name;
+  const name = nameRef === undefined ? null : c(nameRef), line = m.line === undefined ? null : c(m.line), state = m.state === undefined ? null : c(m.state);
   const item = m.item === undefined ? null : c(m.item);
   // plus: value + each extra column of the same row, a null counted as zero; null when every one is null
   const adds = [m.value, ...(m.plus ?? [])].map(c);
   const value = adds.length === 1 ? adds[0] : `CASE WHEN ${adds.map((a) => `${a} IS NULL`).join(" AND ")} THEN NULL ELSE ${adds.map((a) => `COALESCE(${a}, 0)`).join(" + ")} END`;
-  const cols = [`${entityCol} AS CODE`, `${name ?? "NULL"} AS NAME`, `${year} AS YR`, `${line ?? "NULL"} AS LINE`, `${state ?? "NULL"} AS STATE`, `${m.sum ? `SUM(${value})` : value} AS VAL`];
+  const cols = [`${m.distinct ? "DISTINCT " : ""}${entityCol} AS CODE`, `${name ?? "NULL"} AS NAME`, `${year} AS YR`, `${line ?? "NULL"} AS LINE`, `${state ?? "NULL"} AS STATE`, `${m.sum ? `SUM(${value})` : value} AS VAL`];
   if (item !== null) cols.push(`${item} AS ITEM`);   // only fields by counterparty map an item column
   let source = from(m.view) + (m.as === undefined ? "" : ` AS "${m.as.toUpperCase()}"`);
-  for (const j of m.joins ?? []) source += ` ${j.kind === "left" ? "LEFT JOIN" : "JOIN"} ${from(j.view)} AS "${j.as.toUpperCase()}" ON ${j.on.map((o) => `${c(o.left)} = ${c(o.right)}`).join(" AND ")}`;
+  for (const j of joins) source += ` ${j.kind === "left" ? "LEFT JOIN" : "JOIN"} ${from(j.view)} AS "${j.as.toUpperCase()}" ON ${j.on.map((o) => `${c(o.left)} = ${c(o.right)}`).join(" AND ")}`;
   const bindings: Binding[] = q.codes.map((code) => ({ type: "TEXT", value: code }));
   let where = `${entityCol} IN (${q.codes.map(() => "?").join(", ")}) AND ${year} BETWEEN ? AND ?`;
   bindings.push({ type: "FIXED", value: String(q.fromYear) }, { type: "FIXED", value: String(q.toYear) });
-  for (const w of m.where ?? []) {
+  for (const w of conds) {
     const col = c(w.column);
     if (w.equals !== undefined) { where += ` AND ${col} = ?`; bindings.push({ type: "TEXT", value: w.equals }); }
     else if (w.notEquals !== undefined) { where += ` AND ${col} <> ?`; bindings.push({ type: "TEXT", value: w.notEquals }); }
@@ -247,11 +314,14 @@ export function buildSql(database: string, schema: string, m: FieldMap, q: StatQ
     else if (w.month !== undefined) { where += ` AND MONTH(${col}) = ?`; bindings.push({ type: "FIXED", value: String(w.month) }); }
     else if (w.startsWith !== undefined) { where += ` AND STARTSWITH(${col}, ?)`; bindings.push({ type: "TEXT", value: w.startsWith }); }
   }
-  const latest = m.latest === undefined ? null : c(m.latest);
-  // sum: grouped by everything else selected (by position), and by the latest column when there is one.
-  const group = m.sum ? ` GROUP BY 1, 2, 3, 4, 5${item !== null ? ", 7" : ""}${latest ? `, ${latest}` : ""}` : "";
-  const company = !m.sum && m.entity.company !== undefined && m.entity.company !== entityRef ? c(m.entity.company) : null;
-  const keep = latest ? ` QUALIFY ROW_NUMBER() OVER (PARTITION BY ${[entityCol, company, name, year, line, state, item].filter((x) => x !== null).join(", ")} ORDER BY ${latest} DESC) = 1` : "";
+  const latest = latestList(m).filter((x) => usedFor(x, q.kind)).map((x) => c(x.column as string));
+  // sum: grouped by everything else selected (by position), and by the latest columns when there are any.
+  const group = m.sum ? ` GROUP BY 1, 2, 3, 4, 5${item !== null ? ", 7" : ""}${latest.map((l) => `, ${l}`).join("")}` : "";
+  // Rows of each company stay apart in a group lookup, when this lookup's chain has the company column.
+  const aliases = [m.as, ...joins.map((j) => j.as)].filter((a): a is string => a !== undefined).map((a) => a.toUpperCase());
+  const companyRef = m.entity.company === undefined ? null : colRef(m.entity.company)!;
+  const company = !m.sum && companyRef && m.entity.company !== entityRef && (!companyRef.alias || aliases.includes(companyRef.alias)) ? c(m.entity.company!) : null;
+  const keep = latest.length ? ` QUALIFY ROW_NUMBER() OVER (PARTITION BY ${[entityCol, company, name, year, line, state, item].filter((x) => x !== null).join(", ")} ORDER BY ${latest.map((l) => `${l} DESC`).join(", ")}) = 1` : "";
   return { statement: `SELECT ${cols.join(", ")} FROM ${source} WHERE ${where}${group}${keep} ORDER BY 1, 3 LIMIT 20000`, bindings };
 }
 

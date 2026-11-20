@@ -23,9 +23,17 @@ const sortRows = (rows: any[]) => [...rows].sort((a, b) => JSON.stringify(a) < J
 // ---------- made-up views in three schemas ----------
 const TABLES: SchemaTables = {
   "ENTITY.ENTITY_LIST": [
-    { ENTITY_ID: 1, NAIC_CD: "12345", ENTITY_NAME: "Calloway Insurance Co", GROUP_ID: 10 },
-    { ENTITY_ID: 2, NAIC_CD: "12346", ENTITY_NAME: "Calloway Home Co", GROUP_ID: 10 },
-    { ENTITY_ID: 3, NAIC_CD: "23456", ENTITY_NAME: "Tarrow Mutual Insurance Co", GROUP_ID: null },
+    { ENTITY_ID: 1, NAIC_CD: "12345", ENTITY_NAME: "Calloway Insurance Co", GROUP_ID: 10, GROUP_ENT_ID: 900, INST_ID: 5001 },
+    { ENTITY_ID: 2, NAIC_CD: "12346", ENTITY_NAME: "Calloway Home Co", GROUP_ID: 10, GROUP_ENT_ID: 900, INST_ID: 5002 },
+    { ENTITY_ID: 3, NAIC_CD: "23456", ENTITY_NAME: "Tarrow Mutual Insurance Co", GROUP_ID: null, GROUP_ENT_ID: null, INST_ID: 5003 },
+    // the group's own entity, whose periods carry the group's combined figures
+    { ENTITY_ID: 900, NAIC_CD: null, ENTITY_NAME: "Calloway Group (combined)", GROUP_ID: null, GROUP_ENT_ID: null, INST_ID: 5900 },
+  ],
+  // group membership: one row for each member and membership period
+  "ENTITY.GROUP_MEMBERS": [
+    { GROUP_CD: "9100", GROUP_NAME: "Calloway Group", MEMBER_PERIOD: "2024-12-31", INST_ID: 5001 },
+    { GROUP_CD: "9100", GROUP_NAME: "Calloway Group", MEMBER_PERIOD: "2024-12-31", INST_ID: 5002 },
+    { GROUP_CD: "9100", GROUP_NAME: "Calloway Group", MEMBER_PERIOD: "2023-12-31", INST_ID: 5001 },
   ],
   "ENTITY.GROUP_LIST": [{ GROUP_ID: 10, GROUP_CD: "9100", GROUP_NAME: "Calloway Group" }],
   "CORE_FIN.STOCK_PERIOD": [
@@ -38,6 +46,8 @@ const TABLES: SchemaTables = {
     { PERIOD_ID: 107, ENTITY_ID: 2, PERIOD_END: "2024-12-31", LOB_NAME: "Total", SEQ: 1 },
     { PERIOD_ID: 108, ENTITY_ID: 3, PERIOD_END: "2024-12-31", LOB_NAME: "Total", SEQ: 1 },
     { PERIOD_ID: 109, ENTITY_ID: 3, PERIOD_END: "2024-12-31", LOB_NAME: null, SEQ: 1 },
+    { PERIOD_ID: 120, ENTITY_ID: 900, PERIOD_END: "2024-12-31", LOB_NAME: "Total", SEQ: 1 },
+    { PERIOD_ID: 121, ENTITY_ID: 900, PERIOD_END: "2023-12-31", LOB_NAME: "Total", SEQ: 1 },
   ],
   "CORE_FIN.FLOW_PERIOD": [
     { FLOW_ID: 201, STOCK_PERIOD_ID: 101, ANNUALISED: "Y", ANN_FACTOR: 1 }, { FLOW_ID: 202, STOCK_PERIOD_ID: 102, ANNUALISED: "Y", ANN_FACTOR: 1 },
@@ -46,6 +56,7 @@ const TABLES: SchemaTables = {
     { FLOW_ID: 207, STOCK_PERIOD_ID: 107, ANNUALISED: "Y" }, { FLOW_ID: 208, STOCK_PERIOD_ID: 108, ANNUALISED: "Y", ANN_FACTOR: 1 },
     { FLOW_ID: 209, STOCK_PERIOD_ID: 103, ANNUALISED: "N", ANN_FACTOR: 0.25 },   // a quarter inside the restated year
     { FLOW_ID: 210, STOCK_PERIOD_ID: 109, ANNUALISED: "Y" },
+    { FLOW_ID: 220, STOCK_PERIOD_ID: 120, ANNUALISED: "Y", ANN_FACTOR: 1 }, { FLOW_ID: 221, STOCK_PERIOD_ID: 121, ANNUALISED: "Y", ANN_FACTOR: 1 },
   ],
   "CORE_FIN.FIN_FLOW_B": [
     { FLOW_ID: 201, NPE_000: 1000, DPW_000: 1200, LOSS_RATIO: 0.6 }, { FLOW_ID: 202, NPE_000: 1100, DPW_000: 1250, LOSS_RATIO: 0.62 },
@@ -53,9 +64,11 @@ const TABLES: SchemaTables = {
     { FLOW_ID: 205, NPE_000: 400, DPW_000: 420, LOSS_RATIO: null }, { FLOW_ID: 206, NPE_000: 300, DPW_000: 310, LOSS_RATIO: null },
     { FLOW_ID: 207, NPE_000: 250, DPW_000: 260, LOSS_RATIO: 0.7 }, { FLOW_ID: 208, NPE_000: 900, DPW_000: 950, LOSS_RATIO: 99999999999999 },   // S&P-style "meaningless" sentinel
     { FLOW_ID: 209, NPE_000: 280, DPW_000: 290, LOSS_RATIO: 0.4 }, { FLOW_ID: 210, NPE_000: 1, DPW_000: 1, LOSS_RATIO: 0.01 },
+    { FLOW_ID: 220, NPE_000: 1400, DPW_000: 1500, LOSS_RATIO: 0.58 }, { FLOW_ID: 221, NPE_000: 1300, DPW_000: 1350, LOSS_RATIO: 0.6 },
   ],
   "CORE_FIN.FIN_STOCK_A": [{ PERIOD_ID: 101, PHS_000: 5000, CAP_STOCK_000: 10, PAID_IN_000: 90 }, { PERIOD_ID: 102, PHS_000: 5500, CAP_STOCK_000: 5, PAID_IN_000: null }, { PERIOD_ID: 103, PHS_000: 5600, CAP_STOCK_000: null, PAID_IN_000: 200 },
-    { PERIOD_ID: 104, PHS_000: 5200, CAP_STOCK_000: 1, PAID_IN_000: 1 }, { PERIOD_ID: 107, PHS_000: 800, CAP_STOCK_000: 2, PAID_IN_000: 3 }, { PERIOD_ID: 108, PHS_000: 3000, CAP_STOCK_000: null, PAID_IN_000: null }],
+    { PERIOD_ID: 104, PHS_000: 5200, CAP_STOCK_000: 1, PAID_IN_000: 1 }, { PERIOD_ID: 107, PHS_000: 800, CAP_STOCK_000: 2, PAID_IN_000: 3 }, { PERIOD_ID: 108, PHS_000: 3000, CAP_STOCK_000: null, PAID_IN_000: null },
+    { PERIOD_ID: 120, PHS_000: 9000, CAP_STOCK_000: 50, PAID_IN_000: 450 }, { PERIOD_ID: 121, PHS_000: 8000, CAP_STOCK_000: 50, PAID_IN_000: 400 }],
   "CORE_FIN.GEO_REGION": [
     { FLOW_ID: 203, REGION: "Reported:FL", DPW_000: 700 }, { FLOW_ID: 203, REGION: "Reported:TX", DPW_000: 450 }, { FLOW_ID: 203, REGION: "Region:Southeast", DPW_000: 1150 },
     { FLOW_ID: 203, REGION: "Zone:3", DPW_000: 5 }, { FLOW_ID: 208, REGION: "Reported:FL", DPW_000: 900 },
@@ -171,8 +184,8 @@ const OLD: FieldMap = { view: "IR_PREM_LINE", entity: { company: "NAIC_CD", grou
     ["an alias in quotes", { ...BASE, as: '"S"' }, "as must be a short name: letters, digits and _, starting with a letter"],
     ["an alias that is too long", { ...BASE, as: "A".repeat(31) }, "as must be a short name: letters, digits and _, starting with a letter"],
     ["an alias with a dollar sign", { ...BASE, as: "S$" }, "as must be a short name: letters, digits and _, starting with a letter"],
-    ["joins that aren't a list", { ...BASE, joins: J0 }, "joins must be a list of up to 6 joins"],
-    ["seven joins", { ...BASE, joins: Array.from({ length: 7 }, (_, i) => ({ view: "V", as: `J${i}`, on: [{ left: "S.A", right: `J${i}.A` }] })) }, "joins must be a list of up to 6 joins"],
+    ["joins that aren't a list", { ...BASE, joins: J0 }, "joins must be a list of up to 8 joins"],
+    ["nine joins", { ...BASE, joins: Array.from({ length: 9 }, (_, i) => ({ view: "V", as: `J${i}`, on: [{ left: "S.A", right: `J${i}.A` }] })) }, "joins must be a list of up to 8 joins"],
     ["joins with no alias on the main view", { ...BASE, as: undefined }, "as is needed on the main view when there are joins, so each column can say which view it is in"],
     ["a join that isn't an object", { ...BASE, joins: ["CORE_FIN.STOCK_PERIOD"] }, "joins[0] must be an object with view, as and on"],
     ["a join with a hostile view", { ...BASE, joins: [{ ...J0, view: "CORE_FIN.X; DROP TABLE Y" }] }, "joins[0].view must be a view name or SCHEMA.VIEW"],
@@ -351,6 +364,101 @@ const PAID_IN: FieldMap = { ...SURPLUS, value: "S.CAP_STOCK_000", plus: ["S.PAID
   ok("without the startsWith condition, a state that doesn't start with the prefix is left as it is", same(sortRows(loose.fields[0].rows.map((x) => x.state)), sortRows(["FL", "TX", "Region:Southeast", "Zone:3", "FL"])), loose.fields[0].rows);
 }
 
+// ---------- group lookups through a membership view, from the same mapping as company lookups ----------
+const GROUPED: FieldMap = {
+  view: "CORE_FIN.FIN_FLOW_B", as: "F", joins: [
+    CHAIN[0], CHAIN[1],
+    { view: "ENTITY.ENTITY_LIST", as: "E", on: [{ left: "SP.ENTITY_ID", right: "E.ENTITY_ID" }], when: "company" },
+    { view: "ENTITY.ENTITY_LIST", as: "GE", on: [{ left: "SP.ENTITY_ID", right: "GE.ENTITY_ID" }], when: "group" },
+    { view: "ENTITY.ENTITY_LIST", as: "M", on: [{ left: "GE.ENTITY_ID", right: "M.GROUP_ENT_ID" }], when: "group" },
+    { view: "ENTITY.GROUP_MEMBERS", as: "MS", on: [{ left: "M.INST_ID", right: "MS.INST_ID" }], when: "group" },
+  ],
+  entity: { company: "E.NAIC_CD", name: "E.ENTITY_NAME", group: "MS.GROUP_CD", groupName: "MS.GROUP_NAME" },
+  year: "SP.PERIOD_END", yearIsDate: true, value: "F.NPE_000",
+  where: [{ column: "SP.LOB_NAME", equals: "Total" }, { column: "FP.ANNUALISED", equals: "Y" }, { column: "SP.PERIOD_END", month: 12 }],
+  latest: ["SP.SEQ", { column: "MS.MEMBER_PERIOD", when: "group" }], distinct: true, scale: 1000,
+};
+{
+  ok("a mapping with company-only and group-only joins has nothing wrong with it", mapProblem("npe", GROUPED) === null, mapProblem("npe", GROUPED));
+  const co = buildSql(DB, SCH, GROUPED, Q)!;
+  ok("a company lookup: the exact SQL, with none of the group-only joins", co.statement === 'SELECT DISTINCT "E".NAIC_CD AS CODE, "E".ENTITY_NAME AS NAME, YEAR("SP".PERIOD_END) AS YR, NULL AS LINE, NULL AS STATE, "F".NPE_000 AS VAL FROM MI_XPRESSCLOUD.CORE_FIN.FIN_FLOW_B AS "F" JOIN MI_XPRESSCLOUD.CORE_FIN.FLOW_PERIOD AS "FP" ON "F".FLOW_ID = "FP".FLOW_ID JOIN MI_XPRESSCLOUD.CORE_FIN.STOCK_PERIOD AS "SP" ON "FP".STOCK_PERIOD_ID = "SP".PERIOD_ID JOIN MI_XPRESSCLOUD.ENTITY.ENTITY_LIST AS "E" ON "SP".ENTITY_ID = "E".ENTITY_ID WHERE "E".NAIC_CD IN (?, ?) AND YEAR("SP".PERIOD_END) BETWEEN ? AND ? AND "SP".LOB_NAME = ? AND "FP".ANNUALISED = ? AND MONTH("SP".PERIOD_END) = ? QUALIFY ROW_NUMBER() OVER (PARTITION BY "E".NAIC_CD, "E".ENTITY_NAME, YEAR("SP".PERIOD_END) ORDER BY "SP".SEQ DESC) = 1 ORDER BY 1, 3 LIMIT 20000', co.statement);
+  ok("and nothing of the group's chain appears in it", !/"GE"|"M"|"MS"|GROUP_MEMBERS|MEMBER_PERIOD/.test(co.statement));
+  const gr = buildSql(DB, SCH, GROUPED, { ...Q, kind: "group", codes: ["9100"] })!;
+  ok("a group lookup from the same mapping: the exact SQL, through the group entity, its members and the membership view", gr.statement === 'SELECT DISTINCT "MS".GROUP_CD AS CODE, "MS".GROUP_NAME AS NAME, YEAR("SP".PERIOD_END) AS YR, NULL AS LINE, NULL AS STATE, "F".NPE_000 AS VAL FROM MI_XPRESSCLOUD.CORE_FIN.FIN_FLOW_B AS "F" JOIN MI_XPRESSCLOUD.CORE_FIN.FLOW_PERIOD AS "FP" ON "F".FLOW_ID = "FP".FLOW_ID JOIN MI_XPRESSCLOUD.CORE_FIN.STOCK_PERIOD AS "SP" ON "FP".STOCK_PERIOD_ID = "SP".PERIOD_ID JOIN MI_XPRESSCLOUD.ENTITY.ENTITY_LIST AS "GE" ON "SP".ENTITY_ID = "GE".ENTITY_ID JOIN MI_XPRESSCLOUD.ENTITY.ENTITY_LIST AS "M" ON "GE".ENTITY_ID = "M".GROUP_ENT_ID JOIN MI_XPRESSCLOUD.ENTITY.GROUP_MEMBERS AS "MS" ON "M".INST_ID = "MS".INST_ID WHERE "MS".GROUP_CD IN (?) AND YEAR("SP".PERIOD_END) BETWEEN ? AND ? AND "SP".LOB_NAME = ? AND "FP".ANNUALISED = ? AND MONTH("SP".PERIOD_END) = ? QUALIFY ROW_NUMBER() OVER (PARTITION BY "MS".GROUP_CD, "MS".GROUP_NAME, YEAR("SP".PERIOD_END) ORDER BY "SP".SEQ DESC, "MS".MEMBER_PERIOD DESC) = 1 ORDER BY 1, 3 LIMIT 20000', gr.statement);
+  ok("its bindings", same(gr.bindings, [T("9100"), N(2023), N(2024), T("Total"), T("Y"), N(12)]), gr.bindings);
+  const whereWhen = buildSql(DB, SCH, { ...GROUPED, where: [...GROUPED.where!, { column: "MS.MEMBER_PERIOD", isNull: false, when: "group" }, { column: "E.NAIC_CD", notEquals: "00000", when: "company" }] }, Q)!;
+  ok("a where entry marked for groups is left out of a company lookup, and one marked for companies is kept", !whereWhen.statement.includes("MEMBER_PERIOD") && whereWhen.statement.includes('AND "E".NAIC_CD <> ?') && whereWhen.bindings.at(-1)!.value === "00000");
+  const whereG = buildSql(DB, SCH, { ...GROUPED, where: [...GROUPED.where!, { column: "MS.MEMBER_PERIOD", isNull: false, when: "group" }, { column: "E.NAIC_CD", notEquals: "00000", when: "company" }] }, { ...Q, kind: "group", codes: ["9100"] })!;
+  ok("and the other way round for a group lookup", whereG.statement.includes('AND "MS".MEMBER_PERIOD IS NOT NULL') && !whereG.statement.includes('"E".') && whereG.bindings.length === 6);
+  const noGn = buildSql(DB, SCH, { ...GROUPED, entity: { company: "E.NAIC_CD", group: "MS.GROUP_CD" } }, { ...Q, kind: "group", codes: ["9100"] })!;
+  ok("without a name column, NULL is selected as the name", noGn.statement.includes('"MS".GROUP_CD AS CODE, NULL AS NAME'));
+  ok("without distinct there is no DISTINCT", !buildSql(DB, SCH, { ...GROUPED, distinct: undefined }, Q)!.statement.includes("DISTINCT"));
+
+  const w = world();
+  const r = await runStatutory(w.api, w.creds.database, w.creds.schema, { fields: { npe: GROUPED } }, Q, ["npe"]);
+  ok("the company lookup gives each company's own figures", same(r.fields[0].rows.map((x) => [x.code, x.year, x.value]), [["12345", 2023, 1_000_000], ["12345", 2024, 1_150_000], ["23456", 2024, 900_000]]), r.fields[0].rows);
+  const g = await runStatutory(w.api, w.creds.database, w.creds.schema, { fields: { npe: GROUPED } }, { kind: "group", codes: ["9100"], fromYear: 2023, toYear: 2024 }, ["npe"]);
+  ok("the group lookup gives the group's combined figures once a year, named from the membership view", same(g.fields[0].rows.map((x) => [x.code, x.year, x.value]), [["9100", 2023, 1_300_000], ["9100", 2024, 1_400_000]]) && same(g.entities, [{ code: "9100", name: "Calloway Group" }]), { rows: g.fields[0].rows, entities: g.entities });
+  const stock: FieldMap = { ...GROUPED, view: "CORE_FIN.FIN_STOCK_A", as: "S", joins: [{ view: "CORE_FIN.STOCK_PERIOD", as: "SP", on: [{ left: "S.PERIOD_ID", right: "SP.PERIOD_ID" }] }, ...GROUPED.joins!.slice(2)], value: "S.PHS_000", where: [{ column: "SP.LOB_NAME", equals: "Total" }, { column: "SP.PERIOD_END", month: 12 }], latest: undefined };
+  const fan = await runStatutory(w.api, w.creds.database, w.creds.schema, { fields: { surplus: { ...stock, distinct: undefined } } }, { kind: "group", codes: ["9100"], fromYear: 2024, toYear: 2024 }, ["surplus"]);
+  ok("without distinct or latest, the member list fans one figure out to one row per member and membership period", fan.fields[0].rows.length === 3 && fan.fields[0].rows.every((x) => x.value === 9_000_000), fan.fields[0].rows);
+  const dist = await runStatutory(w.api, w.creds.database, w.creds.schema, { fields: { surplus: stock } }, { kind: "group", codes: ["9100"], fromYear: 2023, toYear: 2024 }, ["surplus"]);
+  ok("distinct collapses the fan-out to one row a year", same(dist.fields[0].rows.map((x) => [x.year, x.value]), [[2023, 8_000_000], [2024, 9_000_000]]), dist.fields[0].rows);
+  const tarrow = await runStatutory(w.api, w.creds.database, w.creds.schema, { fields: { surplus: stock } }, { kind: "company", codes: ["23456"], fromYear: 2024, toYear: 2024 }, ["surplus"]);
+  ok("a company in no group still comes back on a company lookup, because the group's joins aren't used", same(tarrow.fields[0].rows.map((x) => [x.code, x.value]), [["23456", 3_000_000]]), tarrow.fields[0].rows);
+  const eight = { ...GROUPED, joins: [...GROUPED.joins!, { view: "ENTITY.GROUP_LIST", as: "GL", on: [{ left: "E.GROUP_ID", right: "GL.GROUP_ID" }], kind: "left" as const, when: "company" as const }, { view: "ENTITY.GROUP_LIST", as: "GL2", on: [{ left: "M.GROUP_ID", right: "GL2.GROUP_ID" }], kind: "left" as const, when: "group" as const }] };
+  ok("eight joins are allowed", eight.joins.length === 8 && mapProblem("npe", eight) === null, mapProblem("npe", eight));
+
+  const G: any = GROUPED;
+  for (const [name, m, says] of [
+    ["entity.company on a group-only alias", { ...G, entity: { ...G.entity, company: "MS.NAIC_CD" } }, "entity.company names alias MS, which is only joined for group lookups"],
+    ["entity.group on a company-only alias", { ...G, entity: { ...G.entity, group: "E.GROUP_CD" } }, "entity.group names alias E, which is only joined for company lookups"],
+    ["entity.groupName on a company-only alias", { ...G, entity: { ...G.entity, groupName: "E.ENTITY_NAME" } }, "entity.groupName names alias E, which is only joined for company lookups"],
+    ["entity.name on a company-only alias with no groupName", { ...G, entity: { company: "E.NAIC_CD", name: "E.ENTITY_NAME", group: "MS.GROUP_CD" } }, "entity.name names alias E, which is only joined for company lookups"],
+    ["the value on a group-only alias", { ...G, value: "GE.NPE_000" }, "value names alias GE, which is only joined for group lookups"],
+    ["a where entry for every lookup on a group-only alias", { ...G, where: [{ column: "MS.MEMBER_PERIOD", isNull: false }] }, "where[0].column names alias MS, which is only joined for group lookups"],
+    ["a latest column for every lookup on a group-only alias", { ...G, latest: ["SP.SEQ", "MS.MEMBER_PERIOD"] }, "latest[1] names alias MS, which is only joined for group lookups"],
+    ["a join for every lookup linked to a group-only alias", { ...G, joins: [...G.joins, { view: "ENTITY.GROUP_LIST", as: "GL", on: [{ left: "M.GROUP_ID", right: "GL.GROUP_ID" }] }] }, "joins[6].on[0].left names alias M, which is only joined for group lookups"],
+    ["a group-only join linked to a company-only alias", { ...G, joins: [...G.joins.slice(0, 5), { ...G.joins[5], on: [{ left: "E.INST_ID", right: "MS.INST_ID" }] }] }, "joins[5].on[0].left names alias E, which is only joined for company lookups"],
+    ["a join for another kind of lookup", { ...G, joins: [...G.joins.slice(0, 2), { ...G.joins[2], when: "holding" }] }, 'joins[2].when must be "company" or "group"'],
+    ["a where entry for another kind of lookup", { ...G, where: [{ column: "SP.LOB_NAME", equals: "Total", when: "both" }] }, 'where[0].when must be "company" or "group"'],
+    ["a latest column for another kind of lookup", { ...G, latest: ["SP.SEQ", { column: "MS.MEMBER_PERIOD", when: 1 }] }, 'latest[1].when must be "company" or "group"'],
+    ["four latest columns", { ...G, latest: ["SP.SEQ", "SP.SEQ", "SP.SEQ", "SP.SEQ"] }, "latest must be a column, or a list of 1 to 3 columns"],
+    ["an empty latest list", { ...G, latest: [] }, "latest must be a column, or a list of 1 to 3 columns"],
+    ["a latest column that is SQL", { ...G, latest: ["SP.SEQ DESC; --"] }, "latest[0] must be a column name"],
+    ["a latest object column that is SQL", { ...G, latest: [{ column: "SP.SEQ)" }] }, "latest[0].column must be a column name"],
+    ["distinct that is text", { ...G, distinct: "yes" }, "distinct must be true or false"],
+    ["distinct with sum", { ...G, sum: true }, "sum and distinct can't be used together: removing repeated rows before adding up would also drop real rows that happen to have the same figures"],
+  ] as const) {
+    const got = mapProblem("npe", m);
+    ok(`refused: ${name}, saying "${says}"`, got === says && buildSql(DB, SCH, m as any, Q) === null && buildSql(DB, SCH, m as any, { ...Q, kind: "group", codes: ["9100"] }) === null, got);
+  }
+  ok("a group-only join may use an alias only group lookups have, when the mapping has no group column it is simply never used", mapProblem("npe", { ...G, entity: { company: "E.NAIC_CD", name: "E.ENTITY_NAME" }, latest: "SP.SEQ" }) === null);
+  ok("a group lookup on a mapping with no group column still gives the plain existing message", buildSql(DB, SCH, { ...G, entity: { company: "E.NAIC_CD" }, latest: "SP.SEQ" }, { ...Q, kind: "group" }) === null);
+}
+
+// ---------- the loss and LAE ratio, a new figure ----------
+{
+  const P = await import(new URL("../../supabase/functions/_shared/profile.ts", import.meta.url).href);
+  const { STAT_FIELDS, DEFAULT_STAT_FIELDS } = await import(new URL("../../supabase/functions/_shared/statutory.ts", import.meta.url).href);
+  const ids = STAT_FIELDS.map((f: any) => f.id);
+  ok("the loss and LAE ratio is the 18th figure, straight after the loss ratio, a percentage by year", ids.length === 18 && ids.indexOf("loss_lae_ratio") === ids.indexOf("loss_ratio") + 1 && same(STAT_FIELDS.find((f: any) => f.id === "loss_lae_ratio"), { id: "loss_lae_ratio", label: "Loss and LAE ratio", unit: "pct", by: "year" }) && STAT_FIELDS.find((f: any) => f.id === "loss_ratio").label === "Loss ratio");
+  ok("it is one of the figures a query gets by default, straight after the loss ratio", same(DEFAULT_STAT_FIELDS, ["dpw_by_line", "npw_by_line", "dpw_by_state", "surplus", "loss_ratio", "loss_lae_ratio", "expense_ratio", "combined_ratio"]));
+  const w = world();
+  const r = await runStatutory(w.api, w.creds.database, w.creds.schema, MAPPING, Q, DEFAULT_STAT_FIELDS);
+  const ll = r.fields.find((f) => f.id === "loss_lae_ratio")!;
+  ok("unmapped, as in a mapping saved before it existed, it shows as not mapped and is never an error", ll.mapped === false && ll.error === null && ll.rows.length === 0 && r.fields.find((f) => f.id === "loss_ratio")!.rows.length === 3);
+  const mapped = await runStatutory(w.api, w.creds.database, w.creds.schema, { fields: { loss_lae_ratio: { ...LOSS, value: "F.LOSS_RATIO" } } }, Q, ["loss_lae_ratio"]);
+  ok("mapped, it comes back like any other ratio", mapped.fields[0].mapped === true && mapped.fields[0].rows.length === 3 && mapped.fields[0].unit === "pct");
+  ok("company profiles carry it as a series beside the loss ratio", P.SERIES.indexOf("loss_lae_ratio") === P.SERIES.indexOf("loss_ratio") + 1);
+  const s = P.sampleFacts("2026-11-14");
+  ok("in the sample, loss and LAE ratio plus expense ratio is the combined ratio, and the loss ratio is the smaller", s.series.loss_lae_ratio.every((v: number, i: number) => Math.abs(v + s.series.expense_ratio[i] - s.series.combined_ratio[i]) < 1e-9 && s.series.loss_ratio[i] < v));
+  const text = JSON.stringify(P.plainText(s));
+  ok("the profile's underwriting text gives the loss and LAE ratio too", text.includes("loss ratio 50.2%, loss and LAE ratio 60.7%, expense ratio 30.8%, combined ratio 91.5%"), text.match(/In 2025: [^"]*/)?.[0]);
+  const noLl = { ...s, series: { ...s.series, loss_lae_ratio: undefined } };
+  ok("without it, the text reads as before", JSON.stringify(P.plainText(noLl)).includes("loss ratio 50.2%, expense ratio 30.8%, combined ratio 91.5%"));
+}
+
 // ---------- the saved-result id ----------
 {
   const clock = fakeClock(), db = memoryDb(clock), sf = fakeSnowflake(clock, { on: joinReader({ tables: TABLES }) });
@@ -409,7 +517,7 @@ function fnWorld(mapping: unknown = MAPPING) {
   const vl = await w.call({ action: "discover", schema: "CORE_FIN", like: "flow_" });
   ok("a name filter works in a chosen schema", same(vl.body.views.map((x: any) => x.name), ["FIN_FLOW_A", "FIN_FLOW_B", "FLOW_PERIOD"]) && same(w.sf.statements.at(-1)!.bindings, [T("CORE_FIN"), T("%flow_%")]), vl.body);
   const e = await w.call({ action: "discover", schema: "ENTITY" });
-  ok("another schema lists its own views", same(e.body.views.map((x: any) => x.name), ["BATCH_RUN", "ENTITY_LIST", "FIN_FLOW_B", "GROUP_LIST"]), e.body);
+  ok("another schema lists its own views", same(e.body.views.map((x: any) => x.name), ["BATCH_RUN", "ENTITY_LIST", "FIN_FLOW_B", "GROUP_LIST", "GROUP_MEMBERS"]), e.body);
   const c1 = await w.call({ action: "discover", schema: "CORE_FIN", view: "FIN_FLOW_B" });
   ok("Discover lists a view's columns in a chosen schema", c1.status === 200 && c1.body.schema === "CORE_FIN" && c1.body.view === "FIN_FLOW_B" && same(c1.body.columns.map((x: any) => x.name), ["FLOW_ID", "NPE_000", "DPW_000", "LOSS_RATIO"]) && same(w.sf.statements.at(-1)!.bindings, [T("CORE_FIN"), T("FIN_FLOW_B")]), c1.body);
   const c2 = await w.call({ action: "discover", schema: "ENTITY", view: "FIN_FLOW_B" });

@@ -64,7 +64,7 @@ export const systemPrompt = (org = ""): string => `You answer questions for ${or
 
 What you can use
 - SNL Insurance Product Filings: rate, rule and form filings that insurers make with US state regulators. search_filings finds them; read_filing_document attaches a filing's original document, or a range of its pages, so you can read it.
-- SNL statutory financials (premiums by line and state, policyholder surplus, loss, expense and combined ratios) through query_statutory, when it is set up.
+- SNL statutory financials (premiums by line and state, policyholder surplus, loss, loss and LAE, expense and combined ratios) through query_statutory, when it is set up.
 - resolve_entity turns a company name or NAIC code into the S&P ids that search_filings needs. resolve_entities does the same for several names in one call, and turns an insurer group's name into all of its member companies.
 Take facts about filings, forms, rates and statutory figures only from these tools. Don't fill gaps from other knowledge. If the data doesn't cover something, say so and say what would answer it. You have no access to ${org ? org + "'s" : "the team's"} deals, pipeline or internal information; if asked, say this tool only covers S&P's insurance data.
 
@@ -207,7 +207,7 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
   },
   {
     name: "query_statutory",
-    description: "Statutory financials by NAIC company code or group code over a range of years: premiums written by line and state, policyholder surplus, and loss, expense and combined ratios. With an empty fields list it returns those seven. Name other fields to get them: gross premiums written, net premiums earned, net income, paid-in capital, total assets, risk-based capital ratio, net loss and LAE reserves, prior-year reserve development, reinsurance recoverables and ceded premiums by reinsurer. Answers that it isn't set up yet until the Snowflake account is set up.",
+    description: "Statutory financials by NAIC company code or group code over a range of years: premiums written by line and state, policyholder surplus, and the loss ratio (losses only), loss and LAE ratio, expense ratio and combined ratio (loss and LAE ratio plus expense ratio). With an empty fields list it returns those eight. Name other fields to get them: gross premiums written, net premiums earned, net income, paid-in capital, total assets, risk-based capital ratio, net loss and LAE reserves, prior-year reserve development, reinsurance recoverables and ceded premiums by reinsurer. Answers that it isn't set up yet until the Snowflake account is set up.",
     strict: true,
     input_schema: {
       type: "object",
