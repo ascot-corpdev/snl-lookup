@@ -1,0 +1,60 @@
+{
+  "_about": "Made-up answers for the Field set-up panel across schemas and a joined mapping. Every schema, view, column, company and figure is invented.",
+  "statusUnmapped": {
+    "configured": true, "mapped": false, "loadedProblem": null,
+    "message": "Snowflake is connected, but the statutory fields aren't mapped to S&P's views yet. A Corp Dev login can do this once on the Statutory view.",
+    "fields": [
+      { "id": "npe", "label": "Net premiums earned", "unit": "usd", "by": "year", "mapped": false, "problem": "not mapped" },
+      { "id": "surplus", "label": "Policyholder surplus", "unit": "usd", "by": "year", "mapped": false, "problem": "not mapped" },
+      { "id": "ceded_by_reinsurer", "label": "Ceded premiums by reinsurer", "unit": "usd", "by": "item", "mapped": false, "problem": "not mapped" }
+    ]
+  },
+  "statusSaved": {
+    "configured": true, "mapped": true, "message": null, "loadedProblem": "loaded.at must be a column name",
+    "fields": [
+      { "id": "npe", "label": "Net premiums earned", "unit": "usd", "by": "year", "mapped": true, "problem": null },
+      { "id": "surplus", "label": "Policyholder surplus", "unit": "usd", "by": "year", "mapped": false, "problem": "joins[1].on[0].left names alias X, which isn't declared" },
+      { "id": "ceded_by_reinsurer", "label": "Ceded premiums by reinsurer", "unit": "usd", "by": "item", "mapped": false, "problem": "not mapped" }
+    ]
+  },
+  "schemas": { "schemas": [{ "name": "CORE_FIN", "comment": null }, { "name": "ENTITY", "comment": "Made-up: companies and groups" }, { "name": "REINS", "comment": null }], "truncated": false, "fetchedAt": "2026-11-13T12:00:00Z", "fromStore": false },
+  "views": {
+    "CORE_FIN": [{ "name": "FIN_FLOW_B", "type": "VIEW", "comment": "Made-up wide financials" }, { "name": "FLOW_PERIOD", "type": "VIEW", "comment": null }, { "name": "STOCK_PERIOD", "type": "VIEW", "comment": null }],
+    "ENTITY": [{ "name": "ENTITY_LIST", "type": "VIEW", "comment": null }]
+  },
+  "mapping": {
+    "fields": {
+      "npe": {
+        "view": "CORE_FIN.FIN_FLOW_B", "as": "F",
+        "joins": [
+          { "view": "CORE_FIN.FLOW_PERIOD", "as": "FP", "on": [{ "left": "F.PERIOD_ID", "right": "FP.PERIOD_ID" }] },
+          { "view": "CORE_FIN.STOCK_PERIOD", "as": "SP", "on": [{ "left": "FP.STOCK_PERIOD_ID", "right": "SP.PERIOD_ID" }] },
+          { "view": "ENTITY.ENTITY_LIST", "as": "E", "on": [{ "left": "SP.ENTITY_ID", "right": "E.ENTITY_ID" }] }
+        ],
+        "entity": { "company": "E.NAIC_CD", "group": "E.GROUP_CD", "name": "E.ENTITY_NAME" },
+        "year": "SP.PERIOD_END", "yearIsDate": true, "value": "F.NPE_000",
+        "where": [{ "column": "SP.LOB_NAME", "equals": "Total" }, { "column": "FP.ANNUALISED", "equals": "Y" }, { "column": "SP.PERIOD_END", "month": 12 }],
+        "latest": "SP.SEQ", "scale": 1000
+      },
+      "surplus": {
+        "view": "CORE_FIN.FIN_STOCK_A", "as": "S",
+        "joins": [
+          { "view": "CORE_FIN.STOCK_PERIOD", "as": "SP", "on": [{ "left": "S.PERIOD_ID", "right": "SP.PERIOD_ID" }] },
+          { "view": "ENTITY.ENTITY_LIST", "as": "E", "on": [{ "left": "X.ENTITY_ID", "right": "E.ENTITY_ID" }] }
+        ],
+        "entity": { "company": "E.NAIC_CD" }, "year": "SP.PERIOD_END", "yearIsDate": true, "value": "S.PHS_000", "scale": 1000
+      }
+    },
+    "loaded": { "view": "BATCH_RUN", "at": "RUN DATE" }
+  },
+  "query": {
+    "kind": "company", "codes": ["12345", "23456"], "fromYear": 2021, "toYear": 2025,
+    "entities": [{ "code": "12345", "name": "Calloway Insurance Co" }, { "code": "23456", "name": "Tarrow Mutual Insurance Co" }],
+    "fields": [
+      { "id": "surplus", "label": "Policyholder surplus", "unit": "usd", "by": "year", "mapped": true, "error": null,
+        "rows": [{ "code": "12345", "year": 2024, "line": null, "state": null, "value": 5600000 }, { "code": "23456", "year": 2024, "line": null, "state": null, "value": 3000000 }] }
+    ],
+    "loaded": [{ "view": "CORE_FIN", "at": "2026-11-16" }, { "view": "ENTITY", "at": "2026-11-15" }], "loadedBy": "schema",
+    "truncated": false, "source": "S&P Global Market Intelligence, SNL Insurance Regulatory Data (Snowflake)", "fetchedAt": "2026-11-13T12:00:00Z", "fromStore": false, "saved": true
+  }
+}

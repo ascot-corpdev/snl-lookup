@@ -209,7 +209,8 @@ const HOSTILE = ["X; DROP TABLE Y", 'a"b', "A--", "A/*", "A B", "A.B", "A)", "(S
   let leaks: string[] = [];
   for (const bad of HOSTILE) {
     const tries: [string, unknown][] = [
-      ["view", { ...GOOD, view: bad }], ["entity.company", { ...GOOD, entity: { ...GOOD.entity, company: bad } }], ["entity.group", { ...GOOD, entity: { ...GOOD.entity, group: bad } }], ["entity.name", { ...GOOD, entity: { ...GOOD.entity, name: bad } }],
+      // "A.B" is a view in another schema (SCHEMA.VIEW) now, so the view is tried with three parts instead
+      ["view", { ...GOOD, view: bad === "A.B" ? "A.B.C" : bad }], ["entity.company", { ...GOOD, entity: { ...GOOD.entity, company: bad } }], ["entity.group", { ...GOOD, entity: { ...GOOD.entity, group: bad } }], ["entity.name", { ...GOOD, entity: { ...GOOD.entity, name: bad } }],
       ["year", { ...GOOD, year: bad }], ["value", { ...GOOD, value: bad }], ["line", { ...GOOD, line: bad }], ["state", { ...GOOD, state: bad }], ["where.column", { ...GOOD, where: [{ column: bad, equals: "x" }] }],
     ];
     for (const [where, m] of tries) if (mapProblem("dpw_by_line", m) === null) leaks.push(`${where}=${JSON.stringify(bad)}`);
@@ -219,7 +220,7 @@ const HOSTILE = ["X; DROP TABLE Y", 'a"b', "A--", "A/*", "A B", "A.B", "A)", "(S
   ok("the reason names the part that is wrong", mapProblem("dpw_by_line", { ...GOOD, view: "X; DROP TABLE Y" }) === "view must be a view name" && mapProblem("dpw_by_line", { ...GOOD, year: 'a"b' }) === "year must be a column name" && mapProblem("dpw_by_line", { ...GOOD, value: "A--" }) === "value must be a column name"
     && mapProblem("dpw_by_line", { ...GOOD, entity: { company: "NAIC_CD", name: "A--" } }) === "entity.name must be a column name");
   for (const [name, m] of [["nothing", undefined], ["null", null], ["a string", "IR_PREM_LINE"], ["a list", []], ["no entity", { ...GOOD, entity: undefined }], ["an entity with neither company nor group", { ...GOOD, entity: { name: "CO_NAME" } }], ["no year", { ...GOOD, year: undefined }], ["no value", { ...GOOD, value: undefined }],
-    ["a by-line field with no line column", { ...GOOD, line: undefined }], ["a view that is a number", { ...GOOD, view: 42 }], ["a view that is a list", { ...GOOD, view: ["A"] }], ["where that isn't a list", { ...GOOD, where: { column: "A", equals: "b" } }], ["nine where filters", { ...GOOD, where: Array.from({ length: 9 }, () => ({ column: "A", equals: "b" })) }],
+    ["a by-line field with no line column", { ...GOOD, line: undefined }], ["a view that is a number", { ...GOOD, view: 42 }], ["a view that is a list", { ...GOOD, view: ["A"] }], ["where that isn't a list", { ...GOOD, where: { column: "A", equals: "b" } }], ["thirteen where filters", { ...GOOD, where: Array.from({ length: 13 }, () => ({ column: "A", equals: "b" })) }],
     ["a where value that isn't text", { ...GOOD, where: [{ column: "A", equals: 5 }] }], ["a where value of 201 characters", { ...GOOD, where: [{ column: "A", equals: "x".repeat(201) }] }], ["a null where entry", { ...GOOD, where: [null] }],
     ["a scale of zero", { ...GOOD, scale: 0 }], ["a scale that is text", { ...GOOD, scale: "1000" }], ["a scale that isn't finite", { ...GOOD, scale: Infinity }], ["a scale that is SQL", { ...GOOD, scale: "1; DROP" }]] as const)
     ok(`a mapping with ${name} is not usable`, mapProblem("dpw_by_line", m) !== null, mapProblem("dpw_by_line", m));
@@ -227,7 +228,7 @@ const HOSTILE = ["X; DROP TABLE Y", 'a"b', "A--", "A/*", "A B", "A.B", "A)", "(S
   ok("a by-year field needs neither line nor state", mapProblem("surplus", { view: "IR_SURPLUS", entity: { company: "NAIC_CD" }, year: "STMT_YEAR", value: "PHS" }) === null);
   ok("a where value may hold any text, because it is bound", mapProblem("dpw_by_line", { ...GOOD, where: [{ column: "BASIS", equals: "'; DROP TABLE X; --" }] }) === null);
   const status = fieldStatus({ fields: { dpw_by_line: GOOD, surplus: { ...GOOD, view: "X; DROP TABLE Y" } } });
-  ok("status lists every field (the seven the view shows and ten for company profiles) and which are mapped", status.length === 17 && same(status.filter((f) => f.mapped).map((f) => f.id), ["dpw_by_line"]) && same(status.map((f) => f.id), STAT_FIELDS.map((f) => f.id)), status.map((f) => [f.id, f.mapped]));
+  ok("status lists every field (the eight the view shows and ten for company profiles) and which are mapped", status.length === 18 && same(status.filter((f) => f.mapped).map((f) => f.id), ["dpw_by_line"]) && same(status.map((f) => f.id), STAT_FIELDS.map((f) => f.id)), status.map((f) => [f.id, f.mapped]));
   ok("a settings row with no fields reads as nothing mapped", same(readMapping(null), { fields: {} }) && same(readMapping({}), { fields: {} }) && same(readMapping({ fields: "x" }), { fields: {} }) && same(readMapping({ fields: null }), { fields: {} }));
 }
 
@@ -256,7 +257,7 @@ const Q: StatQuery = { kind: "company", codes: ["91001", "92001"], fromYear: 202
 // ---------- parseStatQuery ----------
 {
   const p = parseStatQuery({ codes: ["91001", 92001, " 91001 "] }, 2026);
-  ok("a query needs only codes: company, last five full years, the seven fields the view shows", p.ok && same(p.q, { kind: "company", codes: ["91001", "92001"], fromYear: 2021, toYear: 2025 }) && same(p.fields, STAT_FIELDS.slice(0, 7).map((f) => f.id)), p);
+  ok("a query needs only codes: company, last five full years, the eight fields the view shows", p.ok && same(p.q, { kind: "company", codes: ["91001", "92001"], fromYear: 2021, toYear: 2025 }) && same(p.fields, STAT_FIELDS.slice(0, 8).map((f) => f.id)), p);
   const g = parseStatQuery({ kind: "group", codes: ["9100"], fromYear: 2015, toYear: 2026, fields: ["surplus", "surplus", "loss_ratio"] }, 2026);
   ok("kind, years and fields can be chosen; repeats are dropped", g.ok && g.q.kind === "group" && g.q.fromYear === 2015 && g.q.toYear === 2026 && same(g.fields, ["surplus", "loss_ratio"]), g);
   ok("15 years at a time is allowed, 16 is not", parseStatQuery({ codes: ["1"], fromYear: 2011, toYear: 2025 }, 2026).ok && !parseStatQuery({ codes: ["1"], fromYear: 2010, toYear: 2025 }, 2026).ok);
