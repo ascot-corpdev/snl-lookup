@@ -140,7 +140,8 @@
   function lower(s) { return /^[A-Z][a-z]/.test(s) && !/^(RBC|LAE|NAIC)/.test(s) ? s[0].toLowerCase() + s.slice(1) : s; }
   // "Net loss and LAE reserves aren't", "Surplus isn't"
   // (named apart from the filings profile's plural below, which would otherwise replace it in this scope)
-  function pluralLabel(label) { var w = String(label).trim().split(/\s+/).pop().toLowerCase(); return /s$/.test(w) && !/(surplus|gross|loss|ss|us)$/.test(w); }
+  // plural when a word before any " by ..." ends in s and isn't one of the words that only look plural
+  function pluralLabel(label) { return String(label).trim().split(/\s+by\s+/)[0].toLowerCase().split(/\s+/).some(function (w) { return /s$/.test(w) && !/(surplus|gross|loss|ss|us)$/.test(w); }); }
   function cap(s) { return s ? s[0].toUpperCase() + s.slice(1) : s; }
   function whyMissing(f, keys) {
     var miss = f.missing || [], notMapped = [], empty = [];

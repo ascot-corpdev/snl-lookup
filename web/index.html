@@ -404,6 +404,26 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 .pfplan li.out .t1{color:var(--muted)}
 .pfplan .pill.in{color:var(--teal)}
 .pfplan .pfwhy{font-size:12px;color:var(--magenta);min-width:0;overflow-wrap:anywhere;flex:0 1 auto;text-align:right}
+/* Profile: the slides the reader may take out, and the figures section by section (profile-detail) */
+.pfplan .pfinc{margin:0 8px 0 0;width:15px;height:15px;vertical-align:-2px}
+.pfplan li.mineout .t1{color:var(--muted)}
+.pfdetail{display:flex;flex-direction:column;gap:6px;min-width:0}
+.pfdh{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;justify-content:space-between;min-width:0}
+.pfsec{border:1px solid var(--grid);min-width:0}
+.pfsec>summary{cursor:pointer;padding:8px 10px;font-weight:bold;color:var(--ink)}
+.pfsec[open]>summary{border-bottom:1px solid var(--grid)}
+.pfsecb{display:flex;flex-direction:column;gap:10px;padding:10px;min-width:0}
+.pftbl{font-size:12px}
+.pftbl th,.pftbl td{padding:5px 8px}
+.pftbl td.num,.pftbl th.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.pftbl td.bad{color:var(--magenta)}
+.pfcap{margin:0;font-weight:bold;font-size:13px;overflow-wrap:anywhere}
+.pfnote{margin:0;font-size:12px;overflow-wrap:anywhere}
+.pffig{margin:0;max-width:560px;min-width:0}
+.pfchart rect.c1{fill:var(--ink)}.pfchart rect.c2{fill:var(--blue)}.pfchart rect.c3{fill:var(--magenta)}
+.pfkeys{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--muted)}
+.pfkeys i{display:inline-block;width:10px;height:10px;margin-right:5px;vertical-align:-1px}
+.pfkeys i.c1{background:var(--ink)}.pfkeys i.c2{background:var(--blue)}.pfkeys i.c3{background:var(--magenta)}
 .pfcheck{display:flex;gap:10px;align-items:flex-start;cursor:pointer;min-width:0;overflow-wrap:anywhere}
 .pfcheck input{margin-top:3px;flex:none;width:16px;height:16px}
 .pfdraft{display:flex;flex-direction:column;gap:6px;min-width:0}
@@ -3690,7 +3710,7 @@ function pfFinderHTML(){
 }
 
 /* ----- the figures, Claude's draft, and the file ----- */
-function pfReset(pf){ pf.res=null; pf.err=null; pf.plan=null; pf.libsErr=""; pf.drafted=null; pf.draftErr=null; pf.built=null; pf.buildErr=""; }
+function pfReset(pf){ pf.res=null; pf.err=null; pf.plan=null; pf.libsErr=""; pf.drafted=null; pf.draftErr=null; pf.built=null; pf.buildErr=""; pf.part=null; }
 /* The figures, asked for again by themselves while some are still to come (statCarry): carryOn asks for the rest of
    the figures of the profile on screen. */
 async function pfFacts(carryOn){
@@ -3701,9 +3721,10 @@ async function pfFacts(carryOn){
   else if(!naicOk(code)){ pf.formErr = code ? "NAIC codes are numbers of up to 6 digits, like 90001." : `Choose a ${kind}: find it by name, or type its NAIC ${kind} code.`; render(); return; }
   const ctl=bsControl();
   pf.formErr=""; pfReset(pf); pf.busy="facts"; pf.ctl=ctl; pf.figs=keep&&keep.stalled?keep.stalled.figs:null; pbStart("pf-facts"); if(!carryOn) pf.asked={kind, code, name:pf.name}; render();
-  const r=await statCarry(()=>callFn("snl-profile",{action:"facts", kind, code}), pfFigs, {ctl, onPart:f=>{ if(S.pf===pf && pf.ctl===ctl){ pf.figs=f; render(); } }});
+  // each call that leaves figures to come also shows what has arrived so far (pfSoFarHTML), section by section
+  const r=await statCarry(()=>callFn("snl-profile",{action:"facts", kind, code}), pfFigs, {ctl, onPart:(f,data)=>{ if(S.pf===pf && pf.ctl===ctl){ pf.figs=f; if(data && data.facts && typeof data.facts==="object") pf.part=data.facts; render(); } }});
   if(!S.session || S.pf!==pf || pf.ctl!==ctl) return;
-  pf.busy=""; pf.ctl=null; pf.figs=null;
+  pf.busy=""; pf.ctl=null; pf.figs=null; pf.part=null;
   if(r.err==="stopped"){ if(keep){ pfTake(pf, keep); pf.res.stalled={...keep.stalled, why:"stopped"}; } else toast("Stopped. No figures had come back yet."); render(); return; }
   if(!r.data && keep && r.err!=="signin"){ pfTake(pf, keep); pf.res.stalled={...keep.stalled, why:"failed", err:r}; render(); return; }   // what had arrived stays
   if(r.data && r.data.facts && typeof r.data.facts==="object" && r.data.text){ pfTake(pf, r.data); if(r.stalled) pf.res.stalled=r.stalled; loadStatus(); }
@@ -3768,7 +3789,7 @@ async function pfMake(pf){
   if(!S.session || S.pf!==pf) return;
   try{ await loadProfileLibs(); }catch{ fail(PF_LIBS_ERR); return; }
   if(!S.session || S.pf!==pf) return;
-  let spec; try{ spec=window.SNLProfile.spec(use.facts, use.text); }catch(e){ fail("Couldn't lay out the slides from these figures. "+((e&&e.message)||"")); return; }
+  let spec; try{ spec=window.SNLProfile.spec(use.facts, use.text, {skip:pfSkip().slice()}); }catch(e){ fail("Couldn't lay out the slides from these figures. "+((e&&e.message)||"")); return; }
   let out; try{ out=await window.SNLDeck.build(bytes.slice(0), spec); }catch(e){ fail("Couldn't build the PowerPoint file. "+((e&&e.message)||"Try again.")); return; }
   if(!S.session || S.pf!==pf) return;
   pf.busy=""; pf.built={blob:new Blob([out],{type:PPTX_TYPE}), name:pfFileName(spec), by:use.text&&use.text.by==="claude"?"claude":"plain"};
@@ -3801,9 +3822,12 @@ function pfHeadlineHTML(f){
 function pfPlanHTML(pf){
   if(pf.libsErr) return `<div class="banner" id="pfLibsErr" role="alert"><span>${esc(pf.libsErr)}</span><button type="button" class="btn sm" data-act="pf-libs-retry">Try again</button></div>`;
   if(!pf.plan) return `<p class="t2" role="status">Working out which slides these figures fill…</p>`;
-  const n=pf.plan.filter(s=>s.included).length;
-  return `<div class="f"><span>The slides <em>${plural(n,"slide")} of ${count(pf.plan.length)} can be filled from these figures</em></span>
-    <ol class="pfplan" id="pfPlan">${pf.plan.map(s=>`<li class="${s.included?"in":"out"}"><span class="t1">${esc(s.label||s.id)}</span>${s.included?`<span class="pill in">Included</span>`:`<span class="pfwhy">Left out: ${esc(blank(s.reason)?"its figures aren't available":s.reason)}</span>`}</li>`).join("")}</ol></div>`;
+  const n=pf.plan.filter(s=>s.included).length, skip=pfSkip();
+  // every slide that can be filled has a tick box (on unless the reader took it off); the cover is always built
+  const mine=pf.plan.filter(s=>s.included && s.id!=="cover" && skip.includes(String(s.id))).length;
+  const box=s=>s.included && s.id!=="cover" && !blank(s.id) ? `<input type="checkbox" class="pfinc" data-act="pf-slide" data-id="${esc(s.id)}" ${skip.includes(String(s.id))?"":"checked"} ${pf.busy?"disabled":""} aria-label="${esc(`Include the ${String(s.label||s.id).toLowerCase()} slide`)}">` : "";
+  return `<div class="f"><span>The slides <em>${plural(n,"slide")} of ${count(pf.plan.length)} can be filled from these figures${mine?`; you left out ${count(mine)}`:""}</em></span>
+    <ol class="pfplan" id="pfPlan">${pf.plan.map(s=>`<li class="${s.included?(skip.includes(String(s.id))&&s.id!=="cover"?"in mineout":"in"):"out"}"><span class="t1">${box(s)}${esc(s.label||s.id)}</span>${s.included?(skip.includes(String(s.id))&&s.id!=="cover"?`<span class="pill">You left it out</span>`:`<span class="pill in">Included</span>`):`<span class="pfwhy">Left out: ${esc(blank(s.reason)?"its figures aren't available":s.reason)}</span>`}</li>`).join("")}</ol></div>`;
 }
 function pfMissingHTML(f){
   const miss=(Array.isArray(f.missing)?f.missing:[]).filter(m=>m&&typeof m==="object" && !/^Not run:/.test(String(m.reason||"")));   // figures still to come have their own banner (pfPending)
@@ -3812,6 +3836,134 @@ function pfMissingHTML(f){
   return `<div class="notes" id="pfMissing" role="status"><b>Some figures aren't available, so the slides that need them are left out.</b><ul>${items}</ul>
     <p class="t2" style="margin:6px 0 0">${isCorpDev()?`Map them in the field set-up on the <a href="#statutory">Statutory view</a>, then get the figures again.`:"Ask Corp Dev to map them in the statutory field set-up."}</p></div>`;
 }
+/* ---------- Profile: the detail before anything is built (profile-detail) ----------
+   What each slide will hold, section by section, as tables and small charts, folded away until the reader opens one (the
+   open ones stay open as the page redraws). Figures the app works out say "(derived)". Facts saved before the detail
+   existed show the sections their own figures fill. While figures are still coming in, the same sections show what has
+   arrived (pfSoFarHTML). The reader can also take slides out of the deck (pfSkip, remembered in this browser only). */
+const PF_SECS=[["premium","Premium"],["lines","Lines and states"],["underwriting","Underwriting"],["earnings","Earnings"],["balance","Balance sheet"],["capital","Capital"],["reserves","Reserves"],["accident","Accident years"],["reinsurance","Reinsurance"]];
+const PF_SKIP_KEY="snl.pfSkip";
+function pfSkip(){
+  const pf=S.pf;
+  if(!Array.isArray(pf.skip)){ let v=[]; try{ v=JSON.parse(localStorage.getItem(PF_SKIP_KEY)||"[]"); }catch{} pf.skip=Array.isArray(v)?v.filter(x=>typeof x==="string").slice(0,30):[]; }
+  return pf.skip;
+}
+function pfToggleSlide(id, on){
+  if(blank(id) || id==="cover") return;
+  const skip=pfSkip().filter(x=>x!==id); if(!on) skip.push(String(id));
+  S.pf.skip=skip; try{ localStorage.setItem(PF_SKIP_KEY, JSON.stringify(skip)); }catch{}
+  render();
+}
+function pfNum1(v){ if(!isNum(v)) return "n/d"; const a=Math.abs(+v).toLocaleString("en-US",{minimumFractionDigits:1, maximumFractionDigits:1}); return +v<0 && a!=="0.0" ? `(${a})` : a; }
+const pfM = v => isNum(v) ? pfNum1(+v/1e6) : "n/d";            // $M with one decimal, under a "$M" heading
+const pfP = v => pfNum1(v);                                    // percentage points, under a "%" label
+const pfX = v => isNum(v) ? (+v<0 ? `(${pfNum1(-v)}x)` : `${pfNum1(v)}x`) : "n/d";
+const pfArr = a => Array.isArray(a) && a.some(isNum) ? a : null;
+/** A by-year table: rows [label, values, format, derived, adverse(v)]; rows with no figure are left out. */
+function pfYearTable(f, rows, id){
+  const ys=(f.years||[]).map(String);
+  rows=rows.filter(r=>pfArr(r[1]));
+  if(!rows.length || !ys.length) return "";
+  return `<div class="tbl-wrap pfwrap"><table class="pftbl" id="${id}"><thead><tr><th>$M unless shown</th>${ys.map(y=>`<th class="num">${esc(y)}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r[0])}${r[3]?` <span class="t2">(derived)</span>`:""}</td>${ys.map((_,i)=>{ const v=r[1][i], bad=r[4]&&isNum(v)&&r[4](+v); return `<td class="num${bad?" bad":""}">${esc(r[2](v))}</td>`; }).join("")}</tr>`).join("")}</tbody></table></div>`;
+}
+/** A table of named rows: cols [[heading, key, format, numeric]]. */
+function pfListTable(id, cols, list){
+  if(!list.length) return "";
+  return `<div class="tbl-wrap pfwrap"><table class="pftbl" id="${id}"><thead><tr>${cols.map(c=>`<th${c[3]?' class="num"':""}>${esc(c[0])}</th>`).join("")}</tr></thead><tbody>${list.map(r=>`<tr>${cols.map(c=>{ const v=c[2](r[c[1]], r); return `<td${c[3]?' class="num"':""}>${esc(v)}</td>`; }).join("")}</tr>`).join("")}</tbody></table></div>`;
+}
+/** A small column chart by year, as the page draws its other charts: series [{n: name, v: values, c: "c1"|"c2"|"c3", f: format}]. */
+function pfMiniChart(f, series, label){
+  const ys=(f.years||[]).map(String), ss=series.filter(s=>pfArr(s.v));
+  if(!ss.length || !ys.length) return "";
+  const W=window.innerWidth<560?340:520, H=150, L=6, R=6, T=10, B=22, vals=ss.flatMap(s=>s.v.filter(isNum).map(Number)), max=Math.max(0,...vals), min=Math.min(0,...vals), span=(max-min)||1;
+  const y=v=>T+(max-v)/span*(H-T-B), band=(W-L-R)/ys.length, bw=Math.min(30, band*0.72/ss.length);
+  let g=`<line class="ax0" x1="${L}" x2="${W-R}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}"/>`;
+  ys.forEach((yr,i)=>{ const x0=L+band*i+(band-bw*ss.length)/2;
+    ss.forEach((s,k)=>{ const v=s.v[i]; if(!isNum(v)) return; const a=y(Math.max(0,+v)), z=y(Math.min(0,+v));
+      g+=`<rect class="${s.c}" x="${(x0+k*bw).toFixed(1)}" y="${a.toFixed(1)}" width="${Math.max(1,bw-2).toFixed(1)}" height="${Math.max(0.5,z-a).toFixed(1)}"><title>${esc(`${s.n}, ${yr}: ${s.f(v)}`)}</title></rect>`; });
+    g+=`<text x="${(L+band*i+band/2).toFixed(1)}" y="${H-6}" text-anchor="middle">${esc(yr)}</text>`; });
+  return `<figure class="pffig"><svg class="snchart pfchart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}. The figures are in the table." focusable="false">${g}</svg><figcaption class="pfkeys">${ss.map(s=>`<span><i class="${s.c}"></i>${esc(s.n)}</span>`).join("")}</figcaption></figure>`;
+}
+/** The sections' contents, each "" when its figures aren't there. */
+function pfSecBody(f, id){
+  const s=f.series||{}, d=f.derived||{}, X=f.detail&&typeof f.detail==="object"?f.detail:{}, Y=k=>pfArr(s[k]), D=k=>pfArr(d[k]);
+  const pos=v=>v>0, neg=v=>v<0, over=v=>v>100, items=a=>Array.isArray(a)?a.filter(x=>x&&typeof x==="object"):[];
+  const usd=v=>usdM(v);
+  if(id==="premium") return pfMiniChart(f,[{n:"Direct premiums written", v:s.dpw, c:"c1", f:usd},{n:"Net premiums written", v:s.npw, c:"c3", f:usd}],"Direct and net premiums written by year")
+    + pfYearTable(f,[["Direct premiums written",s.dpw,pfM],["Assumed premiums written",s.assumed_pw,pfM], Y("gpw")?["Gross premiums written",s.gpw,pfM]:["Gross premiums written",d.gross_pw,pfM,true],
+      Y("ceded_pw")?["Ceded premiums written",s.ceded_pw,pfM]:["Ceded premiums",d.ceded_pw,pfM,true],["Net premiums written",s.npw,pfM],["Net premiums earned",s.npe,pfM],
+      ["Ceded share (%)",d.cession_pct,pfP,true],["Direct premium growth (%)",d.dpw_yoy,pfP,true,neg],["Net premium growth (%)",d.npw_yoy,pfP,true,neg]],"pfTabPremium");
+  if(id==="lines"){
+    const L=X.lines&&items(X.lines.items).length?X.lines:null, St=X.states&&items(X.states.items).length?X.states:null, mix=f.mix||{};
+    let h="";
+    if(L) h+=`<p class="pfcap">Largest lines, ${esc(L.year)} <span class="t2">(share of ${L.by==="npe"?"net premiums earned":"direct premiums written"}, derived)</span></p>`+pfListTable("pfTabLines",[["Line","name",v=>v||"n/d"],["DPW $M","dpw",pfM,1],["NPW $M","npw",pfM,1],["NPE $M","npe",pfM,1],["Share %","share",pfP,1],["Loss and LAE ratio %","lossRatio",pfP,1]],items(L.items));
+    else if(items(mix.lines).length) h+=`<p class="pfcap">Lines, ${esc(mix.year)} <span class="t2">(share of direct premiums written, derived)</span></p>`+pfListTable("pfTabLines",[["Line","name",v=>v||"n/d"],["DPW $M","dpw",pfM,1],["NPW $M","npw",pfM,1],["Share %","share",pfP,1]],items(mix.lines));
+    if(St) h+=`<p class="pfcap">Largest states, ${esc(St.year)} <span class="t2">(share of ${St.by==="dpe"?"direct premiums earned":"direct premiums written"}, derived)</span></p>`+pfListTable("pfTabStates",[["State","state",v=>v||"n/d"],["DPW $M","dpw",pfM,1],["DPE $M","dpe",pfM,1],["Share %","share",pfP,1],["Direct loss ratio %","lossRatio",pfP,1]],items(St.items));
+    else if(items(mix.states).length) h+=`<p class="pfcap">States, ${esc(mix.year)} <span class="t2">(share of direct premiums written, derived)</span></p>`+pfListTable("pfTabStates",[["State","state",v=>v||"n/d"],["DPW $M","dpw",pfM,1],["Share %","share",pfP,1]],items(mix.states));
+    return h;
+  }
+  if(id==="underwriting"){
+    const avg=[isNum(d.combined_avg)?`average combined ratio ${pct(d.combined_avg)}`:"", isNum(d.combined_avg_weighted)?`weighted by net premiums earned ${pct(d.combined_avg_weighted)}`:"", isNum(d.years_above_100)?`above 100% in ${plural(d.years_above_100,"year")}`:""].filter(Boolean);
+    const run=X.combinedRun&&isNum(X.combinedRun.years)&&X.combinedRun.years>1?`; ${X.combinedRun.above?"above":"at or below"} 100% in each of the last ${count(X.combinedRun.years)} years`:"";
+    const body=pfMiniChart(f,[{n:"Combined ratio", v:s.combined_ratio, c:"c1", f:pct}],"Combined ratio by year")
+      + pfYearTable(f,[["Loss ratio (%)",s.loss_ratio,pfP],["Loss and LAE ratio (%)",s.loss_lae_ratio,pfP],["Expense ratio (%)",s.expense_ratio,pfP],["Commission ratio (%)",s.commission_ratio,pfP],["Combined ratio (%)",s.combined_ratio,pfP,false,over]],"pfTabUw");
+    const words=avg.join(", ")+run;
+    return body && avg.length ? body+`<p class="t2 pfnote">${esc(words[0].toUpperCase()+words.slice(1))} (derived).</p>` : body;
+  }
+  if(id==="earnings"){
+    const roe=Y("roae")?["Return on average equity (%)",s.roae,pfP,false,neg]:["Return on average equity (%)",d.roae,pfP,true,neg];
+    const body=pfMiniChart(f,[{n:"Underwriting gain", v:s.uw_gain, c:"c1", f:usd},{n:"Investment income", v:s.net_inv_income, c:"c2", f:usd},{n:"Net income", v:s.net_income, c:"c3", f:usd}],"Underwriting gain, investment income and net income by year")
+      + pfYearTable(f,[["Net underwriting gain",s.uw_gain,pfM,false,neg],["Net investment income",s.net_inv_income,pfM],["Net realized capital gains",s.realized_gains,pfM,false,neg],["Net income",s.net_income,pfM,false,neg],["Net cash from operations",s.cash_from_ops,pfM,false,neg],["Investment yield (%)",s.investment_yield,pfP],roe],"pfTabEarn");
+    return body && isNum(d.net_income_total) ? body+`<p class="t2 pfnote">Net income over these years: ${esc(usdM(d.net_income_total))} (derived).</p>` : body;
+  }
+  if(id==="balance") return pfMiniChart(f,[{n:"Cash and invested assets", v:s.cash_invested, c:"c1", f:usd},{n:"Total liabilities", v:s.total_liabilities, c:"c3", f:usd}],"Cash and invested assets and total liabilities by year")
+    + pfYearTable(f,[["Cash and invested assets",s.cash_invested,pfM],["Bonds",s.bonds,pfM],["Common stocks",s.stocks,pfM],["Cash and short-term",s.cash_short_term,pfM],["Premiums receivable",s.premiums_receivable,pfM],["Total assets",s.total_assets,pfM],["Total liabilities",s.total_liabilities,pfM],["Unearned premiums",s.unearned_premiums,pfM],
+      ["Invested assets to liabilities",d.invested_to_liabilities,pfX,true],["Liabilities to surplus",d.liabilities_to_surplus,pfX,true],["Receivables to direct premiums (%)",d.receivable_to_dpw,pfP,true],["Bonds share (%)",d.bonds_share,pfP,true],["Stocks share (%)",d.stocks_share,pfP,true],["Cash share (%)",d.cash_share,pfP,true]],"pfTabBal");
+  if(id==="capital") return pfMiniChart(f,[{n:"Surplus", v:s.surplus, c:"c1", f:usd},{n:"Paid-in capital", v:s.paid_in_capital, c:"c2", f:usd}],"Surplus and paid-in capital by year")
+    + pfYearTable(f,[["Policyholder surplus",s.surplus,pfM],["Paid-in capital",s.paid_in_capital,pfM],["Surplus less paid-in",d.accumulated_deficit,pfM,true,neg],["Surplus notes",s.surplus_notes,pfM],["Unassigned funds",s.unassigned_funds,pfM,false,neg],
+      ["Dividends to stockholders",s.dividends_paid,pfM],["Capital paid in",s.capital_contributed,pfM],["Paid in less dividends",d.net_capital_flow,pfM,true,neg],["Total adjusted capital",s.rbc_tac,pfM],
+      Y("rbc_acl")?["Authorized control level",s.rbc_acl,pfM]:["Authorized control level, implied",d.rbc_acl_implied,pfM,true], Y("rbc_ratio")?["RBC ratio (%)",s.rbc_ratio,pfP]:["RBC ratio (%)",d.rbc_ratio_calc,pfP,true],
+      ["Net premiums written to surplus",d.npw_to_surplus,pfX,true],["Surplus growth (%)",d.surplus_yoy,pfP,true,neg],["Total assets",s.total_assets,pfM]],"pfTabCap");
+  if(id==="reserves") return pfMiniChart(f,[{n:"Net loss and LAE reserves", v:s.net_reserves, c:"c1", f:usd}],"Net loss and LAE reserves by year")
+    + pfYearTable(f,[["Net loss and LAE reserves",s.net_reserves,pfM],["Reserves to net premiums earned",d.reserves_to_npe,pfX,true],["Reserves to surplus",d.reserves_to_surplus,pfX,true],["One-year development (positive is adverse)",s.pyd,pfM,false,pos],
+      ["One-year development to prior surplus (%)",d.pyd_to_prior_surplus,pfP,true,pos],["One-year development to net premiums earned (%)",d.pyd_to_npe,pfP,true,pos],["Two-year development (positive is adverse)",s.pyd_two_year,pfM,false,pos]],"pfTabRes");
+  if(id==="accident"){
+    const A=X.accidentYears, rows=A?items(A.rows):[], ys=(f.years||[]).map(Number);
+    if(!rows.length) return "";
+    return `<div class="tbl-wrap pfwrap"><table class="pftbl" id="pfTabAy"><thead><tr><th>Accident year</th>${ys.map(y=>`<th class="num">${esc(y)}</th>`).join("")}<th class="num">Change (points)</th><th class="num">NPE $M</th></tr></thead><tbody>${rows.map(r=>{ const v=Array.isArray(r.values)?r.values:[];
+      return `<tr><td>${esc(r.ay)}</td>${ys.map((y,i)=>`<td class="num">${+r.ay>y?"":esc(pfP(v[i]))}</td>`).join("")}<td class="num${isNum(r.change)&&+r.change>0?" bad":""}">${isNum(r.change)?esc((+r.change>0?"+":"")+pfP(r.change)):"n/d"}</td><td class="num">${esc(pfM(r.npe))}</td></tr>`; }).join("")}</tbody></table></div>
+      <p class="t2 pfnote">Net loss and LAE ratio (%) as each year's statement reported it. Change: the latest less the first shown, in percentage points (derived); positive is worse.</p>`;
+  }
+  if(id==="reinsurance"){
+    const R=X.recoverables&&items(X.recoverables.items).length?X.recoverables:null, re=f.reinsurers&&items(f.reinsurers.items).length?f.reinsurers:null;
+    let h=pfYearTable(f,[Y("gpw")?["Gross premiums written",s.gpw,pfM]:["Gross premiums written",d.gross_pw,pfM,true],Y("ceded_pw")?["Ceded premiums written",s.ceded_pw,pfM]:["Ceded premiums",d.ceded_pw,pfM,true],["Ceded share (%)",d.cession_pct,pfP,true],["Reinsurance recoverables",s.reins_recoverable,pfM],["Recoverables to surplus (%)",d.recoverable_to_surplus,pfP,true]],"pfTabRe");
+    if(re) h+=`<p class="pfcap">Ceded premiums by reinsurer, ${esc(re.year)} <span class="t2">(share derived)</span></p>`+pfListTable("pfTabCeded",[["Reinsurer","name",v=>v||"n/d"],["Ceded $M","ceded",pfM,1],["Share %","share",pfP,1]],items(re.items));
+    if(R){
+      h+=`<p class="pfcap">Recoverables by reinsurer, ${esc(R.year)} <span class="t2">(shares derived)</span></p>`+pfListTable("pfTabRecov",[["Reinsurer","name",v=>v||"n/d"],["$M","recoverable",pfM,1],["Share %","share",pfP,1],["To surplus %","toSurplus",pfP,1]].concat(R.tagged?[["Status","tag",(v,r)=>r.name==="Other"?"":blank(v)?"Not given":String(v)]]:[]),items(R.items));
+      if(R.tagged) h+=`<p class="t2 pfnote">${esc(pct(R.unauthorizedShare))} of recoverables were owed by reinsurers marked as not authorized, and ${esc(pct(R.untaggedShare))} by reinsurers with no status given (derived).</p>`;
+    }
+    return h;
+  }
+  return "";
+}
+function pfDetailHTML(f, where){
+  const open=S.pf.openSecs||{}, old=!(f.detail && typeof f.detail==="object");   // facts saved before the detail: the sections of the slides they had
+  const secs=PF_SECS.map(([id,name])=>{ const body=old && ["lines","earnings","balance","accident"].includes(id) ? "" : pfSecBody(f,id); return body ? `<details class="pfsec" data-sec="${id}" id="pfSec-${where}-${id}"${open[id]?" open":""}><summary>${esc(name)}</summary><div class="pfsecb">${body}</div></details>` : ""; }).filter(Boolean);
+  if(!secs.length) return "";
+  const all=PF_SECS.every(([id])=>open[id]);
+  return `<div class="pfdetail" id="pfDetail-${where}"><div class="pfdh"><b>The figures, section by section</b><button type="button" class="btn sm ghost" data-act="pf-sec-all" data-open="${all?"0":"1"}">${all?"Close all":"Open all"}</button></div>${secs.join("")}<p class="t2 pfnote">US dollars in $M. "(derived)" marks a figure the app works out from the reported ones.</p></div>`;
+}
+/* While figures are still coming in: the sections they fill so far. */
+function pfSoFarHTML(pf){
+  const f=pf.part;
+  if(!f || !pfHasData(f)) return "";
+  const body=pfDetailHTML(f,"sofar");
+  return body ? `<section class="tcard" id="pfSoFar" aria-label="The figures so far"><div><h3>The figures so far</h3><p class="t2">Each section fills in as its figures arrive. You can open one while the rest come in.</p></div>${body}</section>` : "";
+}
+document.addEventListener("toggle", e=>{   // which sections are open, so they stay open when the page redraws
+  const d=e.target; if(!d || !d.classList || !d.classList.contains("pfsec")) return;
+  const o=S.pf.openSecs||(S.pf.openSecs={}); o[d.dataset.sec]=d.open;
+}, true);
 function pfDraftHTML(pf){
   const f=pf.res.facts;
   if(f.sample) return `<p class="t2" id="pfDraftNote">The sample uses plain text written from its figures.</p>`;
@@ -3835,7 +3987,7 @@ function pfDraftErrText(r){
 }
 function pfOutHTML(){
   const pf=S.pf;
-  if(pf.busy==="facts" && pf.figs) return `<div class="info" id="pfBusy" role="status"><span><b>Getting the rest of the figures for ${esc(pf.asked&&pf.asked.name||pfEntLabel(pf.asked.kind, pf.asked.code))}…</b> ${statFigsText(pf.figs)} so far. The ones that came back are kept.</span>${pbHTML("pf-facts", {name:"Getting the figures", done:pf.figs.done, of:pf.figs.of, say:statFigsText(pf.figs)})}<button type="button" class="btn sm" id="pfStop" data-act="pf-stop" title="Stops asking for the rest. The figures that came back stay.">Stop</button></div>`;
+  if(pf.busy==="facts" && pf.figs) return `<div class="info" id="pfBusy" role="status"><span><b>Getting the rest of the figures for ${esc(pf.asked&&pf.asked.name||pfEntLabel(pf.asked.kind, pf.asked.code))}…</b> ${statFigsText(pf.figs)} so far. The ones that came back are kept.</span>${pbHTML("pf-facts", {name:"Getting the figures", done:pf.figs.done, of:pf.figs.of, say:statFigsText(pf.figs)})}<button type="button" class="btn sm" id="pfStop" data-act="pf-stop" title="Stops asking for the rest. The figures that came back stay.">Stop</button></div>${pfSoFarHTML(pf)}`;
   if(pf.busy==="facts") return `<div class="info" id="pfBusy" role="status"><span><b>Getting the figures for ${esc(pf.asked&&pf.asked.name||pfEntLabel(pf.asked.kind, pf.asked.code))}…</b> This can take a minute when they haven't been fetched before.</span>${pbHTML("pf-facts", {name:"Getting the figures"})}</div>`;
   if(pf.busy==="sample") return `<div class="info" id="pfBusy" role="status"><span><b>Getting the sample figures…</b></span>${pbHTML("pf-sample", {name:"Getting the sample figures"})}</div>`;
   if(!pf.res){
@@ -3851,7 +4003,7 @@ function pfOutHTML(){
   let h=(pf.res.stalled?statPendingHTML(pf.res.stalled, "pfPending", "pf-carry", "the profile below doesn't have them yet and the slides that need them are left out", !!pf.busy):"")+`<section class="tcard" id="pfContents" aria-label="What the profile will contain">`;
   if(f.sample) h+=`<div class="info" id="pfSample" role="status"><span><b>This is a sample profile.</b> The company and every figure in it are made up, so you can check how your template comes out.</span></div>`;
   h+=`<div class="blk-h"><div><h3 id="pfName">${esc(pfName(shown))}</h3><p class="t2" id="pfMeta">${esc([pfEntLabel(e.kind, e.code), !blank(e.groupName)&&e.kind!=="group"?`part of ${e.groupName}`:"", `figures for ${pfYears(shown)}`].filter(Boolean).join(" · "))}</p></div></div>`;
-  h+=pfHeadlineHTML(shown)+pfPlanHTML(pf)+pfMissingHTML(shown);
+  h+=pfHeadlineHTML(shown)+pfPlanHTML(pf)+pfMissingHTML(shown)+pfDetailHTML(shown,"contents");
   h+=`<p class="source">Source: ${esc(f.source||"S&P Global Market Intelligence")}. US dollars are shown in $M.</p></section>`;
   // the text, then building
   h+=`<section class="tcard" id="pfBuild" aria-label="Build the PowerPoint file">${pfDraftHTML(pf)}`;
@@ -7655,6 +7807,8 @@ document.addEventListener("click", e=>{
     case "pf-status-retry": loadProfileStatus(); break;
     case "pf-libs-retry": S.pf.libsErr=""; render(); pfPlan(S.pf); break;
     case "pf-draft": S.pf.draft=!!t.checked; render(); break;
+    case "pf-slide": pfToggleSlide(t.dataset.id, !!t.checked); break;
+    case "pf-sec-all": { const o=S.pf.openSecs||(S.pf.openSecs={}), on=t.dataset.open==="1"; PF_SECS.forEach(([id])=>{ o[id]=on; }); render(); break; }
     case "pf-build": pfBuild(false); break;
     case "pf-build-plain": pfBuild(true); break;
     case "pf-again": pfDownloadAgain(); break;
