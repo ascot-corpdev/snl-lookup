@@ -127,7 +127,7 @@ const LINES = ["Homeowners", "Commercial property", "Inland marine", "Other liab
 // ---------- the facts with all figures, none, a ragged mix, and before this change ----------
 function within(t: P.ProfileText): string[] {
   const bad: string[] = [];
-  const L = P.LIMITS, chk = (s: string, max: number, where: string) => { if (typeof s !== "string" || !s.trim() || s.length > max) bad.push(`${where}: ${s?.length}`); if (/—/.test(s)) bad.push(`${where}: em dash`); };
+  const L = P.LIMITS, chk = (s: string, max: number, where: string) => { if (typeof s !== "string" || !s.trim() || s.length > max) bad.push(`${where}: ${s?.length}`); if (/\u2014/.test(s)) bad.push(`${where}: em dash`); };
   chk(t.cover.subtitle, L.subtitle, "subtitle");
   for (const s of P.SECTIONS) {
     chk(t[s].title, L.title, `${s}.title`);
@@ -219,7 +219,7 @@ function count(schemas: unknown[]) {
   const c = count([P.TEXT_SCHEMA]);
   ok("the text shape, with the new sections, is inside Anthropic's limits: no unions, nothing optional, nothing unsupported", c.unions <= SCHEMA_LIMITS.unions && c.optional <= SCHEMA_LIMITS.optional && c.unions === 0 && c.optional === 0 && c.unsupported.length === 0, c);
   ok("it asks for every section, the new ones included", same(P.TEXT_SCHEMA.required, ["cover", ...P.SECTIONS, "questions"]) && "earnings" in P.TEXT_SCHEMA.properties && "balance" in P.TEXT_SCHEMA.properties);
-  ok("the instructions name the new sections, keep exactly 4 questions, and say detail figures are derived", /earnings \(underwriting gain/.test(P.DRAFT_SYSTEM) && /balance \(the balance sheet/.test(P.DRAFT_SYSTEM) && /exactly 4 key diligence questions/.test(P.DRAFT_SYSTEM) && /facts\.detail\.derived lists/.test(P.DRAFT_SYSTEM) && !P.DRAFT_SYSTEM.includes("—"));
+  ok("the instructions name the new sections, keep exactly 4 questions, and say detail figures are derived", /earnings \(underwriting gain/.test(P.DRAFT_SYSTEM) && /balance \(the balance sheet/.test(P.DRAFT_SYSTEM) && /exactly 4 key diligence questions/.test(P.DRAFT_SYSTEM) && /facts\.detail\.derived lists/.test(P.DRAFT_SYSTEM) && !P.DRAFT_SYSTEM.includes("\u2014"));
   ok("Claude sees only the facts: no deal words in the prompt but the rules against them", !/pipeline|banker|target price/i.test(P.draftPrompt(S)) && P.draftPrompt(S).includes('"detail"'));
   const plain = P.plainText(S);
   const good: any = JSON.parse(JSON.stringify(plain)); delete good.by; delete good.note;

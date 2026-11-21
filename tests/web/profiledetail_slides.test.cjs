@@ -96,7 +96,7 @@ function hostile() {
     && why("accident").reason === "Net loss and LAE ratio by accident year isn't mapped to Snowflake yet."
     && why("lines").reason === "Net premiums earned by line, loss and LAE ratio by line, direct premiums earned by state and direct loss ratio by state aren't mapped to Snowflake yet.", pl.filter(r => !r.included).map(r => r.reason.slice(-80)));
   ok("plan: and every slide that was there before still is", IDS.filter(id => !NEW.includes(id)).every(id => why(id).included));
-  ok("plan: reasons are plain sentences with no field ids or em dashes", pl.concat(await plan(nothing())).every(r => !/_/.test(r.reason) && !r.reason.includes("—") && (r.reason === "" || /^[A-Z].*\.$/.test(r.reason))));
+  ok("plan: reasons are plain sentences with no field ids or em dashes", pl.concat(await plan(nothing())).every(r => !/_/.test(r.reason) && !r.reason.includes("\u2014") && (r.reason === "" || /^[A-Z].*\.$/.test(r.reason))));
   const empt = copy(noneNew()); empt.facts.missing = empt.facts.missing.map(m => ({ ...m, reason: "S&P returned nothing for it" }));
   ok("plan: a mapped figure that came back empty says S&P returned nothing", (await plan(empt)).find(r => r.id === "accident").reason === "S&P returned nothing for net loss and LAE ratio by accident year for 2021 to 2025.", (await plan(empt)).find(r => r.id === "accident"));
 
@@ -128,7 +128,7 @@ function hostile() {
   const rt = items(s, "reinsurance", "table").find(t => t.name === "Table recoverables");
   ok("reinsurance: recoverables by reinsurer with their share of surplus and status", same(rt.rows[0], ["Reinsurer", "$M", "Share", "To surplus", "Status"]) && same(rt.rows[1].map(cell), ["Nonesuch Re", "10.0", "30.0", "17.8", "Authorized"]) && same(rt.rows[3].map(cell), ["Tarrow Re", "5.0", "15.0", "8.9", "Unauthorized"]), rt.rows);
   ok("reinsurance: a tile for the share owed by reinsurers not authorized (derived)", items(s, "reinsurance", "tile").some(t => t.value === "18.0%" && /not authorized, 2025 \(derived\)/.test(t.label)));
-  ok("no em dashes anywhere", !JSON.stringify(s).includes("—"));
+  ok("no em dashes anywhere", !JSON.stringify(s).includes("\u2014"));
 
   // ----- the reader chooses slides -----
   const sk = await spec(FULL, { skip: ["earnings", "balance", "cover", "accident"] });
