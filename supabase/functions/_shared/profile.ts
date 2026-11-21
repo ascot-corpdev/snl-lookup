@@ -498,6 +498,8 @@ function detailFrom(years: number[], series: Partial<Record<SeriesId, Arr>>, fie
   // accident years: the loss and LAE ratio of each, as each statement year reported it
   const af = ratioField("ay_loss_ratio", "item", 20), nf = field("ay_npe");
   if (af) {
+    // UNCONFIRMED: how S&P holds an accident year isn't known; the mapped item column must give a four-digit year
+    // (a row whose item isn't one, such as a total, is left out).
     const ayOf = (s: string | null | undefined) => { const c = clean(s, 20); return c && /^(19|20)\d{2}$/.test(c) ? Number(c) : null; };
     const table = new Map<number, Arr>();
     years.forEach((y, i) => {
