@@ -20,16 +20,24 @@
   var MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
   var SLIDES = [
-    ["cover", "Cover"], ["summary", "Executive summary"], ["premium", "Premium"], ["underwriting", "Underwriting"],
-    ["capital", "Capital"], ["reserves", "Reserves"], ["reinsurance", "Reinsurance"],
+    ["cover", "Cover"], ["summary", "Executive summary"], ["premium", "Premium"], ["lines", "Lines and states"], ["underwriting", "Underwriting"],
+    ["earnings", "Earnings"], ["balance", "Balance sheet"], ["capital", "Capital"], ["reserves", "Reserves"], ["accident", "Accident years"], ["reinsurance", "Reinsurance"],
     ["filings", "Recent rate and form filings"], ["questions", "Key diligence questions"]
   ];
+  // the detailed profile's slides: planned only for facts that have the detail (facts saved before it existed open
+  // with the nine slides they had)
+  var DETAIL_SLIDES = ["lines", "earnings", "balance", "accident"];
+  var BLUE2 = "0081C3", TEAL2 = "00857C", GREY2 = "A6A6BF";
   var LABELS = {
     dpw: "Direct premiums written", npw: "Net premiums written", gpw: "Gross premiums written", npe: "Net premiums earned",
     loss_ratio: "Loss ratio", loss_lae_ratio: "Loss and LAE ratio", expense_ratio: "Expense ratio", combined_ratio: "Combined ratio", net_income: "Net income",
     surplus: "Surplus", paid_in_capital: "Paid-in capital", total_assets: "Total assets", rbc_ratio: "RBC ratio",
     net_reserves: "Net loss and LAE reserves", pyd: "One-year reserve development", reins_recoverable: "Reinsurance recoverables",
-    ceded_by_reinsurer: "Ceded premiums by reinsurer"
+    ceded_by_reinsurer: "Ceded premiums by reinsurer",
+    uw_gain: "Net underwriting gain", net_inv_income: "Net investment income earned", realized_gains: "Net realized capital gains", cash_from_ops: "Net cash from operations",
+    investment_yield: "Net yield on invested assets", cash_invested: "Cash and invested assets", premiums_receivable: "Premiums receivable", total_liabilities: "Total liabilities",
+    npe_by_line: "Net premiums earned by line", loss_lae_ratio_by_line: "Loss and LAE ratio by line", dpe_by_state: "Direct premiums earned by state", loss_ratio_by_state: "Direct loss ratio by state",
+    ay_loss_ratio: "Net loss and LAE ratio by accident year"
   };
   // statutory field ids that feed a series key (dpw and npw are the by-line figures summed)
   var FIELDS = { dpw: ["dpw", "dpw_by_line"], npw: ["npw", "npw_by_line"] };
@@ -122,12 +130,18 @@
     return n || "NAIC " + (e.kind === "group" ? "group " : "company ") + flat(e.code);
   }
   function hasFilings(f) { return !!f.filings && !f.filings.unavailable; }
+  // the detailed profile's part of the facts, or null for facts made before it existed
+  function detailOf(f) { return f && f.detail && typeof f.detail === "object" && !Array.isArray(f.detail) ? f.detail : null; }
+  var EARN = ["uw_gain", "net_inv_income", "realized_gains", "cash_from_ops", "investment_yield"];
+  var BAL = ["cash_invested", "bonds", "stocks", "cash_short_term", "premiums_receivable", "total_liabilities", "unearned_premiums"];
 
   // ---------- plan: which slides, and why one is left out ----------
   function joinWords(list) { return list.length < 2 ? list.join("") : list.slice(0, -1).join(", ") + " and " + list[list.length - 1]; }
   function lower(s) { return /^[A-Z][a-z]/.test(s) && !/^(RBC|LAE|NAIC)/.test(s) ? s[0].toLowerCase() + s.slice(1) : s; }
   // "Net loss and LAE reserves aren't", "Surplus isn't"
-  function plural(label) { var w = String(label).trim().split(/\s+/).pop().toLowerCase(); return /s$/.test(w) && !/(surplus|gross|loss|ss|us)$/.test(w); }
+  // (named apart from the filings profile's plural below, which would otherwise replace it in this scope)
+  // plural when a word before any " by ..." ends in s and isn't one of the words that only look plural
+  function pluralLabel(label) { return String(label).trim().split(/\s+by\s+/)[0].toLowerCase().split(/\s+/).some(function (w) { return /s$/.test(w) && !/(surplus|gross|loss|ss|us)$/.test(w); }); }
   function cap(s) { return s ? s[0].toUpperCase() + s.slice(1) : s; }
   function whyMissing(f, keys) {
     var miss = f.missing || [], notMapped = [], empty = [];
@@ -139,7 +153,7 @@
       if (m && /not mapped/i.test(String(m.reason || ""))) notMapped.push(label); else empty.push(label);
     });
     var parts = [];
-    if (notMapped.length) parts.push(cap(joinWords(notMapped.map(function (l, i) { return i ? lower(l) : l; }))) + (notMapped.length > 1 || plural(notMapped[0]) ? " aren't" : " isn't") + " mapped to Snowflake yet");
+    if (notMapped.length) parts.push(cap(joinWords(notMapped.map(function (l, i) { return i ? lower(l) : l; }))) + (notMapped.length > 1 || pluralLabel(notMapped[0]) ? " aren't" : " isn't") + " mapped to Snowflake yet");
     var yl = yearsLabel(f);
     if (empty.length) parts.push("S&P returned nothing for " + lower(joinWords(empty.map(lower))) + (yl ? " for " + yl : ""));
     return parts.join("; ") + ".";
@@ -147,8 +161,15 @@
   function plan(facts) {
     var f = facts || {};
     var anySeries = Object.keys(f.series || {}).some(function (k) { return any(S(f, k)); });
-    var rows = SLIDES.map(function (s) { return { id: s[0], label: s[1], included: true, reason: "" }; });
+    var X = detailOf(f);
+    var rows = SLIDES.filter(function (s) { return X || DETAIL_SLIDES.indexOf(s[0]) < 0; }).map(function (s) { return { id: s[0], label: s[1], included: true, reason: "" }; });
     var out = function (id, reason) { rows.forEach(function (r) { if (r.id === id) { r.included = false; r.reason = reason; } }); };
+    if (X) {
+      if (!(X.lines && arr(X.lines.items).length) && !(X.states && arr(X.states.items).length)) out("lines", whyMissing(f, ["npe_by_line", "loss_lae_ratio_by_line", "dpe_by_state", "loss_ratio_by_state"]));
+      if (!EARN.some(function (k) { return any(S(f, k)); })) out("earnings", whyMissing(f, EARN));
+      if (!BAL.some(function (k) { return any(S(f, k)); })) out("balance", whyMissing(f, ["cash_invested", "premiums_receivable", "total_liabilities"]));
+      if (!(X.accidentYears && arr(X.accidentYears.rows).length)) out("accident", whyMissing(f, ["ay_loss_ratio"]));
+    }
     if (!anySeries) out("summary", "No statutory figures came back for this company, so there is nothing to sum up.");
     if (!any(S(f, "dpw")) && !any(S(f, "npw"))) out("premium", whyMissing(f, ["dpw", "npw"]));
     if (!any(S(f, "combined_ratio")) && !(any(S(f, "loss_ratio")) && any(S(f, "expense_ratio"))))
@@ -259,14 +280,18 @@
       ni: function () { var a = f.derived && f.derived.net_income_total; return num(a) ? { v: money(a), label: "Net income, " + yearsLabel(f) + " in total (derived)", c: a < 0 ? MAG : NAVY, d: 1 } : null; },
       niLast: function () { var l = latest(f, S(f, "net_income")); return l && { v: money(l.v), label: "Net income, " + l.year, c: l.v < 0 ? MAG : NAVY }; },
       growth: function () { var a = f.derived && f.derived.dpw_growth_pct; return num(a) ? { v: pct(a), label: "Direct premium growth a year, " + yearsLabel(f) + " (derived)", d: 1 } : null; },
-      cession: function () { var l = latest(f, D(f, "cession_pct")); return l && { v: pct(l.v), label: "Share of gross premium ceded, " + l.year + " (derived)", d: 1 }; }
+      cession: function () { var l = latest(f, D(f, "cession_pct")); return l && { v: pct(l.v), label: "Share of gross premium ceded, " + l.year + " (derived)", d: 1 }; },
+      // the detailed profile
+      rbcCalc: function () { var l = latest(f, D(f, "rbc_ratio_calc")); return l && { v: pct(l.v), label: "RBC ratio, " + l.year + " (derived)", d: 1 }; },
+      uwg: function () { var l = latest(f, S(f, "uw_gain")); return l && { v: money(l.v), label: "Net underwriting gain, " + l.year, c: l.v < 0 ? MAG : NAVY }; },
+      ci: function () { var l = latest(f, S(f, "cash_invested")); return l && { v: money(l.v), label: "Cash and invested assets, " + l.year }; }
     };
-    var spare = ["npw", "gpw", "niLast", "assets", "growth", "cession", "top3", "line", "lev", "lr"];
+    var spare = ["npw", "gpw", "niLast", "assets", "growth", "cession", "top3", "line", "lev", "lr", "uwg", "ci"];
     var wants = [
       { first: ["dpw", "npw", "gpw"], none: "Direct premiums written" },
       { first: ["cr", "lr"], none: "Combined ratio" },
       { first: ["surplus", "assets"], none: "Surplus" },
-      { first: ["rbc", "lev"], none: "RBC ratio" },
+      { first: ["rbc", "rbcCalc", "lev"], none: "RBC ratio" },
       { first: ["top", "line", "top3"], none: "Share of direct premiums in the top state" },
       { first: ["avg", "ni"], none: "Average combined ratio (derived)" }
     ];
@@ -329,9 +354,12 @@
     if (any(dpw)) series.push(ser("Direct premiums written", dpw.map(m1), NAVY));
     if (any(npw)) series.push(ser("Net premiums written", npw.map(m1), MAG));
     var growth = any(dpw) ? dpw.map(function (v, i) { return i && num(v) && num(dpw[i - 1]) && dpw[i - 1] > 0 ? Math.round((v / dpw[i - 1] - 1) * 1000) / 10 : null; }) : null;
-    var rows = [];
+    var rows = [], asm = S(f, "assumed_pw"), cpw = S(f, "ceded_pw"), gpd = D(f, "gross_pw");
     if (any(dpw)) rows.push(["Direct premiums written", dpw, millions, null, true]);
+    if (any(asm)) rows.push(["Assumed premiums written", asm, millions]);
     if (any(gpw)) rows.push(["Gross premiums written", gpw, millions]);
+    else if (any(gpd)) rows.push(["Gross premiums written (derived)", gpd, millions]);
+    if (any(cpw)) rows.push(["Ceded premiums written", cpw, millions]);
     if (any(npw)) rows.push(["Net premiums written", npw, millions]);
     if (any(npe)) rows.push(["Net premiums earned", npe, millions]);
     if (any(cession)) rows.push(["Ceded share (%, derived)", cession, pctCell]);
@@ -341,7 +369,7 @@
     if ((mix.lines && mix.lines.length) || (mix.states && mix.states.length)) blocks.push(function (x, y, w, h) { return mixTables(f, x, y, w, h); });
     blocks.push(tableBlock("Premium by year", f, rows));
     var items = quads(blocks, pointsOf(t, "premium"));
-    items.push(source(f, { derived: any(cession) || !!growth }));
+    items.push(source(f, { derived: any(cession) || !!growth || (!any(gpw) && any(gpd)) }));
     return content(t, "premium", "Premium, " + yearsLabel(f), items);
   }
 
@@ -365,11 +393,14 @@
     if (any(lr)) rows.push(["Loss ratio (%)", lr, pctCell]);
     if (any(ll)) rows.push(["Loss and LAE ratio (%)", ll, pctCell]);
     if (any(er)) rows.push(["Expense ratio (%)", er, pctCell]);
+    var cm = S(f, "commission_ratio"), roaeR = S(f, "roae");
+    if (any(cm)) rows.push(["Commission ratio (%)", cm, pctCell]);
     if (any(cr)) rows.push(["Combined ratio (%)", cr, pctCell, adverseOver100, true]);
     if (any(ni)) rows.push(["Net income", ni, millions, negative]);
-    if (any(roae)) rows.push(["ROAE (%, derived)", roae, pctCell, negative]);
+    if (any(roaeR)) rows.push(["ROAE (%)", roaeR, pctCell, negative]);
+    else if (any(roae)) rows.push(["ROAE (%, derived)", roae, pctCell, negative]);
     var items = quads([chart, tableBlock("Results by year", f, rows)], pointsOf(t, "underwriting"));
-    items.push(source(f, { derived: any(roae) }));
+    items.push(source(f, { derived: any(roae) && !any(roaeR) }));
     return content(t, "underwriting", "Underwriting results, " + yearsLabel(f), items);
   }
 
@@ -379,16 +410,33 @@
     var series = [];
     if (any(pic)) series.push(ser("Paid-in capital", pic.map(m1), PAIDIN));
     series.push(ser("Surplus", sp.map(m1), NAVY));
+    // the detailed profile: surplus notes, unassigned funds, dividends and capital paid in, and RBC from its parts
+    var notes = S(f, "surplus_notes"), unas = S(f, "unassigned_funds"), divs = S(f, "dividends_paid"), contrib = S(f, "capital_contributed"), flow = D(f, "net_capital_flow");
+    var tac = S(f, "rbc_tac"), acl = S(f, "rbc_acl"), aclImp = D(f, "rbc_acl_implied"), rbcCalc = D(f, "rbc_ratio_calc"), spg = D(f, "surplus_yoy");
+    var flows = [];
+    if (any(divs)) flows.push(["Dividends to stockholders", divs, millions]);
+    if (any(contrib)) flows.push(["Capital paid in", contrib, millions]);
+    if (any(flow)) flows.push(["Paid in less dividends (derived)", flow, millions, negative]);
+    if (any(tac)) flows.push(["Total adjusted capital", tac, millions]);
+    if (any(acl)) flows.push(["Authorized control level", acl, millions]);
+    else if (any(aclImp)) flows.push(["Control level, implied (derived)", aclImp, millions]);
+    var rich = flows.length > 0 || any(notes) || any(unas) || any(rbcCalc);
+    if (rich) { if (any(rbc)) flows.push(["RBC ratio (%)", rbc, pctCell, null, true]); else if (any(rbcCalc)) flows.push(["RBC ratio (%, derived)", rbcCalc, pctCell, null, true]); }
     var rows = [["Surplus", sp, millions, null, true]];
     if (any(pic)) rows.push(["Paid-in capital", pic, millions]);
     if (any(def)) rows.push(["Surplus less paid-in (derived)", def, millions, negative]);
+    if (any(notes)) rows.push(["Surplus notes", notes, millions]);
+    if (any(unas)) rows.push(["Unassigned funds", unas, millions, negative]);
     if (any(ta)) rows.push(["Total assets", ta, millions]);
     if (any(lev)) rows.push(["NPW to surplus (x, derived)", lev, mult]);
-    if (any(rbc)) rows.push(["RBC ratio (%)", rbc, pctCell]);
-    var items = quads([chartBlock(series.length > 1 ? "Paid-in capital and surplus ($M)" : "Surplus ($M)",
+    if (rich && any(spg)) rows.push(["Surplus growth (%, derived)", spg, pctCell, negative]);
+    if (!rich && any(rbc)) rows.push(["RBC ratio (%)", rbc, pctCell]);
+    var blocks = [chartBlock(series.length > 1 ? "Paid-in capital and surplus ($M)" : "Surplus ($M)",
       { kind: "column", categories: years(f), series: series, legend: series.length > 1 ? "top" : "none", gap: 60, overlap: -10, labels: { format: "#,##0.0;(#,##0.0)" } }),
-      tableBlock("Capital by year", f, rows)], pointsOf(t, "capital"));
-    items.push(source(f, { derived: any(def) || any(lev) }));
+      tableBlock("Capital by year", f, rows.slice(0, 8))];
+    if (rich && flows.length) blocks.push(tableBlock("Capital flows and risk-based capital", f, flows));
+    var items = quads(blocks, pointsOf(t, "capital"));
+    items.push(source(f, { derived: any(def) || any(lev) || (rich && (any(flow) || any(spg) || (!any(acl) && any(aclImp)) || (!any(rbc) && any(rbcCalc)))) }));
     return content(t, "capital", "Capital, " + yearsLabel(f), items);
   }
 
@@ -406,6 +454,9 @@
     if (any(rts)) rows.push(["Reserves to surplus (x, derived)", rts, mult]);
     if (any(pyd)) rows.push(["One-year development (PYD)", pyd, millions, positive]);
     if (any(pps)) rows.push(["PYD to prior surplus (%, derived)", pps, pctCell, positive]);
+    var pyd2 = S(f, "pyd_two_year"), ppn = D(f, "pyd_to_npe");
+    if (any(ppn)) rows.push(["PYD to NPE (%, derived)", ppn, pctCell, positive]);
+    if (any(pyd2)) rows.push(["Two-year development", pyd2, millions, positive]);
     var y2 = TOP + th + 0.3;
     items = items.concat(tableBlock("Reserves by year", f, rows)(L, y2, QW, BOTTOM - y2));
     items = items.concat(takeaways(pointsOf(t, "reserves"), QX2, y2, QW, BOTTOM - y2));
@@ -417,27 +468,187 @@
     var re = f.reinsurers && Array.isArray(f.reinsurers.items) ? f.reinsurers.items.slice(0, 8) : [];
     var cess = D(f, "cession_pct"), rts = D(f, "recoverable_to_surplus"), items = [];
     var lw = 7.4, rx = 8.42, rw = R - rx;
+    var X = detailOf(f), RC = X && X.recoverables && arr(X.recoverables.items).length ? X.recoverables : null, ty = TOP;   // ty: where the recoverables table may start
     if (re.length) {
       items.push(header("Ceded premiums by reinsurer, " + f.reinsurers.year + " ($M)", L, TOP, lw));
-      items.push({ type: "chart", kind: "bar", x: L, y: TOP + HDR, w: lw, h: Math.min(BOTTOM - TOP - HDR, 0.5 + re.length * 0.55), legend: "none", gap: 50,
-        categories: re.map(function (r) { return fitText(r.name, 11, 2.6, false); }),
-        series: [ser("Ceded premiums ($M)", re.map(function (r) { return m1(r.ceded); }), NAVY)], labels: { format: "#,##0.0;(#,##0.0)" }, catSize: 11, name: "Chart reinsurers" });
+      var bh = RC ? Math.min(2.05, 0.3 + re.length * 0.25) : Math.min(BOTTOM - TOP - HDR, 0.5 + re.length * 0.55);
+      items.push({ type: "chart", kind: "bar", x: L, y: TOP + HDR, w: lw, h: bh, legend: "none", gap: 50,
+        categories: re.map(function (r) { return fitText(r.name, RC ? 10 : 11, 2.6, false); }),
+        series: [ser("Ceded premiums ($M)", re.map(function (r) { return m1(r.ceded); }), NAVY)], labels: { format: "#,##0.0;(#,##0.0)", size: RC ? 10 : undefined }, catSize: RC ? 10 : 11, name: "Chart reinsurers" });
+      ty = TOP + HDR + bh + 0.15;
     } else {
       var rows = [];
       if (any(S(f, "gpw"))) rows.push(["Gross premiums written", S(f, "gpw"), millions]);
-      if (any(D(f, "ceded_pw"))) rows.push(["Ceded premiums (derived)", D(f, "ceded_pw"), millions, null, true]);
+      if (any(S(f, "ceded_pw"))) rows.push(["Ceded premiums written", S(f, "ceded_pw"), millions, null, true]);
+      else if (any(D(f, "ceded_pw"))) rows.push(["Ceded premiums (derived)", D(f, "ceded_pw"), millions, null, true]);
       if (any(cess)) rows.push(["Ceded share (%, derived)", cess, pctCell]);
       if (any(S(f, "reins_recoverable"))) rows.push(["Reinsurance recoverables", S(f, "reins_recoverable"), millions]);
       if (any(rts)) rows.push(["Recoverables to surplus (%, derived)", rts, pctCell]);
-      items = items.concat(tableBlock("Reinsurance by year", f, rows)(L, TOP, lw, 2.6));
+      items = items.concat(tableBlock("Reinsurance by year", f, rows)(L, TOP, lw, RC ? Math.min(2.6, HDR + 0.27 * (rows.length + 1)) : 2.6));
+      ty = TOP + (RC ? Math.min(2.6, HDR + 0.27 * (rows.length + 1)) : 2.6) + 0.15;
     }
+    if (RC) items = items.concat(recoverablesTable(RC, L, ty, lw));
     var a = latest(f, cess), b = latest(f, rts), tw = (rw - 0.2) / 2, th = 1.3;
     items.push(tile(rx, TOP, tw, th, a ? pct(a.v) : "n/d", "Share of gross premium ceded" + (a ? ", " + a.year : "") + " (derived)"));
     items.push(tile(rx + tw + 0.2, TOP, tw, th, b ? pct(b.v) : "n/d", "Recoverables to surplus" + (b ? ", " + b.year : "") + " (derived)", b && b.v > 100 ? MAG : NAVY));
     var y2 = TOP + th + 0.3;
+    if (RC && RC.tagged) {
+      var us = RC.unauthorizedShare;
+      items.push(tile(rx, y2, rw, 1.0, num(us) ? pct(us) : "n/d", "Recoverables owed by reinsurers not authorized, " + RC.year + " (derived)", num(us) && us >= 20 ? MAG : NAVY));
+      y2 += 1.0 + 0.3;
+    }
     items = items.concat(takeaways(pointsOf(t, "reinsurance"), rx, y2, rw, BOTTOM - y2));
     items.push(source(f, { derived: true, period: re.length ? yearsLabel(f) : "" }));
     return content(t, "reinsurance", "Reinsurance, " + yearsLabel(f), items);
+  }
+
+  // ---------- the detailed profile's slides ----------
+  // recoverables by reinsurer as a table: amount, share, share of surplus and the tag (authorized or not) when given
+  function recoverablesTable(RC, x, y, w) {
+    var rowH = 0.25, tagged = !!RC.tagged;
+    var num3 = [0.85, 0.85, 1.05], tagW = tagged ? 1.3 : 0, nameW = w - num3.reduce(function (a, b) { return a + b; }, 0) - tagW;
+    var max = Math.max(1, Math.floor((BOTTOM - y - HDR - 0.05) / rowH) - 1), list = arr(RC.items).slice(0, max);
+    var head = ["Reinsurer", "$M", "Share", "To surplus"].concat(tagged ? ["Status"] : []);
+    var colW = [nameW].concat(num3).concat(tagged ? [tagW] : []);
+    var rows = [head].concat(list.map(function (r) {
+      var cells = [cellText(r.name, nameW), millions(r.recoverable), pctCell(r.share), pctCell(r.toSurplus)];
+      if (tagged) cells.push(flat(r.name) === "Other" ? "" : cellText(r.tag || "Not given", tagW, false));
+      return cells;
+    }));
+    return [header("Recoverables by reinsurer, " + RC.year + " ($M; shares, %)", x, y, w),
+      { type: "table", x: x, y: y + HDR, colW: colW, rowH: rowH, size: 11, rows: rows, aligns: ["l", "r", "r", "r"].concat(tagged ? ["l"] : []), name: "Table recoverables" }];
+  }
+
+  // lines and states: the largest five of each with premiums, share and loss ratio, and the loss ratios as bar charts
+  function linesSlide(f, t) {
+    var X = detailOf(f) || {}, Ld = X.lines && arr(X.lines.items).length ? X.lines : null, Sd = X.states && arr(X.states.items).length ? X.states : null, items = [];
+    var panel = function (kind, d, tx, ty, tw, th, cx, cy, cw, ch) {
+      var lines = kind === "line", list = arr(d.items), key = lines ? "name" : "state";
+      var has = function (k) { return list.some(function (r) { return num(r[k]); }); };
+      var cols = [[lines ? "Line" : "State", null]];
+      if (has("dpw")) cols.push(["DPW", "dpw", millions, 0.8]);
+      if (lines && has("npw")) cols.push(["NPW", "npw", millions, 0.8]);
+      if (has(lines ? "npe" : "dpe")) cols.push([lines ? "NPE" : "DPE", lines ? "npe" : "dpe", millions, 0.8]);
+      cols.push(["Share", "share", pctCell, 0.75]);
+      if (has("lossRatio")) cols.push(["Loss ratio", "lossRatio", pctCell, 1.05]);
+      var rest = cols.slice(1).reduce(function (a, c) { return a + c[3]; }, 0), nameW = tw - rest;
+      var by = d.by === "npe" ? "net premiums earned" : d.by === "dpe" ? "direct premiums earned" : "direct premiums written";
+      var out = [header((lines ? "Largest lines, " + d.year + " ($M; loss ratio with LAE, %)" : "Largest states, " + d.year + " ($M; direct loss ratio, %)"), tx, ty, tw)];
+      out.push({ type: "table", x: tx, y: ty + HDR, colW: [nameW].concat(cols.slice(1).map(function (c) { return c[3]; })), rowH: 0.27, size: 11, name: lines ? "Table lines" : "Table states",
+        aligns: ["l"].concat(cols.slice(1).map(function () { return "r"; })),
+        rows: [cols.map(function (c) { return c[0]; })].concat(list.map(function (r) { return [cellText(r[key], nameW)].concat(cols.slice(1).map(function (c) { return c[2](r[c[1]]); })); })) });
+      var withRatio = list.filter(function (r) { return flat(r[key]) !== "Other" && num(r.lossRatio); }).slice(0, 5);
+      if (withRatio.length) {
+        out.push(header((lines ? "Loss and LAE ratio by line, " : "Direct loss ratio by state, ") + d.year + " (%)", cx, cy, cw));
+        var pc = {}; withRatio.forEach(function (r, i) { if (r.lossRatio > 100) pc[i] = MAG; });
+        out.push({ type: "chart", kind: "bar", x: cx, y: cy + HDR, w: cw, h: ch - HDR, legend: "none", gap: 50, catSize: 10, name: lines ? "Chart line loss ratios" : "Chart state loss ratios",
+          categories: withRatio.map(function (r) { return fitText(r[key], 10, 1.9, false); }), series: [ser(lines ? "Loss and LAE ratio (%)" : "Direct loss ratio (%)", withRatio.map(function (r) { return r.lossRatio; }), lines ? NAVY : BLUE, { pointColors: pc })], labels: { format: "0.0", size: 10 } });
+      }
+      notes.push(by);
+      return out;
+    };
+    var th = HDR + 0.27 * 7, cy = TOP + th + 0.25, ch = BOTTOM - cy, notes = [];
+    if (Ld && Sd) items = items.concat(panel("line", Ld, L, TOP, QW, th, L, cy, QW, ch), panel("state", Sd, QX2, TOP, QW, th, QX2, cy, QW, ch));
+    else items = items.concat(panel(Ld ? "line" : "state", Ld || Sd, L, TOP, QW, th, QX2, TOP, QW, BOTTOM - TOP));
+    var note = notes.length > 1 && notes[0] !== notes[1] ? "Shares: of each total." : "Shares: of " + notes[0] + ".";
+    items.push(source(f, { derived: true, period: String((Ld || Sd).year), note: note }));
+    return content(t, "lines", "Lines and states, " + (Ld || Sd).year, items);
+  }
+
+  function earningsSlide(f, t) {
+    var ug = S(f, "uw_gain"), nii = S(f, "net_inv_income"), rg = S(f, "realized_gains"), ni = S(f, "net_income"), cfo = S(f, "cash_from_ops"), yld = S(f, "investment_yield");
+    var roaeR = S(f, "roae"), roaeD = D(f, "roae");
+    var series = [];
+    if (any(ug)) series.push(ser("Underwriting gain", ug.map(m1), NAVY));
+    if (any(nii)) series.push(ser("Investment income", nii.map(m1), BLUE2));
+    if (any(ni)) series.push(ser("Net income", ni.map(m1), MAG));
+    var rows = [];
+    if (any(ug)) rows.push(["Net underwriting gain", ug, millions, negative]);
+    if (any(nii)) rows.push(["Net investment income", nii, millions]);
+    if (any(rg)) rows.push(["Net realized capital gains", rg, millions, negative]);
+    if (any(ni)) rows.push(["Net income", ni, millions, negative, true]);
+    if (any(cfo)) rows.push(["Net cash from operations", cfo, millions, negative]);
+    if (any(yld)) rows.push(["Investment yield (%)", yld, pctCell]);
+    if (any(roaeR)) rows.push(["ROAE (%)", roaeR, pctCell, negative]);
+    else if (any(roaeD)) rows.push(["ROAE (%, derived)", roaeD, pctCell, negative]);
+    var blocks = [];
+    if (series.length) blocks.push(chartBlock("Earnings by year ($M)", { kind: "column", categories: years(f), series: series, legend: series.length > 1 ? "top" : "none", gap: 60, overlap: -10, catLabels: "low", labels: { format: "#,##0.0;(#,##0.0)", size: 9 } }));
+    blocks.push(tableBlock("Earnings by year", f, rows));
+    var items = quads(blocks, pointsOf(t, "earnings"));
+    var tot = f.derived && f.derived.net_income_total;
+    items.push(source(f, { derived: !any(roaeR) && any(roaeD), note: num(tot) ? "Net income over the years shown: " + money(tot) + " (derived)." : "" }));
+    return content(t, "earnings", "Earnings, " + yearsLabel(f), items);
+  }
+
+  function balanceSlide(f, t) {
+    var ci = S(f, "cash_invested"), bo = S(f, "bonds"), st = S(f, "stocks"), cs = S(f, "cash_short_term"), pr = S(f, "premiums_receivable"), ta = S(f, "total_assets"), tl = S(f, "total_liabilities"), up = S(f, "unearned_premiums");
+    var blocks = [], derived = false;
+    var parts = [["Bonds", bo, NAVY], ["Common stocks", st, BLUE2], ["Cash and short-term", cs, MAG]].filter(function (p) { return any(p[1]); });
+    if (parts.length && any(ci)) {
+      var other = ci.map(function (v, i) { if (!num(v)) return null; var s = 0, all = true; parts.forEach(function (p) { if (num(p[1][i])) s += p[1][i]; else all = false; }); return all && v - s >= 0 ? v - s : null; });
+      // only the largest part carries labels: the thin ones would be unreadable
+      var sers = parts.map(function (p, i) { return ser(p[0], p[1].map(m1), p[2], i ? { labels: false } : null); });
+      if (any(other)) sers.push(ser("Other invested assets", other.map(m1), GREY2, { labels: false }));
+      blocks.push(chartBlock("Cash and invested assets ($M)", { kind: "stackedColumn", categories: years(f), series: sers, legend: "top", gap: 60, overlap: 100, labels: { format: "#,##0;(#,##0);;", position: "ctr", color: "FFFFFF", size: 9 } }));
+    } else if (any(ci) || any(tl)) {
+      var s2 = [];
+      if (any(ci)) s2.push(ser("Cash and invested assets", ci.map(m1), NAVY));
+      if (any(tl)) s2.push(ser("Total liabilities", tl.map(m1), MAG));
+      blocks.push(chartBlock(s2.length > 1 ? "Invested assets and liabilities ($M)" : s2[0].name + " ($M)", { kind: "column", categories: years(f), series: s2, legend: s2.length > 1 ? "top" : "none", gap: 60, overlap: -10, labels: { format: "#,##0.0;(#,##0.0)", size: 9 } }));
+    }
+    var rows = [];
+    if (any(ci)) rows.push(["Cash and invested assets", ci, millions, null, true]);
+    if (any(bo)) rows.push(["Bonds", bo, millions]);
+    if (any(st)) rows.push(["Common stocks", st, millions]);
+    if (any(cs)) rows.push(["Cash and short-term", cs, millions]);
+    if (any(pr)) rows.push(["Premiums receivable", pr, millions]);
+    if (any(ta)) rows.push(["Total assets", ta, millions]);
+    if (any(tl)) rows.push(["Total liabilities", tl, millions]);
+    if (any(up)) rows.push(["Unearned premiums", up, millions]);
+    if (rows.length) blocks.push(tableBlock("Balance sheet by year", f, rows));
+    var ratios = [];
+    [["Invested assets to liabilities (x)", "invested_to_liabilities", mult], ["Liabilities to surplus (x)", "liabilities_to_surplus", mult], ["NPW to surplus (x)", "npw_to_surplus", mult],
+      ["Receivables to DPW (%)", "receivable_to_dpw", pctCell], ["Bonds share (%)", "bonds_share", pctCell], ["Stocks share (%)", "stocks_share", pctCell], ["Cash share (%)", "cash_share", pctCell]].forEach(function (r) {
+      var a = D(f, r[1]); if (any(a)) ratios.push([r[0], a, r[2]]);
+    });
+    if (ratios.length) { derived = true; blocks.push(tableBlock("Liquidity and leverage (derived)", f, ratios)); }
+    if (!blocks.length) blocks.push(tableBlock("Balance sheet by year", f, rows));
+    var items = quads(blocks.slice(0, 3), pointsOf(t, "balance"));
+    items.push(source(f, { derived: derived }));
+    return content(t, "balance", "Balance sheet, " + yearsLabel(f), items);
+  }
+
+  // accident years: each one's loss and LAE ratio as each statement year reported it, and how far it has moved
+  function accidentSlide(f, t) {
+    var A = (detailOf(f) || {}).accidentYears || {}, rows = arr(A.rows).slice(-10), ys = (f.years || []).map(Number), n = ys.length;
+    var hasNpe = rows.some(function (r) { return num(r.npe); });
+    var yw = 0.82, aw = 1.25, cw = 1.15, nw = hasNpe ? 1.0 : 0, tw = aw + yw * n + cw + nw;
+    var head = ["Accident year"].concat(ys.map(String)).concat(["Change (pts)"]).concat(hasNpe ? ["NPE ($M)"] : []);
+    var body = rows.map(function (r) {
+      var vals = arr(r.values);
+      return [String(r.ay)].concat(ys.map(function (y, i) { return r.ay > y ? "" : pctCell(vals[i]); }))
+        .concat([num(r.change) ? (r.change > 0 ? { text: "+" + fixed1(r.change), color: MAG } : pctCell(r.change)) : "n/d"]).concat(hasNpe ? [millions(r.npe)] : []);
+    });
+    var rowH = Math.min(0.3, (BOTTOM - TOP - HDR) / (rows.length + 1));
+    var items = [header("Loss and LAE ratio by accident year, as each statement reported it (%)", L, TOP, tw),
+      { type: "table", x: L, y: TOP + HDR, colW: [aw].concat(ys.map(function () { return yw; })).concat([cw]).concat(hasNpe ? [nw] : []), rowH: rowH, size: 11, rows: [head].concat(body),
+        aligns: ["l"].concat(ys.map(function () { return "r"; })).concat(["r"]).concat(hasNpe ? ["r"] : []), name: "Table accident years" }];
+    var rx = L + tw + 0.3, rw = R - rx;
+    var worst = rows.filter(function (r) { return num(r.change); }).sort(function (a, b) { return b.change - a.change; })[0];
+    var withChange = rows.filter(function (r) { return num(r.change); });
+    if (rw >= 2.4) {
+      items.push(tile(rx, TOP, rw, 1.2, worst ? (worst.change > 0 ? "+" : "") + fixed1(worst.change) + " pts" : "n/d", worst ? "Largest change, accident year " + worst.ay + ", since " + (worst.firstYear === worst.ay ? "first reported" : worst.firstYear) + " (derived)" : "Largest change since first shown (derived)", worst && worst.change > 0 ? MAG : NAVY));
+      items.push(tile(rx, TOP + 1.45, rw, 1.2, withChange.length ? cnt(A.worse) + " of " + cnt(withChange.length) : "n/d", "Accident years worse than first shown (derived)", num(A.worse) && A.worse > 0 ? MAG : NAVY));
+      if (withChange.length) {
+        var cy = TOP + 2.9, pc = {};
+        withChange.forEach(function (r, i) { pc[i] = r.change > 0 ? MAG : NAVY; });
+        items.push(header("Change since first shown (points)", rx, cy, rw));
+        items.push({ type: "chart", kind: "column", x: rx, y: cy + HDR, w: rw, h: BOTTOM - cy - HDR, legend: "none", gap: 60, catLabels: "low", catSize: 10, name: "Chart accident year change",
+          categories: withChange.map(function (r) { return String(r.ay); }), series: [ser("Change (points)", withChange.map(function (r) { return r.change; }), NAVY, { pointColors: pc })], labels: { format: "0.0;(0.0);0.0", size: 9 } });
+      }
+    }
+    items.push(source(f, { derived: true, note: "Change: points since first shown; up is worse." }));
+    return content(t, "accident", "Accident years, " + yearsLabel(f), items);
   }
 
   function filingsSlide(f, t) {
@@ -1095,11 +1306,12 @@
     return { fileName: (slug(fpName(f)) || "filings") + "-filings-profile" + (f.sample ? "-sample" : "") + (day ? "-" + day : "") + ".pptx", slides: slides };
   }
 
-  function spec(facts, text) {
-    var f = facts || {}, t = text || {};
-    var included = {}; plan(f).forEach(function (r) { included[r.id] = r.included; });
-    var make = { summary: summarySlide, premium: premiumSlide, underwriting: underwritingSlide, capital: capitalSlide,
-      reserves: reservesSlide, reinsurance: reinsuranceSlide, filings: filingsSlide, questions: questionsSlide };
+  // opts.skip: ids of slides the reader chose to leave out (the cover always stays)
+  function spec(facts, text, opts) {
+    var f = facts || {}, t = text || {}, skip = opts && Array.isArray(opts.skip) ? opts.skip : [];
+    var included = {}; plan(f).forEach(function (r) { included[r.id] = r.included && (r.id === "cover" || skip.indexOf(r.id) < 0); });
+    var make = { summary: summarySlide, premium: premiumSlide, lines: linesSlide, underwriting: underwritingSlide, earnings: earningsSlide, balance: balanceSlide, capital: capitalSlide,
+      reserves: reservesSlide, accident: accidentSlide, reinsurance: reinsuranceSlide, filings: filingsSlide, questions: questionsSlide };
     var slides = [coverSlide(f, t)];
     SLIDES.slice(1).forEach(function (s) { if (included[s[0]]) slides.push(make[s[0]](f, t)); });
     var name = slug(entityName(f)) || "company";

@@ -56,7 +56,10 @@ const labelOf = (id: string) => STAT_FIELDS.find((f) => f.id === id)?.label ?? i
 
 // ---------- the facts (contract 1) ----------
 
-export const SERIES = ["dpw", "npw", "gpw", "npe", "loss_ratio", "loss_lae_ratio", "expense_ratio", "combined_ratio", "net_income", "surplus", "paid_in_capital", "total_assets", "rbc_ratio", "net_reserves", "pyd", "reins_recoverable"] as const;
+export const SERIES = ["dpw", "npw", "gpw", "npe", "loss_ratio", "loss_lae_ratio", "expense_ratio", "combined_ratio", "net_income", "surplus", "paid_in_capital", "total_assets", "rbc_ratio", "net_reserves", "pyd", "reins_recoverable",
+  // the detailed profile's figures by year, as reported (each a statutory field of the same id)
+  "assumed_pw", "ceded_pw", "losses_incurred", "uw_gain", "net_inv_income", "realized_gains", "dividends_paid", "capital_contributed", "surplus_notes", "unassigned_funds", "cash_from_ops",
+  "cash_invested", "bonds", "stocks", "cash_short_term", "premiums_receivable", "total_liabilities", "unearned_premiums", "rbc_acl", "rbc_tac", "pyd_two_year", "commission_ratio", "investment_yield", "roae"] as const;
 export type SeriesId = typeof SERIES[number];
 type Arr = (number | null)[];
 export type MixLine = { name: string; dpw: number | null; npw: number | null; share: number | null };
@@ -69,6 +72,32 @@ export type Derived = {
   ceded_pw?: Arr; cession_pct?: Arr; npw_to_surplus?: Arr; roae?: Arr; reserves_to_npe?: Arr; reserves_to_surplus?: Arr;
   pyd_to_prior_surplus?: Arr; accumulated_deficit?: Arr; recoverable_to_surplus?: Arr;
   combined_avg?: number; combined_avg_weighted?: number; years_above_100?: number; net_income_total?: number; dpw_growth_pct?: number;
+  // the detailed profile (DERIVED_WORDS says how each is worked out)
+  gross_pw?: Arr; pyd_to_npe?: Arr; rbc_ratio_calc?: Arr; rbc_acl_implied?: Arr; invested_to_liabilities?: Arr; liabilities_to_surplus?: Arr; receivable_to_dpw?: Arr;
+  bonds_share?: Arr; stocks_share?: Arr; cash_share?: Arr; dpw_yoy?: Arr; npw_yoy?: Arr; surplus_yoy?: Arr; net_capital_flow?: Arr; years_below_100?: number;
+};
+/** The detailed profile's figures that aren't by year: the largest lines and states with their results, recoverables by
+    reinsurer, and accident years as each statement reported them. Shares, ratios to surplus and changes are worked out
+    here (see Detail.derived); dollar amounts and loss ratios are as reported. Facts made before this existed have none. */
+export type DetailLine = { name: string; dpw: number | null; npw: number | null; npe: number | null; share: number | null; lossRatio: number | null };
+export type DetailState = { state: string; dpw: number | null; dpe: number | null; share: number | null; lossRatio: number | null };
+export type DetailRecoverable = { name: string; recoverable: number | null; share: number | null; toSurplus: number | null; tag: string | null };
+export type AyRow = { ay: number; values: Arr; npe: number | null; first: number | null; firstYear: number | null; latest: number | null; latestYear: number | null; change: number | null };
+export type Detail = {
+  /** The latest year with figures by line: the five largest lines (by direct premiums, or net premiums earned when there
+      are none), then Other; share is of that measure, top5Share the five together. */
+  lines?: { year: number; by: "dpw" | "npe"; items: DetailLine[]; top5Share: number | null };
+  states?: { year: number; by: "dpw" | "dpe"; items: DetailState[]; top5Share: number | null };
+  /** The latest year with recoverables by reinsurer: the seven largest, then Other. tagged: some rows carry a tag
+      (authorized or not); then the shares of the total owed by reinsurers tagged as not authorized, and with no tag. */
+  recoverables?: { year: number; items: DetailRecoverable[]; total: number | null; tagged: boolean; unauthorizedShare: number | null; untaggedShare: number | null };
+  /** Accident years (up to the latest ten) by statement year: values line up with facts.years. change is the latest less
+      the first reported, in percentage points (positive is worse). */
+  accidentYears?: { rows: AyRow[]; worst: number | null; worse: number };
+  /** The latest run of years with the combined ratio above 100% (above true) or at or below it. */
+  combinedRun?: { above: boolean; years: number; from: number; to: number };
+  /** Every figure here and in facts.derived that the app works out, with how, in plain words: never a reported figure. */
+  derived: Record<string, string>;
 };
 export type Missing = { field: string; label: string; reason: string };
 export type Facts = {
@@ -78,8 +107,55 @@ export type Facts = {
   series: Partial<Record<SeriesId, Arr>>;
   derived: Derived;
   mix?: Mix; reinsurers?: Reinsurers;
+  /** The detailed profile; left out of facts made before it existed, which still open as they did. */
+  detail?: Detail;
   filings: FactsFilings;
   missing: Missing[];
+};
+
+/** How each worked-out figure is worked out, as the facts carry it (Detail.derived) and Claude is told. */
+export const DERIVED_WORDS: Record<string, string> = {
+  "derived.ceded_pw": "gross less net premiums written",
+  "derived.cession_pct": "ceded premiums written (as reported, or gross less net) as a share of gross premiums written",
+  "derived.gross_pw": "direct plus assumed premiums written, only when gross premiums written aren't reported",
+  "derived.npw_to_surplus": "net premiums written to policyholder surplus",
+  "derived.roae": "net income to the average of opening and closing surplus (the reported return on average equity is series.roae)",
+  "derived.reserves_to_npe": "net loss and LAE reserves to net premiums earned",
+  "derived.reserves_to_surplus": "net loss and LAE reserves to surplus",
+  "derived.pyd_to_prior_surplus": "one-year reserve development as a share of the previous year-end surplus",
+  "derived.pyd_to_npe": "one-year reserve development as a share of the same year's net premiums earned",
+  "derived.accumulated_deficit": "surplus less paid-in capital (negative is an accumulated deficit)",
+  "derived.recoverable_to_surplus": "reinsurance recoverables as a share of surplus",
+  "derived.rbc_ratio_calc": "total adjusted capital to authorized control level, only when the RBC ratio isn't reported",
+  "derived.rbc_acl_implied": "surplus divided by the RBC ratio, only when the authorized control level isn't reported",
+  "derived.invested_to_liabilities": "cash and invested assets to total liabilities",
+  "derived.liabilities_to_surplus": "total liabilities to surplus",
+  "derived.receivable_to_dpw": "premiums receivable as a share of direct premiums written",
+  "derived.bonds_share": "bonds as a share of cash and invested assets",
+  "derived.stocks_share": "common stocks as a share of cash and invested assets",
+  "derived.cash_share": "cash and short-term investments as a share of cash and invested assets",
+  "derived.dpw_yoy": "direct premiums written, change on the previous year",
+  "derived.npw_yoy": "net premiums written, change on the previous year",
+  "derived.surplus_yoy": "surplus, change on the previous year",
+  "derived.net_capital_flow": "capital paid in less dividends paid in the year",
+  "derived.combined_avg": "simple average of the combined ratios shown",
+  "derived.combined_avg_weighted": "average of the combined ratios weighted by net premiums earned",
+  "derived.years_above_100": "years with a combined ratio above 100%",
+  "derived.years_below_100": "years with a combined ratio of 100% or below",
+  "derived.net_income_total": "net income added up over the years shown (cumulative)",
+  "derived.dpw_growth_pct": "compound yearly growth of direct premiums written, first to last year",
+  "detail.lines.items.share": "a line's share of the year's total (direct premiums, or net premiums earned)",
+  "detail.lines.top5Share": "the five largest lines' share together",
+  "detail.states.items.share": "a state's share of the year's total (direct premiums written, or earned)",
+  "detail.states.top5Share": "the five largest states' share together",
+  "detail.recoverables.items.share": "a reinsurer's share of all recoverables",
+  "detail.recoverables.items.toSurplus": "a reinsurer's recoverables as a share of surplus",
+  "detail.recoverables.unauthorizedShare": "share of recoverables from reinsurers whose tag says they aren't authorized",
+  "detail.recoverables.untaggedShare": "share of recoverables from reinsurers with no tag",
+  "detail.accidentYears.rows.change": "an accident year's latest loss and LAE ratio less its first reported one, in percentage points",
+  "detail.accidentYears.worst": "the largest change of any accident year shown, in percentage points",
+  "detail.accidentYears.worse": "how many accident years are worse now than first reported",
+  "detail.combinedRun": "the latest run of years above, or at or below, a 100% combined ratio",
 };
 
 /** Text from S&P or the company list: no control characters, one line, cut to max. null when nothing is left. */
@@ -199,7 +275,7 @@ export function factsFrom(stat: StatResult | null, dir: Directory, filings: Fact
   if (!series.dpw && !problem("dpw_by_state")) { put("dpw", lineTotals("dpw_by_state"), "dpw_by_state"); }
   if (!problem("npw_by_line")) put("npw", lineTotals("npw_by_line"), "npw_by_line");
   const yearlyProblems = new Map<string, string>();
-  for (const id of ["gpw", "npe", "loss_ratio", "loss_lae_ratio", "expense_ratio", "combined_ratio", "net_income", "surplus", "paid_in_capital", "total_assets", "rbc_ratio", "net_reserves", "pyd", "reins_recoverable"] as const) {
+  for (const id of SERIES.filter((x): x is Exclude<SeriesId, "dpw" | "npw"> => x !== "dpw" && x !== "npw")) {
     if (problem(id)) continue;
     const y = yearly(field(id));
     if (y.problem) { yearlyProblems.set(id, y.problem); continue; }
@@ -245,6 +321,13 @@ export function factsFrom(stat: StatResult | null, dir: Directory, filings: Fact
     used.add("ceded_by_reinsurer");
   }
 
+  const derived = derive(years, series);
+  const detail = detailFrom(years, series, (id) => (problem(id) ? undefined : field(id)), used, yearlyProblems);
+  detail.derived = Object.fromEntries(Object.entries(DERIVED_WORDS).filter(([k]) => {
+    const [where, key] = k.split(".");
+    return where === "derived" ? key in derived : key in detail && (detail as Record<string, unknown>)[key] !== undefined;
+  }));
+
   for (const f of STAT_FIELDS) {
     if (used.has(f.id)) continue;
     const reason = problem(f.id) ?? yearlyProblems.get(f.id) ?? (yearsWith(field(f.id)).length ? "S&P returned nothing for it in these years" : "S&P returned nothing for it");
@@ -255,8 +338,8 @@ export function factsFrom(stat: StatResult | null, dir: Directory, filings: Fact
   return {
     version: 1, sample: o.sample === true, asOf: o.asOf,
     entity: { kind: o.kind, code: o.code, name: statName ?? dir.name, groupName: dir.groupName, naicGroupCode: dir.groupCode },
-    years, source: SOURCE, series, derived: derive(years, series),
-    ...(mix ? { mix } : {}), ...(reinsurers ? { reinsurers } : {}),
+    years, source: SOURCE, series, derived,
+    ...(mix ? { mix } : {}), ...(reinsurers ? { reinsurers } : {}), detail,
     filings, missing: [...missing.entries()].map(([field, reason]) => ({ field, label: labelOf(field), reason })),
   };
 }
@@ -273,24 +356,41 @@ export function derive(years: number[], s: Partial<Record<SeriesId, Arr>>): Deri
     if (anyValue(a)) (d as Record<string, unknown>)[key] = a;
   };
   const diff = (a: number | null, b: number | null) => (a === null || b === null ? null : a - b);
+  // A ratio to surplus, premiums, assets or capital: n/d (null) when the denominator is missing, zero or negative.
+  const pdiv = (a: number | null, b: number | null) => (b === null || b <= 0 ? null : div(a, b));
+  const pct = (r: number | null) => (r === null ? null : r * 100);
   arr("ceded_pw", ["gpw", "npw"], (i) => diff(at("gpw", i), at("npw", i)));
-  arr("cession_pct", ["gpw", "npw"], (i) => { const c = div(diff(at("gpw", i), at("npw", i)), at("gpw", i)); return c === null ? null : c * 100; });
-  arr("npw_to_surplus", ["npw", "surplus"], (i) => div(at("npw", i), at("surplus", i)));
+  // gross: as reported, or direct plus assumed when gross premiums written aren't mapped
+  if (!s.gpw) arr("gross_pw", ["dpw", "assumed_pw"], (i) => { const a = at("dpw", i), b = at("assumed_pw", i); return a === null || b === null ? null : a + b; });
+  const gross = (i: number) => (s.gpw ? at("gpw", i) : d.gross_pw?.[i] ?? null);
+  const ceded = (i: number) => (s.ceded_pw ? at("ceded_pw", i) : diff(gross(i), at("npw", i)));
+  if ((s.gpw || d.gross_pw) && (s.ceded_pw || s.npw)) arr("cession_pct", [], (i) => pct(pdiv(ceded(i), gross(i))));
+  arr("npw_to_surplus", ["npw", "surplus"], (i) => pdiv(at("npw", i), at("surplus", i)));
   arr("roae", ["net_income", "surplus"], (i) => {
     const open = prior("surplus", i), close = at("surplus", i);
-    const r = div(at("net_income", i), open === null || close === null ? null : (open + close) / 2);
-    return r === null ? null : r * 100;
+    return pct(pdiv(at("net_income", i), open === null || close === null ? null : (open + close) / 2));
   });
-  arr("reserves_to_npe", ["net_reserves", "npe"], (i) => div(at("net_reserves", i), at("npe", i)));
-  arr("reserves_to_surplus", ["net_reserves", "surplus"], (i) => div(at("net_reserves", i), at("surplus", i)));
-  arr("pyd_to_prior_surplus", ["pyd", "surplus"], (i) => { const r = div(at("pyd", i), prior("surplus", i)); return r === null ? null : r * 100; });
+  arr("reserves_to_npe", ["net_reserves", "npe"], (i) => pdiv(at("net_reserves", i), at("npe", i)));
+  arr("reserves_to_surplus", ["net_reserves", "surplus"], (i) => pdiv(at("net_reserves", i), at("surplus", i)));
+  arr("pyd_to_prior_surplus", ["pyd", "surplus"], (i) => pct(pdiv(at("pyd", i), prior("surplus", i))));
   arr("accumulated_deficit", ["surplus", "paid_in_capital"], (i) => diff(at("surplus", i), at("paid_in_capital", i)));
-  arr("recoverable_to_surplus", ["reins_recoverable", "surplus"], (i) => { const r = div(at("reins_recoverable", i), at("surplus", i)); return r === null ? null : r * 100; });
+  arr("recoverable_to_surplus", ["reins_recoverable", "surplus"], (i) => pct(pdiv(at("reins_recoverable", i), at("surplus", i))));
+  // the detailed profile
+  arr("pyd_to_npe", ["pyd", "npe"], (i) => pct(pdiv(at("pyd", i), at("npe", i))));
+  if (!s.rbc_ratio) arr("rbc_ratio_calc", ["rbc_tac", "rbc_acl"], (i) => pct(pdiv(at("rbc_tac", i), at("rbc_acl", i))));
+  if (!s.rbc_acl) arr("rbc_acl_implied", ["surplus", "rbc_ratio"], (i) => { const r = at("rbc_ratio", i); return r === null || r <= 0 ? null : pdiv(at("surplus", i), r / 100); });
+  arr("invested_to_liabilities", ["cash_invested", "total_liabilities"], (i) => pdiv(at("cash_invested", i), at("total_liabilities", i)));
+  arr("liabilities_to_surplus", ["total_liabilities", "surplus"], (i) => pdiv(at("total_liabilities", i), at("surplus", i)));
+  arr("receivable_to_dpw", ["premiums_receivable", "dpw"], (i) => pct(pdiv(at("premiums_receivable", i), at("dpw", i))));
+  for (const [key, part] of [["bonds_share", "bonds"], ["stocks_share", "stocks"], ["cash_share", "cash_short_term"]] as const) arr(key, [part, "cash_invested"], (i) => pct(pdiv(at(part, i), at("cash_invested", i))));
+  for (const [key, of] of [["dpw_yoy", "dpw"], ["npw_yoy", "npw"], ["surplus_yoy", "surplus"]] as const) arr(key, [of], (i) => { const p = prior(of, i); return pct(pdiv(diff(at(of, i), p), p)); });
+  arr("net_capital_flow", ["capital_contributed", "dividends_paid"], (i) => diff(at("capital_contributed", i), at("dividends_paid", i)));
 
   const cr = (s.combined_ratio ?? []).map((v, i) => ({ v, npe: at("npe", i) })).filter((x): x is { v: number; npe: number | null } => x.v !== null);
   if (cr.length) {
     d.combined_avg = round(cr.reduce((a, x) => a + x.v, 0) / cr.length)!;
     d.years_above_100 = cr.filter((x) => x.v > 100).length;
+    d.years_below_100 = cr.length - d.years_above_100;
     const w = cr.filter((x): x is { v: number; npe: number } => x.npe !== null && x.npe > 0);
     const weight = w.reduce((a, x) => a + x.npe, 0);
     if (w.length && weight > 0) d.combined_avg_weighted = round(w.reduce((a, x) => a + x.v * x.npe, 0) / weight)!;
@@ -304,6 +404,135 @@ export function derive(years: number[], s: Partial<Record<SeriesId, Arr>>): Deri
     if (first.v > 0 && last.v >= 0 && n > 0) d.dpw_growth_pct = round((Math.pow(last.v / first.v, 1 / n) - 1) * 100)!;
   }
   return d;
+}
+
+/** Rows of a by-line, by-state or by-item ratio for one year, by name. A ratio can't be added up: a name that comes back
+    with two different figures for one year (a group's member companies) makes the whole field unusable. */
+function ratioByName(f: StatField | undefined, year: number, key: "line" | "state" | "item", max: number): { values: Map<string, number>; problem: string | null } {
+  const seen = new Map<string, Set<number>>();
+  for (const r of f?.rows ?? []) {
+    if (r.year !== year || r.value === null || !Number.isFinite(r.value)) continue;
+    let name = clean(r[key], max);
+    if (!name) continue;
+    if (key === "state" && /^[a-z]{2}$/i.test(name)) name = name.toUpperCase();
+    seen.set(name, (seen.get(name) ?? new Set()).add(r.value));
+  }
+  const values = new Map<string, number>();
+  for (const [name, vals] of seen) { if (vals.size > 1) return { values: new Map(), problem: GROUP_RATIO }; values.set(name, [...vals][0]); }
+  return { values, problem: null };
+}
+/** True when any year has two different figures for one name: checked over every year, so a group's ratios by line,
+    state or accident year are refused as a whole, as a group's ratios by year are. */
+function ratioProblem(f: StatField | undefined, key: "line" | "state" | "item", max: number): string | null {
+  for (const y of yearsWith(f)) { const p = ratioByName(f, y, key, max).problem; if (p) return p; }
+  return null;
+}
+/** Text a tag says about a reinsurer. UNCONFIRMED: S&P's own wording for authorization isn't known; a tag that says
+    "unauthorized", "not authorized" or "non-authorized" (any case, either spelling) is read as not authorized. */
+export const unauthorizedTag = (t: string | null) => !!t && /\b(un|non-?|not\s+)authori[sz]ed\b/i.test(t);
+
+/** The detailed profile's figures that aren't by year (Detail), from the fields that can be used (field gives undefined
+    for one that isn't mapped or failed). used collects the fields that gave something; problems the fields refused for
+    a group (a ratio that can't be added up). Pure: no I/O. */
+function detailFrom(years: number[], series: Partial<Record<SeriesId, Arr>>, field: (id: StatFieldId) => StatField | undefined, used: Set<StatFieldId>, problems: Map<string, string>): Detail {
+  const out: Detail = { derived: {} };
+  const surplusIn = (y: number) => { const i = years.indexOf(y); return i < 0 ? null : series.surplus?.[i] ?? null; };
+  const ratioField = (id: StatFieldId, key: "line" | "state" | "item", max: number) => {
+    const f = field(id); if (!f) return undefined;
+    const p = ratioProblem(f, key, max); if (p) { problems.set(id, p); return undefined; }
+    return f;
+  };
+  const latestWith = (fs: (StatField | undefined)[], key: "line" | "state" | "item", max: number) => [...years].reverse().find((y) => fs.some((f) => byName(f, y, key, max).size));
+  const topFive = <T extends { share: number | null }>(sorted: T[], other: (rest: T[]) => T) => (sorted.length > 6 ? [...sorted.slice(0, 5), other(sorted.slice(5))] : sorted);
+  const top5 = (shares: (number | null)[]) => (shares.slice(0, 5).some((s) => s === null) ? null : round(sum(shares.slice(0, 5))!, 4));
+
+  // the largest lines: direct and net premiums written, net premiums earned and the loss and LAE ratio
+  const dl = field("dpw_by_line"), nl = field("npw_by_line"), el = field("npe_by_line"), ll = ratioField("loss_lae_ratio_by_line", "line", 80);
+  const ly = latestWith([dl, el, ll], "line", 80);
+  if (ly !== undefined) {
+    const d = byName(dl, ly, "line", 80), n = byName(nl, ly, "line", 80), e = byName(el, ly, "line", 80), r = ratioByName(ll, ly, "line", 80).values;
+    const by = d.size ? "dpw" : "npe", base = by === "dpw" ? d : e, total = sum([...base.values()]);
+    const names = [...new Set([...base.keys(), ...(base.size ? [] : r.keys())])];
+    const items: DetailLine[] = names.map((name) => ({ name, dpw: d.get(name) ?? null, npw: n.get(name) ?? null, npe: e.get(name) ?? null, share: share(base.get(name) ?? null, total), lossRatio: r.get(name) ?? null }))
+      .sort((a, b) => (base.get(b.name) ?? -Infinity) - (base.get(a.name) ?? -Infinity));
+    if (items.length && (e.size || r.size)) {
+      out.lines = { year: ly, by, items: topFive(items, (rest) => ({ name: "Other", dpw: sum(rest.map((x) => x.dpw)), npw: sum(rest.map((x) => x.npw)), npe: sum(rest.map((x) => x.npe)), share: share(sum(rest.map((x) => base.get(x.name) ?? null)), total), lossRatio: null })), top5Share: base.size ? top5(items.map((x) => x.share)) : null };
+      if (e.size) used.add("npe_by_line");
+      if (r.size) used.add("loss_lae_ratio_by_line");
+    }
+  }
+  // the largest states: direct premiums written and earned, and the direct loss ratio
+  const ds = field("dpw_by_state"), es = field("dpe_by_state"), rs = ratioField("loss_ratio_by_state", "state", 40);
+  const sy = latestWith([ds, es, rs], "state", 40);
+  if (sy !== undefined) {
+    const d = byName(ds, sy, "state", 40), e = byName(es, sy, "state", 40), r = ratioByName(rs, sy, "state", 40).values;
+    const by = d.size ? "dpw" : "dpe", base = by === "dpw" ? d : e, total = sum([...base.values()]);
+    const items: DetailState[] = [...base.keys()].map((state) => ({ state, dpw: d.get(state) ?? null, dpe: e.get(state) ?? null, share: share(base.get(state) ?? null, total), lossRatio: r.get(state) ?? null }))
+      .sort((a, b) => (base.get(b.state) ?? 0) - (base.get(a.state) ?? 0));
+    if (items.length && (e.size || r.size)) {
+      out.states = { year: sy, by, items: topFive(items, (rest) => ({ state: "Other", dpw: sum(rest.map((x) => x.dpw)), dpe: sum(rest.map((x) => x.dpe)), share: share(sum(rest.map((x) => base.get(x.state) ?? null)), total), lossRatio: null })), top5Share: top5(items.map((x) => x.share)) };
+      if (e.size) used.add("dpe_by_state");
+      if (r.size) used.add("loss_ratio_by_state");
+    }
+  }
+  // recoverables by reinsurer, with the share owed by reinsurers that aren't authorized when the rows carry tags
+  const rf = field("recoverable_by_reinsurer");
+  const ry = latestWith([rf], "item", 120);
+  if (ry !== undefined) {
+    const amounts = byName(rf, ry, "item", 120), tags = new Map<string, string | null>();
+    for (const r of rf?.rows ?? []) {
+      if (r.year !== ry) continue;
+      const name = clean(r.item, 120), tag = clean(r.tag, 60);
+      if (name && (!tags.has(name) || (tags.get(name) === null && tag))) tags.set(name, tag);
+    }
+    const total = sum([...amounts.values()]), surplus = surplusIn(ry);
+    const sorted = [...amounts.entries()].sort((a, b) => b[1] - a[1]).map(([name, v]): DetailRecoverable => ({ name, recoverable: v, share: share(v, total), toSurplus: surplus === null || surplus <= 0 ? null : round((v / surplus) * 100, 4), tag: tags.get(name) ?? null }));
+    const tagged = sorted.some((x) => x.tag !== null);
+    const shareOf = (keep: (x: DetailRecoverable) => boolean) => (tagged ? share(sum(sorted.filter(keep).map((x) => x.recoverable)) ?? 0, total) : null);
+    out.recoverables = {
+      year: ry, total, tagged, unauthorizedShare: shareOf((x) => unauthorizedTag(x.tag)), untaggedShare: shareOf((x) => x.tag === null),
+      items: topSeven(sorted, (rest) => { const v = sum(rest.map((x) => x.recoverable))!; return { name: "Other", recoverable: v, share: share(v, total), toSurplus: surplus === null || surplus <= 0 ? null : round((v / surplus) * 100, 4), tag: null }; }),
+    };
+    used.add("recoverable_by_reinsurer");
+  }
+  // accident years: the loss and LAE ratio of each, as each statement year reported it
+  const af = ratioField("ay_loss_ratio", "item", 20), nf = field("ay_npe");
+  if (af) {
+    // UNCONFIRMED: how S&P holds an accident year isn't known; the mapped item column must give a four-digit year
+    // (a row whose item isn't one, such as a total, is left out).
+    const ayOf = (s: string | null | undefined) => { const c = clean(s, 20); return c && /^(19|20)\d{2}$/.test(c) ? Number(c) : null; };
+    const table = new Map<number, Arr>();
+    years.forEach((y, i) => {
+      for (const [name, v] of ratioByName(af, y, "item", 20).values) {
+        const ay = ayOf(name); if (ay === null || ay > y) continue;
+        if (!table.has(ay)) table.set(ay, years.map(() => null));
+        table.get(ay)![i] = v;
+      }
+    });
+    const npeOf = (ay: number) => { for (let i = years.length - 1; i >= 0; i--) { const m = byName(nf, years[i], "item", 20); for (const [k, v] of m) if (ayOf(k) === ay) return v; } return null; };
+    const rows: AyRow[] = [...table.keys()].sort((a, b) => a - b).slice(-10).map((ay) => {
+      const values = table.get(ay)!, f = earliest(years, values), l = latest(years, values);
+      return { ay, values, npe: npeOf(ay), first: f?.v ?? null, firstYear: f?.y ?? null, latest: l?.v ?? null, latestYear: l?.y ?? null, change: f && l && l.y > f.y ? round(l.v - f.v, 4) : null };
+    });
+    if (rows.length) {
+      const changes = rows.map((r) => r.change).filter((c): c is number => c !== null);
+      out.accidentYears = { rows, worst: changes.length ? Math.max(...changes) : null, worse: changes.filter((c) => c > 0).length };
+      used.add("ay_loss_ratio");
+      if (rows.some((r) => r.npe !== null)) used.add("ay_npe");
+    }
+  }
+  // the latest run of years above, or at or below, 100%
+  const cr = series.combined_ratio;
+  if (cr) {
+    let i = cr.length - 1; while (i >= 0 && cr[i] === null) i--;
+    if (i >= 0) {
+      const above = cr[i]! > 100, to = years[i];
+      let n = 1;
+      while (i - n >= 0 && cr[i - n] !== null && (cr[i - n]! > 100) === above && years[i - n] === to - n) n++;
+      out.combinedRun = { above, years: n, from: to - n + 1, to };
+    }
+  }
+  return out;
 }
 
 // ---------- filings ----------
@@ -431,10 +660,12 @@ export type ProfileText = {
   by: "plain" | "claude"; note: string | null;
   cover: { subtitle: string };
   summary: Section; premium: Section; underwriting: Section; capital: Section; reserves: Section; reinsurance: Section; filings: Section;
+  /** The detailed profile's sections. A text saved before they existed has neither; the slides then show no takeaways there. */
+  earnings: Section; balance: Section;
   questions: { title: string; items: { title: string; text: string }[] };
 };
-export const SECTIONS = ["summary", "premium", "underwriting", "capital", "reserves", "reinsurance", "filings"] as const;
-export const POINT_COUNTS: Record<typeof SECTIONS[number], [number, number]> = { summary: [5, 7], premium: [2, 4], underwriting: [2, 4], capital: [2, 4], reserves: [2, 4], reinsurance: [2, 4], filings: [2, 4] };
+export const SECTIONS = ["summary", "premium", "underwriting", "earnings", "balance", "capital", "reserves", "reinsurance", "filings"] as const;
+export const POINT_COUNTS: Record<typeof SECTIONS[number], [number, number]> = { summary: [5, 7], premium: [2, 4], underwriting: [2, 4], earnings: [2, 4], balance: [2, 4], capital: [2, 4], reserves: [2, 4], reinsurance: [2, 4], filings: [2, 4] };
 
 /** The latest figure in a by-year array, with its year. */
 function latest(years: number[], a: Arr | undefined): { v: number; y: number } | null {
@@ -462,8 +693,14 @@ export function plainText(facts: Facts): ProfileText {
   const pydPct = L(d.pyd_to_prior_surplus), rec = L(d.recoverable_to_surplus), deficit = L(d.accumulated_deficit);
   const nCr = (s.combined_ratio ?? []).filter((v) => v !== null).length;
   const reinsurer = facts.reinsurers?.items.find((r) => r.name !== "Other");
+  // the detailed profile's parts (none in facts made before it existed)
+  const X: Detail = facts.detail ?? { derived: {} };
+  const dLine = X.lines?.items.find((l) => l.name !== "Other"), dState = X.states?.items.find((x) => x.state !== "Other");
+  const assumed = L(s.assumed_pw), cededRep = L(s.ceded_pw);
+  const roaeRep = L(s.roae), roaeAny = roaeRep ?? roae, roaeWord = roaeRep ? "" : " (derived)";
+  const rbcCalc = L(d.rbc_ratio_calc), rbcAny = rbc ?? rbcCalc;
 
-  const scale = dpw ? `Direct premiums written of ${fmt.usd(dpw.v)} in ${dpw.y}${d.dpw_growth_pct !== undefined && dpw0 && dpw0.y !== dpw.y ? `, ${fmt.pct(d.dpw_growth_pct)} a year since ${dpw0.y} (derived)` : ""}.` : "Direct premiums written n/d.";
+  const scale =dpw ? `Direct premiums written of ${fmt.usd(dpw.v)} in ${dpw.y}${d.dpw_growth_pct !== undefined && dpw0 && dpw0.y !== dpw.y ? `, ${fmt.pct(d.dpw_growth_pct)} a year since ${dpw0.y} (derived)` : ""}.` : "Direct premiums written n/d.";
   const mixText = line || state
     ? [line ? `${line.name} is ${fmt.pct(line.share)} of direct premiums` : "", state ? `${state.state} is ${fmt.pct(state.share)}` : ""].filter(Boolean).join("; ") + ` (${facts.mix!.year}, derived).`
     : "Premiums by line and state n/d.";
@@ -476,39 +713,80 @@ export function plainText(facts: Facts): ProfileText {
   const summary = sec(`Executive summary, ${range}`, [p("Scale", scale), p("Mix", mixText), p("Underwriting", uw), p("Profit", profit), p("Capital", capital), p("Reserves", reserves), p("Reinsurance", reins)]);
 
   const premium = sec(`Premiums written, ${range}`, [
-    p("Direct premiums", dpw && dpw0 && dpw0.y !== dpw.y ? `Direct premiums written went from ${fmt.usd(dpw0.v)} in ${dpw0.y} to ${fmt.usd(dpw.v)} in ${dpw.y}${d.dpw_growth_pct !== undefined ? `, ${fmt.pct(d.dpw_growth_pct)} a year (derived)` : ""}.` : scale),
-    p("Net premiums", npw ? `Net premiums written of ${fmt.usd(npw.v)} in ${npw.y}${ceded && ceded.y === npw.y ? `, after ceding ${fmt.usd(ceded.v)} (derived)` : ""}.` : "Net premiums written n/d."),
-    p("Largest line", line ? `${line.name}: ${fmt.usd(line.dpw)} of direct premiums in ${facts.mix!.year}, ${fmt.pct(line.share)} of the total (derived).` : "Premiums by line n/d."),
-    p("Largest state", state ? `${state.state}: ${fmt.pct(state.share)} of direct premiums in ${facts.mix!.year}${facts.mix!.top3StateShare !== null && facts.mix!.top3StateShare !== undefined ? `; the top three states ${fmt.pct(facts.mix!.top3StateShare)}` : ""} (derived).` : "Premiums by state n/d."),
+    p("Direct premiums", (dpw && dpw0 && dpw0.y !== dpw.y ? `Direct premiums written went from ${fmt.usd(dpw0.v)} in ${dpw0.y} to ${fmt.usd(dpw.v)} in ${dpw.y}${d.dpw_growth_pct !== undefined ? `, ${fmt.pct(d.dpw_growth_pct)} a year (derived)` : ""}.` : scale)
+      + (assumed ? ` Assumed premiums written of ${fmt.usd(assumed.v)} in ${assumed.y}.` : "")),
+    p("Net premiums", npw ? `Net premiums written of ${fmt.usd(npw.v)} in ${npw.y}${cededRep && cededRep.y === npw.y ? `, after ceding ${fmt.usd(cededRep.v)}` : ceded && ceded.y === npw.y ? `, after ceding ${fmt.usd(ceded.v)} (derived)` : ""}.` : "Net premiums written n/d."),
+    p("Largest line", (line ? `${line.name}: ${fmt.usd(line.dpw)} of direct premiums in ${facts.mix!.year}, ${fmt.pct(line.share)} of the total (derived).` : dLine ? `${dLine.name} is the largest line in ${X.lines!.year}, ${fmt.pct(dLine.share)} of the total (derived).` : "Premiums by line n/d.")
+      + (dLine && dLine.lossRatio !== null ? ` The loss and LAE ratio on ${lowerName(dLine.name)} was ${fmt.pct(dLine.lossRatio)} in ${X.lines!.year}.` : "")),
+    p("Largest state", (state ? `${state.state}: ${fmt.pct(state.share)} of direct premiums in ${facts.mix!.year}${facts.mix!.top3StateShare !== null && facts.mix!.top3StateShare !== undefined ? `; the top three states ${fmt.pct(facts.mix!.top3StateShare)}` : ""} (derived).` : dState ? `${dState.state} is the largest state in ${X.states!.year}, ${fmt.pct(dState.share)} of the total (derived).` : "Premiums by state n/d.")
+      + (dState && dState.lossRatio !== null ? ` The direct loss ratio in ${dState.state} was ${fmt.pct(dState.lossRatio)} in ${X.states!.year}.` : "")),
   ]);
 
-  const lr = L(s.loss_ratio), ll = L(s.loss_lae_ratio), er = L(s.expense_ratio), cr = L(s.combined_ratio);
+  const lr = L(s.loss_ratio), ll = L(s.loss_lae_ratio), er = L(s.expense_ratio), cr = L(s.combined_ratio), cm = L(s.commission_ratio);
   const found = [lr, ll, er, cr].filter((x): x is { v: number; y: number } => !!x), ly = found.length ? Math.max(...found.map((x) => x.y)) : null;
   const inLy = (x: { v: number; y: number } | null) => (x && x.y === ly ? x.v : null);
+  const run = X.combinedRun;
   const underwriting = sec(`Underwriting results, ${range}`, [
     p("Combined ratio", uw),
-    p("Latest year", ly !== null ? `In ${ly}: loss ratio ${fmt.pct(inLy(lr))}, ${ll ? `loss and LAE ratio ${fmt.pct(inLy(ll))}, ` : ""}expense ratio ${fmt.pct(inLy(er))}, combined ratio ${fmt.pct(inLy(cr))}.` : "Loss and expense ratios n/d."),
+    p("Latest year", ly !== null ? `In ${ly}: loss ratio ${fmt.pct(inLy(lr))}, ${ll ? `loss and LAE ratio ${fmt.pct(inLy(ll))}, ` : ""}expense ratio ${fmt.pct(inLy(er))}, combined ratio ${fmt.pct(inLy(cr))}${cm && cm.y === ly ? `; commission ratio ${fmt.pct(cm.v)}` : ""}.` : "Loss and expense ratios n/d."),
     p("Weighted average", d.combined_avg_weighted !== undefined ? `Weighted by net premiums earned, the combined ratio averaged ${fmt.pct(d.combined_avg_weighted)} (derived).` : "Combined ratio weighted by net premiums earned n/d."),
-    p("Net income", profit),
+    run && run.years > 1 ? p("Run of years", `The combined ratio was ${run.above ? "above" : "at or below"} 100% in each of the last ${run.years} years, ${run.from} to ${run.to} (derived).`)
+      : p("Net income", profit),
   ]);
 
+  // earnings: underwriting, investments, net income and cash
+  const ug = L(s.uw_gain), nii = L(s.net_inv_income), rg = L(s.realized_gains), yld = L(s.investment_yield), cfo = L(s.cash_from_ops);
+  const earnings = sec(`Earnings, ${range}`, [
+    p("Underwriting", ug ? `Net underwriting ${ug.v < 0 ? "loss" : "gain"} of ${fmt.usd(Math.abs(ug.v))} in ${ug.y}.` : "Net underwriting gain n/d."),
+    p("Investments", nii ? `Net investment income of ${fmt.usd(nii.v)} in ${nii.y}${yld && yld.y === nii.y ? `, a yield of ${fmt.pct(yld.v)} on invested assets` : ""}${rg && rg.y === nii.y ? `; net realized capital ${rg.v < 0 ? "losses" : "gains"} of ${fmt.usd(Math.abs(rg.v))}` : ""}.` : yld ? `Net yield on invested assets of ${fmt.pct(yld.v)} in ${yld.y}.` : "Net investment income n/d."),
+    p("Net income", `${profit}${roaeAny ? ` Return on average equity of ${fmt.pct(roaeAny.v)} in ${roaeAny.y}${roaeWord}.` : ""}`),
+    p("Cash", cfo ? `Net cash from operations of ${fmt.usd(cfo.v)} in ${cfo.y}.` : "Net cash from operations n/d."),
+  ]);
+
+  // the balance sheet: invested assets and their mix, receivables, liabilities and leverage
+  const ci = L(s.cash_invested), tl = L(s.total_liabilities), prc = L(s.premiums_receivable), upr = L(s.unearned_premiums);
+  const at = (a: Arr | undefined, y: number) => { const i = Y.indexOf(y); return i < 0 ? null : a?.[i] ?? null; };
+  const mixWords = ci ? [["bonds", d.bonds_share], ["common stocks", d.stocks_share], ["cash and short-term", d.cash_share]].map(([n, a]) => [n, at(a as Arr | undefined, ci.y)] as const).filter(([, v]) => v !== null) : [];
+  const itl = L(d.invested_to_liabilities), lts = L(d.liabilities_to_surplus), rtd = L(d.receivable_to_dpw);
+  const balance = sec(`Balance sheet, ${range}`, [
+    p("Invested assets", ci ? `Cash and invested assets of ${fmt.usd(ci.v)} at the end of ${ci.y}${mixWords.length ? `: ${mixWords.map(([n, v]) => `${n} ${fmt.pct(v)}`).join(", ")} (derived)` : ""}.` : "Cash and invested assets n/d."),
+    p("Liabilities", tl ? `Total liabilities of ${fmt.usd(tl.v)} at the end of ${tl.y}${itl && itl.y === tl.y ? `; cash and invested assets were ${fmt.mult(itl.v)} liabilities (derived)` : ""}.` : "Total liabilities n/d."),
+    p("Leverage", lts ? `Total liabilities were ${fmt.mult(lts.v)} surplus at the end of ${lts.y} (derived)${upr && upr.y === lts.y ? `, with unearned premiums of ${fmt.usd(upr.v)}` : ""}.` : upr ? `Unearned premiums of ${fmt.usd(upr.v)} at the end of ${upr.y}.` : "Liabilities to surplus n/d."),
+    p("Receivables", prc ? `Premiums receivable of ${fmt.usd(prc.v)} at the end of ${prc.y}${rtd && rtd.y === prc.y ? `, ${fmt.pct(rtd.v)} of direct premiums written (derived)` : ""}.` : "Premiums receivable n/d."),
+  ]);
+
+  const divs = L(s.dividends_paid), contrib = L(s.capital_contributed), notes = L(s.surplus_notes), tac = L(s.rbc_tac), acl = L(s.rbc_acl), aclImp = L(d.rbc_acl_implied);
+  const flowY = divs?.y ?? contrib?.y;
+  const flowParts = flowY !== undefined ? [divs && divs.y === flowY && divs.v !== 0 ? `dividends of ${fmt.usd(divs.v)}` : "", contrib && contrib.y === flowY && contrib.v !== 0 ? `capital paid in of ${fmt.usd(contrib.v)}` : ""].filter(Boolean) : [];
+  const flows = flowY === undefined ? "" : flowParts.length ? flowParts.join(" and ") : `no ${divs && divs.y === flowY ? "dividends" : ""}${divs && divs.y === flowY && contrib && contrib.y === flowY ? " or " : ""}${contrib && contrib.y === flowY ? "capital paid in" : ""}`;
+  const rbcParts = rbcAny ? (acl && tac && acl.y === rbcAny.y && tac.y === rbcAny.y ? `; total adjusted capital ${fmt.usd(tac.v)} against an authorized control level of ${fmt.usd(acl.v)}` : !acl && aclImp && aclImp.y === rbcAny.y ? `; an authorized control level of about ${fmt.usd(aclImp.v)} (derived)` : "") : "";
   const capitalSec = sec(`Capital, ${range}`, [
     p("Surplus", capital),
-    p("Return on surplus", roae ? `Net income was ${fmt.pct(roae.v)} of average surplus in ${roae.y} (derived).` : "Return on average surplus n/d."),
-    p("Risk-based capital", rbc ? `Risk-based capital ratio of ${fmt.pct(rbc.v)} at the end of ${rbc.y}.` : "Risk-based capital ratio n/d."),
+    flows ? p("Capital flows", `${flows[0].toUpperCase()}${flows.slice(1)} in ${flowY}${notes && notes.y === flowY ? `; surplus notes of ${fmt.usd(notes.v)} at the end of the year` : ""}.`)
+      : p("Return on surplus", roae ? `Net income was ${fmt.pct(roae.v)} of average surplus in ${roae.y} (derived).` : "Return on average surplus n/d."),
+    p("Risk-based capital", rbcAny ? `Risk-based capital ratio of ${fmt.pct(rbcAny.v)} at the end of ${rbcAny.y}${rbc ? "" : " (derived)"}${rbcParts}.` : "Risk-based capital ratio n/d."),
     p("Paid-in capital", deficit ? `Surplus ${deficit.v < 0 ? "was below" : "was above"} paid-in capital by ${fmt.usd(Math.abs(deficit.v))} at the end of ${deficit.y} (derived).` : "Surplus against paid-in capital n/d."),
   ]);
 
+  const pyd2 = L(s.pyd_two_year);
+  const ayRows = (X.accidentYears?.rows ?? []).filter((r) => r.change !== null);
+  const worstAy = ayRows.length ? ayRows.reduce((a, b) => (b.change! > a.change! ? b : a)) : null;
   const reservesSec = sec(`Reserves, ${range}`, [
     p("Reserves", reserves),
     p("Reserves to premiums", rtn ? `Reserves were ${fmt.mult(rtn.v)} net premiums earned in ${rtn.y} (derived).` : "Reserves against net premiums earned n/d."),
-    p("Development", pyd ? `Prior-year reserves developed ${pyd.v > 0 ? "adversely" : pyd.v < 0 ? "favourably" : "by nothing"}${pyd.v !== 0 ? ` by ${fmt.usd(Math.abs(pyd.v))}` : ""} in ${pyd.y}${pydPct && pydPct.y === pyd.y ? `, ${fmt.pct(pydPct.v)} of prior year-end surplus (derived)` : ""}.` : "Prior-year reserve development n/d."),
+    p("Development", (pyd ? `Prior-year reserves developed ${pyd.v > 0 ? "adversely" : pyd.v < 0 ? "favourably" : "by nothing"}${pyd.v !== 0 ? ` by ${fmt.usd(Math.abs(pyd.v))}` : ""} in ${pyd.y}${pydPct && pydPct.y === pyd.y ? `, ${fmt.pct(pydPct.v)} of prior year-end surplus (derived)` : ""}.` : "Prior-year reserve development n/d.")
+      + (pyd2 ? ` Two-year development was ${pyd2.v > 0 ? "adverse" : pyd2.v < 0 ? "favourable" : "nil"}${pyd2.v !== 0 ? `, ${fmt.usd(Math.abs(pyd2.v))}` : ""}, in ${pyd2.y}.` : "")),
+    ...(worstAy ? [p("Accident years", `Accident year ${worstAy.ay}'s loss and LAE ratio went from ${fmt.pct(worstAy.first)} ${worstAy.firstYear === worstAy.ay ? "first reported" : "as reported"} in ${worstAy.firstYear} to ${fmt.pct(worstAy.latest)} in ${worstAy.latestYear}, ${worstAy.change! > 0 ? "up" : "down"} ${fmt.pct(Math.abs(worstAy.change!)).replace("%", "")} percentage points (derived).`)] : []),
   ]);
 
+  const R = X.recoverables, bigRec = R?.items.find((r) => r.name !== "Other");
   const reinsSec = sec(`Reinsurance, ${range}`, [
-    p("Cession", cession && ceded && ceded.y === cession.y ? `Ceded ${fmt.usd(ceded.v)}, ${fmt.pct(cession.v)} of gross premiums written, in ${cession.y} (derived).` : reins),
+    p("Cession", cession && cededRep && cededRep.y === cession.y ? `Ceded ${fmt.usd(cededRep.v)} in ${cession.y}, ${fmt.pct(cession.v)} of gross premiums written (derived).`
+      : cession && ceded && ceded.y === cession.y ? `Ceded ${fmt.usd(ceded.v)}, ${fmt.pct(cession.v)} of gross premiums written, in ${cession.y} (derived).` : reins),
     p("Largest reinsurer", reinsurer ? `${reinsurer.name}: ${fmt.pct(reinsurer.share)} of ceded premiums in ${facts.reinsurers!.year} (derived).` : "Ceded premiums by reinsurer n/d."),
     p("Recoverables", rec ? `Reinsurance recoverables were ${fmt.pct(rec.v)} of surplus at the end of ${rec.y} (derived).` : "Reinsurance recoverables n/d."),
+    ...(R && R.tagged ? [p("Not authorized", `${fmt.pct(R.unauthorizedShare)} of recoverables at the end of ${R.year} were owed by reinsurers marked as not authorized, and ${fmt.pct(R.untaggedShare)} by reinsurers with no status given (derived).`)]
+      : bigRec ? [p("Largest recoverable", `${bigRec.name}: ${fmt.usd(bigRec.recoverable)} at the end of ${R!.year}, ${fmt.pct(bigRec.toSurplus)} of surplus (derived).`)] : []),
   ]);
 
   let filings: Section;
@@ -527,7 +805,7 @@ export function plainText(facts: Facts): ProfileText {
   return {
     by: "plain", note: null,
     cover: { subtitle: fit(dpw ? `${fmt.usd(dpw.v)} of direct premiums written in ${dpw.y}${line ? `, largest line ${line.name}` : ""}` : `Statutory profile, ${range}`, LIMITS.subtitle) },
-    summary, premium, underwriting, capital: capitalSec, reserves: reservesSec, reinsurance: reinsSec, filings,
+    summary, premium, underwriting, earnings, balance, capital: capitalSec, reserves: reservesSec, reinsurance: reinsSec, filings,
     questions: { title: fit("Key diligence questions", LIMITS.title), items: questionsFor(facts).map((q) => ({ title: fit(q.title, LIMITS.qTitle), text: fit(q.text, LIMITS.qText) })) },
   };
 }
@@ -547,6 +825,16 @@ function questionsFor(facts: Facts): { title: string; text: string }[] {
   const def = L(d.accumulated_deficit);
   if (def && def.v < 0) out.push({ title: "Capital history", text: `Surplus was ${fmt.usd(Math.abs(def.v))} below paid-in capital at the end of ${def.y} (derived). How much capital has been put in, and is more planned?` });
   if (d.net_income_total !== undefined && d.net_income_total < 0) out.push({ title: "Profitability", text: `Net income over the years shown totalled ${fmt.usd(d.net_income_total)} (derived). What is the plan to return to profit, and over what time?` });
+  // the detailed profile's figures, when they are there
+  const X = facts.detail;
+  const ay = (X?.accidentYears?.rows ?? []).filter((r) => r.change !== null && r.change >= 5).sort((a, b) => b.change! - a.change!)[0];
+  if (ay) out.push({ title: "Accident year development", text: `Accident year ${ay.ay}'s loss and LAE ratio has risen from ${fmt.pct(ay.first)} to ${fmt.pct(ay.latest)} since ${ay.firstYear === ay.ay ? "it was first reported" : ay.firstYear} (derived). What is driving it, and are the later accident years reserved on the same basis?` });
+  const rec = X?.recoverables;
+  if (rec && rec.tagged && rec.unauthorizedShare !== null && rec.unauthorizedShare >= 20) out.push({ title: "Unsecured reinsurance", text: `${fmt.pct(rec.unauthorizedShare)} of recoverables at the end of ${rec.year} were owed by reinsurers marked as not authorized (derived). What collateral is held against them?` });
+  const rbcNow = L(s.rbc_ratio) ?? L(d.rbc_ratio_calc);
+  if (rbcNow && rbcNow.v < 300) out.push({ title: "Capital adequacy", text: `The risk-based capital ratio was ${fmt.pct(rbcNow.v)} at the end of ${rbcNow.y}${s.rbc_ratio ? "" : " (derived)"}. What capital plan keeps it above the level regulators watch, and who would provide more capital?` });
+  const dv = L(s.dividends_paid), niNow = L(s.net_income);
+  if (dv && niNow && dv.y === niNow.y && dv.v > 0 && dv.v > niNow.v) out.push({ title: "Dividends", text: `Dividends of ${fmt.usd(dv.v)} in ${dv.y} were more than net income of ${fmt.usd(niNow.v)}. What is the dividend policy, and what does it assume about earnings?` });
   if (facts.missing.length) out.push({ title: "Figures not available", text: fit(`${facts.missing.length} ${facts.missing.length === 1 ? "figure wasn't" : "figures weren't"} available here (${facts.missing.slice(0, 4).map((m) => m.label.toLowerCase()).join("; ")}${facts.missing.length > 4 ? "; and more" : ""}). Can management provide them?`, LIMITS.qText) });
   out.push(
     { title: "Business plan", text: "What are the premium, loss ratio and capital plans for the next three years, and what do they assume about rates?" },
@@ -568,6 +856,17 @@ export function sampleFacts(today: string): Facts {
     net_income: [3.1, -4.6, -1.2, 5.8, 7.9].map((v) => v * M), surplus: [41.5, 38.2, 40.6, 47.9, 56.3].map((v) => v * M), paid_in_capital: [45.0, 45.0, 48.0, 50.0, 50.0].map((v) => v * M),
     total_assets: [152.4, 166.0, 181.7, 199.2, 218.8].map((v) => v * M), rbc_ratio: [412.0, 356.5, 371.2, 398.4, 431.0], net_reserves: [39.4, 45.8, 50.1, 53.6, 57.2].map((v) => v * M),
     pyd: [-0.8, 2.6, 1.4, -0.5, -1.1].map((v) => v * M), reins_recoverable: [21.6, 25.3, 28.8, 30.1, 33.4].map((v) => v * M),
+    // the detailed profile: made up to agree with the figures above (assumed = gross less direct, ceded = gross less net,
+    // liabilities = assets less surplus, unassigned funds = surplus less paid-in and surplus notes)
+    assumed_pw: [4.7, 5.1, 5.7, 6.3, 6.9].map((v) => v * M), ceded_pw: [27.6, 31.9, 38.8, 44.8, 49.8].map((v) => v * M), losses_incurred: [31.2, 38.8, 41.8, 41.9, 46.0].map((v) => v * M),
+    uw_gain: [1.3, -2.4, -0.8, 4.2, 6.4].map((v) => v * M), net_inv_income: [3.4, 3.6, 4.1, 4.9, 5.6].map((v) => v * M), realized_gains: [0.2, -0.9, -0.3, 0.4, 0.6].map((v) => v * M),
+    dividends_paid: [0, 0, 0, 2.0, 3.0].map((v) => v * M), capital_contributed: [0, 0, 3.0, 2.0, 0].map((v) => v * M), surplus_notes: [5.0, 5.0, 5.0, 5.0, 5.0].map((v) => v * M),
+    unassigned_funds: [-8.5, -11.8, -12.4, -7.1, 1.3].map((v) => v * M), cash_from_ops: [6.8, 4.1, 7.5, 10.2, 12.9].map((v) => v * M),
+    cash_invested: [118.2, 128.9, 140.6, 154.0, 169.3].map((v) => v * M), bonds: [88.6, 95.4, 103.9, 113.2, 123.6].map((v) => v * M), stocks: [12.1, 13.0, 14.8, 16.2, 18.4].map((v) => v * M),
+    cash_short_term: [14.3, 16.9, 18.2, 20.5, 22.9].map((v) => v * M), premiums_receivable: [14.9, 16.8, 19.2, 21.6, 24.1].map((v) => v * M),
+    total_liabilities: [110.9, 127.8, 141.1, 151.3, 162.5].map((v) => v * M), unearned_premiums: [24.6, 27.4, 30.6, 34.3, 38.8].map((v) => v * M),
+    rbc_acl: [10.07, 10.72, 10.94, 12.02, 13.06].map((v) => v * M), rbc_tac: [41.5, 38.2, 40.6, 47.9, 56.3].map((v) => v * M), pyd_two_year: [-1.2, 3.4, 3.1, 0.6, -0.9].map((v) => v * M),
+    commission_ratio: [15.8, 15.6, 15.3, 15.1, 14.9], investment_yield: [2.9, 2.8, 3.0, 3.3, 3.5], roae: [7.6, -11.5, -3.0, 13.1, 15.1],
   };
   const lines: [string, number, number][] = [["Homeowners", 81.0, 52.6], ["Commercial property", 14.2, 9.1], ["Inland marine", 8.4, 5.9], ["Other liability", 6.7, 4.6], ["Allied lines", 5.1, 3.2], ["Fire", 3.6, 2.1], ["Earthquake", 2.0, 1.2], ["Mobile homes", 1.0, 0.6], ["Personal umbrella", 0.5, 0.3]];
   const states: [string, number][] = [["FL", 70.0], ["TX", 18.4], ["LA", 10.9], ["GA", 7.6], ["SC", 6.2], ["AL", 4.8], ["NC", 2.9], ["MS", 1.7]];
@@ -576,8 +875,8 @@ export function sampleFacts(today: string): Facts {
     fields: STAT_FIELDS.map((f) => {
       const by = (i: number) => ({ code: "90001", year: years[i], line: null as string | null, state: null as string | null });
       let out: StatField["rows"] = [];
-      const key: Record<string, SeriesId> = { gpw: "gpw", npe: "npe", loss_ratio: "loss_ratio", loss_lae_ratio: "loss_lae_ratio", expense_ratio: "expense_ratio", combined_ratio: "combined_ratio", net_income: "net_income", surplus: "surplus", paid_in_capital: "paid_in_capital", total_assets: "total_assets", rbc_ratio: "rbc_ratio", net_reserves: "net_reserves", pyd: "pyd", reins_recoverable: "reins_recoverable" };
-      if (key[f.id]) out = series[key[f.id]]!.map((v, i) => ({ ...by(i), value: v }));
+      // every figure by year is its series (dpw and npw are the by-line figures added up)
+      if (f.by === "year") out = series[f.id as SeriesId]!.map((v, i) => ({ ...by(i), value: v }));
       // By line and by state: each year scaled so its total is that year's direct (or net) premiums.
       const spread = (parts: number[], total: number) => {
         const t = parts.reduce((a, b) => a + b, 0), vals = parts.map((x) => Math.round((x / t) * total));
@@ -589,6 +888,32 @@ export function sampleFacts(today: string): Facts {
       if (f.id === "ceded_by_reinsurer") {
         const re: [string, number][] = [["Nonesuch Re", 31.0], ["Nonesuch Specialty Re", 22.0], ["Tarrow Re", 17.0], ["Nonesuch Casualty Re", 12.0], ["Nonesuch Property Re", 9.0], ["Tarrow Mutual Re", 5.0], ["Nonesuch Global Re", 2.5], ["Calloway Re", 1.0], ["Nonesuch Marine Re", 0.5]];
         out = years.flatMap((_, i) => { const vals = spread(re.map((r) => r[1]), series.gpw![i]! - series.npw![i]!); return re.map((r, k) => ({ ...by(i), item: r[0], value: vals[k] })); });
+      }
+      // the detailed profile: earned premiums and loss ratios by line and state, recoverables by reinsurer (with a
+      // made-up authorization tag), and accident years as each statement reported them
+      const swing = [1.5, 6.2, 4.8, -0.6, -2.0];
+      if (f.id === "npe_by_line") out = years.flatMap((_, i) => { const vals = spread(lines.map((l) => l[2]), series.npe![i]!); return lines.map((l, k) => ({ ...by(i), line: l[0], value: vals[k] })); });
+      if (f.id === "loss_lae_ratio_by_line") {
+        const base = [62.0, 55.4, 41.2, 68.9, 58.3, 47.5, 12.1, 71.0, 35.0];
+        out = years.flatMap((_, i) => lines.map((l, k) => ({ ...by(i), line: l[0], value: Math.round((base[k] + swing[i]) * 10) / 10 })));
+      }
+      if (f.id === "dpe_by_state") out = years.flatMap((_, i) => { const vals = spread(states.map((st) => st[1]), series.dpw![i]! * 0.96); return states.map((st, k) => ({ ...by(i), state: st[0], value: vals[k] })); });
+      if (f.id === "loss_ratio_by_state") {
+        const base = [58.1, 66.4, 49.8, 44.2, 39.5, 52.7, 36.0, 61.3];
+        out = years.flatMap((_, i) => states.map((st, k) => ({ ...by(i), state: st[0], value: Math.round((base[k] + swing[i]) * 10) / 10 })));
+      }
+      if (f.id === "recoverable_by_reinsurer") {
+        const re: [string, number, string | null][] = [["Nonesuch Re", 30, "Authorized"], ["Nonesuch Specialty Re", 24, "Authorized"], ["Tarrow Re", 15, "Unauthorized"], ["Nonesuch Casualty Re", 12, "Authorized"],
+          ["Nonesuch Property Re", 8, "Certified"], ["Tarrow Mutual Re", 6, "Authorized"], ["Nonesuch Global Re", 3, "Unauthorized"], ["Calloway Re", 1.5, "Authorized"], ["Nonesuch Marine Re", 0.5, null]];
+        out = years.flatMap((_, i) => { const vals = spread(re.map((r) => r[1]), series.reins_recoverable![i]!); return re.map((r, k) => ({ ...by(i), item: r[0], tag: r[2], value: vals[k] })); });
+      }
+      if (f.id === "ay_loss_ratio" || f.id === "ay_npe") {
+        // accident years y-6 to y: first reported loss and LAE ratio, and how much each later statement adds
+        const first = [63.0, 65.5, 62.8, 70.1, 68.4, 61.9, 60.2], step = [0.9, 1.4, 1.1, 2.3, 1.6, -0.4, 0], npe = [38.9, 43.7, ...series.npe!.map((v) => v! / M)];
+        out = years.flatMap((sy, i) => first.map((_, k) => y - 6 + k).filter((ay) => ay <= sy).map((ay) => {
+          const k = ay - (y - 6);
+          return { ...by(i), item: String(ay), value: f.id === "ay_npe" ? Math.round(npe[k] * M) : Math.round((first[k] + step[k] * (sy - ay)) * 10) / 10 };
+        }));
       }
       return { id: f.id, label: f.label, unit: f.unit, by: f.by, mapped: true, error: null, rows: out };
     }),
@@ -657,9 +982,31 @@ export function allowedFigures(f: Facts): Record<Figure["kind"], number[]> {
     for (const v of f.series[id] ?? []) add(unit === "pct" ? pct : usd, v, unit === "pct" ? 1 : 1e-6);
   }
   const d = f.derived;
-  for (const k of ["ceded_pw", "accumulated_deficit"] as const) for (const v of d[k] ?? []) add(usd, v, 1e-6);
-  for (const k of ["cession_pct", "roae", "pyd_to_prior_surplus", "recoverable_to_surplus"] as const) for (const v of d[k] ?? []) add(pct, v);
-  for (const k of ["npw_to_surplus", "reserves_to_npe", "reserves_to_surplus"] as const) for (const v of d[k] ?? []) add(mult, v);
+  for (const k of ["ceded_pw", "accumulated_deficit", "gross_pw", "rbc_acl_implied", "net_capital_flow"] as const) for (const v of d[k] ?? []) add(usd, v, 1e-6);
+  for (const k of ["cession_pct", "roae", "pyd_to_prior_surplus", "recoverable_to_surplus", "pyd_to_npe", "rbc_ratio_calc", "receivable_to_dpw", "bonds_share", "stocks_share", "cash_share", "dpw_yoy", "npw_yoy", "surplus_yoy"] as const) for (const v of d[k] ?? []) add(pct, v);
+  for (const k of ["npw_to_surplus", "reserves_to_npe", "reserves_to_surplus", "invested_to_liabilities", "liabilities_to_surplus"] as const) for (const v of d[k] ?? []) add(mult, v);
+  // the detailed profile's lines, states, recoverables and accident years
+  const X = f.detail;
+  if (X) {
+    for (const part of [X.lines, X.states] as const) {
+      if (!part) continue;
+      year.add(part.year); add(pct, part.top5Share);
+      for (const it of part.items as (DetailLine | DetailState)[]) {
+        for (const k of ["dpw", "npw", "npe", "dpe"] as const) add(usd, (it as Record<string, unknown>)[k], 1e-6);
+        add(pct, it.share); add(pct, it.lossRatio);
+      }
+    }
+    if (X.recoverables) {
+      const r = X.recoverables; year.add(r.year); add(usd, r.total, 1e-6); add(pct, r.unauthorizedShare); add(pct, r.untaggedShare);
+      for (const it of r.items) { add(usd, it.recoverable, 1e-6); add(pct, it.share); add(pct, it.toSurplus); }
+    }
+    for (const r of X.accidentYears?.rows ?? []) {
+      year.add(r.ay); for (const v of r.values) add(pct, v);
+      add(pct, r.first); add(pct, r.latest); add(pct, r.change); add(usd, r.npe, 1e-6);
+    }
+    if (X.accidentYears) add(pct, X.accidentYears.worst);
+    if (X.combinedRun) { year.add(X.combinedRun.from); year.add(X.combinedRun.to); }
+  }
   add(usd, d.net_income_total, 1e-6);
   for (const k of ["combined_avg", "combined_avg_weighted", "dpw_growth_pct"] as const) add(pct, d[k]);
   if (f.mix) {
@@ -699,7 +1046,7 @@ export const TEXT_SCHEMA = {
 
 export const DRAFT_SYSTEM = `You write the words of a company profile slide deck for an insurer's strategy and corporate development team, from one company's statutory figures and recent rate and form filings. Answer with JSON in the shape given.
 
-Sections: cover (a one-line subtitle), summary (5 to 7 points), premium, underwriting, capital, reserves, reinsurance and filings (2 to 4 points each), and questions (exactly 4 key diligence questions). Each section has a title. Each point has a short lead (a few words) and a text.
+Sections: cover (a one-line subtitle), summary (5 to 7 points), premium (direct, assumed, ceded and net premiums; by line and by state), underwriting (loss, LAE, commission and expense ratios; loss ratios by line and by state), earnings (underwriting gain, investment income, realized gains, net income, return on equity, cash from operations), balance (the balance sheet: cash and invested assets and their mix, premiums receivable, liabilities, leverage), capital (surplus, paid-in capital, surplus notes, dividends and capital paid in, risk-based capital), reserves (reserves, one- and two-year development, accident years), reinsurance (cession, the largest reinsurers by ceded premium and by recoverable, authorized or not) and filings (2 to 4 points each), and questions (exactly 4 key diligence questions). Each section has a title. Each point has a short lead (a few words) and a text.
 
 Limits: titles at most ${LIMITS.title} characters, leads at most ${LIMITS.lead}, point text at most ${LIMITS.point}, question titles at most ${LIMITS.qTitle}, question text at most ${LIMITS.qText}, the subtitle at most ${LIMITS.subtitle}.
 
@@ -709,7 +1056,8 @@ Figures
 - Take every number from the facts only. Every dollar amount, percentage, multiple and year you write must be a figure in the facts, rounded as shown here. Don't work out new figures (no differences, changes or averages that aren't already in the facts).
 - Units in the facts: dollar amounts are US dollars; ratios and shares are percentage points (98.4 means 98.4%); multiples are plain numbers (1.8 means 1.8x). Arrays line up with facts.years.
 - Write dollar amounts in $M with one decimal and commas ($1,234.5M), percentages to one decimal (98.4%), multiples to one decimal (1.8x), negatives in parentheses, and "n/d" for anything missing.
-- Figures from facts.derived are calculations: mark them "(derived)". Mark your own judgements "(inferred)".
+- Figures from facts.derived are calculations: mark them "(derived)". So are the figures facts.detail.derived lists (for example shares of the largest lines, states and reinsurers, recoverables as a share of surplus, and the change in an accident year's loss ratio): mark them "(derived)" too. Every other figure is as reported. Mark your own judgements "(inferred)".
+- facts.detail.accidentYears gives each accident year's loss and LAE ratio as each statement year reported it (values line up with facts.years); a change is in percentage points, and positive is worse.
 - If a section's figures are missing (facts.missing, or facts.filings.unavailable), say so briefly in that section.
 - An empty filings result means S&P returned nothing for the search. It doesn't show that nothing was filed.
 
@@ -849,8 +1197,9 @@ export function answerLines(facts: Facts, text: ProfileText): Segment[] {
     `Profile text for ${e.name ?? `NAIC ${e.kind} ${e.code}`} (NAIC ${e.kind} code ${e.code}), figures ${Y.length ? `${Y[0]} to ${Y[Y.length - 1]}` : "n/d"}. ${text.by === "claude" ? "Written by Claude from the statutory figures and filings shown in the profile." : "The plain text, written by the app."}`,
     `Cover: ${text.cover.subtitle}`,
   ];
-  const names: Record<typeof SECTIONS[number], string> = { summary: "Executive summary", premium: "Premium", underwriting: "Underwriting", capital: "Capital", reserves: "Reserves", reinsurance: "Reinsurance", filings: "Recent filings" };
+  const names: Record<typeof SECTIONS[number], string> = { summary: "Executive summary", premium: "Premium", underwriting: "Underwriting", earnings: "Earnings", balance: "Balance sheet", capital: "Capital", reserves: "Reserves", reinsurance: "Reinsurance", filings: "Recent filings" };
   for (const s of SECTIONS) {
+    if (!text[s]) continue;
     lines.push(`## ${names[s]}: ${text[s].title}`);
     for (const pt of text[s].points) lines.push(`- **${pt.lead}.** ${pt.text}`);
   }
