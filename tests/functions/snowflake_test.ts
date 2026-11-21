@@ -228,7 +228,7 @@ const HOSTILE = ["X; DROP TABLE Y", 'a"b', "A--", "A/*", "A B", "A.B", "A)", "(S
   ok("a by-year field needs neither line nor state", mapProblem("surplus", { view: "IR_SURPLUS", entity: { company: "NAIC_CD" }, year: "STMT_YEAR", value: "PHS" }) === null);
   ok("a where value may hold any text, because it is bound", mapProblem("dpw_by_line", { ...GOOD, where: [{ column: "BASIS", equals: "'; DROP TABLE X; --" }] }) === null);
   const status = fieldStatus({ fields: { dpw_by_line: GOOD, surplus: { ...GOOD, view: "X; DROP TABLE Y" } } });
-  ok("status lists every field (the eight the view shows and ten for company profiles) and which are mapped", status.length === 18 && same(status.filter((f) => f.mapped).map((f) => f.id), ["dpw_by_line"]) && same(status.map((f) => f.id), STAT_FIELDS.map((f) => f.id)), status.map((f) => [f.id, f.mapped]));
+  ok("status lists every field (the eight the view shows and the rest for company profiles) and which are mapped", status.length === STAT_FIELDS.length && status.length === 49 && same(status.filter((f) => f.mapped).map((f) => f.id), ["dpw_by_line"]) && same(status.map((f) => f.id), STAT_FIELDS.map((f) => f.id)), status.map((f) => [f.id, f.mapped]));
   ok("a settings row with no fields reads as nothing mapped", same(readMapping(null), { fields: {} }) && same(readMapping({}), { fields: {} }) && same(readMapping({ fields: "x" }), { fields: {} }) && same(readMapping({ fields: null }), { fields: {} }));
 }
 

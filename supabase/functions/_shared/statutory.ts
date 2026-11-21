@@ -34,6 +34,40 @@ export const STAT_FIELDS = [
   { id: "pyd", label: "Prior-year reserve development (positive is adverse)", unit: "usd", by: "year" },
   { id: "reins_recoverable", label: "Reinsurance recoverables", unit: "usd", by: "year" },
   { id: "ceded_by_reinsurer", label: "Ceded premiums by reinsurer", unit: "usd", by: "item" },
+  // Added for the detailed company profile. App-level names only, as above: each is "not mapped" until the owner maps it.
+  { id: "assumed_pw", label: "Assumed premiums written", unit: "usd", by: "year" },
+  { id: "ceded_pw", label: "Ceded premiums written", unit: "usd", by: "year" },
+  { id: "losses_incurred", label: "Net losses and LAE incurred", unit: "usd", by: "year" },
+  { id: "uw_gain", label: "Net underwriting gain", unit: "usd", by: "year" },
+  { id: "net_inv_income", label: "Net investment income earned", unit: "usd", by: "year" },
+  { id: "realized_gains", label: "Net realized capital gains", unit: "usd", by: "year" },
+  { id: "dividends_paid", label: "Dividends to stockholders", unit: "usd", by: "year" },
+  { id: "capital_contributed", label: "Capital and surplus paid in during the year", unit: "usd", by: "year" },
+  { id: "surplus_notes", label: "Surplus notes", unit: "usd", by: "year" },
+  { id: "unassigned_funds", label: "Unassigned funds", unit: "usd", by: "year" },
+  { id: "cash_from_ops", label: "Net cash from operations", unit: "usd", by: "year" },
+  { id: "cash_invested", label: "Cash and invested assets", unit: "usd", by: "year" },
+  { id: "bonds", label: "Bonds", unit: "usd", by: "year" },
+  { id: "stocks", label: "Common stocks", unit: "usd", by: "year" },
+  { id: "cash_short_term", label: "Cash and short-term investments", unit: "usd", by: "year" },
+  { id: "premiums_receivable", label: "Premiums receivable", unit: "usd", by: "year" },
+  { id: "total_liabilities", label: "Total liabilities", unit: "usd", by: "year" },
+  { id: "unearned_premiums", label: "Unearned premiums", unit: "usd", by: "year" },
+  { id: "rbc_acl", label: "Authorized control level risk-based capital", unit: "usd", by: "year" },
+  { id: "rbc_tac", label: "Total adjusted capital", unit: "usd", by: "year" },
+  { id: "pyd_two_year", label: "Two-year reserve development (positive is adverse)", unit: "usd", by: "year" },
+  { id: "commission_ratio", label: "Commission ratio", unit: "pct", by: "year" },
+  { id: "investment_yield", label: "Net yield on invested assets", unit: "pct", by: "year" },
+  { id: "roae", label: "Return on average equity", unit: "pct", by: "year" },
+  { id: "npe_by_line", label: "Net premiums earned by line", unit: "usd", by: "line" },
+  { id: "loss_lae_ratio_by_line", label: "Loss and LAE ratio by line", unit: "pct", by: "line" },
+  { id: "dpe_by_state", label: "Direct premiums earned by state", unit: "usd", by: "state" },
+  { id: "loss_ratio_by_state", label: "Direct loss ratio by state", unit: "pct", by: "state" },
+  // By counterparty: item is the reinsurer; an optional tag column says, for example, whether it is authorized.
+  { id: "recoverable_by_reinsurer", label: "Reinsurance recoverables by reinsurer", unit: "usd", by: "item" },
+  // By accident year: item is the accident year, with one set of rows for each statement year.
+  { id: "ay_loss_ratio", label: "Net loss and LAE ratio by accident year", unit: "pct", by: "item" },
+  { id: "ay_npe", label: "Net premiums earned by accident year", unit: "usd", by: "item" },
 ] as const;
 export type StatFieldId = typeof STAT_FIELDS[number]["id"];
 export const MAPPING_ID = "statutory_mapping";
@@ -72,6 +106,9 @@ export type FieldMap = {
   line?: string; state?: string;
   /** For a field by counterparty (by "item", such as ceded premiums by reinsurer): the column naming it. */
   item?: string;
+  /** For a field by counterparty only: a column of the same row that describes the item (for example whether the
+      reinsurer is authorized, or affiliated). Selected as TAG, kept on each row, and grouped on with sum. */
+  tag?: string;
   where?: WhereMap[];
   sum?: boolean; latest?: string | (string | { column: string; when?: "company" | "group" })[];
   /** SELECT DISTINCT: collapses the repeated rows a join to a list of group members fans out to. Not with sum. */
@@ -198,7 +235,7 @@ function shapeProblem(f: FieldMap): string | null {
   const entityKinds: Record<string, Kind[]> = { company: ["company"], group: ["group"], name: ent.groupName === undefined ? ["company", "group"] : ["company"], groupName: ["group"] };
   for (const k of ["company", "group", "name", "groupName"] as const) if (ent[k] !== undefined) { const p = col(`entity.${k}`, ent[k], inKinds(entityKinds[k])); if (p) return p; }
   for (const k of ["year", "value"] as const) { const p = col(k, f[k]); if (p) return p; }
-  for (const k of ["line", "state", "item"] as const) if (f[k] !== undefined) { const p = col(k, f[k]); if (p) return p; }
+  for (const k of ["line", "state", "item", "tag"] as const) if (f[k] !== undefined) { const p = col(k, f[k]); if (p) return p; }
   if (f.latest !== undefined) {
     const l = latestList(f), one = !Array.isArray(f.latest as unknown);
     if (!one && (l.length < 1 || l.length > 3)) return "latest must be a column, or a list of 1 to 3 columns";
@@ -243,6 +280,7 @@ export function mapProblem(id: StatFieldId, m: unknown): string | null {
   if (by === "line" && f.line === undefined) return "line must be a column name";
   if (by === "state" && f.state === undefined) return "state must be a column name";
   if (by === "item" && f.item === undefined) return "item must be a column name";
+  if (by !== "item" && f.tag !== undefined) return "tag is only for a figure by counterparty (one with an item column)";
   return shapeProblem(f);
 }
 
@@ -300,6 +338,8 @@ export function buildSql(database: string, schema: string, m: FieldMap, q: StatQ
   const value = adds.length === 1 ? adds[0] : `CASE WHEN ${adds.map((a) => `${a} IS NULL`).join(" AND ")} THEN NULL ELSE ${adds.map((a) => `COALESCE(${a}, 0)`).join(" + ")} END`;
   const cols = [`${m.distinct ? "DISTINCT " : ""}${entityCol} AS CODE`, `${name ?? "NULL"} AS NAME`, `${year} AS YR`, `${line ?? "NULL"} AS LINE`, `${state ?? "NULL"} AS STATE`, `${m.sum ? `SUM(${value})` : value} AS VAL`];
   if (item !== null) cols.push(`${item} AS ITEM`);   // only fields by counterparty map an item column
+  const tag = item !== null && m.tag !== undefined ? c(m.tag) : null;
+  if (tag !== null) cols.push(`${tag} AS TAG`);      // and only they may map a tag column beside it
   let source = from(m.view) + (m.as === undefined ? "" : ` AS "${m.as.toUpperCase()}"`);
   for (const j of joins) source += ` ${j.kind === "left" ? "LEFT JOIN" : "JOIN"} ${from(j.view)} AS "${j.as.toUpperCase()}" ON ${j.on.map((o) => `${c(o.left)} = ${c(o.right)}`).join(" AND ")}`;
   const bindings: Binding[] = q.codes.map((code) => ({ type: "TEXT", value: code }));
@@ -316,7 +356,7 @@ export function buildSql(database: string, schema: string, m: FieldMap, q: StatQ
   }
   const latest = latestList(m).filter((x) => usedFor(x, q.kind)).map((x) => c(x.column as string));
   // sum: grouped by everything else selected (by position), and by the latest columns when there are any.
-  const group = m.sum ? ` GROUP BY 1, 2, 3, 4, 5${item !== null ? ", 7" : ""}${latest.map((l) => `, ${l}`).join("")}` : "";
+  const group = m.sum ? ` GROUP BY 1, 2, 3, 4, 5${item !== null ? ", 7" : ""}${tag !== null ? ", 8" : ""}${latest.map((l) => `, ${l}`).join("")}` : "";
   // Rows of each company stay apart in a group lookup, when this lookup's chain has the company column.
   const aliases = [m.as, ...joins.map((j) => j.as)].filter((a): a is string => a !== undefined).map((a) => a.toUpperCase());
   const companyRef = m.entity.company === undefined ? null : colRef(m.entity.company)!;
@@ -325,7 +365,7 @@ export function buildSql(database: string, schema: string, m: FieldMap, q: StatQ
   return { statement: `SELECT ${cols.join(", ")} FROM ${source} WHERE ${where}${group}${keep} ORDER BY 1, 3 LIMIT 20000`, bindings };
 }
 
-export type StatRow = { code: string; year: number; line: string | null; state: string | null; value: number | null; item?: string | null };
+export type StatRow = { code: string; year: number; line: string | null; state: string | null; value: number | null; item?: string | null; tag?: string | null };
 export type StatField = { id: StatFieldId; label: string; unit: "usd" | "pct"; by: "year" | "line" | "state" | "item"; mapped: boolean; error: string | null; rows: StatRow[] };
 export type StatResult = {
   kind: "company" | "group"; codes: string[]; fromYear: number; toYear: number;
@@ -339,8 +379,9 @@ const bareName = (v: string) => v.replace(/^"|"$/g, "");
 export const storedName = (v: string) => (/^".*"$/.test(v) ? bareName(v) : v.toUpperCase());
 
 /** How many figures' statements run at once: each is a join across big shared views that takes several seconds, so
-    one after another they don't fit in one function call. */
-export const STAT_POOL = 6;
+    one after another they don't fit in one function call. Eight: Snowflake's usual limit of statements running at
+    once on one warehouse (more would only queue). A full profile asks for about 50 figures. */
+export const STAT_POOL = 8;
 /** A statement isn't started with less time than this left in the call: it would only be cancelled. */
 export const STAT_MIN_MS = 8_000;
 /** Every figure that didn't fit in the time starts with this; savedOrFreshStatutory counts them as still to come. */
@@ -380,7 +421,7 @@ async function runFigures(sf: Snowflake, database: string, schema: string, mappi
     const problem = mapProblem(id, m);
     const base = { id, label: meta.label, unit: meta.unit, by: meta.by };
     if (problem || !m) { parts[i] = part({ ...base, mapped: false, error: null, rows: [] }); continue; }
-    const sql = buildSql(database, schema, meta.by === "item" ? m : { ...m, item: undefined }, q);
+    const sql = buildSql(database, schema, meta.by === "item" ? m : { ...m, item: undefined, tag: undefined }, q);
     if (!sql) {
       const error = !ident(database) || !ident(schema) ? "SNOWFLAKE_DATABASE or SNOWFLAKE_SCHEMA isn't a valid name. Check those two secrets on Supabase."
         : `This field has no ${q.kind} column mapped, so it can't be looked up by ${q.kind} code.`;
@@ -400,6 +441,7 @@ async function runFigures(sf: Snowflake, database: string, schema: string, mappi
           const row: StatRow = { code, year: Number(r.YR), line: r.LINE === null ? null : String(r.LINE), state: r.STATE === null ? null : String(r.STATE), value: Number.isFinite(raw) ? Math.round(raw * (m.scale ?? 1) * 1e6) / 1e6 : null };
           if (m.stateStrip && row.state !== null && row.state.startsWith(m.stateStrip)) row.state = row.state.slice(m.stateStrip.length);   // "Reported:FL" -> "FL"
           if (meta.by === "item") row.item =r.ITEM === null || r.ITEM === undefined ? null : String(r.ITEM);
+          if (meta.by === "item" && m.tag !== undefined) row.tag = r.TAG === null || r.TAG === undefined ? null : String(r.TAG);
           return row;
         }).filter((r) => Number.isInteger(r.year));
         parts[i] = {

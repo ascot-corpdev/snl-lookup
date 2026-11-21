@@ -81,14 +81,14 @@ function standIn(clock: Clock, o: { ms?: number; delay?: (s: string) => number; 
 
 // ---------- several statements at once ----------
 {
-  ok("six statements run at once, and a statement needs at least eight seconds", STAT_POOL === 6 && STAT_MIN_MS === 8_000);
+  ok("eight statements run at once, and a statement needs at least eight seconds", STAT_POOL === 8 && STAT_MIN_MS === 8_000);
   const w = world();
   const r = await runStatutory(w.sf, w.creds.database, w.creds.schema, MAPPING, Q, ALL);
-  ok("the eighteen figures' statements overlap: more than one in flight", w.gate.max > 1, w.gate.max);
+  ok("every figure's statements overlap: more than one in flight", w.gate.max > 1, w.gate.max);
   ok(`but never more than ${STAT_POOL} at a time`, w.gate.max <= STAT_POOL, w.gate.max);
-  ok("every figure came back, with its rows", r.fields.length === 18 && r.fields.every((f) => f.error === null && f.rows.length === 4), r.fields.map((f) => [f.id, f.error, f.rows.length]));
-  ok("names and run dates are collected as before", same(r.entities, [{ code: "91001", name: "Calloway Insurance Co" }, { code: "92001", name: "Tarrow Mutual Insurance Co" }]) && r.loaded.length === 18 && r.truncated === false, { e: r.entities, l: r.loaded.length });
-  ok("one statement for each figure, and one for LOADTRACKER", figureStatements(w.gate.sent).length === 18 && w.gate.sent.length === 19);
+  ok("every figure came back, with its rows", r.fields.length === ALL.length && r.fields.every((f) => f.error === null && f.rows.length === 4), r.fields.map((f) => [f.id, f.error, f.rows.length]));
+  ok("names and run dates are collected as before", same(r.entities, [{ code: "91001", name: "Calloway Insurance Co" }, { code: "92001", name: "Tarrow Mutual Insurance Co" }]) && r.loaded.length === ALL.length && r.truncated === false, { e: r.entities, l: r.loaded.length });
+  ok("one statement for each figure, and one for LOADTRACKER", figureStatements(w.gate.sent).length === ALL.length && w.gate.sent.length === ALL.length + 1);
 
   // output order is the order asked, whichever statement finishes first
   const order: StatFieldId[] = ["surplus", "dpw_by_state", "ceded_by_reinsurer", "loss_ratio", "gpw", "dpw_by_line", "npe", "combined_ratio"];
@@ -104,8 +104,8 @@ function standIn(clock: Clock, o: { ms?: number; delay?: (s: string) => number; 
   const r = await runStatutory(w.sf, w.creds.database, w.creds.schema, MAPPING, Q, ALL);
   const f = (id: string) => r.fields.find((x) => x.id === id)!;
   ok("a 408 on one figure marks that figure Not run, with the usual words", f("surplus").error === NOT_RUN && f("npe").error === NOT_RUN && f("surplus").mapped === true && f("surplus").rows.length === 0, [f("surplus").error, f("npe").error]);
-  ok("and the other figures are all there", r.fields.filter((x) => x.error === null && x.rows.length === 4).length === 16);
-  ok("the run dates leave out only what didn't come back", r.loaded.length === 16 && !r.loaded.some((l) => l.view === "V_SURPLUS"), r.loaded.length);
+  ok("and the other figures are all there", r.fields.filter((x) => x.error === null && x.rows.length === 4).length === ALL.length - 2);
+  ok("the run dates leave out only what didn't come back", r.loaded.length === ALL.length - 2 && !r.loaded.some((l) => l.view === "V_SURPLUS"), r.loaded.length);
 
   // a statement Snowflake keeps running past its time is given up on and cancelled: also Not run
   const slow = world();
@@ -116,15 +116,15 @@ function standIn(clock: Clock, o: { ms?: number; delay?: (s: string) => number; 
   // the deadline passes part-way: each statement takes 30 seconds; 65 seconds in all
   const clock = fakeClock(), si = standIn(clock, { ms: 30_000 }), t0 = clock.now;
   const d = await runStatutory(si as unknown as Snowflake, "DB", "SCH", MAPPING, Q, ALL, { deadline: t0 + 65_000, now: clock.fn });
-  ok("with the deadline passing part-way, the first two rounds of six run", si.started.length === 12 && d.fields.slice(0, 12).every((x) => x.error === null && x.rows.length === 1), si.started.map((x) => x.at - t0));
-  ok("and the rest are Not run, never started with only five seconds left", d.fields.slice(12).every((x) => x.error === NOT_RUN && x.rows.length === 0) && si.started.every((x) => x.at - t0 <= 30_000), d.fields.map((x) => x.error));
+  ok(`with the deadline passing part-way, the first two rounds of ${STAT_POOL} run`, si.started.length === 2 * STAT_POOL && d.fields.slice(0, 2 * STAT_POOL).every((x) => x.error === null && x.rows.length === 1), si.started.map((x) => x.at - t0));
+  ok("and the rest are Not run, never started with only five seconds left", d.fields.slice(2 * STAT_POOL).every((x) => x.error === NOT_RUN && x.rows.length === 0) && si.started.every((x) => x.at - t0 <= 30_000), d.fields.map((x) => x.error));
   ok("each statement is given only the time left when it starts", si.started.every((x) => x.wait === Math.min(100_000, t0 + 65_000 - x.at)) && si.max <= STAT_POOL && si.max > 1, si.started.map((x) => x.wait));
 
   // nothing is started with too little time left
-  for (const [left, starts] of [[STAT_MIN_MS - 1, 0], [STAT_MIN_MS, 6]] as const) {
+  for (const [left, starts] of [[STAT_MIN_MS - 1, 0], [STAT_MIN_MS, STAT_POOL]] as const) {
     const c = fakeClock(), x = standIn(c, { ms: 30_000 });
     const out = await runStatutory(x as unknown as Snowflake, "DB", "SCH", MAPPING, Q, ALL, { deadline: c.now + left, now: c.fn });
-    ok(`with ${left / 1000} seconds left, ${starts} statements start and the rest are Not run`, x.started.length === starts && out.fields.filter((f) => f.error === NOT_RUN).length === 18 - starts, { started: x.started.length });
+    ok(`with ${left / 1000} seconds left, ${starts} statements start and the rest are Not run`, x.started.length === starts && out.fields.filter((f) => f.error === NOT_RUN).length === ALL.length - starts, { started: x.started.length });
   }
 }
 
@@ -158,8 +158,8 @@ function standIn(clock: Clock, o: { ms?: number; delay?: (s: string) => number; 
   const saved = watchStore(w.db);
   const t0 = w.clock.now;
   const a = await w.ask();
-  ok("the first call answers with what arrived and says four figures are pending", a.pending === 4 && a.saved === false && a.fromStore === false && a.fields.length === 18 && a.fields.filter((f) => f.error === NOT_RUN).length === 4, { pending: a.pending, saved: a.saved });
-  ok("each figure that came back is saved on its own, under kind statutory, and passes the database's checks", saved.length === 14 && saved.every((s) => s.kind === "statutory" && s.problem === null && /^statutory:f\.[0-9a-f]{32}$/.test(s.id)), saved);
+  ok("the first call answers with what arrived and says four figures are pending", a.pending === 4 && a.saved === false && a.fromStore === false && a.fields.length === ALL.length && a.fields.filter((f) => f.error === NOT_RUN).length === 4, { pending: a.pending, saved: a.saved });
+  ok("each figure that came back is saved on its own, under kind statutory, and passes the database's checks", saved.length === ALL.length - 4 && saved.every((s) => s.kind === "statutory" && s.problem === null && /^statutory:f\.[0-9a-f]{32}$/.test(s.id)), saved);
   ok("the whole answer isn't saved while figures are pending", ![...w.db.store.keys()].some((k) => /^statutory:[0-9a-f]{32}$/.test(k)));
   firstCall = false;
   w.clock.now += 60_000;
@@ -169,14 +169,14 @@ function standIn(clock: Clock, o: { ms?: number; delay?: (s: string) => number; 
   ok("and answers in full, in the order asked, nothing pending", b.pending === 0 && same(b.fields.map((f) => f.id), ALL) && b.fields.every((f) => f.error === null && f.rows.length === 4), b.fields.map((f) => f.error));
   ok("the figures match a run done in one go", same(b.fields, (await world().ask()).fields));
   ok("names come from saved and fresh figures alike", same(b.entities, [{ code: "91001", name: "Calloway Insurance Co" }, { code: "92001", name: "Tarrow Mutual Insurance Co" }]));
-  ok("the run dates cover every view, saved and fresh, looked up once", b.loaded.length === 18 && w.gate.sent.slice(n).filter((s) => s.statement.includes("LOADTRACKER")).length === 1, b.loaded.length);
+  ok("the run dates cover every view, saved and fresh, looked up once", b.loaded.length === ALL.length && w.gate.sent.slice(n).filter((s) => s.statement.includes("LOADTRACKER")).length === 1, b.loaded.length);
   ok("a mixed answer is as old as its oldest figure", b.fetchedAt === new Date(t0).toISOString() && b.fromStore === false, b.fetchedAt);
   ok("once complete, the whole answer is saved", b.saved === true && [...w.db.store.keys()].filter((k) => /^statutory:[0-9a-f]{32}$/.test(k)).length === 1);
   const m = w.gate.sent.length;
   const c = await w.ask();
   ok("the third call opens the whole saved answer without asking Snowflake", c.fromStore === true && c.saved === true && c.pending === 0 && w.gate.sent.length === m && same(c.fields, b.fields) && c.fetchedAt === b.fetchedAt);
   const r = await w.ask(Q, ALL, { refresh: true });
-  ok("refresh runs every statement again", figureStatements(w.gate.sent.slice(m)).length === 18 && r.fromStore === false && r.pending === 0 && r.fetchedAt === new Date(w.clock.now).toISOString());
+  ok("refresh runs every statement again", figureStatements(w.gate.sent.slice(m)).length === ALL.length && r.fromStore === false && r.pending === 0 && r.fetchedAt === new Date(w.clock.now).toISOString());
 
   // a changed mapping for one figure re-runs only that figure
   const changed: Mapping = { fields: { ...MAPPING.fields, surplus: { ...MAPPING.fields.surplus!, scale: 1000 } } };
@@ -200,7 +200,7 @@ function standIn(clock: Clock, o: { ms?: number; delay?: (s: string) => number; 
   for (const [name, q] of [["another company", { ...Q, codes: ["92001"] }], ["other years", { ...Q, codes: ["91001"], fromYear: 2024 }], ["a group", { kind: "group", codes: ["9100"], fromYear: 2023, toYear: 2024 }]] as [string, StatQuery][]) {
     const n = w.gate.sent.length;
     const a = await w.ask(q);
-    ok(`${name} runs every statement afresh`, figureStatements(w.gate.sent.slice(n)).length === 18 && a.fromStore === false, figureStatements(w.gate.sent.slice(n)).length);
+    ok(`${name} runs every statement afresh`, figureStatements(w.gate.sent.slice(n)).length === ALL.length && a.fromStore === false, figureStatements(w.gate.sent.slice(n)).length);
   }
 }
 {
@@ -213,7 +213,7 @@ function standIn(clock: Clock, o: { ms?: number; delay?: (s: string) => number; 
   delete doc.fetchedAt;
   old.db.store.set(id, { ...row, doc, fetched_at: "2026-10-01T09:00:00.000Z" });
   const a = await savedOrFreshStatutory(null, old.db, old.creds.database, old.creds.schema, MAPPING, Q, ALL, { now: old.clock.now });
-  ok("an old whole saved answer still opens, without Snowflake, with its saved time and nothing pending", a.fromStore === true && a.saved === true && a.pending === 0 && a.fetchedAt === "2026-10-01T09:00:00.000Z" && a.fields.length === 18 && old.gate.sent.length === 0, { fromStore: a.fromStore, at: a.fetchedAt });
+  ok("an old whole saved answer still opens, without Snowflake, with its saved time and nothing pending", a.fromStore === true && a.saved === true && a.pending === 0 && a.fetchedAt === "2026-10-01T09:00:00.000Z" && a.fields.length === ALL.length && old.gate.sent.length === 0, { fromStore: a.fromStore, at: a.fetchedAt });
 }
 {
   // a refresh that doesn't get to everything: carrying on runs those afresh, never the old copies
@@ -256,7 +256,7 @@ function standIn(clock: Clock, o: { ms?: number; delay?: (s: string) => number; 
   const deps = { env: env({ ...PAT, ANTHROPIC_API_KEY: "test-key-not-a-secret" }), fetch: w.fetch, anthropicFetch: ai.fetch, now: w.clock.fn, whoIs: corpdev, db: w.db, sleep: w.clock.sleep };
   const call = async (body: unknown) => { const res: Response = await profile.handle(req("snl-profile", body), deps); return { status: res.status, body: await res.json() }; };
   const a = await call({ action: "facts", kind: "company", code: "91001", toYear: 2024 });
-  ok("profile facts say two figures are pending, and how many came back", a.status === 200 && a.body.pending === 2 && same(a.body.figures, { done: 16, of: 18 }) && a.body.facts && a.body.text, { pending: a.body.pending, figures: a.body.figures });
+  ok("profile facts say two figures are pending, and how many came back", a.status === 200 && a.body.pending === 2 && same(a.body.figures, { done: ALL.length - 2, of: ALL.length }) && a.body.facts && a.body.text, { pending: a.body.pending, figures: a.body.figures });
   ok("the figures still to come are listed as missing, saying they weren't run", a.body.facts.missing.some((m: any) => m.field === "surplus" && /^Not run/.test(m.reason)), a.body.facts.missing);
   const d = await call({ action: "draft", kind: "company", code: "91001", toYear: 2024 });
   ok("a draft while figures are pending gives the plain text with a note, isn't sent to Claude and isn't counted", d.status === 200 && d.body.pending === 2 && d.body.text.by === "plain" && d.body.text.note === NOTES.pending && ai.calls.length === 0 && w.db.jobs.size === 0 && !d.body.jobId, d.body.text?.note);

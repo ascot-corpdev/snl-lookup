@@ -442,7 +442,7 @@ const GROUPED: FieldMap = {
   const P = await import(new URL("../../supabase/functions/_shared/profile.ts", import.meta.url).href);
   const { STAT_FIELDS, DEFAULT_STAT_FIELDS } = await import(new URL("../../supabase/functions/_shared/statutory.ts", import.meta.url).href);
   const ids = STAT_FIELDS.map((f: any) => f.id);
-  ok("the loss and LAE ratio is the 18th figure, straight after the loss ratio, a percentage by year", ids.length === 18 && ids.indexOf("loss_lae_ratio") === ids.indexOf("loss_ratio") + 1 && same(STAT_FIELDS.find((f: any) => f.id === "loss_lae_ratio"), { id: "loss_lae_ratio", label: "Loss and LAE ratio", unit: "pct", by: "year" }) && STAT_FIELDS.find((f: any) => f.id === "loss_ratio").label === "Loss ratio");
+  ok("the loss and LAE ratio is one of the figures, straight after the loss ratio, a percentage by year", ids.length === 49 && ids.indexOf("loss_lae_ratio") === ids.indexOf("loss_ratio") + 1 && same(STAT_FIELDS.find((f: any) => f.id === "loss_lae_ratio"), { id: "loss_lae_ratio", label: "Loss and LAE ratio", unit: "pct", by: "year" }) && STAT_FIELDS.find((f: any) => f.id === "loss_ratio").label === "Loss ratio");
   ok("it is one of the figures a query gets by default, straight after the loss ratio", same(DEFAULT_STAT_FIELDS, ["dpw_by_line", "npw_by_line", "dpw_by_state", "surplus", "loss_ratio", "loss_lae_ratio", "expense_ratio", "combined_ratio"]));
   const w = world();
   const r = await runStatutory(w.api, w.creds.database, w.creds.schema, MAPPING, Q, DEFAULT_STAT_FIELDS);
