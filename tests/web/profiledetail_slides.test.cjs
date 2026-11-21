@@ -18,6 +18,10 @@ let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else { fail++; 
 const MAG = "EB008C";
 const IDS = ["cover", "summary", "premium", "lines", "underwriting", "earnings", "balance", "capital", "reserves", "accident", "reinsurance", "filings", "questions"];
 const NEW = ["lines", "earnings", "balance", "accident"];
+// the filings in detail (filings-detail): after the filings slide, in the sample; the rate map needs the page's outlines
+const FD = ["fdRates", "fdRateMap", "fdMarks", "fdForms", "fdStates", "fdRegulator"];
+const IDSF = IDS.slice(0, 12).concat(FD, ["questions"]);
+const BUILT = IDSF.filter(id => id !== "fdRateMap").flatMap(id => id === "fdStates" ? [id, id] : [id]);   // every state runs on to a second slide
 
 // ----- variants -----
 const LABELS = { npe_by_line: "Net premiums earned by line", loss_lae_ratio_by_line: "Loss and LAE ratio by line", dpe_by_state: "Direct premiums earned by state", loss_ratio_by_state: "Direct loss ratio by state",
@@ -85,7 +89,7 @@ function hostile() {
 
   // ----- the plan -----
   let pl = await plan(FULL);
-  ok("plan: the full sample fills all thirteen slides, the new ones on by default, in deck order", same(pl.map(r => r.id), IDS) && pl.every(r => r.included && r.reason === ""), pl);
+  ok("plan: the full sample fills all its slides, the new ones on by default, in deck order (the rate map only with the state outlines)", same(pl.map(r => r.id), IDSF) && pl.every(r => r.id === "fdRateMap" ? !r.included : r.included && r.reason === ""), pl);
   ok("plan: the new slides' labels", same(pl.filter(r => NEW.includes(r.id)).map(r => r.label), ["Lines and states", "Earnings", "Balance sheet", "Accident years"]));
   pl = await plan(OLD);
   ok("plan: facts saved before this change keep the nine slides they had, and none of the new ones", same(pl.map(r => r.id), IDS.filter(id => !NEW.includes(id))) && pl.every(r => r.included), pl.map(r => r.id));
@@ -102,7 +106,7 @@ function hostile() {
 
   // ----- the whole sample -----
   const s = await spec(FULL);
-  ok("spec: thirteen slides, cover first, in plan order", s.slides.length === 13 && s.slides[0].kind === "cover" && same(s.slides.slice(1).map(x => x.id), IDS.slice(1)));
+  ok("spec: nineteen slides, cover first, in plan order", s.slides.length === 19 && s.slides[0].kind === "cover" && same(s.slides.slice(1).map(x => x.id), BUILT.slice(1)));
   ok("every content slide ends with a source line; the new ones say (derived) where they show worked-out figures", s.slides.slice(1).every(x => x.items[x.items.length - 1].type === "source") && ["lines", "balance", "accident", "capital", "reinsurance"].every(id => items(s, id, "source")[0].text.includes("(derived)")));
   const lt = items(s, "lines", "table");
   ok("lines and states: the five largest lines then Other, with premiums, share and loss and LAE ratio", same(lt[0].rows[0], ["Line", "DPW", "NPW", "NPE", "Share", "Loss ratio"]) && same(lt[0].rows[1].map(cell), ["Homeowners", "81.0", "52.6", "50.1", "66.1", "60.0"]) && lt[0].rows.length === 7 && cell(lt[0].rows[6][0]) === "Other" && lt[0].rows[6][5] === "n/d", lt[0].rows);
@@ -132,8 +136,8 @@ function hostile() {
 
   // ----- the reader chooses slides -----
   const sk = await spec(FULL, { skip: ["earnings", "balance", "cover", "accident"] });
-  ok("slides the reader leaves out aren't built; the cover always is", sk.slides.length === 10 && sk.slides[0].kind === "cover" && !sk.slides.some(x => ["earnings", "balance", "accident"].includes(x.id)), sk.slides.map(x => x.id || x.kind));
-  ok("with nothing left out the deck is as planned", (await spec(FULL, { skip: [] })).slides.length === 13 && (await spec(FULL, { skip: "nonsense" })).slides.length === 13);
+  ok("slides the reader leaves out aren't built; the cover always is", sk.slides.length === 16 && sk.slides[0].kind === "cover" && !sk.slides.some(x => ["earnings", "balance", "accident"].includes(x.id)), sk.slides.map(x => x.id || x.kind));
+  ok("with nothing left out the deck is as planned", (await spec(FULL, { skip: [] })).slides.length === 19 && (await spec(FULL, { skip: "nonsense" })).slides.length === 19);
 
   // ----- facts saved before this change: the same nine slides -----
   const so = await spec(OLD);
@@ -180,10 +184,10 @@ function hostile() {
     const names = Object.keys(z.files), read = n => z.file(n).async("string");
     const slides = names.filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n)), charts = names.filter(n => /^ppt\/charts\/chart\d+\.xml$/.test(n));
     const ct = await read("[Content_Types].xml"), pres = await read("ppt/presentation.xml");
-    ok(`${name}: thirteen slides and nine charts, each chart with its workbook`, slides.length === 13 && (pres.match(/<p:sldId /g) || []).length === 13 && charts.length === 9 && names.filter(n => /\.xlsx$/.test(n)).length === 9, { slides: slides.length, charts: charts.length });
+    ok(`${name}: nineteen slides and twelve charts (three on the filings in detail), each chart with its workbook`, slides.length === 19 && (pres.match(/<p:sldId /g) || []).length === 19 && charts.length === 12 && names.filter(n => /\.xlsx$/.test(n)).length === 12, { slides: slides.length, charts: charts.length });
     ok(`${name}: every slide and chart is declared, and nothing declared is missing`, slides.concat(charts).every(n => ct.includes('PartName="/' + n + '"')) && [...ct.matchAll(/PartName="\/([^"]+)"/g)].every(m => names.includes(m[1])));
     const all = (await Promise.all(slides.map(read))).join("\n");
-    ok(`${name}: the new slides' titles and figures are in it`, ["Lines and states, 2025", "Earnings, 2021 to 2025", "Balance sheet, 2021 to 2025", "Accident years, 2021 to 2025", "Unauthorized", "+6.9 pts"].every(x => all.includes(x)) && (all.match(/Sample: made-up figures/g) || []).length === 12);
+    ok(`${name}: the new slides' titles and figures are in it`, ["Lines and states, 2025", "Earnings, 2021 to 2025", "Balance sheet, 2021 to 2025", "Accident years, 2021 to 2025", "Unauthorized", "+6.9 pts"].every(x => all.includes(x)) && (all.match(/Sample: made-up figures|Made-up figures\.|Made-up\./g) || []).length === 18);
     const chartXml = (await Promise.all(charts.map(read))).join("\n");
     ok(`${name}: the charts carry the new figures`, chartXml.includes("<c:v>Homeowners</c:v>") && chartXml.includes("<c:v>Underwriting gain</c:v>") && chartXml.includes("<c:v>Bonds</c:v>") && chartXml.includes("<c:v>2022</c:v>"));
     // opened by another program, python-pptx, where it is installed (GitHub's test run installs it)
@@ -193,7 +197,7 @@ function hostile() {
     else {
       let py = "";
       try { py = execFileSync("python3", ["-I", "-c", "import sys\nfrom pptx import Presentation\np=Presentation(sys.argv[1])\nfor i,s in enumerate(p.slides,1):\n  print(i,sum(1 for g in s.shapes if g.has_table),sum(1 for g in s.shapes if g.has_chart))\nprint('slides',len(p.slides))", file], { encoding: "utf8" }); } catch (e) { py = String(e); }
-      ok(`${name}: python-pptx opens it, with the tables and charts on the new slides`, /slides 13/.test(py) && /^4 2 2$/m.test(py) && /^6 1 1$/m.test(py) && /^7 2 1$/m.test(py) && /^10 1 1$/m.test(py), py);
+      ok(`${name}: python-pptx opens it, with the tables and charts on the new slides`, /slides 19/.test(py) && /^4 2 2$/m.test(py) && /^6 1 1$/m.test(py) && /^7 2 1$/m.test(py) && /^10 1 1$/m.test(py), py);
     }
   }
 

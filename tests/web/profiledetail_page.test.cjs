@@ -79,9 +79,9 @@ function noneNew(){
   // ----- every figure in: thirteen slides, each with a tick box, and the figures section by section -----
   let t=await open(); let p=t.p;
   await t.figures("90001");
-  ok("thirteen slides, all included, the new ones among them", same(await t.list("#pfPlan li"),["CoverIncluded","Executive summaryIncluded","PremiumIncluded","Lines and statesIncluded","UnderwritingIncluded","EarningsIncluded","Balance sheetIncluded","CapitalIncluded","ReservesIncluded","Accident yearsIncluded","ReinsuranceIncluded","Recent rate and form filingsIncluded","Key diligence questionsIncluded"]), await t.list("#pfPlan li"));
-  ok("every slide but the cover has a tick box, ticked, named for the slide", (await p.$$("#pfPlan .pfinc")).length===12 && (await p.$$eval("#pfPlan .pfinc",e=>e.every(x=>x.checked))) && (await p.getAttribute('#pfPlan .pfinc[data-id="earnings"]',"aria-label"))==="Include the earnings slide" && !(await p.$('#pfPlan .pfinc[data-id="cover"]')));
-  ok("the sections are there, folded away, in slide order", same(await p.$$eval("#pfDetail-contents details.pfsec",e=>e.map(x=>[x.dataset.sec, x.open])),[["premium",false],["lines",false],["underwriting",false],["earnings",false],["balance",false],["capital",false],["reserves",false],["accident",false],["reinsurance",false]]));
+  ok("nineteen slides (the filings in detail in place of the one filings slide), all included, the new ones among them", same(await t.list("#pfPlan li"),["CoverIncluded","Executive summaryIncluded","PremiumIncluded","Lines and statesIncluded","UnderwritingIncluded","EarningsIncluded","Balance sheetIncluded","CapitalIncluded","ReservesIncluded","Accident yearsIncluded","ReinsuranceIncluded","Filings at a glance, last 12 monthsIncluded","Rate changes, last 12 monthsIncluded","Latest rate change by state (map), last 12 monthsIncluded","New products and market moves, last 12 monthsIncluded","Latest form and rule filings, last 12 monthsIncluded","Every state, last 12 monthsIncluded","Time with the regulator, last 12 monthsIncluded","Key diligence questionsIncluded"]), await t.list("#pfPlan li"));
+  ok("every slide but the cover has a tick box, ticked, named for the slide", (await p.$$("#pfPlan .pfinc")).length===18 && (await p.$$eval("#pfPlan .pfinc",e=>e.every(x=>x.checked))) && (await p.getAttribute('#pfPlan .pfinc[data-id="earnings"]',"aria-label"))==="Include the earnings slide" && !(await p.$('#pfPlan .pfinc[data-id="cover"]')));
+  ok("the sections are there, folded away, in slide order", same(await p.$$eval("#pfDetail-contents details.pfsec",e=>e.map(x=>[x.dataset.sec, x.open])),[["premium",false],["lines",false],["underwriting",false],["earnings",false],["balance",false],["capital",false],["reserves",false],["accident",false],["reinsurance",false],["filings",false]]));
   await p.click("#pfSec-contents-premium summary"); await p.waitForTimeout(150);
   const prem=await t.cells("#pfTabPremium");
   ok("premium: direct, assumed, gross, ceded, net and earned premiums in $M, then shares and growth marked (derived)", same(prem.map(r=>r[0]),["$M unless shown","Direct premiums written","Assumed premiums written","Gross premiums written","Ceded premiums written","Net premiums written","Net premiums earned","Ceded share (%) (derived)","Direct premium growth (%) (derived)","Net premium growth (%) (derived)"]) && same(prem[1],["Direct premiums written","74.2","83.6","96.1","108.9","122.5"]), prem.map(r=>r[0]));
@@ -109,11 +109,11 @@ function noneNew(){
   // ----- the reader takes slides out -----
   await p.click('#pfPlan .pfinc[data-id="earnings"]'); await p.waitForTimeout(150);
   await p.click('#pfPlan .pfinc[data-id="accident"]'); await p.waitForTimeout(150);
-  ok("a slide taken out says so, and the count says how many you left out", (await t.list("#pfPlan li")).includes("EarningsYou left it out") && (await t.txt("#pfPlan")).includes("Accident yearsYou left it out") && (await t.txt(".f:has(#pfPlan) em")).includes("13 slides of 13 can be filled from these figures; you left out 2"), [await t.list("#pfPlan li"), await t.txt(".f:has(#pfPlan) em")]);
+  ok("a slide taken out says so, and the count says how many you left out", (await t.list("#pfPlan li")).includes("EarningsYou left it out") && (await t.txt("#pfPlan")).includes("Accident yearsYou left it out") && (await t.txt(".f:has(#pfPlan) em")).includes("19 slides of 19 can be filled from these figures; you left out 2"), [await t.list("#pfPlan li"), await t.txt(".f:has(#pfPlan) em")]);
   ok("it is remembered in this browser only", same(await p.evaluate(()=>JSON.parse(localStorage.getItem("snl.pfSkip"))),["earnings","accident"]));
   await p.click("#pf_buildBtn"); await p.waitForTimeout(1200);
   let built=await p.evaluate(()=>window.__deck&&window.__deck.build);
-  ok("the deck is built without them: eleven slides", built && built.length===1 && built[0].ids.length===11 && !built[0].ids.includes("earnings") && !built[0].ids.includes("accident") && built[0].ids.includes("balance"), built);
+  ok("the deck is built without them: eighteen slides (every state runs on to a second)", built && built.length===1 && built[0].ids.length===18 && !built[0].ids.includes("earnings") && !built[0].ids.includes("accident") && built[0].ids.includes("balance"), built);
   await p.click('#pfPlan .pfinc[data-id="earnings"]'); await p.waitForTimeout(150);
   ok("ticking it again puts it back", same(await p.evaluate(()=>JSON.parse(localStorage.getItem("snl.pfSkip"))),["accident"]) && (await t.list("#pfPlan li")).includes("EarningsIncluded"));
   await t.ctx.close();
@@ -130,7 +130,7 @@ function noneNew(){
   t=await open({facts:(body,n)=>({status:200, body:n===1?partial():REAL()}), delay:n=>n===1?50:1500}); p=t.p;
   await p.fill("#pf_code","90001"); await p.click("#pf_get");
   ok("while the rest come in, the figures so far are shown, section by section", await t.until(async()=>!!(await p.$("#pfSoFar"))) && (await t.txt("#pfBusy")).startsWith("Getting the rest of the figures for NAIC company 90001… 32 of 49 figures so far.") && !(await p.$("#pfContents")), await t.txt("#pfBusy"));
-  ok("only the sections whose figures have arrived", same(await p.$$eval("#pfSoFar details.pfsec",e=>e.map(x=>x.dataset.sec)),["premium","lines","underwriting","capital","reinsurance"]), await p.$$eval("#pfSoFar details.pfsec",e=>e.map(x=>x.dataset.sec)));
+  ok("only the sections whose figures have arrived", same(await p.$$eval("#pfSoFar details.pfsec",e=>e.map(x=>x.dataset.sec)),["premium","lines","underwriting","capital","reinsurance","filings"]), await p.$$eval("#pfSoFar details.pfsec",e=>e.map(x=>x.dataset.sec)));
   await p.click("#pfSec-sofar-premium summary"); await p.waitForTimeout(100);
   ok("a section can be opened and read while the rest come in", await p.$eval("#pfSec-sofar-premium",e=>e.open) && (await t.cells("#pfTabPremium")).length>3 && await p.isVisible("#pfStop"));
   await p.setViewportSize({width:390,height:844}); await p.waitForTimeout(150);
@@ -143,7 +143,7 @@ function noneNew(){
   t=await open({facts:()=>({status:200, body:partial()})}); p=t.p;
   await p.fill("#pf_code","90001"); await p.click("#pf_get");
   ok("figures that don't come: the banner is as before, above what the profile holds", await t.until(async()=>!!(await p.$("#pfPending"))) && (await t.txt("#pfPending")).startsWith("Some figures didn't arrive. 17 of 49 figures didn't come back in time, so the profile below doesn't have them yet and the slides that need them are left out.") && !!(await p.$("#pfPending + #pfContents")) && !(await p.$("#pfSoFar")), await t.txt("#pfPending"));
-  ok("and the sections the figures that did arrive fill are shown", (await p.$$("#pfDetail-contents details.pfsec")).length===5);
+  ok("and the sections the figures that did arrive fill are shown, and the filings", (await p.$$("#pfDetail-contents details.pfsec")).length===6);
   await t.ctx.close();
 
   // ----- none of the new figures mapped, and figures saved before this change -----
@@ -151,7 +151,7 @@ function noneNew(){
   await t.figures("90001");
   const pl=await t.list("#pfPlan li");
   ok("none of the new figures: the new slides are left out, saying which figures aren't mapped; never an error", pl.includes("EarningsLeft out: Net underwriting gain, net investment income earned, net realized capital gains, net cash from operations and net yield on invested assets aren't mapped to Snowflake yet.") && pl.includes("Accident yearsLeft out: Net loss and LAE ratio by accident year isn't mapped to Snowflake yet.") && !(await p.$("#pfErr")), pl);
-  ok("the sections show what the other figures fill (net income and total assets still fill earnings and the balance sheet)", same(await p.$$eval("#pfDetail-contents details.pfsec",e=>e.map(x=>x.dataset.sec)),["premium","lines","underwriting","earnings","balance","capital","reserves","reinsurance"]) && (await p.$$("#pfTabEarn tr")).length===3 && (await t.txt("#pfMissing")).includes("Net underwriting gain (not mapped)"), [await p.$$eval("#pfDetail-contents details.pfsec",e=>e.map(x=>x.dataset.sec)), await t.txt("#pfMissing")]);
+  ok("the sections show what the other figures fill (net income and total assets still fill earnings and the balance sheet)", same(await p.$$eval("#pfDetail-contents details.pfsec",e=>e.map(x=>x.dataset.sec)),["premium","lines","underwriting","earnings","balance","capital","reserves","reinsurance","filings"]) && (await p.$$("#pfTabEarn tr")).length===3 && (await t.txt("#pfMissing")).includes("Net underwriting gain (not mapped)"), [await p.$$eval("#pfDetail-contents details.pfsec",e=>e.map(x=>x.dataset.sec)), await t.txt("#pfMissing")]);
   await t.ctx.close();
   t=await open({facts:()=>({status:200, body:copy(OLD)})}); p=t.p;
   await t.figures("90001");
