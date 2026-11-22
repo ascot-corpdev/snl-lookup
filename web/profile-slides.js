@@ -37,7 +37,7 @@
     uw_gain: "Net underwriting gain", net_inv_income: "Net investment income earned", realized_gains: "Net realized capital gains", cash_from_ops: "Net cash from operations",
     investment_yield: "Net yield on invested assets", cash_invested: "Cash and invested assets", premiums_receivable: "Premiums receivable", total_liabilities: "Total liabilities",
     npe_by_line: "Net premiums earned by line", loss_lae_ratio_by_line: "Loss and LAE ratio by line", dpe_by_state: "Direct premiums earned by state", loss_ratio_by_state: "Direct loss ratio by state",
-    ay_loss_ratio: "Net loss and LAE ratio by accident year"
+    ay_loss_ratio: "Net loss and DCC ratio by accident year"
   };
   // statutory field ids that feed a series key (dpw and npw are the by-line figures summed)
   var FIELDS = { dpw: ["dpw", "dpw_by_line"], npw: ["npw", "npw_by_line"] };
@@ -619,7 +619,7 @@
     return content(t, "balance", "Balance sheet, " + yearsLabel(f), items);
   }
 
-  // accident years: each one's loss and LAE ratio as each statement year reported it, and how far it has moved
+  // accident years: each one's loss and DCC ratio (losses and defense and cost containment) as each statement year reported it, and how far it has moved
   function accidentSlide(f, t) {
     var A = (detailOf(f) || {}).accidentYears || {}, rows = arr(A.rows).slice(-10), ys = (f.years || []).map(Number), n = ys.length;
     var hasNpe = rows.some(function (r) { return num(r.npe); });
@@ -631,7 +631,7 @@
         .concat([num(r.change) ? (r.change > 0 ? { text: "+" + fixed1(r.change), color: MAG } : pctCell(r.change)) : "n/d"]).concat(hasNpe ? [millions(r.npe)] : []);
     });
     var rowH = Math.min(0.3, (BOTTOM - TOP - HDR) / (rows.length + 1));
-    var items = [header("Loss and LAE ratio by accident year, as each statement reported it (%)", L, TOP, tw),
+    var items = [header("Loss and DCC ratio by accident year, as each statement reported it (%)", L, TOP, tw),
       { type: "table", x: L, y: TOP + HDR, colW: [aw].concat(ys.map(function () { return yw; })).concat([cw]).concat(hasNpe ? [nw] : []), rowH: rowH, size: 11, rows: [head].concat(body),
         aligns: ["l"].concat(ys.map(function () { return "r"; })).concat(["r"]).concat(hasNpe ? ["r"] : []), name: "Table accident years" }];
     var rx = L + tw + 0.3, rw = R - rx;
@@ -648,7 +648,7 @@
           categories: withChange.map(function (r) { return String(r.ay); }), series: [ser("Change (points)", withChange.map(function (r) { return r.change; }), NAVY, { pointColors: pc })], labels: { format: "0.0;(0.0);0.0", size: 9 } });
       }
     }
-    items.push(source(f, { derived: true, note: "Change: points since first shown; up is worse." }));
+    items.push(source(f, { derived: true, note: "DCC: defense and cost containment. Change: points since first shown; up is worse." }));
     return content(t, "accident", "Accident years, " + yearsLabel(f), items);
   }
 

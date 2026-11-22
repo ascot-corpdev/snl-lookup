@@ -66,7 +66,7 @@ export const STAT_FIELDS = [
   // By counterparty: item is the reinsurer; an optional tag column says, for example, whether it is authorized.
   { id: "recoverable_by_reinsurer", label: "Reinsurance recoverables by reinsurer", unit: "usd", by: "item" },
   // By accident year: item is the accident year, with one set of rows for each statement year.
-  { id: "ay_loss_ratio", label: "Net loss and LAE ratio by accident year", unit: "pct", by: "item" },
+  { id: "ay_loss_ratio", label: "Net loss and DCC ratio by accident year", unit: "pct", by: "item" },
   { id: "ay_npe", label: "Net premiums earned by accident year", unit: "usd", by: "item" },
 ] as const;
 export type StatFieldId = typeof STAT_FIELDS[number]["id"];
@@ -122,7 +122,7 @@ export type FieldMap = {
 /** loaded: optional. When S&P's database has no LOADTRACKER, the view each schema has with S&P's run dates, and its
     date column. The app then reports, for each schema a figure came from, the latest date in that view. */
 export type LoadedMap = { view: string; at: string };
-export type Mapping = { fields: Partial<Record<StatFieldId, FieldMap>>; loaded?: LoadedMap };
+export type Mapping = { fields: Partial<Record<StatFieldId, FieldMap>>; loaded?: LoadedMap; companies?: CompanyLookupMap };
 
 // A plain name (letters, digits, _ and $), or the same in double quotes for a name that needs its exact case.
 const IDENT = /^(?:[A-Za-z_][A-Za-z0-9_$]{0,127}|"[A-Za-z0-9_$ ]{1,127}")$/;
@@ -295,7 +295,9 @@ export function loadedProblem(l: unknown): string | null {
 
 export function readMapping(doc: Record<string, unknown> | null): Mapping {
   const fields = doc && typeof doc.fields === "object" && doc.fields ? doc.fields as Mapping["fields"] : {};
-  return doc && doc.loaded !== undefined ? { fields, loaded: doc.loaded as LoadedMap } : { fields };
+  const out: Mapping = doc && doc.loaded !== undefined ? { fields, loaded: doc.loaded as LoadedMap } : { fields };
+  if (doc && doc.companies !== undefined) out.companies = doc.companies as CompanyLookupMap;   // the optional company look-up
+  return out;
 }
 
 export function fieldStatus(mapping: Mapping) {
@@ -363,6 +365,155 @@ export function buildSql(database: string, schema: string, m: FieldMap, q: StatQ
   const company = !m.sum && companyRef && m.entity.company !== entityRef && (!companyRef.alias || aliases.includes(companyRef.alias)) ? c(m.entity.company!) : null;
   const keep = latest.length ? ` QUALIFY ROW_NUMBER() OVER (PARTITION BY ${[entityCol, company, name, year, line, state, item].filter((x) => x !== null).join(", ")} ORDER BY ${latest.map((l) => `${l} DESC`).join(", ")}) = 1` : "";
   return { statement: `SELECT ${cols.join(", ")} FROM ${source} WHERE ${where}${group}${keep} ORDER BY 1, 3 LIMIT 20000`, bindings };
+}
+
+// ---------- the company look-up: NAIC codes for S&P institution ids ----------
+// Optional, top level in the saved mapping beside fields and loaded. It names the view (with any joins and
+// conditions, in the same mapping language as a figure) where each S&P institution id has its NAIC company code, its
+// name and, optionally, its NAIC group code and group name. Find by name uses it for companies the company list has
+// with an institution id but no NAIC company code. Which view and columns S&P has is UNCONFIRMED here: it lives only
+// in the owner's saved mapping.
+
+/** institution, company and name are required; groupCode, groupName and latest (1 to 3 columns, the row with the
+    highest value kept for each institution id and NAIC code, such as a "most recent" flag) are optional. joins and
+    where are as for a figure, without when. */
+export type CompanyLookupMap = {
+  view: string; as?: string; joins?: JoinMap[]; where?: WhereMap[];
+  institution: string; company: string; name: string; groupCode?: string; groupName?: string; latest?: string | string[];
+};
+const COMPANY_KEYS = ["view", "as", "joins", "where", "institution", "company", "name", "groupCode", "groupName", "latest"];
+/** The most institution ids one look-up asks for: the most matches Find by name shows. */
+export const MAX_CODE_IDS = 50;
+/** The company look-up as a figure's mapping, so the same checks (shapeProblem) cover its names, joins and where. */
+const lookupAsField = (c: CompanyLookupMap): FieldMap => ({
+  view: c.view, as: c.as, joins: c.joins, where: c.where, entity: { company: c.institution, name: c.name },
+  year: c.institution, value: c.company, line: c.groupCode, state: c.groupName, latest: c.latest,
+});
+/** shapeProblem's words for a figure, said in the company look-up's own words. */
+const LOOKUP_WORDS: [RegExp, string][] = [[/^entity\.company\b/, "institution"], [/^entity\.name\b/, "name"], [/^value\b/, "company"], [/^year\b/, "institution"], [/^line\b/, "groupCode"], [/^state\b/, "groupName"]];
+
+/** Checks the optional company look-up. Returns what is wrong, or null (also when there is none). */
+export function companiesProblem(c: unknown): string | null {
+  if (c === undefined) return null;
+  if (!isObj(c)) return "companies must be {view, institution, company, name}, with joins, where, groupCode, groupName and latest when needed";
+  const extra = Object.keys(c).find((k) => !COMPANY_KEYS.includes(k));
+  if (extra) return `companies.${extra} isn't part of the company look-up. It takes ${COMPANY_KEYS.join(", ")}`;
+  for (const k of ["institution", "company", "name"]) if (c[k] === undefined) return `companies.${k} must be a column name`;
+  for (const k of ["joins", "where"] as const) {
+    const list = c[k];
+    if (Array.isArray(list)) for (const [i, x] of list.entries()) if (isObj(x) && x.when !== undefined) return `companies.${k}[${i}].when isn't used in the company look-up: leave it out`;
+  }
+  if (Array.isArray(c.latest) && c.latest.some((x) => typeof x !== "string")) return "companies.latest must be a column, or a list of 1 to 3 columns";
+  const p = shapeProblem(lookupAsField(c as unknown as CompanyLookupMap));
+  if (!p) return null;
+  const said = LOOKUP_WORDS.reduce((t, [re, w]) => t.replace(re, w), p);
+  return `companies.${said}`;
+}
+/** Whether the saved mapping has a company look-up that can be used. */
+export const companiesMapped = (mapping: Mapping) => mapping.companies !== undefined && companiesProblem(mapping.companies) === null;
+
+/** UNCONFIRMED until the owner maps it from Discover: the one statement that finds the NAIC codes of up to
+    MAX_CODE_IDS institution ids. Every name comes from the checked mapping; the ids are bound, never pasted in. One
+    row for each institution id and NAIC code it has (the latest columns pick the row kept), so two codes for one
+    institution id both come back and the caller can say so. */
+export function buildCompanySql(database: string, schema: string, m: CompanyLookupMap, ids: string[]): { statement: string; bindings: Binding[] } | null {
+  if (!ident(database) || !ident(schema) || companiesProblem(m) !== null || m === undefined) return null;
+  if (!ids.length || ids.length > MAX_CODE_IDS || ids.some((i) => !/^[0-9]{1,12}$/.test(i))) return null;
+  const c = (ref: string) => { const r = colRef(ref)!; return r.alias ? `"${r.alias}".${r.col}` : r.col; };
+  const from = (ref: string) => { const r = viewRef(ref)!; return `${database}.${r.schema ?? schema}.${r.view}`; };
+  const inst = c(m.institution), code = c(m.company);
+  const cols = [`${inst} AS INST`, `${code} AS CODE`, `${c(m.name)} AS NAME`, `${m.groupCode === undefined ? "NULL" : c(m.groupCode)} AS GROUP_CODE`, `${m.groupName === undefined ? "NULL" : c(m.groupName)} AS GROUP_NAME`];
+  let source = from(m.view) + (m.as === undefined ? "" : ` AS "${m.as.toUpperCase()}"`);
+  for (const j of m.joins ?? []) source += ` ${j.kind === "left" ? "LEFT JOIN" : "JOIN"} ${from(j.view)} AS "${j.as.toUpperCase()}" ON ${j.on.map((o) => `${c(o.left)} = ${c(o.right)}`).join(" AND ")}`;
+  const bindings: Binding[] = ids.map((value) => ({ type: "TEXT", value }));
+  let where = `${inst} IN (${ids.map(() => "?").join(", ")})`;
+  for (const w of m.where ?? []) {
+    const col = c(w.column);
+    if (w.equals !== undefined) { where += ` AND ${col} = ?`; bindings.push({ type: "TEXT", value: w.equals }); }
+    else if (w.notEquals !== undefined) { where += ` AND ${col} <> ?`; bindings.push({ type: "TEXT", value: w.notEquals }); }
+    else if (w.in !== undefined) { where += ` AND ${col} IN (${w.in.map(() => "?").join(", ")})`; bindings.push(...w.in.map((v) => ({ type: "TEXT" as const, value: v }))); }
+    else if (w.isNull !== undefined) where += ` AND ${col} ${w.isNull ? "IS NULL" : "IS NOT NULL"}`;
+    else if (w.month !== undefined) { where += ` AND MONTH(${col}) = ?`; bindings.push({ type: "FIXED", value: String(w.month) }); }
+    else if (w.startsWith !== undefined) { where += ` AND STARTSWITH(${col}, ?)`; bindings.push({ type: "TEXT", value: w.startsWith }); }
+  }
+  // NULLS LAST: an institution with no row in a left-joined view keeps its row, and a flag that is set wins.
+  const latest = m.latest === undefined ? [] : (Array.isArray(m.latest) ? m.latest : [m.latest]).map(c);
+  const keep = latest.length ? ` QUALIFY ROW_NUMBER() OVER (PARTITION BY ${inst}, ${code} ORDER BY ${latest.map((l) => `${l} DESC NULLS LAST`).join(", ")}) = 1` : "";
+  return { statement: `SELECT DISTINCT ${cols.join(", ")} FROM ${source} WHERE ${where}${keep} ORDER BY 1, 2 LIMIT 500`, bindings };
+}
+
+/** What the look-up found for one institution id. found: one NAIC company code. several: more than one, so none is
+    chosen (codes lists them). none: S&P's statutory data has no code for it. known: the company list already had a
+    code. unknown: the id isn't in the company list, so it wasn't looked up. */
+export type CodeAnswer = { institutionId: string; status: "found" | "several" | "none" | "known" | "unknown"; naicCompanyCode: string | null; naicGroupCode: string | null; naicGroupName: string | null; codes?: string[] };
+export const COMPANIES_NOT_MAPPED = "The company look-up isn't mapped, so NAIC codes can't be looked up on S&P's statutory data. A Corp Dev login can add it in Field set-up.";
+/** How long the look-up may take: one statement, about ten seconds on S&P's views. */
+export const CODES_WAIT_MS = 45_000;
+/** How long "S&P has no code for this institution id" is kept before it is asked again. */
+const NOCODE_DAYS = 30;
+const digits = (v: unknown, n: number) => { const s = v === null || v === undefined ? "" : String(v).trim().replace(/\.0+$/, ""); return new RegExp(`^[0-9]{1,${n}}$`).test(s) ? s : null; };
+const textOf = (v: unknown) => (v === null || v === undefined || typeof v === "object" ? null : String(v).trim() || null);
+
+/** The rows of buildCompanySql read per institution id: one code is found (with the group, when one group code comes
+    with it); two or more codes is several, and nothing is chosen, as guessing would put the wrong company's figures on
+    the page; no code is none. */
+export function readCodeRows(rows: Record<string, unknown>[], ids: string[]): Map<string, CodeAnswer> {
+  const out = new Map<string, CodeAnswer>();
+  for (const id of ids) {
+    const mine = rows.filter((r) => digits(r.INST, 12) === id), codes = [...new Set(mine.map((r) => digits(r.CODE, 6)).filter((x): x is string => !!x))].sort();
+    const base: CodeAnswer = { institutionId: id, status: "none", naicCompanyCode: null, naicGroupCode: null, naicGroupName: null };
+    if (codes.length > 1) { out.set(id, { ...base, status: "several", codes: codes.slice(0, 5) }); continue; }
+    if (!codes.length) { out.set(id, base); continue; }
+    const withCode = mine.filter((r) => digits(r.CODE, 6) === codes[0]);
+    const groups = [...new Set(withCode.map((r) => digits(r.GROUP_CODE, 6)).filter((x): x is string => !!x))];
+    const group = groups.length === 1 ? groups[0] : null;
+    const groupName = group ? withCode.map((r) => digits(r.GROUP_CODE, 6) === group ? textOf(r.GROUP_NAME) : null).find((x) => !!x) ?? null : null;
+    out.set(id, { ...base, status: "found", naicCompanyCode: codes[0], naicGroupCode: group, naicGroupName: groupName ? groupName.slice(0, 200) : null });
+  }
+  return out;
+}
+
+/** The "codes" action: NAIC codes for companies the company list has with an institution id but no NAIC company
+    code. Ids already holding a code, or answered "none" or "several" before (kept NOCODE_DAYS, and for this mapping
+    only), need no statement; the rest go to Snowflake in ONE statement. Codes found are saved to the company list,
+    only where the row has none (fillEntityCodes), so the next search needs no statement. sf is null when Snowflake
+    isn't set up. */
+export async function naicCodesFor(sf: Snowflake | null, db: Db, database: string, schema: string, mapping: Mapping, ids: string[], opts: { now: number; waitMs?: number }): Promise<{ results: CodeAnswer[]; asked: number; saved: number }> {
+  if (!companiesMapped(mapping)) throw new SnowflakeError("not_mapped", COMPANIES_NOT_MAPPED);
+  const list = db.entitiesByInstitution ? await db.entitiesByInstitution(ids) : [];
+  const answers = new Map<string, CodeAnswer>();
+  const ask: string[] = [];
+  const mapHash = await shortHash(JSON.stringify(mapping.companies));
+  const markId = async (id: string) => "discover:nocode." + await shortHash(JSON.stringify([id, mapHash]));
+  await Promise.all(ids.map(async (id) => {
+    const rows = list.filter((e) => String(e.institutionId ?? "").trim() === id);
+    const coded = rows.find((e) => digits(e.naicCompanyCode, 6));
+    const none: CodeAnswer = { institutionId: id, status: "unknown", naicCompanyCode: null, naicGroupCode: null, naicGroupName: null };
+    if (!rows.length) { answers.set(id, none); return; }
+    if (coded) { answers.set(id, { ...none, status: "known", naicCompanyCode: digits(coded.naicCompanyCode, 6), naicGroupCode: digits(coded.naicGroupCode, 6), naicGroupName: textOf(coded.naicGroupName) }); return; }
+    const mark = await db.getStore(await markId(id));
+    const d = mark?.doc as { status?: unknown; codes?: unknown } | undefined;
+    if (mark && opts.now - Date.parse(mark.fetched_at) < NOCODE_DAYS * 86_400_000 && (d?.status === "none" || d?.status === "several")) {
+      answers.set(id, { ...none, status: d.status, ...(d.status === "several" && Array.isArray(d.codes) ? { codes: d.codes.map(String).slice(0, 5) } : {}) });
+      return;
+    }
+    ask.push(id);
+  }));
+  let saved = 0;
+  if (ask.length) {
+    if (!sf) throw new SnowflakeError("not_configured", SNOWFLAKE_NOT_CONFIGURED);
+    ask.sort();
+    const sql = buildCompanySql(database, schema, mapping.companies!, ask);
+    if (!sql) throw new SnowflakeError("sql", "SNOWFLAKE_DATABASE or SNOWFLAKE_SCHEMA isn't a valid name. Check those two secrets on Supabase.");
+    const res = await sf.query(sql.statement, sql.bindings, opts.waitMs ?? CODES_WAIT_MS);
+    const read = readCodeRows(res.rows, ask);
+    for (const [id, a] of read) answers.set(id, a);
+    const fills = [...read.values()].filter((a) => a.status === "found").map((a) => ({ institutionId: a.institutionId, naicCompanyCode: a.naicCompanyCode!, naicGroupCode: a.naicGroupCode, naicGroupName: a.naicGroupName }));
+    if (fills.length && db.fillEntityCodes) saved = await db.fillEntityCodes(fills);
+    await Promise.all([...read.values()].filter((a) => a.status !== "found").map(async (a) =>
+      db.putStore({ id: await markId(a.institutionId), kind: "discover", label: `no NAIC code ${a.institutionId}`, doc: { status: a.status, ...(a.codes ? { codes: a.codes } : {}) } })));
+  }
+  return { results: ids.map((id) => answers.get(id)!), asked: ask.length, saved };
 }
 
 export type StatRow = { code: string; year: number; line: string | null; state: string | null; value: number | null; item?: string | null; tag?: string | null };

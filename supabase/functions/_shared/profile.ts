@@ -156,7 +156,7 @@ export const DERIVED_WORDS: Record<string, string> = {
   "detail.recoverables.items.toSurplus": "a reinsurer's recoverables as a share of surplus",
   "detail.recoverables.unauthorizedShare": "share of recoverables from reinsurers whose tag says they aren't authorized",
   "detail.recoverables.untaggedShare": "share of recoverables from reinsurers with no tag",
-  "detail.accidentYears.rows.change": "an accident year's latest loss and LAE ratio less its first reported one, in percentage points",
+  "detail.accidentYears.rows.change": "an accident year's latest loss and DCC ratio (net losses and defense and cost containment expenses to net premiums earned) less its first reported one, in percentage points",
   "detail.accidentYears.worst": "the largest change of any accident year shown, in percentage points",
   "detail.accidentYears.worse": "how many accident years are worse now than first reported",
   "detail.combinedRun": "the latest run of years above, or at or below, a 100% combined ratio",
@@ -500,21 +500,29 @@ function detailFrom(years: number[], series: Partial<Record<SeriesId, Arr>>, fie
     };
     used.add("recoverable_by_reinsurer");
   }
-  // accident years: the loss and LAE ratio of each, as each statement year reported it
+  // accident years: the loss and DCC ratio of each (Schedule P: net losses and defense and cost containment
+  // expenses incurred to net premiums earned), as each statement year reported it
   const af = ratioField("ay_loss_ratio", "item", 20), nf = field("ay_npe");
   if (af) {
-    // UNCONFIRMED: how S&P holds an accident year isn't known; the mapped item column must give a four-digit year
-    // (a row whose item isn't one, such as a total, is left out).
-    const ayOf = (s: string | null | undefined) => { const c = clean(s, 20); return c && /^(19|20)\d{2}$/.test(c) ? Number(c) : null; };
+    // The mapped item column gives the accident year either as a four-digit year or, as S&P's Schedule P view was
+    // seen to hold it (one company's 2025 statement, 21 Nov 2026), as an offset from the statement year: "AY(0)" is
+    // the statement year itself and "AY(-3)" three years before it. Any other row, such as "Prior(10+)" or a
+    // total, is left out. UNCONFIRMED beyond that one sample.
+    const ayOf = (s: string | null | undefined, y: number) => {
+      const c = clean(s, 20); if (!c) return null;
+      if (/^(19|20)\d{2}$/.test(c)) return Number(c);
+      const m = /^AY\(\s*(0|-\d{1,2})\s*\)$/i.exec(c);
+      return m ? y + Number(m[1]) : null;
+    };
     const table = new Map<number, Arr>();
     years.forEach((y, i) => {
       for (const [name, v] of ratioByName(af, y, "item", 20).values) {
-        const ay = ayOf(name); if (ay === null || ay > y) continue;
+        const ay = ayOf(name, y); if (ay === null || ay > y) continue;
         if (!table.has(ay)) table.set(ay, years.map(() => null));
         table.get(ay)![i] = v;
       }
     });
-    const npeOf = (ay: number) => { for (let i = years.length - 1; i >= 0; i--) { const m = byName(nf, years[i], "item", 20); for (const [k, v] of m) if (ayOf(k) === ay) return v; } return null; };
+    const npeOf = (ay: number) => { for (let i = years.length - 1; i >= 0; i--) { const m = byName(nf, years[i], "item", 20); for (const [k, v] of m) if (ayOf(k, years[i]) === ay) return v; } return null; };
     const rows: AyRow[] = [...table.keys()].sort((a, b) => a - b).slice(-10).map((ay) => {
       const values = table.get(ay)!, f = earliest(years, values), l = latest(years, values);
       return { ay, values, npe: npeOf(ay), first: f?.v ?? null, firstYear: f?.y ?? null, latest: l?.v ?? null, latestYear: l?.y ?? null, change: f && l && l.y > f.y ? round(l.v - f.v, 4) : null };
@@ -795,7 +803,7 @@ export function plainText(facts: Facts): ProfileText {
     p("Reserves to premiums", rtn ? `Reserves were ${fmt.mult(rtn.v)} net premiums earned in ${rtn.y} (derived).` : "Reserves against net premiums earned n/d."),
     p("Development", (pyd ? `Prior-year reserves developed ${pyd.v > 0 ? "adversely" : pyd.v < 0 ? "favourably" : "by nothing"}${pyd.v !== 0 ? ` by ${fmt.usd(Math.abs(pyd.v))}` : ""} in ${pyd.y}${pydPct && pydPct.y === pyd.y ? `, ${fmt.pct(pydPct.v)} of prior year-end surplus (derived)` : ""}.` : "Prior-year reserve development n/d.")
       + (pyd2 ? ` Two-year development was ${pyd2.v > 0 ? "adverse" : pyd2.v < 0 ? "favourable" : "nil"}${pyd2.v !== 0 ? `, ${fmt.usd(Math.abs(pyd2.v))}` : ""}, in ${pyd2.y}.` : "")),
-    ...(worstAy ? [p("Accident years", `Accident year ${worstAy.ay}'s loss and LAE ratio went from ${fmt.pct(worstAy.first)} ${worstAy.firstYear === worstAy.ay ? "first reported" : "as reported"} in ${worstAy.firstYear} to ${fmt.pct(worstAy.latest)} in ${worstAy.latestYear}, ${worstAy.change! > 0 ? "up" : "down"} ${fmt.pct(Math.abs(worstAy.change!)).replace("%", "")} percentage points (derived).`)] : []),
+    ...(worstAy ? [p("Accident years", `Accident year ${worstAy.ay}'s loss and DCC ratio went from ${fmt.pct(worstAy.first)} ${worstAy.firstYear === worstAy.ay ? "first reported" : "as reported"} in ${worstAy.firstYear} to ${fmt.pct(worstAy.latest)} in ${worstAy.latestYear}, ${worstAy.change! > 0 ? "up" : "down"} ${fmt.pct(Math.abs(worstAy.change!)).replace("%", "")} percentage points (derived).`)] : []),
   ]);
 
   const R = X.recoverables, bigRec = R?.items.find((r) => r.name !== "Other");
@@ -927,7 +935,7 @@ function questionsFor(facts: Facts): { title: string; text: string }[] {
   // the detailed profile's figures, when they are there
   const X = facts.detail;
   const ay = (X?.accidentYears?.rows ?? []).filter((r) => r.change !== null && r.change >= 5).sort((a, b) => b.change! - a.change!)[0];
-  if (ay) out.push({ title: "Accident year development", text: `Accident year ${ay.ay}'s loss and LAE ratio has risen from ${fmt.pct(ay.first)} to ${fmt.pct(ay.latest)} since ${ay.firstYear === ay.ay ? "it was first reported" : ay.firstYear} (derived). What is driving it, and are the later accident years reserved on the same basis?` });
+  if (ay) out.push({ title: "Accident year development", text: `Accident year ${ay.ay}'s loss and DCC ratio has risen from ${fmt.pct(ay.first)} to ${fmt.pct(ay.latest)} since ${ay.firstYear === ay.ay ? "it was first reported" : ay.firstYear} (derived). What is driving it, and are the later accident years reserved on the same basis?` });
   const rec = X?.recoverables;
   if (rec && rec.tagged && rec.unauthorizedShare !== null && rec.unauthorizedShare >= 20) out.push({ title: "Unsecured reinsurance", text: `${fmt.pct(rec.unauthorizedShare)} of recoverables at the end of ${rec.year} were owed by reinsurers marked as not authorized (derived). What collateral is held against them?` });
   const rbcNow = L(s.rbc_ratio) ?? L(d.rbc_ratio_calc);
@@ -1015,7 +1023,7 @@ export function sampleFacts(today: string): Facts {
         out = years.flatMap((_, i) => { const vals = spread(re.map((r) => r[1]), series.reins_recoverable![i]!); return re.map((r, k) => ({ ...by(i), item: r[0], tag: r[2], value: vals[k] })); });
       }
       if (f.id === "ay_loss_ratio" || f.id === "ay_npe") {
-        // accident years y-6 to y: first reported loss and LAE ratio, and how much each later statement adds
+        // accident years y-6 to y: first reported loss and DCC ratio, and how much each later statement adds
         const first = [63.0, 65.5, 62.8, 70.1, 68.4, 61.9, 60.2], step = [0.9, 1.4, 1.1, 2.3, 1.6, -0.4, 0], npe = [38.9, 43.7, ...series.npe!.map((v) => v! / M)];
         out = years.flatMap((sy, i) => first.map((_, k) => y - 6 + k).filter((ay) => ay <= sy).map((ay) => {
           const k = ay - (y - 6);
@@ -1180,7 +1188,7 @@ Figures
 - Units in the facts: dollar amounts are US dollars; ratios and shares are percentage points (98.4 means 98.4%); multiples are plain numbers (1.8 means 1.8x). Arrays line up with facts.years.
 - Write dollar amounts in $M with one decimal and commas ($1,234.5M), percentages to one decimal (98.4%), multiples to one decimal (1.8x), negatives in parentheses, and "n/d" for anything missing.
 - Figures from facts.derived are calculations: mark them "(derived)". So are the figures facts.detail.derived lists (for example shares of the largest lines, states and reinsurers, recoverables as a share of surplus, and the change in an accident year's loss ratio): mark them "(derived)" too. Every other figure is as reported. Mark your own judgements "(inferred)".
-- facts.detail.accidentYears gives each accident year's loss and LAE ratio as each statement year reported it (values line up with facts.years); a change is in percentage points, and positive is worse.
+- facts.detail.accidentYears gives each accident year's loss and DCC ratio (net losses and defense and cost containment expenses to net premiums earned, from Schedule P; it leaves out adjusting and other expenses, so it is not the loss and LAE ratio) as each statement year reported it (values line up with facts.years); a change is in percentage points, and positive is worse.
 - If a section's figures are missing (facts.missing, or facts.filings.unavailable), say so briefly in that section.
 - An empty filings result means S&P returned nothing for the search. It doesn't show that nothing was filed.
 - facts.filingsInDetail, when it is there, is the same 12-month search in detail: totals of rate, rule and form filings, rate changes, filings by state, the states S&P returned nothing for (noneReturned) and any not searched (notSearched), the latest form and rule filings, and marks. Draft the filings section from it. A rate impact is S&P's overall figure for one filing, not weighted by premium; for a filing that isn't approved it may be the change asked for, so say so. A mark is the app's reading of a filing's wording, an inference: write that a filing "may be" a new program, a new form, a company new to a state or a withdrawal, mark it "(inferred)", and never state it as fact.

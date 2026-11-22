@@ -6,6 +6,7 @@ import type { FoundFiling, WatchRun, WatchRunPatch } from "../../../supabase/fun
 import type { DigestQuery, DigestRow } from "../../../supabase/functions/_shared/db.ts";
 import type { IndexCompany, IndexQueryParams, IndexQueryResult, IndexRow, IndexState, IndexSweep } from "../../../supabase/functions/_shared/db.ts";
 import { entityLabel, groupNamePattern, oneEach, planEntityWrites, withSameCompanies } from "../../../supabase/functions/_shared/db.ts";
+import { filledRow } from "../../../supabase/functions/_shared/db.ts";
 import { LIBRARY_MISSING, type LibraryRow } from "../../../supabase/functions/_shared/db.ts";
 
 export const read = (name: string) => JSON.parse(Deno.readTextFileSync(new URL(`../../fixtures/${name}`, import.meta.url)));
@@ -70,6 +71,17 @@ export function memoryDb(clock: Clock) {
       return withSameCompanies(oneEach(rows.map((r) => r.doc as unknown as Entity)).slice(0, limit), entityDocs()).slice(0, limit);
     },
     async getSetting(id) { return settings.get(id) ?? null; },
+    // NAIC codes looked up on Snowflake: read by institution id, with partners as the real one; fill only where empty
+    async entitiesByInstitution(ids) { return withSameCompanies(entityDocs().filter((e) => ids.includes(String(e.institutionId ?? "").trim())), entityDocs()); },
+    async fillEntityCodes(fills) {
+      let n = 0;
+      for (const r of [...store.values()].filter((r) => r.kind === "entity")) {
+        const f = fills.find((x) => x.institutionId === String((r.doc as Record<string, unknown>).institutionId ?? "").trim());
+        const doc = f ? filledRow(r.doc as unknown as Entity, f) : null;
+        if (doc) { store.set(r.id, { ...r, label: entityLabel(doc), doc: doc as unknown as Record<string, unknown>, fetched_at: iso() }); n++; }
+      }
+      return n;
+    },
     // the Live check's two reads: the latest saved results of a kind, and the company list without names
     async recentStore(kind, limit) { return [...store.values()].filter((r) => r.kind === kind).sort((a, b) => b.fetched_at.localeCompare(a.fetched_at)).slice(0, limit).map((r) => structuredClone(r)); },
     async entityFields(limit) {
