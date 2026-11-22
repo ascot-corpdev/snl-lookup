@@ -268,19 +268,23 @@ export function oneEach(entities: Entity[]): Entity[] {
 // company id or NAIC code) and from search results (keyed by company id, with a NAIC code and statutory key but no
 // group name). Saving merges the two into the row already there; reading merges any pair saved before this was so.
 
-const ID_FIELDS = ["companyId", "institutionId", "naicCompanyCode"] as const;
-const OTHER_FIELDS = ["companyName", "spStatEntityId", "naicGroupCode", "naicGroupName"] as const;
+// The S&P statutory entity key decides too: a list exported with only the key and a NAIC code lands on the row
+// that has the S&P ids and the same key. It is compared without regard to letter case.
+const ID_FIELDS = ["companyId", "institutionId", "naicCompanyCode", "spStatEntityId"] as const;
+const OTHER_FIELDS = ["companyName", "naicGroupCode", "naicGroupName"] as const;
 const FIELD_ORDER = ["companyId", "companyName", "naicCompanyCode", "institutionId", "spStatEntityId", "naicGroupCode", "naicGroupName"] as const;
 /** A filled-in value as text, or null for empty, missing or not a plain value. "1" and 1 are the same id. */
 const filled = (v: unknown): string | null => (v === null || v === undefined || typeof v === "object" || typeof v === "boolean" ? null : String(v).trim() || null);
+/** An id as two rows are compared on it: the statutory entity key in upper case, the others as filled. */
+const idOf = (e: Partial<Entity> | null | undefined, k: typeof ID_FIELDS[number]): string | null => { const v = filled(e?.[k]); return v && k === "spStatEntityId" ? v.toUpperCase() : v; };
 
-/** Whether two rows are the same company: they share an S&P company id, an institution id or a NAIC company code,
-    and no id that both have differs. Two rows with different company ids are never merged. */
+/** Whether two rows are the same company: they share an S&P company id, an institution id, a NAIC company code or
+    an S&P statutory entity key, and no id that both have differs. Two rows with different company ids are never merged. */
 export function sameCompany(a: Partial<Entity> | null | undefined, b: Partial<Entity> | null | undefined): boolean {
   if (!a || !b) return false;
   let shared = false;
   for (const k of ID_FIELDS) {
-    const x = filled(a[k]), y = filled(b[k]);
+    const x = idOf(a, k), y = idOf(b, k);
     if (x && y) { if (x !== y) return false; shared = true; }
   }
   return shared;
@@ -307,7 +311,7 @@ const fullness = (e: Entity) => [...ID_FIELDS, ...OTHER_FIELDS].filter((k) => fi
 function companyGroups<T extends Entity>(list: T[]): T[][] {
   type G = { at: number; rows: T[] };
   const groups: G[] = [], byId = new Map<string, G>();
-  const keys = (e: T) => ID_FIELDS.map((k) => (filled(e[k]) ? `${k}:${filled(e[k])}` : null)).filter((k): k is string => !!k);
+  const keys = (e: T) => ID_FIELDS.map((k) => (idOf(e, k) ? `${k}:${idOf(e, k)}` : null)).filter((k): k is string => !!k);
   const fits = (a: T[], b: T[]) => a.every((x) => b.every((y) => !clash(x, y)));
   for (const e of list) {
     // The groups this row shares an id with and doesn't clash with, earliest first; it joins the first, and any
@@ -321,7 +325,7 @@ function companyGroups<T extends Entity>(list: T[]): T[][] {
   }
   return groups.filter((g) => g.rows.length).map((g) => g.rows);
 }
-const clash = (a: Entity, b: Entity) => ID_FIELDS.some((k) => { const x = filled(a[k]), y = filled(b[k]); return !!x && !!y && x !== y; });
+const clash = (a: Entity, b: Entity) => ID_FIELDS.some((k) => { const x = idOf(a, k), y = idOf(b, k); return !!x && !!y && x !== y; });
 
 /** One row from all the rows of one company: the fullest leads, the others fill in what it lacks. */
 function mergeGroup(g: Entity[]): Entity {
@@ -357,6 +361,10 @@ export function planEntityWrites(existing: { id: string; doc: Entity }[], incomi
         same.push(r); cur = mergeGroup([e, ...same.map((x) => x.doc)]); grew = true;
       }
     }
+    // A saved row under the very id this company would get (the same company id, say, with another statutory key) is
+    // merged into as before, never overwritten.
+    const taken = saved.find((r) => r.id === `entity:${entityKey(e)}`);
+    if (!same.length && taken) same.push(taken);
     const known = same.length ? mergeGroup(same.map((r) => r.doc)) : null;
     const doc = known ? mergeEntity(known, e, { keepGroup: !opts.fromList }) : mergeEntity(e, e);
     const ids = [...new Set(same.map((r) => r.id))].sort((a, b) => homeRank(a) - homeRank(b) || a.localeCompare(b));
@@ -376,11 +384,15 @@ export function withSameCompanies(found: Entity[], partners: Entity[]): Entity[]
   return companyGroups([...found, ...partners]).filter((g) => g.some((e) => mine.has(e))).map((g) => g.length === 1 ? g[0] : mergeGroup(g));
 }
 
-/** The ids to look for saved rows of the same companies by: company ids, institution ids and NAIC codes, digits only. */
-export function entityIdsOf(list: Partial<Entity>[]): { companyId: string[]; institutionId: string[]; naicCompanyCode: string[] } {
+/** The ids to look for saved rows of the same companies by: company ids, institution ids and NAIC codes, digits only,
+    and statutory entity keys, letters and digits only. */
+export function entityIdsOf(list: Partial<Entity>[]): { companyId: string[]; institutionId: string[]; naicCompanyCode: string[]; spStatEntityId: string[] } {
   const pick = (k: typeof ID_FIELDS[number], re: RegExp) => [...new Set(list.map((e) => filled(e?.[k])).filter((v): v is string => !!v && re.test(v)))];
-  return { companyId: pick("companyId", /^\d{1,12}$/), institutionId: pick("institutionId", /^\d{1,12}$/), naicCompanyCode: pick("naicCompanyCode", /^\d{1,6}$/) };
+  return { companyId: pick("companyId", /^\d{1,12}$/), institutionId: pick("institutionId", /^\d{1,12}$/), naicCompanyCode: pick("naicCompanyCode", /^\d{1,6}$/), spStatEntityId: [...new Set(pick("spStatEntityId", STAT_KEY).flatMap((v) => [v, v.toUpperCase(), v.toLowerCase()]))] };
 }
+
+/** A statutory entity key as the company list holds it: letters and digits, at most 20 (filings.ts takes the same). */
+const STAT_KEY = /^[A-Za-z0-9]{1,20}$/;
 
 // A little over S&P's one second, because the wait is measured in the database and slept in the function.
 const GAP_MS = 1100;
@@ -393,8 +405,8 @@ export function supabaseDb(sb: SupabaseClient, now: () => number = Date.now): Db
   /** Saved company rows whose company id, institution id or NAIC company code is one of these, with their row ids. */
   const rowsByIds = async (ids: ReturnType<typeof entityIdsOf>): Promise<{ id: string; doc: Entity }[]> => {
     const out = new Map<string, { id: string; doc: Entity }>();
-    for (const k of ["companyId", "institutionId", "naicCompanyCode"] as const) {
-      for (let i = 0; i < ids[k].length; i += 100) {
+    for (const k of ["companyId", "institutionId", "naicCompanyCode", "spStatEntityId"] as const) {
+      for (let i = 0; i < (ids[k] ?? []).length; i += 100) {
         const { data, error } = await sb.from("snl_store").select("id,doc").eq("kind", "entity").in(`doc->>${k}`, ids[k].slice(i, i + 100)).limit(1000);
         if (error) throw new Error(`Couldn't read the company list: ${error.message}`);
         for (const r of (data ?? []) as { id?: unknown; doc?: unknown }[]) if (typeof r?.id === "string" && r.doc && typeof r.doc === "object") out.set(r.id, { id: r.id, doc: r.doc as Entity });
@@ -409,7 +421,7 @@ export function supabaseDb(sb: SupabaseClient, now: () => number = Date.now): Db
     let partners: Entity[] = [];
     try {
       const ids = entityIdsOf(list);
-      if (ids.institutionId.length || ids.naicCompanyCode.length) partners = (await rowsByIds({ companyId: [], institutionId: ids.institutionId, naicCompanyCode: ids.naicCompanyCode })).map((r) => r.doc);
+      if (ids.institutionId.length || ids.naicCompanyCode.length || ids.spStatEntityId.length) partners = (await rowsByIds({ companyId: [], institutionId: ids.institutionId, naicCompanyCode: ids.naicCompanyCode, spStatEntityId: ids.spStatEntityId })).map((r) => r.doc);
     } catch { /* the rows as found */ }
     return withSameCompanies(list, partners).slice(0, limit);
   };

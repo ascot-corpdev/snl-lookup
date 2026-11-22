@@ -167,6 +167,9 @@ export function describe(r) {
     `  ${n(r.counts.naicOnly)} for statutory figures only: a NAIC company code but no S&P id, so their filings can't be searched`,
     `  ${n(r.counts.withNaic)} with a NAIC company code, so their statutory figures can be found by name`,
     `  ${n(r.counts.withGroup)} with a group name`);
+  // A company with a statutory key lands on the row already saved with the same key (and its S&P ids) on load.
+  const withStatKey = r.companies.filter((c) => c.spStatEntityId).length;
+  if (withStatKey) lines.push(`  ${n(withStatKey)} with an S&P statutory entity key: loading merges each into a company already in the directory with the same key, which keeps its S&P ids`);
   if (r.skipped.noId) lines.push(`${n(r.skipped.noId)} rows left out: no S&P company id, institution id or NAIC company code, so the app couldn't use them.`);
   if (r.skipped.noName) lines.push(`${n(r.skipped.noName)} rows left out: no company name.`);
   if (r.duplicates) lines.push(`${n(r.duplicates)} rows repeated a company already in the list; the last one was kept.`);
@@ -182,17 +185,19 @@ export function describe(r) {
 // sameCompany, mergeEntity, planEntityWrites), so a list loaded after search results, or loaded again, lands on the
 // row already there instead of making a second row for the same company. Kept in step by a test.
 
-const ID_FIELDS = ["companyId", "institutionId", "naicCompanyCode"];
+// The S&P statutory entity key decides too (compared without regard to letter case), as in db.ts.
+const ID_FIELDS = ["companyId", "institutionId", "naicCompanyCode", "spStatEntityId"];
 const FIELD_ORDER = ["companyId", "companyName", "naicCompanyCode", "institutionId", "spStatEntityId", "naicGroupCode", "naicGroupName"];
 const filled = (v) => (v === null || v === undefined || typeof v === "object" || typeof v === "boolean" ? null : String(v).trim() || null);
-const clash = (a, b) => ID_FIELDS.some((k) => { const x = filled(a?.[k]), y = filled(b?.[k]); return !!x && !!y && x !== y; });
+const idOf = (e, k) => { const v = filled(e?.[k]); return v && k === "spStatEntityId" ? v.toUpperCase() : v; };
+const clash = (a, b) => ID_FIELDS.some((k) => { const x = idOf(a, k), y = idOf(b, k); return !!x && !!y && x !== y; });
 
-/** Whether two rows are the same company: they share a company id, an institution id or a NAIC company code, and no
-    id that both have differs. */
+/** Whether two rows are the same company: they share a company id, an institution id, a NAIC company code or an S&P
+    statutory entity key, and no id that both have differs. */
 export function sameCompany(a, b) {
   if (!a || !b) return false;
   let shared = false;
-  for (const k of ID_FIELDS) { const x = filled(a[k]), y = filled(b[k]); if (x && y) { if (x !== y) return false; shared = true; } }
+  for (const k of ID_FIELDS) { const x = idOf(a, k), y = idOf(b, k); if (x && y) { if (x !== y) return false; shared = true; } }
   return shared;
 }
 
@@ -214,7 +219,7 @@ const homeRank = (id) => (id.startsWith("entity:i.") ? 0 : /^entity:\d/.test(id)
 /** Rows grouped by company, in the order each company first appears (rows: {id, doc}). */
 function companyGroups(rows) {
   const groups = [], byId = new Map();
-  const keys = (r) => ID_FIELDS.map((k) => (filled(r.doc[k]) ? `${k}:${filled(r.doc[k])}` : null)).filter(Boolean);
+  const keys = (r) => ID_FIELDS.map((k) => (idOf(r.doc, k) ? `${k}:${idOf(r.doc, k)}` : null)).filter(Boolean);
   const fits = (a, b) => a.every((x) => b.every((y) => !clash(x.doc, y.doc)));
   for (const r of rows) {
     const linked = [...new Set(keys(r).map((k) => byId.get(k)).filter(Boolean))].filter((g) => fits(g.rows, [r])).sort((a, b) => a.at - b.at);
@@ -226,10 +231,10 @@ function companyGroups(rows) {
   return groups.filter((g) => g.rows.length).map((g) => g.rows);
 }
 
-/** The ids to look for saved rows of the same companies by, digits only. */
+/** The ids to look for saved rows of the same companies by: digits only, statutory entity keys letters and digits. */
 export function entityIdsOf(list) {
   const pick = (k, re) => [...new Set(list.map((e) => filled(e?.[k])).filter((v) => v && re.test(v)))];
-  return { companyId: pick("companyId", /^\d{1,12}$/), institutionId: pick("institutionId", /^\d{1,12}$/), naicCompanyCode: pick("naicCompanyCode", /^\d{1,6}$/) };
+  return { companyId: pick("companyId", /^\d{1,12}$/), institutionId: pick("institutionId", /^\d{1,12}$/), naicCompanyCode: pick("naicCompanyCode", /^\d{1,6}$/), spStatEntityId: [...new Set(pick("spStatEntityId", /^[A-Za-z0-9]{1,20}$/).flatMap((v) => [v, v.toUpperCase(), v.toLowerCase()]))] };
 }
 
 /** What loading companies does to the rows already saved (existing: [{id, doc}] that may be the same companies):
@@ -250,6 +255,9 @@ export function planEntityWrites(existing, incoming, opts = { fromList: true }) 
         same.push(r); cur = mergeGroup([e, ...same.map((x) => x.doc)]); grew = true;
       }
     }
+    // A saved row under the very id this company would get is merged into as before, never overwritten (db.ts too).
+    const taken = saved.find((r) => r.id === `entity:${entityKey(e)}`);
+    if (!same.length && taken) same.push(taken);
     const known = same.length ? mergeGroup(same.map((r) => r.doc)) : null;
     const doc = known ? mergeEntity(known, e, { keepGroup: !opts.fromList }) : mergeEntity(e, e);
     const ids = [...new Set(same.map((r) => r.id))].sort((a, b) => homeRank(a) - homeRank(b) || a.localeCompare(b));

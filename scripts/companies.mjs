@@ -59,10 +59,10 @@ async function database() {
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
-/** Saved company rows whose company id, institution id or NAIC company code is one of these. */
+/** Saved company rows whose company id, institution id, NAIC company code or statutory entity key is one of these. */
 async function savedRows(sb, ids) {
   const out = new Map();
-  for (const k of ["companyId", "institutionId", "naicCompanyCode"]) {
+  for (const k of ["companyId", "institutionId", "naicCompanyCode", "spStatEntityId"]) {
     for (const part of batches(ids[k], 100)) {
       const { data, error } = await sb.from("snl_store").select("id,doc").eq("kind", "entity").in(`doc->>${k}`, part).limit(1000);
       if (error) throw new Error(`Couldn't read the companies already saved: ${error.message}. Nothing was loaded from this batch.`);
