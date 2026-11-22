@@ -13,7 +13,7 @@ const FNS="https://a.supabase.co/functions/v1/";
 const CONFIG='window.SNL_CONFIG={supabaseUrl:"https://a.supabase.co",supabaseAnonKey:"sb_publishable_k",usernameDomain:"snl-lookup.test"};';
 const copy=o=>JSON.parse(JSON.stringify(o));
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
-const MDASH="—";
+const MDASH="\u2014";
 let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log("FAIL "+n+"  "+JSON.stringify(x)); } };
 const MAPPED=()=>({...copy(STAT.statusMapped), companies:{mapped:true, problem:null}});
 const codesAnswer=ids=>({status:200, body:{results:ids.map(id=>({institutionId:id, ...(NL.codes[id]||{status:"unknown", naicCompanyCode:null, naicGroupCode:null, naicGroupName:null})})), asked:ids.length, saved:3}});

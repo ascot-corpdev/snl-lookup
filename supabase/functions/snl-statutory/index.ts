@@ -96,7 +96,7 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
       }
 
       default:
-        return json(400, { error: "bad", message: "Unknown action. Use status, query, discover or codes." });
+        return json(400, { error: "bad", message: "Unknown action. Use status, query or discover." });
     }
   } catch (e) {
     const answer = snowflakeAnswer(e);
