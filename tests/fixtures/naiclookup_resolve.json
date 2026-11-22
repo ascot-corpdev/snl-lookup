@@ -1,0 +1,30 @@
+{
+  "_about": "Made-up companies for tests/web/naiclookup.test.cjs: what Find by name returns for companies the company list holds with an S&P institution id and S&P's group name but no NAIC company code, and what the statutory function's codes action answers for them. No real company, id or code.",
+  "calloway": {
+    "query": "Calloway",
+    "note": null,
+    "matches": [
+      { "companyId": null, "companyName": "Calloway Insurance Co", "naicCompanyCode": null, "institutionId": "5000001", "spStatEntityId": null, "naicGroupCode": null, "naicGroupName": "Calloway Group (SNL P&C Group)" },
+      { "companyId": null, "companyName": "Calloway Home Co", "naicCompanyCode": null, "institutionId": "5000002", "spStatEntityId": null, "naicGroupCode": null, "naicGroupName": "Calloway Group (SNL P&C Group)" },
+      { "companyId": null, "companyName": "Calloway Specialty Co", "naicCompanyCode": null, "institutionId": "5000003", "spStatEntityId": null, "naicGroupCode": null, "naicGroupName": "Calloway Group (SNL P&C Group)" },
+      { "companyId": null, "companyName": "Calloway Twin Co", "naicCompanyCode": null, "institutionId": "5000004", "spStatEntityId": null, "naicGroupCode": null, "naicGroupName": "Calloway Group (SNL P&C Group)" },
+      { "companyId": "4000005", "companyName": "Calloway Coastal Co", "naicCompanyCode": "90005", "institutionId": "5000005", "spStatEntityId": null, "naicGroupCode": "9001", "naicGroupName": "Calloway Group (SNL P&C Group)" },
+      { "companyId": null, "companyName": "Calloway <img src=x onerror=\"window.__xss=1\"> Co", "naicCompanyCode": null, "institutionId": "5000006", "spStatEntityId": null, "naicGroupCode": null, "naicGroupName": null },
+      { "companyId": "4000007", "companyName": "Calloway Lone Co", "naicCompanyCode": null, "institutionId": null, "spStatEntityId": null, "naicGroupCode": null, "naicGroupName": null }
+    ]
+  },
+  "tarrow": {
+    "query": "Tarrow",
+    "note": null,
+    "matches": [
+      { "companyId": null, "companyName": "Tarrow Mutual Insurance Co", "naicCompanyCode": null, "institutionId": "5000003", "spStatEntityId": null, "naicGroupCode": null, "naicGroupName": "Tarrow Group (SNL P&C Group)" }
+    ]
+  },
+  "codes": {
+    "5000001": { "status": "found", "naicCompanyCode": "90001", "naicGroupCode": "9001", "naicGroupName": "Calloway Grp" },
+    "5000002": { "status": "found", "naicCompanyCode": "90002", "naicGroupCode": "9001", "naicGroupName": "Calloway Grp" },
+    "5000003": { "status": "none", "naicCompanyCode": null, "naicGroupCode": null, "naicGroupName": null },
+    "5000004": { "status": "several", "naicCompanyCode": null, "naicGroupCode": null, "naicGroupName": null, "codes": ["90041", "90042"] },
+    "5000006": { "status": "found", "naicCompanyCode": "90006", "naicGroupCode": "9006", "naicGroupName": "Nonesuch <b>Group</b>" }
+  }
+}

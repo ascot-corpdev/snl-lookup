@@ -18,7 +18,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const E = (over) => ({ companyId: null, companyName: "Calloway Insurance Co", naicCompanyCode: null, institutionId: null, spStatEntityId: null, naicGroupCode: null, naicGroupName: null, ...over });
 
 // ---------- the pieces ----------
-ok("ids for the look-up are digits only, each once", same(entityIdsOf([E({ companyId: "4000001", institutionId: "5000001" }), E({ companyId: "4000001", naicCompanyCode: "90-01" }), E({ institutionId: "1 or 1=1" })]), { companyId: ["4000001"], institutionId: ["5000001"], naicCompanyCode: [] }));
+ok("ids for the look-up are digits only, each once", same(entityIdsOf([E({ companyId: "4000001", institutionId: "5000001" }), E({ companyId: "4000001", naicCompanyCode: "90-01" }), E({ institutionId: "1 or 1=1" })]), { companyId: ["4000001"], institutionId: ["5000001"], naicCompanyCode: [], spStatEntityId: [] }));
 ok("the same company by institution id; never two company ids", sameCompany(E({ institutionId: "5000001" }), E({ companyId: "4000001", institutionId: "5000001" })) && !sameCompany(E({ companyId: "1", institutionId: "5" }), E({ companyId: "2", institutionId: "5" })));
 ok("a list's empty cell never wipes what results taught", same(mergeEntity(E({ companyId: "4000001", institutionId: "5000001", naicCompanyCode: "90001" }), E({ institutionId: "5000001", naicGroupName: "Calloway Group" })),
   E({ companyId: "4000001", institutionId: "5000001", naicCompanyCode: "90001", naicGroupName: "Calloway Group" })));

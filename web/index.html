@@ -3191,8 +3191,9 @@ function suProblemsHTML(){
   const s=S.st.status, fields=s&&Array.isArray(s.fields)?s.fields:[];
   const bad=fields.filter(f=>!f.mapped && !blank(f.problem) && f.problem!=="not mapped");
   const lp=s&&!blank(s.loadedProblem)?s.loadedProblem:"";
-  if(!bad.length && !lp) return "";
-  return `<div class="notes" id="suProblems" role="status"><b>Part of the saved mapping can't be used yet</b><ul>${bad.map(f=>`<li><code>${esc(f.id)}</code> ${esc(f.label||"")}: ${esc(f.problem)}. Fix this entry and save again.</li>`).join("")}${lp?`<li><code>loaded</code>: ${esc(lp)}. Until it is fixed, the dates S&amp;P last loaded each view are shown instead.</li>`:""}</ul></div>`;
+  const cp=s&&s.companies&&!blank(s.companies.problem)?s.companies.problem:"";
+  if(!bad.length && !lp && !cp) return "";
+  return `<div class="notes" id="suProblems" role="status"><b>Part of the saved mapping can't be used yet</b><ul>${bad.map(f=>`<li><code>${esc(f.id)}</code> ${esc(f.label||"")}: ${esc(f.problem)}. Fix this entry and save again.</li>`).join("")}${lp?`<li><code>loaded</code>: ${esc(lp)}. Until it is fixed, the dates S&amp;P last loaded each view are shown instead.</li>`:""}${cp?`<li><code>companies</code>: ${esc(cp)}. Until it is fixed, Find by name can't look up missing NAIC codes.</li>`:""}</ul></div>`;
 }
 function suHelpHTML(){
   const ex={fields:{npe:{view:"CORE_FIN.FIN_FLOW_B", as:"F", joins:[{view:"CORE_FIN.FLOW_PERIOD", as:"FP", on:[{left:"F.PERIOD_ID", right:"FP.PERIOD_ID"}]},{view:"CORE_FIN.STOCK_PERIOD", as:"SP", on:[{left:"FP.STOCK_PERIOD_ID", right:"SP.PERIOD_ID"}]},{view:"ENTITY.ENTITY_LIST", as:"E", on:[{left:"SP.ENTITY_ID", right:"E.ENTITY_ID"}]}],
@@ -3224,6 +3225,7 @@ function mappingProblem(text){
     if(f.where!==undefined && !Array.isArray(f.where)) return {problem:`The entry for "${k}" has "where" that isn't a list. Write it as [{"column": ..., "equals": ...}].`};
   }
   if(doc.loaded!==undefined && !obj(doc.loaded)) return {problem:'The "loaded" entry must be an object, like {"view": "...", "at": "..."}.'};
+  if(doc.companies!==undefined && !obj(doc.companies)) return {problem:'The "companies" entry (the company look-up) must be an object, like {"view": "...", "institution": "...", "company": "...", "name": "..."}.'};
   if(text.length>200000) return {problem:"The mapping is too large to save."};
   return {doc};
 }
@@ -3242,7 +3244,7 @@ function setupHTML(){
   return `<section class="tcard" id="setup" aria-label="Field set-up">
     <div><h3>One-off set-up: tell the app where each figure lives in Snowflake</h3>
       <p class="t2">Do this once, after S&amp;P creates the Snowflake account. Only Corp Dev logins see this panel. Find the view and columns that hold each figure, then save them in the mapping below.</p></div>
-    ${fields.length?`<div class="counts" id="suFields"><b>Figures the app shows:</b>${fields.map(f=>`<span><code>${esc(f.id)}</code> ${esc(f.label)} ${f.mapped?"(mapped)":"(not mapped)"}</span>`).join("")}</div>`:""}
+    ${fields.length?`<div class="counts" id="suFields"><b>Figures the app shows:</b>${fields.map(f=>`<span><code>${esc(f.id)}</code> ${esc(f.label)} ${f.mapped?"(mapped)":"(not mapped)"}</span>`).join("")}</div>`:""}${st.status&&st.status.companies?`<p class="t2" id="suCompanies"><code>companies</code> Company look-up, which finds the NAIC code of a company found by name without one: ${st.status.companies.mapped?"mapped":"not mapped (optional)"}.</p>`:""}
     ${suProblemsHTML()}${suSchemaHTML()}
     <div class="f"><label for="su_like">1. Find the view <em>optional: part of a view name</em></label>
       <div class="toolbar"><div class="grow"><input type="text" id="su_like" data-bind="st.setup.like" value="${esc(su.like)}" autocomplete="off" spellcheck="false" placeholder="For example PREMIUM"></div>
@@ -3268,13 +3270,61 @@ const naicOk = c => /^[0-9]{1,6}$/.test(String(c??"").trim());
 async function statLookup(){
   const nf=statFind(), q=nf.q.trim();
   if(!q){ nf.matches=null; nf.err="Type part of a company or group name, or a NAIC code."; render(); return; }
-  nf.busy=true; nf.err=""; nf.note=""; nf.matches=null; nf.asked=q; render();
+  nf.busy=true; nf.err=""; nf.note=""; nf.matches=null; nf.asked=q; nf.nl=null; render();
   const r=await callFn("snl-filings",{action:"resolve", q});
   if(!S.session || S.st.nf!==nf) return;
   nf.busy=false;
   if(r.data){ nf.matches=Array.isArray(r.data.matches)?r.data.matches.filter(m=>m&&typeof m==="object"):[]; nf.note=r.data.note||""; }
   else if(r.err!=="signin") nf.err="Couldn't look that up. "+errText(r);
   render();
+  if(r.data && statCodesOn()) naicFill(nf, ()=>S.st.nf===nf && nf.asked===q);
+}
+/* ---------- missing NAIC codes, looked up on S&P's statutory data (the statutory function's "codes" action) ----------
+   When Find by name (Statutory and Profile) brings back companies the company list has with an S&P institution id but
+   no NAIC company code, and the statutory mapping has its optional company look-up, the page asks for their codes in
+   one call: about ten seconds the first time, saved to the company list after that. The matches show at once and
+   stay as they are if the look-up fails. Without the look-up nothing here runs. */
+const statCodesOn = () => { const s=S.st.status; return !!(s&&s.configured&&s.mapped&&s.companies&&s.companies.mapped); };
+const pfCodesOn = () => { const s=S.pf.status&&S.pf.status.statutory; return !!(s&&s.configured&&s.codes); };
+const naicInst = m => { const v=String(m&&m.institutionId!=null?m.institutionId:"").trim(); return /^[0-9]{1,12}$/.test(v)?v:""; };
+const naicMissing = matches => [...new Set((matches||[]).filter(m=>!naicOk(m.naicCompanyCode)).map(naicInst).filter(Boolean))].slice(0,50);
+async function naicFill(fd, still){
+  const ids=naicMissing(fd.matches);
+  if(!ids.length) return;
+  const nl=fd.nl={busy:true, err:"", by:{}, n:ids.length}; render();
+  const r=await callFn("snl-statutory",{action:"codes", institutionIds:ids});
+  if(!S.session || !still() || fd.nl!==nl) return;
+  nl.busy=false;
+  if(r.data && Array.isArray(r.data.results)){
+    for(const x of r.data.results){
+      if(!x || typeof x!=="object") continue;
+      const id=String(x.institutionId??""); nl.by[id]=x;
+      if((x.status!=="found" && x.status!=="known") || !naicOk(x.naicCompanyCode)) continue;
+      for(const m of fd.matches||[]) if(naicInst(m)===id && !naicOk(m.naicCompanyCode)){
+        m.naicCompanyCode=String(x.naicCompanyCode).trim();
+        if(blank(m.naicGroupCode) && naicOk(x.naicGroupCode)) m.naicGroupCode=String(x.naicGroupCode).trim();
+        if(blank(m.naicGroupName) && !blank(x.naicGroupName)) m.naicGroupName=String(x.naicGroupName);
+      }
+    }
+  }
+  else if(r.err!=="signin" && r.err!=="not_mapped") nl.err=errText(r);
+  render();
+}
+/* The line under the matches: looking the codes up, or why it couldn't. */
+function naicNoteHTML(fd, idp){
+  const nl=fd.nl; if(!nl) return "";
+  if(nl.busy) return `<p class="t2" id="${idp}_codesBusy" role="status">Looking up ${plural(nl.n,"missing NAIC code","missing NAIC codes")} on S&amp;P's statutory data. The first time takes about ten seconds.${pbHTML(idp+"-codes", {name:"Looking up NAIC codes", small:true})}</p>`;
+  if(nl.err) return `<div class="info" id="${idp}_codesErr" role="status"><span>Couldn't look up the missing NAIC codes on S&amp;P's statutory data. ${esc(nl.err)} The matches are shown as the company list has them; if you know a code, type it in the box above.</span></div>`;
+  return "";
+}
+/* What a match that still has no NAIC company code says, after (or while) its code is looked up. */
+function naicRowNote(fd, m, otherwise){
+  const nl=fd.nl, id=naicInst(m), x=nl&&id?nl.by[id]:null;
+  if(nl && nl.busy && id) return `<span class="t2 noadd">Looking up its NAIC code…</span>`;
+  if(x && x.status==="none") return `<span class="t2 noadd">Can't be added: S&amp;P's statutory data has no NAIC company code for this company either. If you know the code, type it in the box above.</span>`;
+  if(x && x.status==="several"){ const cs=Array.isArray(x.codes)?x.codes.map(String):[];
+    return `<span class="t2 noadd">Can't be added: S&amp;P's statutory data has more than one NAIC company code for this company${cs.length?` (${esc(cs.join(", "))})`:""}, so the app didn't choose. Type the right one in the box above.</span>`; }
+  return otherwise;
 }
 /* Adds one code to the end of the list: the first code is the subject, the rest are peers. */
 function statAddCode(code, name){
@@ -3313,7 +3363,10 @@ function statGroups(matches){
     if(!g.name && name) g.name=name;
     g.n++;
   }
-  return out;
+  // A company with only the group's name joins the group of that name that has a NAIC group code (one found by the
+  // NAIC code look-up, say), so the group is listed once.
+  for(const g of out.filter(x=>!x.code && x.name)){ const h=out.find(x=>x.code && x.name && x.name.toLowerCase()===g.name.toLowerCase()); if(h){ h.n+=g.n; g.n=0; } }
+  return out.filter(g=>g.n);
 }
 function statNameOf(kind, code){ const n=S.st.nf&&S.st.nf.names[kind]; return n&&!blank(n[code]) ? n[code] : ""; }
 function statNamedHTML(){
@@ -3330,7 +3383,7 @@ function statFinderHTML(){
   else if(nf.matches!==null && group){
     const groups=statGroups(nf.matches), loose=nf.matches.length-groups.reduce((a,g)=>a+g.n,0);
     const rows=groups.map(g=>{ const can=naicOk(g.code), inList=can&&codes.includes(g.code);
-      const act=!can ? `<span class="t2 noadd">Can't be added: the company list has no NAIC group code for this group.</span>`
+      const act=!can ? (nf.nl&&nf.nl.busy ? `<span class="t2 noadd">Looking up its NAIC group code…</span>` : `<span class="t2 noadd">Can't be added: the company list has no NAIC group code for this group.</span>`)
         : inList ? `<button type="button" class="btn sm" disabled>Added</button>` : `<button type="button" class="btn sm" data-act="st-add" data-code="${esc(g.code)}" data-name="${esc(g.name)}">Add</button>`;
       return `<li><div><div class="t1">${esc(g.name||`NAIC group ${g.code}`)}</div><div class="t2">${[can?`NAIC group ${esc(g.code)}`:"", `${plural(g.n,"matching company","matching companies")}`].filter(Boolean).join(" · ")}</div></div><span class="inline">${act}</span></li>`; }).join("");
     found = groups.length ? `<ul class="matches" id="st_matches" aria-label="Matching groups">${rows}</ul>${loose?`<p class="t2" id="st_loose">${plural(loose,"matching company has","matching companies have")} no group in the company list.</p>`:""}`
@@ -3339,7 +3392,7 @@ function statFinderHTML(){
   else if(nf.matches!==null){
     const rows=nf.matches.map(m=>{ const code=String(m.naicCompanyCode??"").trim(), can=naicOk(code), inList=can&&codes.includes(code);
       const meta=[can?`NAIC ${code}`:"", !blank(m.naicGroupName)?`group ${m.naicGroupName}`:""].filter(Boolean).join(" · ");
-      const act=!can ? `<span class="t2 noadd">Can't be added: the company list has no NAIC company code for it.</span>`
+      const act=!can ? naicRowNote(nf, m, `<span class="t2 noadd">Can't be added: the company list has no NAIC company code for it.</span>`)
         : inList ? `<button type="button" class="btn sm" disabled>Added</button>` : `<button type="button" class="btn sm" data-act="st-add" data-code="${esc(code)}" data-name="${esc(m.companyName)}">Add</button>`;
       return `<li><div><div class="t1">${esc(m.companyName||"n/d")}</div>${meta?`<div class="t2">${esc(meta)}</div>`:""}</div><span class="inline">${act}</span></li>`; }).join("");
     const addable=statAddable(nf.matches), gs=[...new Set(nf.matches.map(m=>blank(m.naicGroupName)?"":String(m.naicGroupName)))];
@@ -3349,7 +3402,7 @@ function statFinderHTML(){
   return `<div class="f" id="st_finder"><label for="st_find">Find by name <em>part of a company or group name, or a NAIC code; adds the ${group?"group":"company"}'s NAIC code to the list</em></label>
     <div class="toolbar"><div class="grow"><input type="text" id="st_find" data-bind="st.nf.q" value="${esc(nf.q)}" autocomplete="off" spellcheck="false" placeholder="For example Calloway"></div>
       <button type="button" class="btn" data-act="st-find" ${nf.busy?"disabled":""}>Find</button></div>
-    ${nf.err?`<p class="err" id="st_findErr" role="alert">${esc(nf.err)}</p>`:""}${found}</div>`;
+    ${nf.err?`<p class="err" id="st_findErr" role="alert">${esc(nf.err)}</p>`:""}${found}${nf.matches&&nf.matches.length&&!nf.busy?naicNoteHTML(nf,"st"):""}</div>`;
 }
 function renderStatutory(){
   const st=S.st, s=st.status;
@@ -3672,13 +3725,14 @@ document.addEventListener("change", e=>{
 async function pfLookup(){
   const pf=S.pf, fd=pf.find, q=fd.q.trim();
   if(!q){ fd.matches=null; fd.err="Type part of a company or group name."; render(); return; }
-  fd.busy=true; fd.err=""; fd.matches=null; fd.asked=q; render();
+  fd.busy=true; fd.err=""; fd.matches=null; fd.asked=q; fd.nl=null; render();
   const r=await callFn("snl-filings",{action:"resolve", q});
   if(!S.session || S.pf!==pf || fd.asked!==q) return;
   fd.busy=false;
   if(r.data) fd.matches=Array.isArray(r.data.matches)?r.data.matches.filter(m=>m&&typeof m==="object"):[];
   else if(r.err!=="signin") fd.err="Couldn't look that up. "+errText(r);
   render();
+  if(r.data && pfCodesOn()) naicFill(fd, ()=>S.pf===pf && pf.find===fd && fd.asked===q);
 }
 function pfChoose(code, name){
   const pf=S.pf; if(!naicOk(code)) return;
@@ -3701,18 +3755,18 @@ function pfFinderHTML(){
   else if(fd.matches!==null && !fd.matches.length) found=`<div class="info" id="pf_noMatch" role="status"><span>No company in the app's company list matches "${esc(fd.asked)}". Try a shorter part of the name, or type the NAIC code above.</span></div>`;
   else if(fd.matches!==null && group){
     const gs=statGroups(fd.matches).filter(g=>naicOk(g.code));
-    found = gs.length ? `<ul class="matches" id="pf_matches" aria-label="Matching groups">${gs.map(g=>`<li><div><div class="t1">${esc(g.name||`NAIC group ${g.code}`)}</div><div class="t2">NAIC group ${esc(g.code)} · ${plural(g.n,"matching company","matching companies")}</div></div><button type="button" class="btn sm" data-act="pf-choose" data-code="${esc(g.code)}" data-name="${esc(g.name)}">Choose</button></li>`).join("")}</ul>`
+    found = !gs.length && fd.nl && fd.nl.busy ? "" : gs.length ? `<ul class="matches" id="pf_matches" aria-label="Matching groups">${gs.map(g=>`<li><div><div class="t1">${esc(g.name||`NAIC group ${g.code}`)}</div><div class="t2">NAIC group ${esc(g.code)} · ${plural(g.n,"matching company","matching companies")}</div></div><button type="button" class="btn sm" data-act="pf-choose" data-code="${esc(g.code)}" data-name="${esc(g.name)}">Choose</button></li>`).join("")}</ul>`
       : `<div class="info" id="pf_noMatch" role="status"><span>The companies that match "${esc(fd.asked)}" have no NAIC group code in the company list. Type the group code above, or profile a company instead.</span></div>`;
   }
   else if(fd.matches!==null){
-    const ms=fd.matches.filter(m=>naicOk(m.naicCompanyCode));
-    found = ms.length ? `<ul class="matches" id="pf_matches" aria-label="Matching companies">${ms.map(m=>`<li><div><div class="t1">${esc(m.companyName||"n/d")}</div><div class="t2">${esc([`NAIC ${String(m.naicCompanyCode).trim()}`, blank(m.naicGroupName)?"":`group ${m.naicGroupName}`].filter(Boolean).join(" · "))}</div></div><button type="button" class="btn sm" data-act="pf-choose" data-code="${esc(String(m.naicCompanyCode).trim())}" data-name="${esc(m.companyName)}">Choose</button></li>`).join("")}</ul>`
+    const ms=fd.matches.filter(m=>naicOk(m.naicCompanyCode)), looked=!!(fd.nl && !fd.nl.busy && !fd.nl.err);
+    found = !ms.length && fd.nl && fd.nl.busy ? "" : !ms.length && looked ? `<div class="info" id="pf_noMatch" role="status"><span>${Object.values(fd.nl.by).some(x=>x&&x.status==="several") ? `S&amp;P's statutory data has more than one NAIC company code for the companies that match "${esc(fd.asked)}", so the app didn't choose. Type the right code above.` : `The companies that match "${esc(fd.asked)}" have no NAIC company code in the company list or in S&amp;P's statutory data. If you know the code, type it above.`}</span></div>` : ms.length ? `<ul class="matches" id="pf_matches" aria-label="Matching companies">${ms.map(m=>`<li><div><div class="t1">${esc(m.companyName||"n/d")}</div><div class="t2">${esc([`NAIC ${String(m.naicCompanyCode).trim()}`, blank(m.naicGroupName)?"":`group ${m.naicGroupName}`].filter(Boolean).join(" · "))}</div></div><button type="button" class="btn sm" data-act="pf-choose" data-code="${esc(String(m.naicCompanyCode).trim())}" data-name="${esc(m.companyName)}">Choose</button></li>`).join("")}</ul>`
       : `<div class="info" id="pf_noMatch" role="status"><span>The companies that match "${esc(fd.asked)}" have no NAIC company code in the company list. Type the code above.</span></div>`;
   }
   return `<div class="f"><label for="pf_find">Find by name <em>part of a company or group name</em></label>
     <div class="toolbar"><div class="grow"><input type="text" id="pf_find" data-bind="pf.find.q" value="${esc(fd.q)}" autocomplete="off" spellcheck="false" placeholder="For example Calloway"></div>
       <button type="button" class="btn" data-act="pf-find" ${fd.busy?"disabled":""}>Find</button></div>
-    ${fd.err?`<p class="err" id="pf_findErr" role="alert">${esc(fd.err)}</p>`:""}${found}</div>`;
+    ${fd.err?`<p class="err" id="pf_findErr" role="alert">${esc(fd.err)}</p>`:""}${found}${fd.matches&&fd.matches.length&&!fd.busy?naicNoteHTML(fd,"pf"):""}</div>`;
 }
 
 /* ----- the figures, Claude's draft, and the file ----- */
