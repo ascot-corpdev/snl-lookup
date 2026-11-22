@@ -208,4 +208,16 @@ const IDS = ["5000001", "5000002", "5000003", "5000004", "5000005", "5000099"];
   ok("any signed-in login may look codes up (reader above, Corp Dev here)", cd.status === 200);
 }
 
+// ---------- the Profile view learns from its own status whether to look codes up ----------
+{
+  const profile = await import(new URL("../../supabase/functions/snl-profile/index.ts", import.meta.url).href);
+  for (const [what, mapping, want] of [["with the look-up", { fields: FIELDS, companies: LOOKUP }, true], ["without it", { fields: FIELDS }, undefined], ["with a broken one", { fields: FIELDS, companies: { ...LOOKUP, name: undefined } }, undefined]] as const) {
+    const clock = fakeClock(), db = memoryDb(clock);
+    db.settings.set("statutory_mapping", mapping as unknown as Record<string, unknown>);
+    const res: Response = await profile.handle(req("snl-profile", { action: "status" }), { env: env(PAT), fetch: (() => { throw new Error("no"); }) as unknown as typeof fetch, now: clock.fn, whoIs: reader, db, sleep: clock.sleep });
+    const body = await res.json();
+    ok(`profile status ${what}: codes is ${want ?? "left out"}`, res.status === 200 && body.statutory.codes === want && ("codes" in body.statutory) === (want === true), body.statutory);
+  }
+}
+
 done();

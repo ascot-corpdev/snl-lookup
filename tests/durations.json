@@ -102,6 +102,7 @@
  "web/morefilters_market.test.cjs": 7,
  "web/morefilters_profile.test.cjs": 69,
  "web/morefilters_snapshot.test.cjs": 22,
+ "web/naiclookup.test.cjs": 12,
  "web/orgname.test.cjs": 5,
  "web/profile.test.cjs": 50,
  "web/profile_e2e.test.cjs": 6,
