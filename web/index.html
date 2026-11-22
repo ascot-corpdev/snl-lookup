@@ -424,6 +424,12 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 .pfkeys{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--muted)}
 .pfkeys i{display:inline-block;width:10px;height:10px;margin-right:5px;vertical-align:-1px}
 .pfkeys i.c1{background:var(--ink)}.pfkeys i.c2{background:var(--blue)}.pfkeys i.c3{background:var(--magenta)}
+/* Profile: the filings in detail (filings-detail): a long table scrolls inside its own box */
+.fdscroll{max-height:340px;overflow:auto}
+.fdscroll thead th{position:sticky;top:0;z-index:1}
+.pftbl td.dim{color:var(--muted)}
+.fdtiles{display:flex;flex-wrap:wrap;gap:6px 18px;margin:0;font-size:13px;min-width:0}
+.fdtiles span{min-width:0;overflow-wrap:anywhere}
 .pfcheck{display:flex;gap:10px;align-items:flex-start;cursor:pointer;min-width:0;overflow-wrap:anywhere}
 .pfcheck input{margin-top:3px;flex:none;width:16px;height:16px}
 .pfdraft{display:flex;flex-direction:column;gap:6px;min-width:0}
@@ -3842,6 +3848,7 @@ function pfMissingHTML(f){
    existed show the sections their own figures fill. While figures are still coming in, the same sections show what has
    arrived (pfSoFarHTML). The reader can also take slides out of the deck (pfSkip, remembered in this browser only). */
 const PF_SECS=[["premium","Premium"],["lines","Lines and states"],["underwriting","Underwriting"],["earnings","Earnings"],["balance","Balance sheet"],["capital","Capital"],["reserves","Reserves"],["accident","Accident years"],["reinsurance","Reinsurance"]];
+PF_SECS.push(["filings","Recent rate and form filings, last 12 months"]);   // filings-detail: shown only for facts that have filingsDetail
 const PF_SKIP_KEY="snl.pfSkip";
 function pfSkip(){
   const pf=S.pf;
@@ -3944,7 +3951,54 @@ function pfSecBody(f, id){
     }
     return h;
   }
+  if(id==="filings") return fdSecBody(f);
   return "";
+}
+/* ---------- Profile: the filings in detail (filings-detail) ----------
+   The same 12-month search the profile already runs, in detail (facts.filingsDetail): what S&P returned, rate changes by
+   state and line, the filings marked as maybe new (read from their wording, so an inference), the latest form and rule
+   filings, and every state in a box that scrolls inside itself. "" for facts without it (saved before it existed, or
+   the search couldn't run), so those show what they showed before. Everything from S&P goes through esc(). */
+const FD_MARK_NAMES={new_program:"New program or product", new_state:"New to a state", new_form:"New form or coverage", withdrawal:"Withdrawal"};
+function fdSecBody(f){
+  const D=f&&f.filingsDetail; if(!D || typeof D!=="object" || !D.totals || !f.filings || f.filings.unavailable) return "";
+  const T=D.totals, P=D.period||{}, rows=a=>Array.isArray(a)?a.filter(x=>x&&typeof x==="object"):[], M=D.marks&&typeof D.marks==="object"?D.marks:null;
+  const when=`published ${fmtDay(P.from)} to ${fmtDay(P.to)}`, searched=D.search&&isNum(D.search.statesSearched)?+D.search.statesSearched:null;
+  const tv=v=>blank(v)?"n/d":String(v);
+  if(!isNum(T.filings) || +T.filings<=0) return `<p class="pfnote" id="fdNone">S&amp;P returned nothing for this search (${esc(when)}${searched!==null?`, ${esc(plural(searched,"state"))} searched`:""}). That doesn't prove nothing was filed.</p>`;
+  const rate=x=>x&&isNum(x.rate)?pct(x.rate)+(x.approved?"":"*"):"n/d";
+  let h=`<p class="fdtiles" id="fdTiles"><span><b>${esc(count(T.filings))}</b> filings ${esc(when)}</span><span><b>${esc(count(T.rate))}</b> rate, <b>${esc(count(T.rule))}</b> rule, <b>${esc(count(T.form))}</b> form</span><span><b>${esc(count(T.states))}</b> states with filings${searched!==null?` of ${esc(count(searched))} searched`:""}</span>${M?`<span><b>${esc(count(M.filings))}</b> may be new products or market moves (inferred)</span>`:""}</p>`;
+  if(D.search&&D.search.capped) h+=`<p class="pfnote">The search stopped early, so there may be more filings than these.</p>`;
+  // rate changes by state and line
+  const R=D.rates||{}, rr=rows(R.rows);
+  if(rr.length) h+=`<p class="pfcap">Rate changes by state and type of insurance <span class="t2">(S&amp;P's overall figure for each filing, not weighted by premium)</span></p>`+pfListTable("fdTabRates",[["State","state",tv],["Type of insurance","toi",tv],["Filings","n",count,1],["Range %","lo",(v,r)=>!isNum(r.lo)?"n/d":r.lo===r.hi?pfP(r.lo):`${pfP(r.lo)} to ${pfP(r.hi)}`,1],["Latest %","latest",l=>l&&isNum(l.rate)?pfP(l.rate)+(l.approved?"":"*"):"n/d",1],["Published","latest",l=>l?fmtDay(l.date):"n/d",1],["Status","latest",l=>l&&!blank(l.status)?String(l.status):"n/d"]],rr);
+  if(D.largest) h+=`<p class="pfnote" id="fdLargest">Largest overall rate change: ${esc(rate(D.largest))} in ${esc(tv(D.largest.state))}${blank(D.largest.toi)?"":` (${esc(D.largest.toi)})`}, published ${esc(fmtDay(D.largest.date))}, ${esc(tv(D.largest.status))}.${D.largest.approved?"":" Not approved, so it may be the change asked for."}</p>`;
+  if(rr.some(r=>r.latest&&!r.latest.approved)) h+=`<p class="t2 pfnote">* Not approved: the figure may be the change asked for.</p>`;
+  // the marks, with the words that triggered each
+  if(M){
+    const mr=rows(M.rows), kinds=Object.keys(FD_MARK_NAMES).filter(k=>M.counts&&+M.counts[k]>0).map(k=>`${FD_MARK_NAMES[k].toLowerCase()} ${count(M.counts[k])}`);
+    h+=`<p class="pfcap">May be new products or market moves <span class="t2">(inferred from each filing's wording, not reported by S&amp;P)</span></p>`;
+    h+= mr.length ? `<p class="pfnote">${esc(plural(M.filings,"filing"))} marked${kinds.length?`: ${esc(kinds.join(", "))}`:""}${+M.filings>mr.length?`; the newest ${esc(count(mr.length))} shown`:""}.</p>`+pfListTable("fdTabMarks",[["State","state",tv],["Type of insurance","toi",tv],["Filing type","type",tv],["Status","status",tv],["Published","published",fmtDay,1],["Effective","effective",fmtDay,1],["Filing number","filingNo",tv],["May be","marks",m=>rows(m).map(x=>tv(x.label)).join("; ")||"n/d"],["Why: the words that marked it","marks",m=>rows(m).map(x=>tv(x.reason)).join("; ")||"n/d"]],mr)
+      : `<p class="pfnote" id="fdNoMarks">No filing's wording suggests a new program, a new form, a company new to a state or a withdrawal. A filing with no mark isn't thereby unimportant.</p>`;
+  }
+  // the latest form and rule filings
+  const lf=rows(D.latest&&D.latest.rows);
+  if(lf.length) h+=`<p class="pfcap">Latest form and rule filings <span class="t2">(${esc(count(lf.length))} of ${esc(count(D.latest.total))})</span></p>`+pfListTable("fdTabForms",[["State","state",tv],["Type of insurance","toi",tv],["Filing type","type",tv],["Status","status",tv],["Published","published",fmtDay,1],["Filing number","filingNo",tv]],lf);
+  // every state, in a box that scrolls inside itself
+  const es=rows(D.everyState);
+  if(es.length){
+    const none=es.filter(s=>s.searched&&!+s.n).length, off=es.filter(s=>!s.searched).length;
+    h+=`<p class="pfcap">Every state <span class="t2">(${esc(count(es.length-none-off))} with filings, ${esc(count(none))} none returned${off?`, ${esc(count(off))} not searched`:""})</span></p>
+      <div class="tbl-wrap pfwrap fdscroll" id="fdStatesBox" tabindex="0" role="region" aria-label="Every state, scrolls"><table class="pftbl" id="fdTabStates"><thead><tr><th>State</th><th class="num">Filings</th><th class="num">Rate</th><th class="num">Rule</th><th class="num">Form</th><th class="num">Latest %</th><th class="num">Published</th><th>Line</th><th class="num">New program</th></tr></thead><tbody>${es.map(s=>{
+        if(!s.searched) return `<tr data-st="${esc(s.state)}"><td>${esc(s.state)}</td><td class="dim" colspan="8">Not searched</td></tr>`;
+        if(!+s.n) return `<tr data-st="${esc(s.state)}"><td>${esc(s.state)}</td><td class="dim" colspan="8">None returned</td></tr>`;
+        const l=s.latest;
+        return `<tr data-st="${esc(s.state)}"><td>${esc(s.state)}</td><td class="num">${esc(count(s.n))}</td><td class="num">${esc(count(s.rate))}</td><td class="num">${esc(count(s.rule))}</td><td class="num">${esc(count(s.form))}</td><td class="num">${esc(l&&isNum(l.rate)?pfP(l.rate)+(l.approved?"":"*"):"n/d")}</td><td class="num">${esc(l?fmtDay(l.date):"n/d")}</td><td>${esc(l?tv(l.toi):"n/d")}</td><td class="num${+s.newProgram>0?" bad":""}">${esc(count(s.newProgram))}</td></tr>`; }).join("")}</tbody></table></div>
+      <p class="t2 pfnote">None returned: S&amp;P returned nothing for this search in that state, which doesn't prove nothing was filed. New program: filings whose wording suggests one (inferred).</p>`;
+  }
+  const g=D.regulator&&D.regulator.all;
+  if(g&&isNum(g.median)) h+=`<p class="pfnote" id="fdRegulator">About ${esc(plural(g.median,"day"))} from submitted to published, the median over ${esc(plural(g.n,"filing"))} (approximate).</p>`;
+  return h;
 }
 function pfDetailHTML(f, where){
   const open=S.pf.openSecs||{}, old=!(f.detail && typeof f.detail==="object");   // facts saved before the detail: the sections of the slides they had

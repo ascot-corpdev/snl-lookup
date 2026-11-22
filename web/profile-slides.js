@@ -158,7 +158,7 @@
     if (empty.length) parts.push("S&P returned nothing for " + lower(joinWords(empty.map(lower))) + (yl ? " for " + yl : ""));
     return parts.join("; ") + ".";
   }
-  function plan(facts) {
+  function plan(facts, opts) {
     var f = facts || {};
     var anySeries = Object.keys(f.series || {}).some(function (k) { return any(S(f, k)); });
     var X = detailOf(f);
@@ -181,6 +181,7 @@
       out("reinsurance", whyMissing(f, ["ceded_by_reinsurer", "gpw", "reins_recoverable"]));
     if (!f.filings) out("filings", "Recent filings weren't looked up for this profile.");
     else if (f.filings.unavailable) out("filings", flat(f.filings.unavailable) || "Recent filings aren't available.");
+    fdPlan(f, rows, out, opts);
     return rows;
   }
 
@@ -929,7 +930,7 @@
     items.push(header("Latest form and rule filings, newest first" + (total > rows.length ? " (" + rows.length + " of " + cnt(total) + ")" : ""), L, TOP, W));
     var tr = rows.map(function (r) { return [flat(r.company) || "n/d", flat(r.state) || "n/d", flat(r.toi) || "n/d", flat(r.type) || "n/d", flat(r.status) || "n/d", fpDate(f, r.published), flat(r.filingNo) || "n/d"]; });
     var tbl = fpTable("Table latest filings", L, TOP + HDR, W, ["Company", "State", "Type of insurance", "Filing type", "Status", "Published", "Filing number"], tr,
-      [3.0, 0.65, 2.45, 1.3, 1.35, 1.2, 2.33], ["l", "l", "l", "l", "l", "r", "l"], [0, 5], { fit: [0, 2, 3, 4, 6] });
+      [3.0, 0.65, 2.45, 1.3, 1.35, 1.2, 2.33], ["l", "l", "l", "l", "l", "r", "l"], f._oneCompany ? [5] : [0, 5], { fit: [0, 2, 3, 4, 6] });
     items.push(tbl);
     var y2 = TOP + HDR + (rows.length + 1) * 0.25 + 0.3;
     if (pts.length && BOTTOM - y2 >= 0.9) items = items.concat(takeaways(pointsOf(t, "forms"), L, y2, W, BOTTOM - y2));
@@ -1306,14 +1307,189 @@
     return { fileName: (slug(fpName(f)) || "filings") + "-filings-profile" + (f.sample ? "-sample" : "") + (day ? "-" + day : "") + ".pptx", slides: slides };
   }
 
+  // =================================================================================================================
+  // ---------- the full profile's filings in detail (facts.filingsDetail, from the same 12-month search) ----------
+  // =================================================================================================================
+  // facts.filingsDetail is a filings profile's facts (filingsFactsFrom in profile.ts) with marks and every state, so
+  // the filings profile's slides are reused for it, with the code-written takeaways in text.filingsDetail. Facts made
+  // before it existed have none and keep the single filings slide. The at-a-glance slide takes the place of that
+  // slide (same id, "filings") and carries the filings section's takeaways (Claude's or the plain ones).
+  var FD_SLIDES = [
+    ["fdRates", "Rate changes, last 12 months"], ["fdRateMap", "Latest rate change by state (map), last 12 months"], ["fdMarks", "New products and market moves, last 12 months"],
+    ["fdForms", "Latest form and rule filings, last 12 months"], ["fdStates", "Every state, last 12 months"], ["fdRegulator", "Time with the regulator, last 12 months"]
+  ];
+  var FD_LABEL = "Filings at a glance, last 12 months";
+  var MARK_ORDER = ["new_program", "new_state", "new_form", "withdrawal"];
+  var MARK_NAMES = { new_program: "New program or product", new_state: "New to a state", new_form: "New form or coverage", withdrawal: "Withdrawal" };
+  var MARK_NOTE = ["Marks: the app reads each filing's type, status and description, so a marked filing may be new; S&P doesn't report it as new.",
+    "Marks are inferred from each filing's wording.", "Marks inferred from wording."];
+  var NONE_NOTE = ["None returned: S&P returned nothing for this search in that state, which doesn't prove nothing was filed.", "None returned: not proof that nothing was filed.", "None returned: not proof of none."];
+
+  // the detail, or null for facts made before it existed (or when the search couldn't run)
+  function fdOf(f) { var d = f && f.filingsDetail; return d && typeof d === "object" && !Array.isArray(d) && d.totals && typeof d.totals === "object" && f.filings && !f.filings.unavailable ? d : null; }
+  function fdMarks(d) { var m = d && d.marks; return m && typeof m === "object" && Array.isArray(m.rows) && m.counts ? m : { counts: {}, filings: 0, rows: [], largeRate: 0 }; }
+  // the takeaways of the detailed slides (code-written; none for a text saved before them)
+  function fdText(t) { var x = t && t.filingsDetail; return x && typeof x === "object" ? x : { by: "plain" }; }
+  function fdTitled(slide, id, fallback) {
+    slide.id = id;
+    if (!/12 months/.test(slide.title)) slide.title = trimTitle(fallback + ", last 12 months");
+    return slide;
+  }
+  function fdPlan(f, rows, out, opts) {
+    var FD = fdOf(f); if (!FD) return;
+    var at = -1; rows.forEach(function (r, i) { if (r.id === "filings") at = i; });
+    if (at < 0) return;
+    rows[at].label = FD_LABEL;
+    rows.splice.apply(rows, [at + 1, 0].concat(FD_SLIDES.map(function (s) { return { id: s[0], label: s[1], included: true, reason: "" }; })));
+    var T = FD.totals || {}, R = FD.rates || {}, M = fdMarks(FD);
+    if (!num(T.filings) || T.filings <= 0) { FD_SLIDES.forEach(function (s) { out(s[0], NOTHING); }); return; }
+    if (!R.filings) out("fdRates", "S&P returned no rate filings for this search, so there are no rate changes to show.");
+    else if (!R.withImpact) out("fdRates", "No filing carried an overall rate impact in S&P's data, so there are no rate changes to chart.");
+    else if (!arr(R.points).length) out("fdRates", "None of the filings with a rate impact has a publish date, so they can't be put in date order.");
+    if (!usMapOf(opts)) out("fdRateMap", "The outlines of the states didn't load, so the rate map is left out. Reload the page and build again.");
+    else if (!fpRows(FD, "states").some(function (s) { return s.latest && num(s.latest.rate); })) out("fdRateMap", "No filing in any state carried an overall rate impact in S&P's data, so there is nothing to shade.");
+    if (!FD.marks) out("fdMarks", "These figures were saved before filings were marked, so get the figures again to see them.");
+    else if (!M.filings) out("fdMarks", "No filing's wording suggests a new program, a new form, a company new to a state or a withdrawal. A filing with no mark isn't thereby unimportant.");
+    if (!(FD.latest && FD.latest.total > 0 && fpRows(FD, "latest").length)) out("fdForms", "S&P returned no form or rule filings for this search.");
+    if (!arr(FD.everyState).length) out("fdStates", "These figures were saved before every state was listed, so get the figures again to see them.");
+    if (!(FD.regulator && FD.regulator.all)) out("fdRegulator", "None of the filings has both a submitted date and a publish date in S&P's data, so the time with the regulator can't be worked out.");
+  }
+  function fdMake(f, make, opts) {
+    var FD = fdOf(f); if (!FD) return;
+    var usMap = usMapOf(opts);
+    make.filings = function (f, t) { return fdGlance(f, t, FD, usMap); };
+    make.fdRates = function (f, t) { return fdTitled(fpRates(FD, fdText(t)), "fdRates", "Rate changes"); };
+    make.fdRateMap = function (f, t) { return fdTitled(mapSlide(FD, fdText(t), "rate", usMap), "fdRateMap", "Latest rate change by state"); };
+    make.fdMarks = function (f, t) { return fdMarksSlide(FD, fdText(t)); };
+    make.fdForms = function (f, t) {
+      // one company: no company column (every row is the company); a group with several keeps it
+      var e = FD.entity || {}, one = !(e.kind === "group" && e.companies > 1);
+      var g = one ? Object.assign({}, FD, { latest: Object.assign({}, FD.latest, { rows: fpRows(FD, "latest").map(function (r) { return Object.assign({}, r, { company: null }); }) }), _oneCompany: true }) : FD;
+      return fdTitled(fpForms(g, fdText(t)), "fdForms", "Latest form and rule filings");
+    };
+    make.fdStates = function (f, t) { return fdEveryState(FD, fdText(t)); };
+    make.fdRegulator = function (f, t) { return fdTitled(fpRegulator(FD, fdText(t)), "fdRegulator", "Time with the regulator"); };
+  }
+
+  // ----- at a glance: tiles, the map of filings by state, filings by type, and the filings section's takeaways -----
+  function fdGlance(f, t, FD, usMap) {
+    var T = FD.totals || {}, A = FD.approval || {}, M = fdMarks(FD), items = [], lw = 7.75, rx = 8.62, rw = R - rx;
+    var claude = t.by === "claude";
+    if (!T.filings) {
+      items.push(header("Filings, last 12 months", L, TOP, lw), fpNothingBox(FD, L, TOP + HDR, lw));
+      items = items.concat(takeaways(pointsOf(t, "filings"), rx, TOP, rw, BOTTOM - TOP));
+      items.push(fpSource(FD, t, [], true));
+      return { kind: "content", id: "filings", title: trimTitle(flat(t.filings && t.filings.title) || "Recent rate and form filings, last 12 months"), items: items };
+    }
+    var rows = fpRows(FD, "states");
+    if (usMap) {
+      var legendRows = Math.ceil((countBins(rows.reduce(function (m, r) { return Math.max(m, r.n || 0); }, 0)).length + 2) / 3);
+      var mapH = BOTTOM - TOP - HDR - 0.12 - legendRows * 0.24;
+      items.push(header("Filings by state, shaded by number of filings", L, TOP, lw));
+      var m = mapItems(FD, "count", usMap, L, TOP + HDR, lw, mapH);
+      items.push(m.group);
+      items.push(legendItems(m.legend, L, m.bottom + 0.1, lw, "Key: filings").group);
+    } else {
+      var bars = rows.slice(0, 12);
+      items.push(header("Filings by state" + (rows.length > bars.length ? " (top " + bars.length + " of " + rows.length + ")" : ""), L, TOP, lw));
+      items.push({ type: "chart", kind: "bar", x: L, y: TOP + HDR, w: lw, h: Math.min(BOTTOM - TOP - HDR, 0.45 + bars.length * 0.3), legend: "none", gap: 50, categories: bars.map(function (r) { return r.state; }),
+        series: [ser("Filings", bars.map(function (r) { return r.n; }), NAVY, { pointColors: { 0: MAG } })], labels: { format: "#,##0" }, catSize: 11, name: "Chart states" });
+    }
+    // the tiles
+    items.push(header("Last 12 months at a glance", rx, TOP, rw));
+    var tw = (rw - 0.12) / 2, th = 0.82;
+    [[cnt(T.filings), "Filings published"], [cnt(T.states), "States filed in, of " + cnt(FD.search && FD.search.statesSearched) + " searched"],
+      [cnt(T.rate), "Rate filings, " + cnt(A.approved) + " approved"], [cnt(M.filings), "May be new products or market moves (inferred)", M.filings ? MAG : NAVY]].forEach(function (c, i) {
+      var tl = tile(rx + (i % 2) * (tw + 0.12), TOP + HDR + Math.floor(i / 2) * (th + 0.1), tw, th, c[0], c[1], c[2]); tl.labelSize = 10; tl.valueSize = 22; items.push(tl);
+    });
+    // by filing type: one row of counts
+    var Y = FD.years || {}, types = arr(Y.types).map(function (ty, i) { return { ty: flat(ty) || "Type n/d", n: arr(Y.byType)[i] || 0 }; }).filter(function (x) { return x.n > 0; }).slice(0, 5);
+    var y2 = TOP + HDR + 2 * th + 0.1 + 0.15;
+    if (types.length) {
+      var cw = rw / types.length;
+      items.push(header("By filing type", rx, y2, rw));
+      items.push({ type: "table", x: rx, y: y2 + HDR, colW: types.map(function () { return cw; }), rowH: 0.25, size: 11, name: "Table filing types", aligns: types.map(function () { return "r"; }),
+        rows: [types.map(function (x) { return fitText(x.ty, 11, cw - 0.26, true); }), types.map(function (x) { return cnt(x.n); })] });
+      y2 += HDR + 0.5 + 0.15;
+    }
+    if (BOTTOM - y2 >= 1.0) items = items.concat(takeaways(pointsOf(t, "filings"), rx, y2, rw, BOTTOM - y2));
+    items.push(fpSource(FD, t, [MARK_NOTE, NONE_NOTE], claude));
+    return { kind: "content", id: "filings", title: trimTitle(flat(t.filings && t.filings.title) || "Recent rate and form filings, last 12 months"), items: items };
+  }
+
+  // ----- new products and market moves: the marked filings with the words that marked them -----
+  function fdMarksSlide(FD, t) {
+    var M = fdMarks(FD), items = [], e = FD.entity || {}, group = e.kind === "group" && e.companies > 1;
+    var cw = 4.3, kinds = MARK_ORDER.map(function (k) { return [MARK_NAMES[k], cnt((M.counts || {})[k] || 0)]; });
+    items.push(header("Filings marked, by kind", L, TOP, cw));
+    items.push({ type: "table", x: L, y: TOP + HDR, colW: [3.1, 1.2], rowH: 0.25, size: 11, name: "Table marks by kind", aligns: ["l", "r"], rows: [["May be", "Filings"]].concat(kinds) });
+    var tx = L + cw + 0.3, tw = R - tx, y2 = TOP + HDR + 0.25 * 5 + 0.3;
+    items = items.concat(takeaways(pointsOf(t, "marks"), tx, TOP, tw, y2 - 0.1 - TOP));
+    var cap = Math.max(1, Math.floor((BOTTOM - y2 - HDR) / 0.25) - 1), shown = arr(M.rows).slice(0, cap);
+    var tr = shown.map(function (r) {
+      var ms = arr(r.marks);
+      return [flat(r.company) || "n/d", flat(r.state) || "n/d", flat(r.toi) || "n/d", flat(r.type) || "n/d", flat(r.status) || "n/d", fpDate(FD, r.published), fpDate(FD, r.effective), flat(r.filingNo) || "n/d",
+        ms.map(function (x) { return flat(x.label); }).filter(Boolean).join("; ") || "n/d", ms.map(function (x) { return flat(x.reason); }).filter(Boolean).join("; ") || "n/d"];
+    });
+    var total = num(M.filings) ? M.filings : shown.length;
+    items.push(header("Marked filings, newest first" + (total > shown.length ? " (" + shown.length + " of " + cnt(total) + ")" : ""), L, y2, W));
+    var head = ["Company", "State", "Type of insurance", "Filing type", "Status", "Published", "Effective", "Filing number", "May be", "Why: the words that marked it"];
+    var widths = [1.3, 0.55, 1.4, 0.85, 1.62, 1.05, 1.05, 1.25, 1.2, 3.31];
+    if (!group) { head = head.slice(1); widths = widths.slice(1); tr = tr.map(function (r) { return r.slice(1); }); }
+    else widths = [1.3, 0.5, 1.2, 0.8, 1.62, 1.0, 1.0, 1.15, 1.1, 2.61];   // a group: room for the company
+    var o = group ? 1 : 0;
+    items.push(fpTable("Table marked filings", L, y2 + HDR, W, head, tr, widths, head.map(function (_, j) { return j === 4 + o || j === 5 + o ? "r" : "l"; }), [0, 4 + o, 7 + o, 8 + o],
+      { fit: group ? [0, 2, 3, 4, 7, 8, 9] : [1, 2, 3, 6, 7, 8], extra: { size: 10 } }));
+    items.push(fpSource(FD, t, [MARK_NOTE, ["Filing number: the tracking number, or S&P's own number (S&P no.) when there is none.", "Filing number: tracking or S&P no.", ""]]));
+    return { kind: "content", id: "fdMarks", title: trimTitle(flat(t.marks && t.marks.title) || "New products and market moves, last 12 months"), items: items };
+  }
+
+  // ----- every state: two tables a slide, running on to a second slide; nothing is shown as zero filings -----
+  function fdEveryState(FD, t) {
+    // 9pt so a state's nine figures fit in half the width; the heading row may take two lines
+    var HEAD_H = 0.42, rows = arr(FD.everyState).filter(function (r) { return r && /^[A-Z]{2}$/.test(String(r.state)); }), per = Math.floor((BOTTOM - TOP - HDR - HEAD_H) / 0.25), star = false;
+    var head = ["State", "Filings", "Rate", "Rule", "Form", "Latest (%)", "Published", "Line", "New program"];
+    var widths = [0.45, 1.0, 0.42, 0.42, 0.46, 0.62, 0.85, 1.07, 0.78], tw = widths.reduce(function (a, b) { return a + b; }, 0), gap = W - 2 * tw;
+    var cell = function (r) {
+      if (!r.searched) return [r.state, { text: "Not searched", color: "666666" }, "", "", "", "", "", "", ""];
+      if (!r.n) return [r.state, { text: "None returned", color: "666666" }, "", "", "", "", "", "", ""];
+      var l = r.latest; if (l && !l.approved) star = true;
+      return [r.state, cnt(r.n), cnt(r.rate), cnt(r.rule), cnt(r.form), l ? pctCell(l.rate) + (l.approved ? "" : "*") : "n/d", l ? fpDate(FD, l.date) : "n/d", l ? fitText(flat(l.toi) || "n/d", 9, 1.07 - 0.26, false) : "n/d",
+        r.newProgram ? { text: cnt(r.newProgram), color: MAG } : "0"];
+    };
+    var table = function (list, x, name) {
+      return { type: "table", x: x, y: TOP + HDR, colW: widths, rowH: [HEAD_H].concat(list.map(function () { return 0.25; })), size: 9, name: name, aligns: ["l", "r", "r", "r", "r", "r", "r", "l", "r"], rows: [head].concat(list.map(cell)) };
+    };
+    var slides = [], pages = Math.max(1, Math.ceil(rows.length / (2 * per)));
+    var filed = rows.filter(function (r) { return r.n > 0; }).length, none = rows.filter(function (r) { return r.searched && !r.n; }).length, off = rows.filter(function (r) { return !r.searched; }).length;
+    for (var pg = 0; pg < pages; pg++) {
+      var part = rows.slice(pg * 2 * per, (pg + 1) * 2 * per), left = part.slice(0, per), right = part.slice(per), items = [];
+      star = false;
+      items.push(header("Every state" + (pages > 1 ? " (" + (pg + 1) + " of " + pages + ")" : "") + ": " + cnt(filed) + " with filings, " + cnt(none) + " none returned" + (off ? ", " + cnt(off) + " not searched" : ""), L, TOP, W));
+      items.push(table(left, L, "Table every state " + (pg * 2 + 1)));
+      if (right.length) items.push(table(right, L + tw + gap, "Table every state " + (pg * 2 + 2)));
+      else items = items.concat(takeaways(pointsOf(t, "everyState"), L + tw + gap, TOP + HDR, tw, BOTTOM - TOP - HDR));
+      items.push(fpSource(FD, t, [NONE_NOTE, star ? ["* Not approved: the figure may be the change asked for. Latest: S&P's overall figure, not weighted by premium.", "* Not approved: may be as asked. Unweighted.", "* May be as asked."] : ["Latest: S&P's overall rate figure for the newest filing with one, not weighted by premium.", "Latest: overall, unweighted."],
+        ["New program: filings whose wording suggests one (inferred).", "New program: inferred.", ""]]));
+      var title = flat(t.everyState && t.everyState.title) || "Every state, last 12 months";
+      slides.push({ kind: "content", id: "fdStates", title: trimTitle(pg ? title + " (continued)" : title), items: items });
+    }
+    return slides;
+  }
+
   // opts.skip: ids of slides the reader chose to leave out (the cover always stays)
   function spec(facts, text, opts) {
     var f = facts || {}, t = text || {}, skip = opts && Array.isArray(opts.skip) ? opts.skip : [];
-    var included = {}; plan(f).forEach(function (r) { included[r.id] = r.included && (r.id === "cover" || skip.indexOf(r.id) < 0); });
+    var included = {}; plan(f, opts).forEach(function (r) { included[r.id] = r.included && (r.id === "cover" || skip.indexOf(r.id) < 0); });
     var make = { summary: summarySlide, premium: premiumSlide, lines: linesSlide, underwriting: underwritingSlide, earnings: earningsSlide, balance: balanceSlide, capital: capitalSlide,
       reserves: reservesSlide, accident: accidentSlide, reinsurance: reinsuranceSlide, filings: filingsSlide, questions: questionsSlide };
+    fdMake(f, make, opts);
     var slides = [coverSlide(f, t)];
-    SLIDES.slice(1).forEach(function (s) { if (included[s[0]]) slides.push(make[s[0]](f, t)); });
+    SLIDES.slice(1).forEach(function (s) {
+      if (included[s[0]]) slides.push(make[s[0]](f, t));
+      // the filings in detail follow the at-a-glance slide (a slide may run on to a second one)
+      if (s[0] === "filings" && fdOf(f)) FD_SLIDES.forEach(function (d) { if (included[d[0]]) [].concat(make[d[0]](f, t)).forEach(function (x) { slides.push(x); }); });
+    });
     var name = slug(entityName(f)) || "company";
     var day = ymd(f.asOf) ? String(f.asOf).slice(0, 10) : "";
     return { fileName: name + "-profile" + (f.sample ? "-sample" : "") + (day ? "-" + day : "") + ".pptx", slides: slides };
