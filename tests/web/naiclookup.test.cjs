@@ -99,9 +99,10 @@ const PSTATUS=(codes)=>({statutory:{configured:true, mapped:true, fields:[], ...
   ok("Add puts the NAIC group code in the list", (await p.inputValue("#st_codes"))==="9001");
   await p.click('button[data-k="company"]'); await p.waitForTimeout(100);
 
-  // a new search starts afresh; one with no institution ids asks nothing
-  await t.find("Tarrow"); await p.waitForTimeout(150);
-  ok("a new search looks its own codes up", same(t.of("snl-statutory","codes").pop().body.institutionIds,["5000003"]) && (await t.all("#st_matches li"))[0].includes("S&P's statutory data has no NAIC company code for this company either"));
+  // a new search starts afresh
+  t.codesDelay=0; await t.find("Tarrow"); await p.waitForTimeout(150);
+  const tw=await t.all("#st_matches li");
+  ok("a new search looks its own codes up", same(t.of("snl-statutory","codes").pop().body.institutionIds,["5000003"]) && (await t.all("#st_matches li"))[0].includes("S&P's statutory data has no NAIC company code for this company either"), {codes:t.of("snl-statutory","codes").map(c=>c.body), tw});
   await t.ctx.close();
 
   // ----- the look-up fails or runs out of time -----
