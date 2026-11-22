@@ -29,7 +29,7 @@ const NEW: [string, string, string, string][] = [
   ["commission_ratio", "Commission ratio", "pct", "year"], ["investment_yield", "Net yield on invested assets", "pct", "year"], ["roae", "Return on average equity", "pct", "year"],
   ["npe_by_line", "Net premiums earned by line", "usd", "line"], ["loss_lae_ratio_by_line", "Loss and LAE ratio by line", "pct", "line"],
   ["dpe_by_state", "Direct premiums earned by state", "usd", "state"], ["loss_ratio_by_state", "Direct loss ratio by state", "pct", "state"],
-  ["recoverable_by_reinsurer", "Reinsurance recoverables by reinsurer", "usd", "item"], ["ay_loss_ratio", "Net loss and LAE ratio by accident year", "pct", "item"], ["ay_npe", "Net premiums earned by accident year", "usd", "item"],
+  ["recoverable_by_reinsurer", "Reinsurance recoverables by reinsurer", "usd", "item"], ["ay_loss_ratio", "Net loss and DCC ratio by accident year", "pct", "item"], ["ay_npe", "Net premiums earned by accident year", "usd", "item"],
 ];
 {
   const ids = STAT_FIELDS.map((f) => f.id);

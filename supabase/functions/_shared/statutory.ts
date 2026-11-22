@@ -66,7 +66,7 @@ export const STAT_FIELDS = [
   // By counterparty: item is the reinsurer; an optional tag column says, for example, whether it is authorized.
   { id: "recoverable_by_reinsurer", label: "Reinsurance recoverables by reinsurer", unit: "usd", by: "item" },
   // By accident year: item is the accident year, with one set of rows for each statement year.
-  { id: "ay_loss_ratio", label: "Net loss and LAE ratio by accident year", unit: "pct", by: "item" },
+  { id: "ay_loss_ratio", label: "Net loss and DCC ratio by accident year", unit: "pct", by: "item" },
   { id: "ay_npe", label: "Net premiums earned by accident year", unit: "usd", by: "item" },
 ] as const;
 export type StatFieldId = typeof STAT_FIELDS[number]["id"];

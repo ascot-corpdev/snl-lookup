@@ -27,7 +27,7 @@ const BUILT = IDSF.filter(id => id !== "fdRateMap").flatMap(id => id === "fdStat
 const LABELS = { npe_by_line: "Net premiums earned by line", loss_lae_ratio_by_line: "Loss and LAE ratio by line", dpe_by_state: "Direct premiums earned by state", loss_ratio_by_state: "Direct loss ratio by state",
   uw_gain: "Net underwriting gain", net_inv_income: "Net investment income earned", realized_gains: "Net realized capital gains", cash_from_ops: "Net cash from operations", investment_yield: "Net yield on invested assets",
   cash_invested: "Cash and invested assets", bonds: "Bonds", stocks: "Common stocks", cash_short_term: "Cash and short-term investments", premiums_receivable: "Premiums receivable", total_liabilities: "Total liabilities",
-  unearned_premiums: "Unearned premiums", ay_loss_ratio: "Net loss and LAE ratio by accident year", ay_npe: "Net premiums earned by accident year" };
+  unearned_premiums: "Unearned premiums", ay_loss_ratio: "Net loss and DCC ratio by accident year", ay_npe: "Net premiums earned by accident year" };
 /** The sample with none of the new figures: every one of them not mapped. */
 function noneNew() {
   const v = copy(FULL);
@@ -97,12 +97,12 @@ function hostile() {
   const why = id => pl.find(r => r.id === id);
   ok("plan: with none of the new figures, the new slides are left out, each saying which figures aren't mapped", NEW.every(id => !why(id).included)
     && why("earnings").reason === "Net underwriting gain, net investment income earned, net realized capital gains, net cash from operations and net yield on invested assets aren't mapped to Snowflake yet."
-    && why("accident").reason === "Net loss and LAE ratio by accident year isn't mapped to Snowflake yet."
+    && why("accident").reason === "Net loss and DCC ratio by accident year isn't mapped to Snowflake yet."
     && why("lines").reason === "Net premiums earned by line, loss and LAE ratio by line, direct premiums earned by state and direct loss ratio by state aren't mapped to Snowflake yet.", pl.filter(r => !r.included).map(r => r.reason.slice(-80)));
   ok("plan: and every slide that was there before still is", IDS.filter(id => !NEW.includes(id)).every(id => why(id).included));
   ok("plan: reasons are plain sentences with no field ids or em dashes", pl.concat(await plan(nothing())).every(r => !/_/.test(r.reason) && !r.reason.includes("\u2014") && (r.reason === "" || /^[A-Z].*\.$/.test(r.reason))));
   const empt = copy(noneNew()); empt.facts.missing = empt.facts.missing.map(m => ({ ...m, reason: "S&P returned nothing for it" }));
-  ok("plan: a mapped figure that came back empty says S&P returned nothing", (await plan(empt)).find(r => r.id === "accident").reason === "S&P returned nothing for net loss and LAE ratio by accident year for 2021 to 2025.", (await plan(empt)).find(r => r.id === "accident"));
+  ok("plan: a mapped figure that came back empty says S&P returned nothing", (await plan(empt)).find(r => r.id === "accident").reason === "S&P returned nothing for net loss and DCC ratio by accident year for 2021 to 2025.", (await plan(empt)).find(r => r.id === "accident"));
 
   // ----- the whole sample -----
   const s = await spec(FULL);

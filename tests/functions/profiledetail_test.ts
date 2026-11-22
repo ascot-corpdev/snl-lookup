@@ -152,7 +152,7 @@ const S = P.sampleFacts("2026-11-14");
   ok("premium: assumed premiums, ceded premiums as reported (not derived), loss ratios on the largest line and state", /Assumed premiums written of \$6\.9M in 2025\./.test(t.premium.points[0].text) && t.premium.points[1].text === "Net premiums written of $79.6M in 2025, after ceding $49.8M." && /loss and LAE ratio on homeowners was 60\.0% in 2025/.test(t.premium.points[2].text) && /direct loss ratio in FL was 56\.1% in 2025/.test(t.premium.points[3].text), t.premium.points);
   ok("underwriting: the commission ratio, and the run of years", /; commission ratio 14\.9%\.$/.test(t.underwriting.points[1].text) && t.underwriting.points[3].text === "The combined ratio was at or below 100% in each of the last 2 years, 2024 to 2025 (derived).", t.underwriting.points);
   ok("capital: dividends and surplus notes, and RBC with its capital and control level", t.capital.points[1].text === "Dividends of $3.0M in 2025; surplus notes of $5.0M at the end of the year." && t.capital.points[2].text === "Risk-based capital ratio of 431.0% at the end of 2025; total adjusted capital $56.3M against an authorized control level of $13.1M.", t.capital.points);
-  ok("reserves: two-year development, and the accident year that moved most, in percentage points (derived)", /Two-year development was favourable, \$0\.9M, in 2025\./.test(t.reserves.points[2].text) && t.reserves.points[3].text === "Accident year 2022's loss and LAE ratio went from 70.1% first reported in 2022 to 77.0% in 2025, up 6.9 percentage points (derived).", t.reserves.points);
+  ok("reserves: two-year development, and the accident year that moved most, in percentage points (derived)", /Two-year development was favourable, \$0\.9M, in 2025\./.test(t.reserves.points[2].text) && t.reserves.points[3].text === "Accident year 2022's loss and DCC ratio went from 70.1% first reported in 2022 to 77.0% in 2025, up 6.9 percentage points (derived).", t.reserves.points);
   ok("reinsurance: ceded as reported, and the share owed by reinsurers not authorized (derived)", t.reinsurance.points[0].text === "Ceded $49.8M in 2025, 38.5% of gross premiums written (derived)." && t.reinsurance.points[3].text === "18.0% of recoverables at the end of 2025 were owed by reinsurers marked as not authorized, and 0.5% by reinsurers with no status given (derived).", t.reinsurance.points);
   ok("the questions: the figures first, then an accident year that has developed badly, then one from the filings, still exactly four", same(t.questions.items.map((q) => q.title), ["Underwriting losses", "Concentration", "Accident year development", "Withdrawals"]), t.questions.items.map((q) => q.title));
 
@@ -180,6 +180,19 @@ const S = P.sampleFacts("2026-11-14");
     n++;
   }
   ok(`for ${n} ragged sets of figures the plain text is always complete, within limits, and its figures match the facts`, worst.length === 0 && badFig.length === 0, { worst, badFig });
+
+  // accident years held as S&P holds them: an offset from the statement year, "AY(0)" down to "AY(-9)", with a
+  // "Prior(10+)" row and a row with no accident year, both left out
+  {
+    const asYear = facts({ ay_loss_ratio: raw("ay_loss_ratio"), ay_npe: raw("ay_npe") }).detail!.accidentYears!;
+    const off = (ay: number, y: number) => (ay === y ? "AY(0)" : `AY(${ay - y})`);
+    const lr = S.detail!.accidentYears!.rows.flatMap((r) => r.values.map((v, k) => ({ year: S.years[k], item: off(r.ay, S.years[k]), value: v }))).filter((r) => r.value !== null);
+    const npe = S.detail!.accidentYears!.rows.map((r) => ({ year: 2025, item: off(r.ay, 2025), value: r.npe }));
+    const extra = [{ year: 2025, item: "Prior(10+)", value: 12.3 }, { year: 2025, item: null, value: 45.6 }, { year: 2025, item: "AY(1)", value: 7.8 }, { year: 2025, item: "AY(-3) x", value: 9.1 }];
+    const asOffset = facts({ ay_loss_ratio: [...lr, ...extra], ay_npe: npe }).detail!.accidentYears!;
+    ok("accident years given as offsets from the statement year read the same as four-digit years", same(asOffset, asYear) && asYear.rows.length > 0, [asOffset, asYear]);
+    ok("a prior-years row, a row with no accident year, a year after the statement and a malformed offset are left out", asOffset.rows.every((r) => r.ay >= 2019 && r.ay <= 2025));
+  }
 
   // facts and text saved before this change
   const old = JSON.parse(await Deno.readTextFile(new URL("../fixtures/profile_facts.json", import.meta.url)));
