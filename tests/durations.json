@@ -36,6 +36,7 @@
  "functions/migration_test.ts": 1,
  "functions/morefilters_market_test.ts": 1,
  "functions/morefilters_profile_test.ts": 1,
+ "functions/naiclookup_test.ts": 1,
  "functions/naiconly_test.ts": 1,
  "functions/orgname_test.ts": 1,
  "functions/pages_test.ts": 1,

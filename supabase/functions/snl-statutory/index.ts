@@ -17,11 +17,16 @@
 //                                              -> the views, or one view's columns, this account can see
 //            {schemas: true}, {schema, like?} or {schema, view}   (Corp Dev only; the same in another schema)
 //                                              -> the database's schemas, or a schema's views, or a view's columns
+//   codes    {institutionIds}                  (any login; needs the mapping's optional company look-up)
+//                                              -> {results: [{institutionId, status, naicCompanyCode, naicGroupCode, naicGroupName, codes?}], asked, saved}
+//            NAIC codes for companies the company list has with an institution id and no NAIC code: one statement
+//            for the ids not answered before; codes found are saved to the company list where it has none
 
 import { adminClient, type Env, type Json, readBody, shortHash, sleep, type WhoIs, whoIs, withCors } from "../_shared/http.ts";
 import { type Db, supabaseDb } from "../_shared/db.ts";
 import { credsReady, Snowflake, SNOWFLAKE_NOT_CONFIGURED, snowflakeCreds, SnowflakeError } from "../_shared/snowflake.ts";
 import { discoverColumns, discoverSchemas, discoverViews, fieldStatus, getMapping, isViewName, loadedProblem, NOT_MAPPED, parseStatQuery, savedOrFreshStatutory, storedName } from "../_shared/statutory.ts";
+import { companiesMapped, companiesProblem, MAX_CODE_IDS, naicCodesFor } from "../_shared/statutory.ts";
 
 export type Deps = { env: Env; fetch: typeof fetch; now?: () => number; whoIs?: WhoIs; db?: Db; sleep?: (ms: number) => Promise<void> };
 
@@ -56,7 +61,8 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
   try {
     switch (body.action) {
       case "status":
-        return json(200, { configured, mapped, message: !configured ? SNOWFLAKE_NOT_CONFIGURED : !mapped ? NOT_MAPPED : null, fields, loadedProblem: loadedProblem(mapping.loaded) });
+        return json(200, { configured, mapped, message: !configured ? SNOWFLAKE_NOT_CONFIGURED : !mapped ? NOT_MAPPED : null, fields, loadedProblem: loadedProblem(mapping.loaded),
+          companies: { mapped: companiesMapped(mapping), problem: companiesProblem(mapping.companies) } });
 
       case "query": {
         const parsed = parseStatQuery(body, new Date(now).getUTCFullYear());
@@ -82,8 +88,15 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
         return json(200, { ...doc, fetchedAt: new Date(now).toISOString(), fromStore: false });
       }
 
+      case "codes": {
+        const raw = Array.isArray(body.institutionIds) ? body.institutionIds.map((x) => String(x ?? "").trim()) : [];
+        const ids = [...new Set(raw)];
+        if (!ids.length || ids.length > MAX_CODE_IDS || ids.some((x) => !/^[0-9]{1,12}$/.test(x))) return json(400, { error: "bad", message: `Give 1 to ${MAX_CODE_IDS} S&P institution ids (whole numbers).` });
+        return json(200, await naicCodesFor(sf, db, creds.database, creds.schema, mapping, ids, { now }));
+      }
+
       default:
-        return json(400, { error: "bad", message: "Unknown action. Use status, query or discover." });
+        return json(400, { error: "bad", message: "Unknown action. Use status, query, discover or codes." });
     }
   } catch (e) {
     const answer = snowflakeAnswer(e);

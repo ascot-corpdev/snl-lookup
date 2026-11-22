@@ -14,6 +14,20 @@ export type Entity = {
   spStatEntityId: string | null; naicGroupCode: string | null; naicGroupName: string | null;
 };
 
+/** A NAIC company code found for an institution id, with its NAIC group when one came with it. */
+export type CodeFill = { institutionId: string; naicCompanyCode: string; naicGroupCode: string | null; naicGroupName: string | null };
+
+/** A company row with a code filled in: the NAIC company code only when the row has none, and the group code and
+    name each only where empty. null when nothing would change (the row already has a code, or another institution). */
+export function filledRow(doc: Entity, f: CodeFill): Entity | null {
+  const has = (v: unknown) => v !== null && v !== undefined && String(v).trim() !== "";
+  if (String(doc.institutionId ?? "").trim() !== f.institutionId || has(doc.naicCompanyCode) || !isNaicCode(f.naicCompanyCode)) return null;
+  const out: Entity = { ...doc, naicCompanyCode: f.naicCompanyCode };
+  if (!has(doc.naicGroupCode) && isNaicCode(f.naicGroupCode)) out.naicGroupCode = f.naicGroupCode;
+  if (!has(doc.naicGroupName) && f.naicGroupName) out.naicGroupName = f.naicGroupName;
+  return out;
+}
+
 /** A company's ids and group, without its name: what the Live check counts in the company list. */
 export type EntityFields = Omit<Entity, "companyName">;
 
@@ -117,6 +131,13 @@ export interface Db {
       without NAIC group codes still has group names. */
   entitiesInGroupName(groupName: string, limit: number): Promise<Entity[]>;
   getSetting(id: string): Promise<Record<string, unknown> | null>;
+  // ---------- NAIC codes looked up on Snowflake (statutory.ts naicCodesFor); optional, so a stand-in without them still works ----------
+  /** The companies in the company list with one of these institution ids, each with what any other row of the same
+      company knows (a NAIC-only row with the same statutory key, say). */
+  entitiesByInstitution?(ids: string[]): Promise<Entity[]>;
+  /** Fills a NAIC company code (and the group code and name, each only where empty) into the company list's rows with
+      this institution id and no NAIC company code. A code already there is never changed. Returns the rows changed. */
+  fillEntityCodes?(fills: CodeFill[]): Promise<number>;
   // ---------- the Live check (_shared/diagnose.ts); optional, so a stand-in without them still works ----------
   /** The latest saved results of one kind, newest first. */
   recentStore?(kind: StoreKind, limit: number): Promise<StoreRow[]>;
@@ -498,6 +519,28 @@ export function supabaseDb(sb: SupabaseClient, now: () => number = Date.now): Db
       if (!pattern) return [];
       const { data } = await sb.from("snl_store").select("doc").eq("kind", "entity").ilike("doc->>naicGroupName", pattern).order("label").limit(limit);
       return await withPartners((data ?? []).map((r) => r.doc as Entity), limit);
+    },
+    async entitiesByInstitution(ids) {
+      const inst = [...new Set(ids.filter((i) => /^\d{1,12}$/.test(i)))];
+      if (!inst.length) return [];
+      return await withPartners((await rowsByIds({ companyId: [], institutionId: inst, naicCompanyCode: [], spStatEntityId: [] })).map((r) => r.doc), 1000);
+    },
+    async fillEntityCodes(fills) {
+      // Written with the function's own service access: logins may only read the company list (migration 0001).
+      const inst = fills.map((f) => f.institutionId).filter((i) => /^\d{1,12}$/.test(i));
+      if (!inst.length) return 0;
+      try {
+        const rows = await rowsByIds({ companyId: [], institutionId: inst, naicCompanyCode: [], spStatEntityId: [] });
+        const out: { id: string; kind: string; label: string; doc: Entity; fetched_at: string }[] = [];
+        for (const r of rows) {
+          const f = fills.find((x) => x.institutionId === String(r.doc.institutionId ?? "").trim());
+          const doc = f ? filledRow(r.doc, f) : null;
+          if (doc) out.push({ id: r.id, kind: "entity", label: entityLabel(doc), doc, fetched_at: nowIso() });
+        }
+        if (!out.length) return 0;
+        const { error } = await sb.from("snl_store").upsert(out, { onConflict: "id" });
+        return error ? 0 : out.length;
+      } catch { return 0; /* the codes are still shown; the next search asks again */ }
     },
     async getSetting(id) {
       const { data } = await sb.from("snl_settings").select("doc").eq("id", id).maybeSingle();
