@@ -255,7 +255,7 @@ function within(t: P.ProfileText): string[] {
     ...Object.fromEntries(P.SECTIONS.map((n) => [n, { title: `Combined ratio of 91.5% in 2025 \u2014 ${n}`, points: Array.from({ length: n === "summary" ? 6 : 3 }, (_, i) => ({ lead: `Point ${i + 1}`, text: `Surplus of $56.3M at the end of 2025 \u2014 up from $41.5M in 2021 (inferred).` })) }])),
     questions: { title: "Key questions", items: Array.from({ length: 5 }, (_, i) => ({ title: `Question ${i + 1}`, text: "What drove the 104.4% combined ratio in 2022?" })) } };
   const ok1 = P.checkDraft(good, s, plain);
-  ok("a good answer is used as Claude's, with no note", ok1.text.by === "claude" && ok1.text.note === null && ok1.text.cover.subtitle === good.cover.subtitle && ok1.replaced.kept === 9, ok1.replaced);
+  ok("a good answer is used as Claude's, with no note", ok1.text.by === "claude" && ok1.text.note === null && ok1.text.cover.subtitle === good.cover.subtitle && ok1.replaced.kept === P.SECTIONS.length + 2, ok1.replaced);
   ok("em dashes are replaced", !JSON.stringify(ok1.text).includes("\u2014") && ok1.text.summary.title === "Combined ratio of 91.5% in 2025, summary", ok1.text.summary.title);
   ok("five questions are cut to four", ok1.text.questions.items.length === 4);
   ok("the checked text stays within every limit", within(ok1.text).length === 0, within(ok1.text));

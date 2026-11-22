@@ -322,6 +322,14 @@ export function flagFiling(r: Partial<FoundFiling> | null | undefined): FilingFl
   return out;
 }
 
+/** A search row's marks, read through the same mapping a found filing gets (foundRow), so the profiles mark a filing
+    exactly as the watchlist would. foundRow needs S&P's version id to keep a row; marks don't use it, so a row
+    without one still gets its marks here. Nothing is stored. */
+export function flagSearchRow(f: Filing | null | undefined): FilingFlag[] {
+  if (!f || typeof f !== "object") return [];
+  return flagFiling(foundRow({ ...f, filingVersionId: "search-row" }, "", "", false));
+}
+
 /** "May be a new form: the description says "new policy form"." */
 export const flagSentence = (f: FilingFlag) => `May be ${FLAG_MEANING[f.kind] ?? "worth a look"}: ${f.reason}.`;
 

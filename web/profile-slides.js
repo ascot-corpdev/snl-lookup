@@ -20,16 +20,24 @@
   var MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
   var SLIDES = [
-    ["cover", "Cover"], ["summary", "Executive summary"], ["premium", "Premium"], ["underwriting", "Underwriting"],
-    ["capital", "Capital"], ["reserves", "Reserves"], ["reinsurance", "Reinsurance"],
+    ["cover", "Cover"], ["summary", "Executive summary"], ["premium", "Premium"], ["lines", "Lines and states"], ["underwriting", "Underwriting"],
+    ["earnings", "Earnings"], ["balance", "Balance sheet"], ["capital", "Capital"], ["reserves", "Reserves"], ["accident", "Accident years"], ["reinsurance", "Reinsurance"],
     ["filings", "Recent rate and form filings"], ["questions", "Key diligence questions"]
   ];
+  // the detailed profile's slides: planned only for facts that have the detail (facts saved before it existed open
+  // with the nine slides they had)
+  var DETAIL_SLIDES = ["lines", "earnings", "balance", "accident"];
+  var BLUE2 = "0081C3", TEAL2 = "00857C", GREY2 = "A6A6BF";
   var LABELS = {
     dpw: "Direct premiums written", npw: "Net premiums written", gpw: "Gross premiums written", npe: "Net premiums earned",
     loss_ratio: "Loss ratio", loss_lae_ratio: "Loss and LAE ratio", expense_ratio: "Expense ratio", combined_ratio: "Combined ratio", net_income: "Net income",
     surplus: "Surplus", paid_in_capital: "Paid-in capital", total_assets: "Total assets", rbc_ratio: "RBC ratio",
     net_reserves: "Net loss and LAE reserves", pyd: "One-year reserve development", reins_recoverable: "Reinsurance recoverables",
-    ceded_by_reinsurer: "Ceded premiums by reinsurer"
+    ceded_by_reinsurer: "Ceded premiums by reinsurer",
+    uw_gain: "Net underwriting gain", net_inv_income: "Net investment income earned", realized_gains: "Net realized capital gains", cash_from_ops: "Net cash from operations",
+    investment_yield: "Net yield on invested assets", cash_invested: "Cash and invested assets", premiums_receivable: "Premiums receivable", total_liabilities: "Total liabilities",
+    npe_by_line: "Net premiums earned by line", loss_lae_ratio_by_line: "Loss and LAE ratio by line", dpe_by_state: "Direct premiums earned by state", loss_ratio_by_state: "Direct loss ratio by state",
+    ay_loss_ratio: "Net loss and LAE ratio by accident year"
   };
   // statutory field ids that feed a series key (dpw and npw are the by-line figures summed)
   var FIELDS = { dpw: ["dpw", "dpw_by_line"], npw: ["npw", "npw_by_line"] };
@@ -122,12 +130,18 @@
     return n || "NAIC " + (e.kind === "group" ? "group " : "company ") + flat(e.code);
   }
   function hasFilings(f) { return !!f.filings && !f.filings.unavailable; }
+  // the detailed profile's part of the facts, or null for facts made before it existed
+  function detailOf(f) { return f && f.detail && typeof f.detail === "object" && !Array.isArray(f.detail) ? f.detail : null; }
+  var EARN = ["uw_gain", "net_inv_income", "realized_gains", "cash_from_ops", "investment_yield"];
+  var BAL = ["cash_invested", "bonds", "stocks", "cash_short_term", "premiums_receivable", "total_liabilities", "unearned_premiums"];
 
   // ---------- plan: which slides, and why one is left out ----------
   function joinWords(list) { return list.length < 2 ? list.join("") : list.slice(0, -1).join(", ") + " and " + list[list.length - 1]; }
   function lower(s) { return /^[A-Z][a-z]/.test(s) && !/^(RBC|LAE|NAIC)/.test(s) ? s[0].toLowerCase() + s.slice(1) : s; }
   // "Net loss and LAE reserves aren't", "Surplus isn't"
-  function plural(label) { var w = String(label).trim().split(/\s+/).pop().toLowerCase(); return /s$/.test(w) && !/(surplus|gross|loss|ss|us)$/.test(w); }
+  // (named apart from the filings profile's plural below, which would otherwise replace it in this scope)
+  // plural when a word before any " by ..." ends in s and isn't one of the words that only look plural
+  function pluralLabel(label) { return String(label).trim().split(/\s+by\s+/)[0].toLowerCase().split(/\s+/).some(function (w) { return /s$/.test(w) && !/(surplus|gross|loss|ss|us)$/.test(w); }); }
   function cap(s) { return s ? s[0].toUpperCase() + s.slice(1) : s; }
   function whyMissing(f, keys) {
     var miss = f.missing || [], notMapped = [], empty = [];
@@ -139,16 +153,23 @@
       if (m && /not mapped/i.test(String(m.reason || ""))) notMapped.push(label); else empty.push(label);
     });
     var parts = [];
-    if (notMapped.length) parts.push(cap(joinWords(notMapped.map(function (l, i) { return i ? lower(l) : l; }))) + (notMapped.length > 1 || plural(notMapped[0]) ? " aren't" : " isn't") + " mapped to Snowflake yet");
+    if (notMapped.length) parts.push(cap(joinWords(notMapped.map(function (l, i) { return i ? lower(l) : l; }))) + (notMapped.length > 1 || pluralLabel(notMapped[0]) ? " aren't" : " isn't") + " mapped to Snowflake yet");
     var yl = yearsLabel(f);
     if (empty.length) parts.push("S&P returned nothing for " + lower(joinWords(empty.map(lower))) + (yl ? " for " + yl : ""));
     return parts.join("; ") + ".";
   }
-  function plan(facts) {
+  function plan(facts, opts) {
     var f = facts || {};
     var anySeries = Object.keys(f.series || {}).some(function (k) { return any(S(f, k)); });
-    var rows = SLIDES.map(function (s) { return { id: s[0], label: s[1], included: true, reason: "" }; });
+    var X = detailOf(f);
+    var rows = SLIDES.filter(function (s) { return X || DETAIL_SLIDES.indexOf(s[0]) < 0; }).map(function (s) { return { id: s[0], label: s[1], included: true, reason: "" }; });
     var out = function (id, reason) { rows.forEach(function (r) { if (r.id === id) { r.included = false; r.reason = reason; } }); };
+    if (X) {
+      if (!(X.lines && arr(X.lines.items).length) && !(X.states && arr(X.states.items).length)) out("lines", whyMissing(f, ["npe_by_line", "loss_lae_ratio_by_line", "dpe_by_state", "loss_ratio_by_state"]));
+      if (!EARN.some(function (k) { return any(S(f, k)); })) out("earnings", whyMissing(f, EARN));
+      if (!BAL.some(function (k) { return any(S(f, k)); })) out("balance", whyMissing(f, ["cash_invested", "premiums_receivable", "total_liabilities"]));
+      if (!(X.accidentYears && arr(X.accidentYears.rows).length)) out("accident", whyMissing(f, ["ay_loss_ratio"]));
+    }
     if (!anySeries) out("summary", "No statutory figures came back for this company, so there is nothing to sum up.");
     if (!any(S(f, "dpw")) && !any(S(f, "npw"))) out("premium", whyMissing(f, ["dpw", "npw"]));
     if (!any(S(f, "combined_ratio")) && !(any(S(f, "loss_ratio")) && any(S(f, "expense_ratio"))))
@@ -160,6 +181,7 @@
       out("reinsurance", whyMissing(f, ["ceded_by_reinsurer", "gpw", "reins_recoverable"]));
     if (!f.filings) out("filings", "Recent filings weren't looked up for this profile.");
     else if (f.filings.unavailable) out("filings", flat(f.filings.unavailable) || "Recent filings aren't available.");
+    fdPlan(f, rows, out, opts);
     return rows;
   }
 
@@ -259,14 +281,18 @@
       ni: function () { var a = f.derived && f.derived.net_income_total; return num(a) ? { v: money(a), label: "Net income, " + yearsLabel(f) + " in total (derived)", c: a < 0 ? MAG : NAVY, d: 1 } : null; },
       niLast: function () { var l = latest(f, S(f, "net_income")); return l && { v: money(l.v), label: "Net income, " + l.year, c: l.v < 0 ? MAG : NAVY }; },
       growth: function () { var a = f.derived && f.derived.dpw_growth_pct; return num(a) ? { v: pct(a), label: "Direct premium growth a year, " + yearsLabel(f) + " (derived)", d: 1 } : null; },
-      cession: function () { var l = latest(f, D(f, "cession_pct")); return l && { v: pct(l.v), label: "Share of gross premium ceded, " + l.year + " (derived)", d: 1 }; }
+      cession: function () { var l = latest(f, D(f, "cession_pct")); return l && { v: pct(l.v), label: "Share of gross premium ceded, " + l.year + " (derived)", d: 1 }; },
+      // the detailed profile
+      rbcCalc: function () { var l = latest(f, D(f, "rbc_ratio_calc")); return l && { v: pct(l.v), label: "RBC ratio, " + l.year + " (derived)", d: 1 }; },
+      uwg: function () { var l = latest(f, S(f, "uw_gain")); return l && { v: money(l.v), label: "Net underwriting gain, " + l.year, c: l.v < 0 ? MAG : NAVY }; },
+      ci: function () { var l = latest(f, S(f, "cash_invested")); return l && { v: money(l.v), label: "Cash and invested assets, " + l.year }; }
     };
-    var spare = ["npw", "gpw", "niLast", "assets", "growth", "cession", "top3", "line", "lev", "lr"];
+    var spare = ["npw", "gpw", "niLast", "assets", "growth", "cession", "top3", "line", "lev", "lr", "uwg", "ci"];
     var wants = [
       { first: ["dpw", "npw", "gpw"], none: "Direct premiums written" },
       { first: ["cr", "lr"], none: "Combined ratio" },
       { first: ["surplus", "assets"], none: "Surplus" },
-      { first: ["rbc", "lev"], none: "RBC ratio" },
+      { first: ["rbc", "rbcCalc", "lev"], none: "RBC ratio" },
       { first: ["top", "line", "top3"], none: "Share of direct premiums in the top state" },
       { first: ["avg", "ni"], none: "Average combined ratio (derived)" }
     ];
@@ -329,9 +355,12 @@
     if (any(dpw)) series.push(ser("Direct premiums written", dpw.map(m1), NAVY));
     if (any(npw)) series.push(ser("Net premiums written", npw.map(m1), MAG));
     var growth = any(dpw) ? dpw.map(function (v, i) { return i && num(v) && num(dpw[i - 1]) && dpw[i - 1] > 0 ? Math.round((v / dpw[i - 1] - 1) * 1000) / 10 : null; }) : null;
-    var rows = [];
+    var rows = [], asm = S(f, "assumed_pw"), cpw = S(f, "ceded_pw"), gpd = D(f, "gross_pw");
     if (any(dpw)) rows.push(["Direct premiums written", dpw, millions, null, true]);
+    if (any(asm)) rows.push(["Assumed premiums written", asm, millions]);
     if (any(gpw)) rows.push(["Gross premiums written", gpw, millions]);
+    else if (any(gpd)) rows.push(["Gross premiums written (derived)", gpd, millions]);
+    if (any(cpw)) rows.push(["Ceded premiums written", cpw, millions]);
     if (any(npw)) rows.push(["Net premiums written", npw, millions]);
     if (any(npe)) rows.push(["Net premiums earned", npe, millions]);
     if (any(cession)) rows.push(["Ceded share (%, derived)", cession, pctCell]);
@@ -341,7 +370,7 @@
     if ((mix.lines && mix.lines.length) || (mix.states && mix.states.length)) blocks.push(function (x, y, w, h) { return mixTables(f, x, y, w, h); });
     blocks.push(tableBlock("Premium by year", f, rows));
     var items = quads(blocks, pointsOf(t, "premium"));
-    items.push(source(f, { derived: any(cession) || !!growth }));
+    items.push(source(f, { derived: any(cession) || !!growth || (!any(gpw) && any(gpd)) }));
     return content(t, "premium", "Premium, " + yearsLabel(f), items);
   }
 
@@ -365,11 +394,14 @@
     if (any(lr)) rows.push(["Loss ratio (%)", lr, pctCell]);
     if (any(ll)) rows.push(["Loss and LAE ratio (%)", ll, pctCell]);
     if (any(er)) rows.push(["Expense ratio (%)", er, pctCell]);
+    var cm = S(f, "commission_ratio"), roaeR = S(f, "roae");
+    if (any(cm)) rows.push(["Commission ratio (%)", cm, pctCell]);
     if (any(cr)) rows.push(["Combined ratio (%)", cr, pctCell, adverseOver100, true]);
     if (any(ni)) rows.push(["Net income", ni, millions, negative]);
-    if (any(roae)) rows.push(["ROAE (%, derived)", roae, pctCell, negative]);
+    if (any(roaeR)) rows.push(["ROAE (%)", roaeR, pctCell, negative]);
+    else if (any(roae)) rows.push(["ROAE (%, derived)", roae, pctCell, negative]);
     var items = quads([chart, tableBlock("Results by year", f, rows)], pointsOf(t, "underwriting"));
-    items.push(source(f, { derived: any(roae) }));
+    items.push(source(f, { derived: any(roae) && !any(roaeR) }));
     return content(t, "underwriting", "Underwriting results, " + yearsLabel(f), items);
   }
 
@@ -379,16 +411,33 @@
     var series = [];
     if (any(pic)) series.push(ser("Paid-in capital", pic.map(m1), PAIDIN));
     series.push(ser("Surplus", sp.map(m1), NAVY));
+    // the detailed profile: surplus notes, unassigned funds, dividends and capital paid in, and RBC from its parts
+    var notes = S(f, "surplus_notes"), unas = S(f, "unassigned_funds"), divs = S(f, "dividends_paid"), contrib = S(f, "capital_contributed"), flow = D(f, "net_capital_flow");
+    var tac = S(f, "rbc_tac"), acl = S(f, "rbc_acl"), aclImp = D(f, "rbc_acl_implied"), rbcCalc = D(f, "rbc_ratio_calc"), spg = D(f, "surplus_yoy");
+    var flows = [];
+    if (any(divs)) flows.push(["Dividends to stockholders", divs, millions]);
+    if (any(contrib)) flows.push(["Capital paid in", contrib, millions]);
+    if (any(flow)) flows.push(["Paid in less dividends (derived)", flow, millions, negative]);
+    if (any(tac)) flows.push(["Total adjusted capital", tac, millions]);
+    if (any(acl)) flows.push(["Authorized control level", acl, millions]);
+    else if (any(aclImp)) flows.push(["Control level, implied (derived)", aclImp, millions]);
+    var rich = flows.length > 0 || any(notes) || any(unas) || any(rbcCalc);
+    if (rich) { if (any(rbc)) flows.push(["RBC ratio (%)", rbc, pctCell, null, true]); else if (any(rbcCalc)) flows.push(["RBC ratio (%, derived)", rbcCalc, pctCell, null, true]); }
     var rows = [["Surplus", sp, millions, null, true]];
     if (any(pic)) rows.push(["Paid-in capital", pic, millions]);
     if (any(def)) rows.push(["Surplus less paid-in (derived)", def, millions, negative]);
+    if (any(notes)) rows.push(["Surplus notes", notes, millions]);
+    if (any(unas)) rows.push(["Unassigned funds", unas, millions, negative]);
     if (any(ta)) rows.push(["Total assets", ta, millions]);
     if (any(lev)) rows.push(["NPW to surplus (x, derived)", lev, mult]);
-    if (any(rbc)) rows.push(["RBC ratio (%)", rbc, pctCell]);
-    var items = quads([chartBlock(series.length > 1 ? "Paid-in capital and surplus ($M)" : "Surplus ($M)",
+    if (rich && any(spg)) rows.push(["Surplus growth (%, derived)", spg, pctCell, negative]);
+    if (!rich && any(rbc)) rows.push(["RBC ratio (%)", rbc, pctCell]);
+    var blocks = [chartBlock(series.length > 1 ? "Paid-in capital and surplus ($M)" : "Surplus ($M)",
       { kind: "column", categories: years(f), series: series, legend: series.length > 1 ? "top" : "none", gap: 60, overlap: -10, labels: { format: "#,##0.0;(#,##0.0)" } }),
-      tableBlock("Capital by year", f, rows)], pointsOf(t, "capital"));
-    items.push(source(f, { derived: any(def) || any(lev) }));
+      tableBlock("Capital by year", f, rows.slice(0, 8))];
+    if (rich && flows.length) blocks.push(tableBlock("Capital flows and risk-based capital", f, flows));
+    var items = quads(blocks, pointsOf(t, "capital"));
+    items.push(source(f, { derived: any(def) || any(lev) || (rich && (any(flow) || any(spg) || (!any(acl) && any(aclImp)) || (!any(rbc) && any(rbcCalc)))) }));
     return content(t, "capital", "Capital, " + yearsLabel(f), items);
   }
 
@@ -406,6 +455,9 @@
     if (any(rts)) rows.push(["Reserves to surplus (x, derived)", rts, mult]);
     if (any(pyd)) rows.push(["One-year development (PYD)", pyd, millions, positive]);
     if (any(pps)) rows.push(["PYD to prior surplus (%, derived)", pps, pctCell, positive]);
+    var pyd2 = S(f, "pyd_two_year"), ppn = D(f, "pyd_to_npe");
+    if (any(ppn)) rows.push(["PYD to NPE (%, derived)", ppn, pctCell, positive]);
+    if (any(pyd2)) rows.push(["Two-year development", pyd2, millions, positive]);
     var y2 = TOP + th + 0.3;
     items = items.concat(tableBlock("Reserves by year", f, rows)(L, y2, QW, BOTTOM - y2));
     items = items.concat(takeaways(pointsOf(t, "reserves"), QX2, y2, QW, BOTTOM - y2));
@@ -417,27 +469,187 @@
     var re = f.reinsurers && Array.isArray(f.reinsurers.items) ? f.reinsurers.items.slice(0, 8) : [];
     var cess = D(f, "cession_pct"), rts = D(f, "recoverable_to_surplus"), items = [];
     var lw = 7.4, rx = 8.42, rw = R - rx;
+    var X = detailOf(f), RC = X && X.recoverables && arr(X.recoverables.items).length ? X.recoverables : null, ty = TOP;   // ty: where the recoverables table may start
     if (re.length) {
       items.push(header("Ceded premiums by reinsurer, " + f.reinsurers.year + " ($M)", L, TOP, lw));
-      items.push({ type: "chart", kind: "bar", x: L, y: TOP + HDR, w: lw, h: Math.min(BOTTOM - TOP - HDR, 0.5 + re.length * 0.55), legend: "none", gap: 50,
-        categories: re.map(function (r) { return fitText(r.name, 11, 2.6, false); }),
-        series: [ser("Ceded premiums ($M)", re.map(function (r) { return m1(r.ceded); }), NAVY)], labels: { format: "#,##0.0;(#,##0.0)" }, catSize: 11, name: "Chart reinsurers" });
+      var bh = RC ? Math.min(2.05, 0.3 + re.length * 0.25) : Math.min(BOTTOM - TOP - HDR, 0.5 + re.length * 0.55);
+      items.push({ type: "chart", kind: "bar", x: L, y: TOP + HDR, w: lw, h: bh, legend: "none", gap: 50,
+        categories: re.map(function (r) { return fitText(r.name, RC ? 10 : 11, 2.6, false); }),
+        series: [ser("Ceded premiums ($M)", re.map(function (r) { return m1(r.ceded); }), NAVY)], labels: { format: "#,##0.0;(#,##0.0)", size: RC ? 10 : undefined }, catSize: RC ? 10 : 11, name: "Chart reinsurers" });
+      ty = TOP + HDR + bh + 0.15;
     } else {
       var rows = [];
       if (any(S(f, "gpw"))) rows.push(["Gross premiums written", S(f, "gpw"), millions]);
-      if (any(D(f, "ceded_pw"))) rows.push(["Ceded premiums (derived)", D(f, "ceded_pw"), millions, null, true]);
+      if (any(S(f, "ceded_pw"))) rows.push(["Ceded premiums written", S(f, "ceded_pw"), millions, null, true]);
+      else if (any(D(f, "ceded_pw"))) rows.push(["Ceded premiums (derived)", D(f, "ceded_pw"), millions, null, true]);
       if (any(cess)) rows.push(["Ceded share (%, derived)", cess, pctCell]);
       if (any(S(f, "reins_recoverable"))) rows.push(["Reinsurance recoverables", S(f, "reins_recoverable"), millions]);
       if (any(rts)) rows.push(["Recoverables to surplus (%, derived)", rts, pctCell]);
-      items = items.concat(tableBlock("Reinsurance by year", f, rows)(L, TOP, lw, 2.6));
+      items = items.concat(tableBlock("Reinsurance by year", f, rows)(L, TOP, lw, RC ? Math.min(2.6, HDR + 0.27 * (rows.length + 1)) : 2.6));
+      ty = TOP + (RC ? Math.min(2.6, HDR + 0.27 * (rows.length + 1)) : 2.6) + 0.15;
     }
+    if (RC) items = items.concat(recoverablesTable(RC, L, ty, lw));
     var a = latest(f, cess), b = latest(f, rts), tw = (rw - 0.2) / 2, th = 1.3;
     items.push(tile(rx, TOP, tw, th, a ? pct(a.v) : "n/d", "Share of gross premium ceded" + (a ? ", " + a.year : "") + " (derived)"));
     items.push(tile(rx + tw + 0.2, TOP, tw, th, b ? pct(b.v) : "n/d", "Recoverables to surplus" + (b ? ", " + b.year : "") + " (derived)", b && b.v > 100 ? MAG : NAVY));
     var y2 = TOP + th + 0.3;
+    if (RC && RC.tagged) {
+      var us = RC.unauthorizedShare;
+      items.push(tile(rx, y2, rw, 1.0, num(us) ? pct(us) : "n/d", "Recoverables owed by reinsurers not authorized, " + RC.year + " (derived)", num(us) && us >= 20 ? MAG : NAVY));
+      y2 += 1.0 + 0.3;
+    }
     items = items.concat(takeaways(pointsOf(t, "reinsurance"), rx, y2, rw, BOTTOM - y2));
     items.push(source(f, { derived: true, period: re.length ? yearsLabel(f) : "" }));
     return content(t, "reinsurance", "Reinsurance, " + yearsLabel(f), items);
+  }
+
+  // ---------- the detailed profile's slides ----------
+  // recoverables by reinsurer as a table: amount, share, share of surplus and the tag (authorized or not) when given
+  function recoverablesTable(RC, x, y, w) {
+    var rowH = 0.25, tagged = !!RC.tagged;
+    var num3 = [0.85, 0.85, 1.05], tagW = tagged ? 1.3 : 0, nameW = w - num3.reduce(function (a, b) { return a + b; }, 0) - tagW;
+    var max = Math.max(1, Math.floor((BOTTOM - y - HDR - 0.05) / rowH) - 1), list = arr(RC.items).slice(0, max);
+    var head = ["Reinsurer", "$M", "Share", "To surplus"].concat(tagged ? ["Status"] : []);
+    var colW = [nameW].concat(num3).concat(tagged ? [tagW] : []);
+    var rows = [head].concat(list.map(function (r) {
+      var cells = [cellText(r.name, nameW), millions(r.recoverable), pctCell(r.share), pctCell(r.toSurplus)];
+      if (tagged) cells.push(flat(r.name) === "Other" ? "" : cellText(r.tag || "Not given", tagW, false));
+      return cells;
+    }));
+    return [header("Recoverables by reinsurer, " + RC.year + " ($M; shares, %)", x, y, w),
+      { type: "table", x: x, y: y + HDR, colW: colW, rowH: rowH, size: 11, rows: rows, aligns: ["l", "r", "r", "r"].concat(tagged ? ["l"] : []), name: "Table recoverables" }];
+  }
+
+  // lines and states: the largest five of each with premiums, share and loss ratio, and the loss ratios as bar charts
+  function linesSlide(f, t) {
+    var X = detailOf(f) || {}, Ld = X.lines && arr(X.lines.items).length ? X.lines : null, Sd = X.states && arr(X.states.items).length ? X.states : null, items = [];
+    var panel = function (kind, d, tx, ty, tw, th, cx, cy, cw, ch) {
+      var lines = kind === "line", list = arr(d.items), key = lines ? "name" : "state";
+      var has = function (k) { return list.some(function (r) { return num(r[k]); }); };
+      var cols = [[lines ? "Line" : "State", null]];
+      if (has("dpw")) cols.push(["DPW", "dpw", millions, 0.8]);
+      if (lines && has("npw")) cols.push(["NPW", "npw", millions, 0.8]);
+      if (has(lines ? "npe" : "dpe")) cols.push([lines ? "NPE" : "DPE", lines ? "npe" : "dpe", millions, 0.8]);
+      cols.push(["Share", "share", pctCell, 0.75]);
+      if (has("lossRatio")) cols.push(["Loss ratio", "lossRatio", pctCell, 1.05]);
+      var rest = cols.slice(1).reduce(function (a, c) { return a + c[3]; }, 0), nameW = tw - rest;
+      var by = d.by === "npe" ? "net premiums earned" : d.by === "dpe" ? "direct premiums earned" : "direct premiums written";
+      var out = [header((lines ? "Largest lines, " + d.year + " ($M; loss ratio with LAE, %)" : "Largest states, " + d.year + " ($M; direct loss ratio, %)"), tx, ty, tw)];
+      out.push({ type: "table", x: tx, y: ty + HDR, colW: [nameW].concat(cols.slice(1).map(function (c) { return c[3]; })), rowH: 0.27, size: 11, name: lines ? "Table lines" : "Table states",
+        aligns: ["l"].concat(cols.slice(1).map(function () { return "r"; })),
+        rows: [cols.map(function (c) { return c[0]; })].concat(list.map(function (r) { return [cellText(r[key], nameW)].concat(cols.slice(1).map(function (c) { return c[2](r[c[1]]); })); })) });
+      var withRatio = list.filter(function (r) { return flat(r[key]) !== "Other" && num(r.lossRatio); }).slice(0, 5);
+      if (withRatio.length) {
+        out.push(header((lines ? "Loss and LAE ratio by line, " : "Direct loss ratio by state, ") + d.year + " (%)", cx, cy, cw));
+        var pc = {}; withRatio.forEach(function (r, i) { if (r.lossRatio > 100) pc[i] = MAG; });
+        out.push({ type: "chart", kind: "bar", x: cx, y: cy + HDR, w: cw, h: ch - HDR, legend: "none", gap: 50, catSize: 10, name: lines ? "Chart line loss ratios" : "Chart state loss ratios",
+          categories: withRatio.map(function (r) { return fitText(r[key], 10, 1.9, false); }), series: [ser(lines ? "Loss and LAE ratio (%)" : "Direct loss ratio (%)", withRatio.map(function (r) { return r.lossRatio; }), lines ? NAVY : BLUE, { pointColors: pc })], labels: { format: "0.0", size: 10 } });
+      }
+      notes.push(by);
+      return out;
+    };
+    var th = HDR + 0.27 * 7, cy = TOP + th + 0.25, ch = BOTTOM - cy, notes = [];
+    if (Ld && Sd) items = items.concat(panel("line", Ld, L, TOP, QW, th, L, cy, QW, ch), panel("state", Sd, QX2, TOP, QW, th, QX2, cy, QW, ch));
+    else items = items.concat(panel(Ld ? "line" : "state", Ld || Sd, L, TOP, QW, th, QX2, TOP, QW, BOTTOM - TOP));
+    var note = notes.length > 1 && notes[0] !== notes[1] ? "Shares: of each total." : "Shares: of " + notes[0] + ".";
+    items.push(source(f, { derived: true, period: String((Ld || Sd).year), note: note }));
+    return content(t, "lines", "Lines and states, " + (Ld || Sd).year, items);
+  }
+
+  function earningsSlide(f, t) {
+    var ug = S(f, "uw_gain"), nii = S(f, "net_inv_income"), rg = S(f, "realized_gains"), ni = S(f, "net_income"), cfo = S(f, "cash_from_ops"), yld = S(f, "investment_yield");
+    var roaeR = S(f, "roae"), roaeD = D(f, "roae");
+    var series = [];
+    if (any(ug)) series.push(ser("Underwriting gain", ug.map(m1), NAVY));
+    if (any(nii)) series.push(ser("Investment income", nii.map(m1), BLUE2));
+    if (any(ni)) series.push(ser("Net income", ni.map(m1), MAG));
+    var rows = [];
+    if (any(ug)) rows.push(["Net underwriting gain", ug, millions, negative]);
+    if (any(nii)) rows.push(["Net investment income", nii, millions]);
+    if (any(rg)) rows.push(["Net realized capital gains", rg, millions, negative]);
+    if (any(ni)) rows.push(["Net income", ni, millions, negative, true]);
+    if (any(cfo)) rows.push(["Net cash from operations", cfo, millions, negative]);
+    if (any(yld)) rows.push(["Investment yield (%)", yld, pctCell]);
+    if (any(roaeR)) rows.push(["ROAE (%)", roaeR, pctCell, negative]);
+    else if (any(roaeD)) rows.push(["ROAE (%, derived)", roaeD, pctCell, negative]);
+    var blocks = [];
+    if (series.length) blocks.push(chartBlock("Earnings by year ($M)", { kind: "column", categories: years(f), series: series, legend: series.length > 1 ? "top" : "none", gap: 60, overlap: -10, catLabels: "low", labels: { format: "#,##0.0;(#,##0.0)", size: 9 } }));
+    blocks.push(tableBlock("Earnings by year", f, rows));
+    var items = quads(blocks, pointsOf(t, "earnings"));
+    var tot = f.derived && f.derived.net_income_total;
+    items.push(source(f, { derived: !any(roaeR) && any(roaeD), note: num(tot) ? "Net income over the years shown: " + money(tot) + " (derived)." : "" }));
+    return content(t, "earnings", "Earnings, " + yearsLabel(f), items);
+  }
+
+  function balanceSlide(f, t) {
+    var ci = S(f, "cash_invested"), bo = S(f, "bonds"), st = S(f, "stocks"), cs = S(f, "cash_short_term"), pr = S(f, "premiums_receivable"), ta = S(f, "total_assets"), tl = S(f, "total_liabilities"), up = S(f, "unearned_premiums");
+    var blocks = [], derived = false;
+    var parts = [["Bonds", bo, NAVY], ["Common stocks", st, BLUE2], ["Cash and short-term", cs, MAG]].filter(function (p) { return any(p[1]); });
+    if (parts.length && any(ci)) {
+      var other = ci.map(function (v, i) { if (!num(v)) return null; var s = 0, all = true; parts.forEach(function (p) { if (num(p[1][i])) s += p[1][i]; else all = false; }); return all && v - s >= 0 ? v - s : null; });
+      // only the largest part carries labels: the thin ones would be unreadable
+      var sers = parts.map(function (p, i) { return ser(p[0], p[1].map(m1), p[2], i ? { labels: false } : null); });
+      if (any(other)) sers.push(ser("Other invested assets", other.map(m1), GREY2, { labels: false }));
+      blocks.push(chartBlock("Cash and invested assets ($M)", { kind: "stackedColumn", categories: years(f), series: sers, legend: "top", gap: 60, overlap: 100, labels: { format: "#,##0;(#,##0);;", position: "ctr", color: "FFFFFF", size: 9 } }));
+    } else if (any(ci) || any(tl)) {
+      var s2 = [];
+      if (any(ci)) s2.push(ser("Cash and invested assets", ci.map(m1), NAVY));
+      if (any(tl)) s2.push(ser("Total liabilities", tl.map(m1), MAG));
+      blocks.push(chartBlock(s2.length > 1 ? "Invested assets and liabilities ($M)" : s2[0].name + " ($M)", { kind: "column", categories: years(f), series: s2, legend: s2.length > 1 ? "top" : "none", gap: 60, overlap: -10, labels: { format: "#,##0.0;(#,##0.0)", size: 9 } }));
+    }
+    var rows = [];
+    if (any(ci)) rows.push(["Cash and invested assets", ci, millions, null, true]);
+    if (any(bo)) rows.push(["Bonds", bo, millions]);
+    if (any(st)) rows.push(["Common stocks", st, millions]);
+    if (any(cs)) rows.push(["Cash and short-term", cs, millions]);
+    if (any(pr)) rows.push(["Premiums receivable", pr, millions]);
+    if (any(ta)) rows.push(["Total assets", ta, millions]);
+    if (any(tl)) rows.push(["Total liabilities", tl, millions]);
+    if (any(up)) rows.push(["Unearned premiums", up, millions]);
+    if (rows.length) blocks.push(tableBlock("Balance sheet by year", f, rows));
+    var ratios = [];
+    [["Invested assets to liabilities (x)", "invested_to_liabilities", mult], ["Liabilities to surplus (x)", "liabilities_to_surplus", mult], ["NPW to surplus (x)", "npw_to_surplus", mult],
+      ["Receivables to DPW (%)", "receivable_to_dpw", pctCell], ["Bonds share (%)", "bonds_share", pctCell], ["Stocks share (%)", "stocks_share", pctCell], ["Cash share (%)", "cash_share", pctCell]].forEach(function (r) {
+      var a = D(f, r[1]); if (any(a)) ratios.push([r[0], a, r[2]]);
+    });
+    if (ratios.length) { derived = true; blocks.push(tableBlock("Liquidity and leverage (derived)", f, ratios)); }
+    if (!blocks.length) blocks.push(tableBlock("Balance sheet by year", f, rows));
+    var items = quads(blocks.slice(0, 3), pointsOf(t, "balance"));
+    items.push(source(f, { derived: derived }));
+    return content(t, "balance", "Balance sheet, " + yearsLabel(f), items);
+  }
+
+  // accident years: each one's loss and LAE ratio as each statement year reported it, and how far it has moved
+  function accidentSlide(f, t) {
+    var A = (detailOf(f) || {}).accidentYears || {}, rows = arr(A.rows).slice(-10), ys = (f.years || []).map(Number), n = ys.length;
+    var hasNpe = rows.some(function (r) { return num(r.npe); });
+    var yw = 0.82, aw = 1.25, cw = 1.15, nw = hasNpe ? 1.0 : 0, tw = aw + yw * n + cw + nw;
+    var head = ["Accident year"].concat(ys.map(String)).concat(["Change (pts)"]).concat(hasNpe ? ["NPE ($M)"] : []);
+    var body = rows.map(function (r) {
+      var vals = arr(r.values);
+      return [String(r.ay)].concat(ys.map(function (y, i) { return r.ay > y ? "" : pctCell(vals[i]); }))
+        .concat([num(r.change) ? (r.change > 0 ? { text: "+" + fixed1(r.change), color: MAG } : pctCell(r.change)) : "n/d"]).concat(hasNpe ? [millions(r.npe)] : []);
+    });
+    var rowH = Math.min(0.3, (BOTTOM - TOP - HDR) / (rows.length + 1));
+    var items = [header("Loss and LAE ratio by accident year, as each statement reported it (%)", L, TOP, tw),
+      { type: "table", x: L, y: TOP + HDR, colW: [aw].concat(ys.map(function () { return yw; })).concat([cw]).concat(hasNpe ? [nw] : []), rowH: rowH, size: 11, rows: [head].concat(body),
+        aligns: ["l"].concat(ys.map(function () { return "r"; })).concat(["r"]).concat(hasNpe ? ["r"] : []), name: "Table accident years" }];
+    var rx = L + tw + 0.3, rw = R - rx;
+    var worst = rows.filter(function (r) { return num(r.change); }).sort(function (a, b) { return b.change - a.change; })[0];
+    var withChange = rows.filter(function (r) { return num(r.change); });
+    if (rw >= 2.4) {
+      items.push(tile(rx, TOP, rw, 1.2, worst ? (worst.change > 0 ? "+" : "") + fixed1(worst.change) + " pts" : "n/d", worst ? "Largest change, accident year " + worst.ay + ", since " + (worst.firstYear === worst.ay ? "first reported" : worst.firstYear) + " (derived)" : "Largest change since first shown (derived)", worst && worst.change > 0 ? MAG : NAVY));
+      items.push(tile(rx, TOP + 1.45, rw, 1.2, withChange.length ? cnt(A.worse) + " of " + cnt(withChange.length) : "n/d", "Accident years worse than first shown (derived)", num(A.worse) && A.worse > 0 ? MAG : NAVY));
+      if (withChange.length) {
+        var cy = TOP + 2.9, pc = {};
+        withChange.forEach(function (r, i) { pc[i] = r.change > 0 ? MAG : NAVY; });
+        items.push(header("Change since first shown (points)", rx, cy, rw));
+        items.push({ type: "chart", kind: "column", x: rx, y: cy + HDR, w: rw, h: BOTTOM - cy - HDR, legend: "none", gap: 60, catLabels: "low", catSize: 10, name: "Chart accident year change",
+          categories: withChange.map(function (r) { return String(r.ay); }), series: [ser("Change (points)", withChange.map(function (r) { return r.change; }), NAVY, { pointColors: pc })], labels: { format: "0.0;(0.0);0.0", size: 9 } });
+      }
+    }
+    items.push(source(f, { derived: true, note: "Change: points since first shown; up is worse." }));
+    return content(t, "accident", "Accident years, " + yearsLabel(f), items);
   }
 
   function filingsSlide(f, t) {
@@ -718,7 +930,7 @@
     items.push(header("Latest form and rule filings, newest first" + (total > rows.length ? " (" + rows.length + " of " + cnt(total) + ")" : ""), L, TOP, W));
     var tr = rows.map(function (r) { return [flat(r.company) || "n/d", flat(r.state) || "n/d", flat(r.toi) || "n/d", flat(r.type) || "n/d", flat(r.status) || "n/d", fpDate(f, r.published), flat(r.filingNo) || "n/d"]; });
     var tbl = fpTable("Table latest filings", L, TOP + HDR, W, ["Company", "State", "Type of insurance", "Filing type", "Status", "Published", "Filing number"], tr,
-      [3.0, 0.65, 2.45, 1.3, 1.35, 1.2, 2.33], ["l", "l", "l", "l", "l", "r", "l"], [0, 5], { fit: [0, 2, 3, 4, 6] });
+      [3.0, 0.65, 2.45, 1.3, 1.35, 1.2, 2.33], ["l", "l", "l", "l", "l", "r", "l"], f._oneCompany ? [5] : [0, 5], { fit: [0, 2, 3, 4, 6] });
     items.push(tbl);
     var y2 = TOP + HDR + (rows.length + 1) * 0.25 + 0.3;
     if (pts.length && BOTTOM - y2 >= 0.9) items = items.concat(takeaways(pointsOf(t, "forms"), L, y2, W, BOTTOM - y2));
@@ -1095,13 +1307,189 @@
     return { fileName: (slug(fpName(f)) || "filings") + "-filings-profile" + (f.sample ? "-sample" : "") + (day ? "-" + day : "") + ".pptx", slides: slides };
   }
 
-  function spec(facts, text) {
-    var f = facts || {}, t = text || {};
-    var included = {}; plan(f).forEach(function (r) { included[r.id] = r.included; });
-    var make = { summary: summarySlide, premium: premiumSlide, underwriting: underwritingSlide, capital: capitalSlide,
-      reserves: reservesSlide, reinsurance: reinsuranceSlide, filings: filingsSlide, questions: questionsSlide };
+  // =================================================================================================================
+  // ---------- the full profile's filings in detail (facts.filingsDetail, from the same 12-month search) ----------
+  // =================================================================================================================
+  // facts.filingsDetail is a filings profile's facts (filingsFactsFrom in profile.ts) with marks and every state, so
+  // the filings profile's slides are reused for it, with the code-written takeaways in text.filingsDetail. Facts made
+  // before it existed have none and keep the single filings slide. The at-a-glance slide takes the place of that
+  // slide (same id, "filings") and carries the filings section's takeaways (Claude's or the plain ones).
+  var FD_SLIDES = [
+    ["fdRates", "Rate changes, last 12 months"], ["fdRateMap", "Latest rate change by state (map), last 12 months"], ["fdMarks", "New products and market moves, last 12 months"],
+    ["fdForms", "Latest form and rule filings, last 12 months"], ["fdStates", "Every state, last 12 months"], ["fdRegulator", "Time with the regulator, last 12 months"]
+  ];
+  var FD_LABEL = "Filings at a glance, last 12 months";
+  var MARK_ORDER = ["new_program", "new_state", "new_form", "withdrawal"];
+  var MARK_NAMES = { new_program: "New program or product", new_state: "New to a state", new_form: "New form or coverage", withdrawal: "Withdrawal" };
+  var MARK_NOTE = ["Marks: the app reads each filing's type, status and description, so a marked filing may be new; S&P doesn't report it as new.",
+    "Marks are inferred from each filing's wording.", "Marks inferred from wording."];
+  var NONE_NOTE = ["None returned: S&P returned nothing for this search in that state, which doesn't prove nothing was filed.", "None returned: not proof that nothing was filed.", "None returned: not proof of none."];
+
+  // the detail, or null for facts made before it existed (or when the search couldn't run)
+  function fdOf(f) { var d = f && f.filingsDetail; return d && typeof d === "object" && !Array.isArray(d) && d.totals && typeof d.totals === "object" && f.filings && !f.filings.unavailable ? d : null; }
+  function fdMarks(d) { var m = d && d.marks; return m && typeof m === "object" && Array.isArray(m.rows) && m.counts ? m : { counts: {}, filings: 0, rows: [], largeRate: 0 }; }
+  // the takeaways of the detailed slides (code-written; none for a text saved before them)
+  function fdText(t) { var x = t && t.filingsDetail; return x && typeof x === "object" ? x : { by: "plain" }; }
+  function fdTitled(slide, id, fallback) {
+    slide.id = id;
+    if (!/12 months/.test(slide.title)) slide.title = trimTitle(fallback + ", last 12 months");
+    return slide;
+  }
+  function fdPlan(f, rows, out, opts) {
+    var FD = fdOf(f); if (!FD) return;
+    var at = -1; rows.forEach(function (r, i) { if (r.id === "filings") at = i; });
+    if (at < 0) return;
+    rows[at].label = FD_LABEL;
+    rows.splice.apply(rows, [at + 1, 0].concat(FD_SLIDES.map(function (s) { return { id: s[0], label: s[1], included: true, reason: "" }; })));
+    var T = FD.totals || {}, R = FD.rates || {}, M = fdMarks(FD);
+    if (!num(T.filings) || T.filings <= 0) { FD_SLIDES.forEach(function (s) { out(s[0], NOTHING); }); return; }
+    if (!R.filings) out("fdRates", "S&P returned no rate filings for this search, so there are no rate changes to show.");
+    else if (!R.withImpact) out("fdRates", "No filing carried an overall rate impact in S&P's data, so there are no rate changes to chart.");
+    else if (!arr(R.points).length) out("fdRates", "None of the filings with a rate impact has a publish date, so they can't be put in date order.");
+    if (!usMapOf(opts)) out("fdRateMap", "The outlines of the states didn't load, so the rate map is left out. Reload the page and build again.");
+    else if (!fpRows(FD, "states").some(function (s) { return s.latest && num(s.latest.rate); })) out("fdRateMap", "No filing in any state carried an overall rate impact in S&P's data, so there is nothing to shade.");
+    if (!FD.marks) out("fdMarks", "These figures were saved before filings were marked, so get the figures again to see them.");
+    else if (!M.filings) out("fdMarks", "No filing's wording suggests a new program, a new form, a company new to a state or a withdrawal. A filing with no mark isn't thereby unimportant.");
+    if (!(FD.latest && FD.latest.total > 0 && fpRows(FD, "latest").length)) out("fdForms", "S&P returned no form or rule filings for this search.");
+    if (!arr(FD.everyState).length) out("fdStates", "These figures were saved before every state was listed, so get the figures again to see them.");
+    if (!(FD.regulator && FD.regulator.all)) out("fdRegulator", "None of the filings has both a submitted date and a publish date in S&P's data, so the time with the regulator can't be worked out.");
+  }
+  function fdMake(f, make, opts) {
+    var FD = fdOf(f); if (!FD) return;
+    var usMap = usMapOf(opts);
+    make.filings = function (f, t) { return fdGlance(f, t, FD, usMap); };
+    make.fdRates = function (f, t) { return fdTitled(fpRates(FD, fdText(t)), "fdRates", "Rate changes"); };
+    make.fdRateMap = function (f, t) { return fdTitled(mapSlide(FD, fdText(t), "rate", usMap), "fdRateMap", "Latest rate change by state"); };
+    make.fdMarks = function (f, t) { return fdMarksSlide(FD, fdText(t)); };
+    make.fdForms = function (f, t) {
+      // one company: no company column (every row is the company); a group with several keeps it
+      var e = FD.entity || {}, one = !(e.kind === "group" && e.companies > 1);
+      var g = one ? Object.assign({}, FD, { latest: Object.assign({}, FD.latest, { rows: fpRows(FD, "latest").map(function (r) { return Object.assign({}, r, { company: null }); }) }), _oneCompany: true }) : FD;
+      return fdTitled(fpForms(g, fdText(t)), "fdForms", "Latest form and rule filings");
+    };
+    make.fdStates = function (f, t) { return fdEveryState(FD, fdText(t)); };
+    make.fdRegulator = function (f, t) { return fdTitled(fpRegulator(FD, fdText(t)), "fdRegulator", "Time with the regulator"); };
+  }
+
+  // ----- at a glance: tiles, the map of filings by state, filings by type, and the filings section's takeaways -----
+  function fdGlance(f, t, FD, usMap) {
+    var T = FD.totals || {}, A = FD.approval || {}, M = fdMarks(FD), items = [], lw = 7.75, rx = 8.62, rw = R - rx;
+    var claude = t.by === "claude";
+    if (!T.filings) {
+      items.push(header("Filings, last 12 months", L, TOP, lw), fpNothingBox(FD, L, TOP + HDR, lw));
+      items = items.concat(takeaways(pointsOf(t, "filings"), rx, TOP, rw, BOTTOM - TOP));
+      items.push(fpSource(FD, t, [], true));
+      return { kind: "content", id: "filings", title: trimTitle(flat(t.filings && t.filings.title) || "Recent rate and form filings, last 12 months"), items: items };
+    }
+    var rows = fpRows(FD, "states");
+    if (usMap) {
+      var legendRows = Math.ceil((countBins(rows.reduce(function (m, r) { return Math.max(m, r.n || 0); }, 0)).length + 2) / 3);
+      var mapH = BOTTOM - TOP - HDR - 0.12 - legendRows * 0.24;
+      items.push(header("Filings by state, shaded by number of filings", L, TOP, lw));
+      var m = mapItems(FD, "count", usMap, L, TOP + HDR, lw, mapH);
+      items.push(m.group);
+      items.push(legendItems(m.legend, L, m.bottom + 0.1, lw, "Key: filings").group);
+    } else {
+      var bars = rows.slice(0, 12);
+      items.push(header("Filings by state" + (rows.length > bars.length ? " (top " + bars.length + " of " + rows.length + ")" : ""), L, TOP, lw));
+      items.push({ type: "chart", kind: "bar", x: L, y: TOP + HDR, w: lw, h: Math.min(BOTTOM - TOP - HDR, 0.45 + bars.length * 0.3), legend: "none", gap: 50, categories: bars.map(function (r) { return r.state; }),
+        series: [ser("Filings", bars.map(function (r) { return r.n; }), NAVY, { pointColors: { 0: MAG } })], labels: { format: "#,##0" }, catSize: 11, name: "Chart states" });
+    }
+    // the tiles
+    items.push(header("Last 12 months at a glance", rx, TOP, rw));
+    var tw = (rw - 0.12) / 2, th = 0.82;
+    [[cnt(T.filings), "Filings published"], [cnt(T.states), "States filed in, of " + cnt(FD.search && FD.search.statesSearched) + " searched"],
+      [cnt(T.rate), "Rate filings, " + cnt(A.approved) + " approved"], [cnt(M.filings), "May be new products or market moves (inferred)", M.filings ? MAG : NAVY]].forEach(function (c, i) {
+      var tl = tile(rx + (i % 2) * (tw + 0.12), TOP + HDR + Math.floor(i / 2) * (th + 0.1), tw, th, c[0], c[1], c[2]); tl.labelSize = 10; tl.valueSize = 22; items.push(tl);
+    });
+    // by filing type: one row of counts
+    var Y = FD.years || {}, types = arr(Y.types).map(function (ty, i) { return { ty: flat(ty) || "Type n/d", n: arr(Y.byType)[i] || 0 }; }).filter(function (x) { return x.n > 0; }).slice(0, 5);
+    var y2 = TOP + HDR + 2 * th + 0.1 + 0.15;
+    if (types.length) {
+      var cw = rw / types.length;
+      items.push(header("By filing type", rx, y2, rw));
+      items.push({ type: "table", x: rx, y: y2 + HDR, colW: types.map(function () { return cw; }), rowH: 0.25, size: 11, name: "Table filing types", aligns: types.map(function () { return "r"; }),
+        rows: [types.map(function (x) { return fitText(x.ty, 11, cw - 0.26, true); }), types.map(function (x) { return cnt(x.n); })] });
+      y2 += HDR + 0.5 + 0.15;
+    }
+    if (BOTTOM - y2 >= 1.0) items = items.concat(takeaways(pointsOf(t, "filings"), rx, y2, rw, BOTTOM - y2));
+    items.push(fpSource(FD, t, [MARK_NOTE, NONE_NOTE], claude));
+    return { kind: "content", id: "filings", title: trimTitle(flat(t.filings && t.filings.title) || "Recent rate and form filings, last 12 months"), items: items };
+  }
+
+  // ----- new products and market moves: the marked filings with the words that marked them -----
+  function fdMarksSlide(FD, t) {
+    var M = fdMarks(FD), items = [], e = FD.entity || {}, group = e.kind === "group" && e.companies > 1;
+    var cw = 4.3, kinds = MARK_ORDER.map(function (k) { return [MARK_NAMES[k], cnt((M.counts || {})[k] || 0)]; });
+    items.push(header("Filings marked, by kind", L, TOP, cw));
+    items.push({ type: "table", x: L, y: TOP + HDR, colW: [3.1, 1.2], rowH: 0.25, size: 11, name: "Table marks by kind", aligns: ["l", "r"], rows: [["May be", "Filings"]].concat(kinds) });
+    var tx = L + cw + 0.3, tw = R - tx, y2 = TOP + HDR + 0.25 * 5 + 0.3;
+    items = items.concat(takeaways(pointsOf(t, "marks"), tx, TOP, tw, y2 - 0.1 - TOP));
+    var cap = Math.max(1, Math.floor((BOTTOM - y2 - HDR) / 0.25) - 1), shown = arr(M.rows).slice(0, cap);
+    var tr = shown.map(function (r) {
+      var ms = arr(r.marks);
+      return [flat(r.company) || "n/d", flat(r.state) || "n/d", flat(r.toi) || "n/d", flat(r.type) || "n/d", flat(r.status) || "n/d", fpDate(FD, r.published), fpDate(FD, r.effective), flat(r.filingNo) || "n/d",
+        ms.map(function (x) { return flat(x.label); }).filter(Boolean).join("; ") || "n/d", ms.map(function (x) { return flat(x.reason); }).filter(Boolean).join("; ") || "n/d"];
+    });
+    var total = num(M.filings) ? M.filings : shown.length;
+    items.push(header("Marked filings, newest first" + (total > shown.length ? " (" + shown.length + " of " + cnt(total) + ")" : ""), L, y2, W));
+    var head = ["Company", "State", "Type of insurance", "Filing type", "Status", "Published", "Effective", "Filing number", "May be", "Why: the words that marked it"];
+    var widths = [1.3, 0.55, 1.4, 0.85, 1.62, 1.05, 1.05, 1.25, 1.2, 3.31];
+    if (!group) { head = head.slice(1); widths = widths.slice(1); tr = tr.map(function (r) { return r.slice(1); }); }
+    else widths = [1.3, 0.5, 1.2, 0.8, 1.62, 1.0, 1.0, 1.15, 1.1, 2.61];   // a group: room for the company
+    var o = group ? 1 : 0;
+    items.push(fpTable("Table marked filings", L, y2 + HDR, W, head, tr, widths, head.map(function (_, j) { return j === 4 + o || j === 5 + o ? "r" : "l"; }), [0, 4 + o, 7 + o, 8 + o],
+      { fit: group ? [0, 2, 3, 4, 7, 8, 9] : [1, 2, 3, 6, 7, 8], extra: { size: 10 } }));
+    items.push(fpSource(FD, t, [MARK_NOTE, ["Filing number: the tracking number, or S&P's own number (S&P no.) when there is none.", "Filing number: tracking or S&P no.", ""]]));
+    return { kind: "content", id: "fdMarks", title: trimTitle(flat(t.marks && t.marks.title) || "New products and market moves, last 12 months"), items: items };
+  }
+
+  // ----- every state: two tables a slide, running on to a second slide; nothing is shown as zero filings -----
+  function fdEveryState(FD, t) {
+    // 9pt so a state's nine figures fit in half the width; the heading row may take two lines
+    var HEAD_H = 0.42, rows = arr(FD.everyState).filter(function (r) { return r && /^[A-Z]{2}$/.test(String(r.state)); }), per = Math.floor((BOTTOM - TOP - HDR - HEAD_H) / 0.25), star = false;
+    var head = ["State", "Filings", "Rate", "Rule", "Form", "Latest (%)", "Published", "Line", "New program"];
+    var widths = [0.45, 1.0, 0.42, 0.42, 0.46, 0.62, 0.85, 1.07, 0.78], tw = widths.reduce(function (a, b) { return a + b; }, 0), gap = W - 2 * tw;
+    var cell = function (r) {
+      if (!r.searched) return [r.state, { text: "Not searched", color: "666666" }, "", "", "", "", "", "", ""];
+      if (!r.n) return [r.state, { text: "None returned", color: "666666" }, "", "", "", "", "", "", ""];
+      var l = r.latest; if (l && !l.approved) star = true;
+      return [r.state, cnt(r.n), cnt(r.rate), cnt(r.rule), cnt(r.form), l ? pctCell(l.rate) + (l.approved ? "" : "*") : "n/d", l ? fpDate(FD, l.date) : "n/d", l ? fitText(flat(l.toi) || "n/d", 9, 1.07 - 0.26, false) : "n/d",
+        r.newProgram ? { text: cnt(r.newProgram), color: MAG } : "0"];
+    };
+    var table = function (list, x, name) {
+      return { type: "table", x: x, y: TOP + HDR, colW: widths, rowH: [HEAD_H].concat(list.map(function () { return 0.25; })), size: 9, name: name, aligns: ["l", "r", "r", "r", "r", "r", "r", "l", "r"], rows: [head].concat(list.map(cell)) };
+    };
+    var slides = [], pages = Math.max(1, Math.ceil(rows.length / (2 * per)));
+    var filed = rows.filter(function (r) { return r.n > 0; }).length, none = rows.filter(function (r) { return r.searched && !r.n; }).length, off = rows.filter(function (r) { return !r.searched; }).length;
+    for (var pg = 0; pg < pages; pg++) {
+      var part = rows.slice(pg * 2 * per, (pg + 1) * 2 * per), left = part.slice(0, per), right = part.slice(per), items = [];
+      star = false;
+      items.push(header("Every state" + (pages > 1 ? " (" + (pg + 1) + " of " + pages + ")" : "") + ": " + cnt(filed) + " with filings, " + cnt(none) + " none returned" + (off ? ", " + cnt(off) + " not searched" : ""), L, TOP, W));
+      items.push(table(left, L, "Table every state " + (pg * 2 + 1)));
+      if (right.length) items.push(table(right, L + tw + gap, "Table every state " + (pg * 2 + 2)));
+      else items = items.concat(takeaways(pointsOf(t, "everyState"), L + tw + gap, TOP + HDR, tw, BOTTOM - TOP - HDR));
+      items.push(fpSource(FD, t, [NONE_NOTE, star ? ["* Not approved: the figure may be the change asked for. Latest: S&P's overall figure, not weighted by premium.", "* Not approved: may be as asked. Unweighted.", "* May be as asked."] : ["Latest: S&P's overall rate figure for the newest filing with one, not weighted by premium.", "Latest: overall, unweighted."],
+        ["New program: filings whose wording suggests one (inferred).", "New program: inferred.", ""]]));
+      var title = flat(t.everyState && t.everyState.title) || "Every state, last 12 months";
+      slides.push({ kind: "content", id: "fdStates", title: trimTitle(pg ? title + " (continued)" : title), items: items });
+    }
+    return slides;
+  }
+
+  // opts.skip: ids of slides the reader chose to leave out (the cover always stays)
+  function spec(facts, text, opts) {
+    var f = facts || {}, t = text || {}, skip = opts && Array.isArray(opts.skip) ? opts.skip : [];
+    var included = {}; plan(f, opts).forEach(function (r) { included[r.id] = r.included && (r.id === "cover" || skip.indexOf(r.id) < 0); });
+    var make = { summary: summarySlide, premium: premiumSlide, lines: linesSlide, underwriting: underwritingSlide, earnings: earningsSlide, balance: balanceSlide, capital: capitalSlide,
+      reserves: reservesSlide, accident: accidentSlide, reinsurance: reinsuranceSlide, filings: filingsSlide, questions: questionsSlide };
+    fdMake(f, make, opts);
     var slides = [coverSlide(f, t)];
-    SLIDES.slice(1).forEach(function (s) { if (included[s[0]]) slides.push(make[s[0]](f, t)); });
+    SLIDES.slice(1).forEach(function (s) {
+      if (included[s[0]]) slides.push(make[s[0]](f, t));
+      // the filings in detail follow the at-a-glance slide (a slide may run on to a second one)
+      if (s[0] === "filings" && fdOf(f)) FD_SLIDES.forEach(function (d) { if (included[d[0]]) [].concat(make[d[0]](f, t)).forEach(function (x) { slides.push(x); }); });
+    });
     var name = slug(entityName(f)) || "company";
     var day = ymd(f.asOf) ? String(f.asOf).slice(0, 10) : "";
     return { fileName: name + "-profile" + (f.sample ? "-sample" : "") + (day ? "-" + day : "") + ".pptx", slides: slides };
