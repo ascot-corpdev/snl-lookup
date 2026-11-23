@@ -34,8 +34,8 @@ const NEW: [string, string, string, string][] = [
 {
   const ids = STAT_FIELDS.map((f) => f.id);
   ok("the first 18 figures are kept, in their order", same(ids.slice(0, 18), FIRST), ids.slice(0, 18));
-  ok("the 31 new figures follow, each with its label, unit and kind", same(STAT_FIELDS.slice(18).map((f) => [f.id, f.label, f.unit, f.by]), NEW), STAT_FIELDS.slice(18));
-  ok("49 figures in all, no id twice", ids.length === 49 && new Set(ids).size === 49);
+  ok("the 31 new figures follow, each with its label, unit and kind", same(STAT_FIELDS.slice(18, 49).map((f) => [f.id, f.label, f.unit, f.by]), NEW), STAT_FIELDS.slice(18));
+  ok("50 figures in all (the 49 above, then the state map's figure by state and line), no id twice", ids.length === 50 && new Set(ids).size === 50 && ids[49] === "dpw_by_state_line");
   ok("ids are plain app-level names: lower case letters, digits and _", ids.every((id) => /^[a-z][a-z0-9_]*$/.test(id)));
   ok("the Statutory view's default set is unchanged", same(DEFAULT_STAT_FIELDS, ["dpw_by_line", "npw_by_line", "dpw_by_state", "surplus", "loss_ratio", "loss_lae_ratio", "expense_ratio", "combined_ratio"]));
   const st = fieldStatus({ fields: {} });

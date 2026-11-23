@@ -25,7 +25,7 @@ import { groupChoices, MAX_IDS, planSearch, resolveEntity, sameId } from "./fili
 import type { Env } from "./http.ts";
 import type { Snowflake } from "./snowflake.ts";
 import { type Spgmi, SpgmiError } from "./spgmi.ts";
-import { type Mapping, savedOrFreshStatutory, STAT_FIELDS, type StatField, type StatFieldId, type StatResult } from "./statutory.ts";
+import { MAP_ONLY_FIELDS, type Mapping, savedOrFreshStatutory, STAT_FIELDS, type StatField, type StatFieldId, type StatResult } from "./statutory.ts";
 import { addUsage, answerUsage, DEFAULT_MODEL, FALLBACK_BETA, makeClient, newState, type Segment } from "./chat.ts";
 import type { IndexRow, IndexState } from "./db.ts";
 import { anthropicReason, askJsonPrompt, jsonIn, schemaRefused } from "./digest.ts";
@@ -52,8 +52,8 @@ export const PROFILE_CALL_MS = 140_000;
 export const SOURCE = "S&P Global Market Intelligence, SNL Insurance Regulatory Data";
 export const LIMITS = { title: 65, lead: 30, point: 220, qTitle: 60, qText: 260, subtitle: 110 };
 
-/** Every statutory field a profile wants: all of them. */
-export const PROFILE_FIELDS: StatFieldId[] = STAT_FIELDS.map((f) => f.id);
+/** Every statutory field a profile wants: all of them but those asked for only by the Combination view's map. */
+export const PROFILE_FIELDS: StatFieldId[] = STAT_FIELDS.map((f) => f.id).filter((id) => !MAP_ONLY_FIELDS.includes(id));
 const labelOf = (id: string) => STAT_FIELDS.find((f) => f.id === id)?.label ?? id;
 
 // ---------- the facts (contract 1) ----------
@@ -334,7 +334,7 @@ export function factsFrom(stat: StatResult | null, dir: Directory, filings: Fact
   }));
 
   for (const f of STAT_FIELDS) {
-    if (used.has(f.id)) continue;
+    if (used.has(f.id) || !PROFILE_FIELDS.includes(f.id)) continue;   // a figure the profile never asks for isn't missing
     const reason = problem(f.id) ?? yearlyProblems.get(f.id) ?? (yearsWith(field(f.id)).length ? "S&P returned nothing for it in these years" : "S&P returned nothing for it");
     missing.set(f.id, reason);
   }
@@ -988,7 +988,7 @@ export function sampleFacts(today: string): Facts {
   const states: [string, number][] = [["FL", 70.0], ["TX", 18.4], ["LA", 10.9], ["GA", 7.6], ["SC", 6.2], ["AL", 4.8], ["NC", 2.9], ["MS", 1.7]];
   const stat: StatResult = {
     kind: "company", codes: ["90001"], fromYear: y - 5, toYear: y, entities: [{ code: "90001", name: "Calloway Insurance Co" }], loaded: [], truncated: false, source: SOURCE,
-    fields: STAT_FIELDS.map((f) => {
+    fields: STAT_FIELDS.filter((f) => PROFILE_FIELDS.includes(f.id)).map((f) => {
       const by = (i: number) => ({ code: "90001", year: years[i], line: null as string | null, state: null as string | null });
       let out: StatField["rows"] = [];
       // every figure by year is its series (dpw and npw are the by-line figures added up)

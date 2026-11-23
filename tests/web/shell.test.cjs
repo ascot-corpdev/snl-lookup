@@ -41,7 +41,7 @@ let pass=0, fail=0; const ok=(n,c,x)=>{ if(c) pass++; else { fail++; console.log
   const scripts=[...SRC.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)].map(m=>m[1]);
   ok("only supabase-js 2.119.0 and config.js load with the page", JSON.stringify(scripts)===JSON.stringify(["https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js","config.js"]), scripts);
   ok("SheetJS is pinned and only named for lazy loading", SRC.includes('"https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.mini.min.js"') && !/<script[^>]*xlsx/.test(SRC));
-  ok("no stylesheet, font or image from outside", !/<link\b/.test(SRC) && !/@import|url\(/.test(SRC) && !/<img\b/.test(SRC));
+  ok("no stylesheet, font or image from outside (url() only for a pattern drawn on the page itself, url(#...))", !/<link\b/.test(SRC) && !/@import|url\((?!#[A-Za-z][\w-]*\))/.test(SRC) && !/<img\b/.test(SRC));
   ok("no em dashes in the page", !SRC.includes("—"));
   ok("the committed config is blank", /supabaseUrl:\s*""/.test(fs.readFileSync(WEB+"/config.js","utf8")) && /supabaseAnonKey:\s*""/.test(fs.readFileSync(WEB+"/config.js","utf8")));
 

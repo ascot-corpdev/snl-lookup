@@ -40,7 +40,7 @@ function world(secrets: Record<string, string> = PAT, opts: SfOpts & { mapping?:
   const w = world({}, { mapping: null });
   const s = await w.call({ action: "status" });
   ok("status says statutory data isn't set up yet, in plain words", s.status === 200 && s.body.configured === false && s.body.mapped === false && s.body.message === SNOWFLAKE_NOT_CONFIGURED, s.body);
-  ok("status lists every field (the eight the view shows and the rest for company profiles), none mapped", s.body.fields.length === 49 && s.body.fields.every((f: any) => f.mapped === false && f.label && f.unit && f.by), s.body.fields);
+  ok("status lists every field (the eight the view shows and the rest for company profiles), none mapped", s.body.fields.length === 50 && s.body.fields.every((f: any) => f.mapped === false && f.label && f.unit && f.by), s.body.fields);
   const q = await w.call(QUERY);
   ok("a query answers 503 not_configured with the same message", q.status === 503 && q.body.error === "not_configured" && q.body.message === SNOWFLAKE_NOT_CONFIGURED, q.body);
   const d = await w.call({ action: "discover" });
