@@ -705,6 +705,29 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 .cbtbl td.cbfirst,.cbtbl th.cbfirst{border-left:2px solid var(--grid)}
 .cbtbl td.cbpf{font-weight:bold}
 .cbwhy{display:block;font-size:11px;font-weight:normal;color:var(--muted);white-space:normal;max-width:22ch;margin-left:auto}
+/* Combination: the change on our company (arrow and signed number; only the arrow is coloured, where lower is better,
+   as the coloured text alone would fall short of 4.5:1 on the shaded rows) */
+.cbchgbar{display:flex;flex-wrap:wrap;gap:4px 16px;align-items:baseline;min-width:0}
+.cbchgbar p{margin:0;flex:1 1 300px;min-width:0}
+.cbchgsw{display:inline-flex;align-items:center;gap:6px;font-weight:bold;cursor:pointer;white-space:nowrap}
+.cbchgsw input{margin:0}
+.cbchg{white-space:nowrap}
+.cbchg .cbarr{font-size:11px}
+.cbchg.adv .cbarr{color:var(--magenta)}
+.cbchg.fav .cbarr{color:var(--teal)}
+.cbtbl td.cbchgc{font-weight:normal}
+.cbhn{display:block;font-weight:normal;font-size:11px;white-space:normal;max-width:16ch;margin-left:auto;overflow-wrap:anywhere}
+.cbtchg{white-space:normal}
+#cbChgKey{margin:0}
+.cbtbl.cbwc td.cbfirst,.cbtbl.cbwc thead tr+tr th.cbfirst{border-left-color:#A9ADBD}
+/* the by-year tables: the first column stays in view while the years scroll */
+.cbtbl.cbyears tbody td:first-child,.cbtbl.cbyears thead tr:first-child th:first-child{position:sticky;left:0;z-index:1;box-shadow:inset -1px 0 0 var(--grid)}
+.cbtbl.cbyears tbody tr:nth-child(odd) td:first-child{background:var(--surface)}
+/* at phone width, with the change shown: a narrower first column, tighter cells and headings that wrap, so the
+   latest year's four columns sit beside the row names before anything scrolls */
+@media (max-width:560px){.cbtbl.cbyears td:first-child{min-width:112px;max-width:132px}
+  .cbtbl.cbwc{font-size:11px}.cbtbl.cbwc th,.cbtbl.cbwc td{padding:4px 5px}.cbtbl.cbwc thead th{white-space:normal}.cbtbl.cbwc .cbhn{font-size:10px}}
+@media print{.cbtbl.cbyears tbody td:first-child,.cbtbl.cbyears thead tr:first-child th:first-child{position:static}.cbchgsw{display:none}}
 .cbnotes{margin:0;padding-left:18px;font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:3px}
 .cbmix ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:3px;font-size:13px}
 .cbmix li{overflow-wrap:anywhere}
@@ -8185,11 +8208,56 @@ function cbFmt(x, unit){
   return unit==="usd" ? usdM(x.v) : unit==="x" ? pfX(x.v) : pct(x.v);
 }
 const cbCell = (x, unit, s, y, extra) => `<td class="num${extra||""}" data-s="${s}" data-y="${y}">${esc(cbFmt(x, unit))}${x&&x.why?`<span class="cbwhy">${esc(x.why)}</span>`:""}</td>`;
+/* ----- Change: the pro forma against our company standalone, worked out here from the figures already on the page
+   (no request, nothing kept). Dollars: percent change, (pro forma less ours) over ours, n/d when ours is zero or
+   negative. Ratios in percent: the difference in percentage points. Multiples: the difference in x. In the mix tables
+   and the map, "New" where we write nothing and the target does. Colour only where lower is plainly better. ----- */
+const CB_LOWER_BETTER = new Set(["loss_ratio","loss_lae_ratio","expense_ratio","combined_ratio","npw_to_surplus","reserves_to_surplus","liabilities_to_surplus"]);
+const cbChgOn = () => !S.cb.hideChg;   // the "Show change" tick box: this page's memory only, never saved
+/* b: ours, p: the pro forma ({v} | {why} | {never}); unit "usd" | "pct" | "x"; mix: a line or state, where a zero of ours
+   under a pro forma above zero is new to us. Gives {v, unit: "pct" | "pts" | "x"}, {isNew}, {never} or {why}. */
+function cbChange(b, p, unit, mix){
+  if(!b || !p || p.never) return {never:true};
+  if(b.why) return {why:`base: ${b.why}`};
+  if(p.why) return {why:p.why};
+  if(unit!=="usd") return {v:p.v-b.v, unit:unit==="x"?"x":"pts"};
+  if(mix && b.v===0 && p.v>0) return {isNew:true};
+  if(b.v===0) return {why:"ours is zero: no percent change"};
+  if(b.v<0) return {why:"ours is negative: no percent change"};
+  return {v:(p.v-b.v)/b.v*100, unit:"pct"};
+}
+/* What a change reads as: text on screen (arrow and signed number), label for screen readers, dir 1 | -1 | 0. */
+function cbChgText(c){
+  if(c.never) return {text:"", label:"", dir:0};
+  if(c.isNew) return {text:"New", label:"new to us", dir:0};
+  if(c.why) return {text:"n/d", label:`n/d, ${c.why}`, dir:0};
+  const r=Math.round(c.v*10)/10, suf=c.unit==="pct"?"%":c.unit==="x"?"x":" pts", word=c.unit==="pct"?"%":c.unit==="x"?" times":" points";
+  if(r===0) return {text:`0.0${suf}`, label:`no change, 0.0${word}`, dir:0};
+  const n=Math.abs(r).toLocaleString("en-US",{minimumFractionDigits:1, maximumFractionDigits:1});
+  return {text:`${r>0?"▲":"▼"} ${r>0?"+":"-"}${n}${suf}`, label:`${r>0?"up":"down"} ${n}${word}`, dir:r>0?1:-1, signed:`${r>0?"+":"-"}${n}${suf}`};
+}
+/* A change on screen: the arrow (coloured only for a lower-is-better figure: up adverse, down favourable) beside the signed number. */
+function cbChgHTML(c, id){
+  const t=cbChgText(c); if(!t.dir) return esc(t.text);
+  const tone=CB_LOWER_BETTER.has(id) ? (t.dir>0?" adv":" fav") : "";
+  return `<span class="cbchg${tone}" role="img" aria-label="${esc(t.label)}"><span class="cbarr">${t.dir>0?"▲":"▼"}</span> ${esc(t.signed)}</span>`;
+}
+/* A change as exported: a number (one decimal), or "New" / "n/d (why)" as text; never an arrow. */
+const cbChgRaw = c => c.never ? "" : c.isNew ? "New" : c.why ? `n/d (${c.why})` : Math.round(c.v*10)/10 || 0;
+const cbChgCell = (r, c, y) => { const x=cbChange(c.b, c.p, r.unit); return `<td class="num cbchgc" data-s="c" data-y="${y}">${cbChgHTML(x, r.id)}${x.why?`<span class="cbwhy">${esc(x.why)}</span>`:""}</td>`; };
+const cbChgHead = () => `<th class="num cbchgh">Change<span class="cbhn">on ${esc(cbBaseName())}</span></th>`;
+const cbOnOurs = () => `on ${ORG ? ORG : "our company"}`;
+/* A pro forma scale tile's change line, for the latest year. */
+function cbTileChgHTML(cell){
+  if(!cbChgOn() || !cell) return "";
+  const x=cbChange(cell.b, cell.p, "usd");
+  return `<span class="t2 cbtchg">${x.why?esc(`Change ${cbOnOurs()}: n/d, ${x.why}`):`${cbChgHTML(x, "")} ${esc(cbOnOurs())}`}</span>`;
+}
 function cbTableHTML(id, rows, years, run){
-  const B=cbBaseName();
-  return `<div class="tbl-wrap" data-keep id="cbWrap_${id}"><table class="cbtbl" id="cbTab_${id}"><thead><tr><th rowspan="2">${id==="never"||id==="ratio"?"Ratio":"$M unless shown"}</th>${years.map(y=>`<th colspan="3" class="cbyr">${esc(y)}</th>`).join("")}</tr>
-    <tr>${years.map(()=>`<th class="num cbfirst">${esc(B)}</th><th class="num">Target</th><th class="num">Pro forma</th>`).join("")}</tr></thead>
-    <tbody>${rows.map(r=>`<tr data-row="${esc(r.id)}"><td>${esc(r.label)}${r.unit==="pct"?" (%)":""}${r.kind==="ratio"?` <span class="t2">(derived)</span>`:""}${r.note?`<span class="cbwhy" style="margin:2px 0 0;max-width:40ch">${esc(r.note)}</span>`:""}</td>${r.cells.map((c,i)=>cbCell(c.b, r.unit, "b", years[i], " cbfirst")+cbCell(c.t, r.unit, "t", years[i])+cbCell(c.p, r.unit, "p", years[i], " cbpf")).join("")}</tr>`).join("")}</tbody></table></div>`;
+  const B=cbBaseName(), chg=cbChgOn() && id!=="never";   // never-combined rows have no change
+  return `<div class="tbl-wrap" data-keep id="cbWrap_${id}"><table class="cbtbl cbyears${chg?" cbwc":""}" id="cbTab_${id}"><thead><tr><th rowspan="2">${id==="never"||id==="ratio"?"Ratio":"$M unless shown"}</th>${years.map(y=>`<th colspan="${chg?4:3}" class="cbyr">${esc(y)}</th>`).join("")}</tr>
+    <tr>${years.map(()=>`<th class="num cbfirst">${esc(B)}</th><th class="num">Target</th><th class="num">Pro forma</th>${chg?cbChgHead():""}`).join("")}</tr></thead>
+    <tbody>${rows.map(r=>`<tr data-row="${esc(r.id)}"><td>${esc(r.label)}${r.unit==="pct"?" (%)":""}${r.kind==="ratio"?` <span class="t2">(derived)</span>`:""}${r.note?`<span class="cbwhy" style="margin:2px 0 0;max-width:40ch">${esc(r.note)}</span>`:""}</td>${r.cells.map((c,i)=>cbCell(c.b, r.unit, "b", years[i], " cbfirst")+cbCell(c.t, r.unit, "t", years[i])+cbCell(c.p, r.unit, "p", years[i], " cbpf")+(chg?cbChgCell(r, c, years[i]):"")).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
 const CB_WHAT = "What this is: a simple sum of two sets of statutory figures, as each company filed them. It has no purchase accounting, no price, no synergies and no financing. It doesn't take out business the two already do with each other, such as reinsurance between them or pooling, and it doesn't change reinsurance or capital as a transaction would. Surplus in particular is not what a combined company would report.";
 const CB_COST = "Cost: two statutory look-ups, one for each side, each saved for that company or group as on the Statutory view, so looking again reads the saved figures. No S&P filing requests and no Claude. The two are added up in this browser: nothing that pairs them is saved or sent anywhere.";
@@ -8207,12 +8275,15 @@ function cbSideStatusHTML(which){
 }
 function cbScaleHTML(rows, years, mixL){
   const row=id=>rows.find(r=>r.id===id), at=(id,k)=>row(id).cells[0]?row(id).cells[0][k]:null, y=years[0];
-  const tile=(k, label, x, sub)=>`<div class="sntile" data-k="${k}"><span class="t2">${label}</span><b>${esc(x&&!x.why&&!x.never?(k.endsWith("share")?pct(x.v):usdM(x.v)):"n/d")}</b><span class="t2">${esc(x&&x.why?x.why:sub)}</span></div>`;
+  const tile=(k, label, x, sub)=>`<div class="sntile" data-k="${k}"><span class="t2">${label}</span><b>${esc(x&&!x.why&&!x.never?(k.endsWith("share")?pct(x.v):usdM(x.v)):"n/d")}</b><span class="t2">${esc(x&&x.why?x.why:sub)}</span>${k.endsWith("share")?"":cbTileChgHTML(row(k).cells[0])}</div>`;
   const share=id=>{ const t=at(id,"t"), p=at(id,"p"); if(!t || !p) return null; if(t.why) return {why:`target: ${t.why}`}; if(p.why) return p; return p.v>0 ? {v:t.v/p.v*100} : {why:"pro forma zero or negative"}; };
   return `<div class="cbtiles" id="cbScale">${tile("dpw","Pro forma direct premiums written",at("dpw","p"),`${y}, added`)}${tile("npw","Pro forma net premiums written",at("npw","p"),`${y}, added`)}${tile("surplus","Pro forma surplus",at("surplus","p"),`${y}, added`)}${tile("dpwshare","Target's share of direct premiums",share("dpw"),"of the pro forma (derived)")}${tile("surplusshare","Target's share of surplus",share("surplus"),"of the pro forma (derived)")}</div>`;
 }
+/* A line's or state's change in the mix: ours ("None" counts as nothing written) against the pro forma. */
+const cbMixChg = x => cbChange({v:x.b===null?0:x.b}, {v:x.p}, "usd", true);
+const cbMixChgCell = x => { const c=cbMixChg(x); return `<td class="num cbchgc">${cbChgHTML(c, "")}${c.why?`<span class="cbwhy">${esc(c.why)}</span>`:""}</td>`; };
 function cbMixHTML(mx, what, idp){
-  const B=cbBaseName(), plural2=what==="line"?["line","lines"]:["state","states"];
+  const B=cbBaseName(), plural2=what==="line"?["line","lines"]:["state","states"], chg=cbChgOn();
   const head=`<div class="blk-h"><div><h3>${what==="line"?"Direct premiums by line":"Direct premiums by state"}${mx.year?`, ${esc(mx.year)}`:""}</h3></div>${mx.why?"":`<span class="inline"><button class="btn sm" data-act="export" data-what="cb" data-tbl="${idp}" data-fmt="csv">Export CSV</button><button class="btn sm" data-act="export" data-what="cb" data-tbl="${idp}" data-fmt="xlsx">Export XLSX</button></span>`}</div>`;
   if(mx.why) return `<section class="blk cbmix" id="cb_${idp}">${head}<p class="t2" id="cb_${idp}_none">The ${plural2[0]} mix can't be added up: ${esc(mx.why)}. That doesn't mean there are none.</p></section>`;
   const who=x=>x.who==="both"?"Both":x.who==="base"?`${B} only`:x.who==="target"?"Target only":`${x.other} more`;
@@ -8224,9 +8295,9 @@ function cbMixHTML(mx, what, idp){
     `Only ${B} writes ${plural(mx.onlyB.n, plural2[0], plural2[1])}${mx.onlyB.n?`: ${usdM(mx.onlyB.v)}, ${pct(mx.onlyB.s)} of the pro forma (${mx.onlyB.names.slice(0,6).join(", ")}${mx.onlyB.n>6?" and more":""})`:""}.`,
     `Overlap, the ${plural2[1]} both write: ${plural(mx.overlap.n, plural2[0], plural2[1])}, ${usdM(mx.overlap.v)} of pro forma premium, ${pct(mx.overlap.s)}.`];
   return `<section class="blk cbmix" id="cb_${idp}">${head}<ul id="cb_${idp}_facts">${facts.map(f=>`<li>${esc(f)}</li>`).join("")}</ul>
-    <div class="tbl-wrap"><table class="cbtbl" id="cbTab_${idp}"><thead><tr><th>${what==="line"?"Line of business":"State"}</th><th>Written by</th><th class="num cbfirst">${esc(B)} $M</th><th class="num">Share</th><th class="num cbfirst">Target $M</th><th class="num">Share</th><th class="num cbfirst">Pro forma $M</th><th class="num">Share</th></tr></thead>
-    <tbody>${mx.rows.map(x=>`<tr data-name="${esc(x.name)}"><td>${esc(x.name)}</td><td>${esc(who(x))}</td><td class="num cbfirst">${x.b===null?"None":esc(usdM(x.b))}</td><td class="num">${x.b===null?"":esc(pct(x.bs))}</td><td class="num cbfirst">${x.t===null?"None":esc(usdM(x.t))}</td><td class="num">${x.t===null?"":esc(pct(x.ts))}</td><td class="num cbfirst cbpf">${esc(usdM(x.p))}</td><td class="num cbpf">${esc(pct(x.ps))}</td></tr>`).join("")}</tbody></table></div>
-    <p class="t2">Shares are of each column's own total (derived). "None" means that side's figures for ${esc(mx.year)} have no premium in that ${plural2[0]}. ${mx.rows.some(x=>x.name==="Other"&&x.other)?`"Other" adds up the ${plural2[1]} after the largest seven.`:""}</p></section>`;
+    <div class="tbl-wrap"><table class="cbtbl" id="cbTab_${idp}"><thead><tr><th>${what==="line"?"Line of business":"State"}</th><th>Written by</th><th class="num cbfirst">${esc(B)} $M</th><th class="num">Share</th><th class="num cbfirst">Target $M</th><th class="num">Share</th><th class="num cbfirst">Pro forma $M</th><th class="num">Share</th>${chg?cbChgHead():""}</tr></thead>
+    <tbody>${mx.rows.map(x=>`<tr data-name="${esc(x.name)}"><td>${esc(x.name)}</td><td>${esc(who(x))}</td><td class="num cbfirst">${x.b===null?"None":esc(usdM(x.b))}</td><td class="num">${x.b===null?"":esc(pct(x.bs))}</td><td class="num cbfirst">${x.t===null?"None":esc(usdM(x.t))}</td><td class="num">${x.t===null?"":esc(pct(x.ts))}</td><td class="num cbfirst cbpf">${esc(usdM(x.p))}</td><td class="num cbpf">${esc(pct(x.ps))}</td>${chg?cbMixChgCell(x):""}</tr>`).join("")}</tbody></table></div>
+    <p class="t2">Shares are of each column's own total (derived). "None" means that side's figures for ${esc(mx.year)} have no premium in that ${plural2[0]}. ${mx.rows.some(x=>x.name==="Other"&&x.other)?`"Other" adds up the ${plural2[1]} after the largest seven.`:""}${chg?` Change is the pro forma against ${esc(B)} in that ${plural2[0]}; "New" means only the target writes it.`:""}</p></section>`;
 }
 function cbReinsHTML(re){
   const head=`<div class="blk-h"><div><h3>Reinsurers both use${re.year?`, ${esc(re.year)}`:""}</h3></div></div>`;
@@ -8239,6 +8310,12 @@ function cbReinsHTML(re){
     <div class="tbl-wrap"><table class="cbtbl" id="cbTab_reins"><thead><tr><th>Reinsurer</th><th class="num cbfirst">${esc(B)} ceded $M</th><th class="num">Target ceded $M</th><th class="num">Pro forma ceded $M</th><th class="num cbfirst">${esc(B)} recoverables $M</th><th class="num">Target recoverables $M</th><th class="num">Pro forma recoverables $M</th></tr></thead>
     <tbody>${re.both.slice(0,15).map(x=>`<tr data-name="${esc(x.name)}"><td>${esc(x.name)}</td>${cbCell(x.b,"usd","b",re.year," cbfirst")}${cbCell(x.t,"usd","t",re.year)}${cbCell(x.p,"usd","p",re.year," cbpf")}${cbCell(x.rb,"usd","rb",re.year," cbfirst")}${cbCell(x.rt,"usd","rt",re.year)}${cbCell(x.rp,"usd","rp",re.year," cbpf")}</tr>`).join("")}</tbody></table></div>
     ${re.both.length>15?`<p class="t2">The largest 15 of ${count(re.both.length)} are shown.</p>`:""}</section>`;
+}
+/* The "Show change" tick box and what Change is, above the by-year tables. */
+function cbChgBarHTML(){
+  const on=cbChgOn();
+  return `<div class="cbchgbar" id="cbChgBar"><label class="cbchgsw"><input type="checkbox" id="cb_chg" ${on?"checked":""}> Show change</label>
+    <p class="t2" id="cbChgWhat">${on?`Change is the pro forma against ${esc(cbBaseName())} standalone: in percent for dollars, in percentage points (pts) for percent ratios and in x for multiples. It is n/d when either figure is, and a percent change is n/d when ours is zero or negative.`:`Change is hidden. Tick Show change to see the pro forma against ${esc(cbBaseName())} in every table on this view.`}</p></div>`;
 }
 /* Everything the tables show, worked out once a render. */
 function cbModel(){
@@ -8261,7 +8338,8 @@ function cbResultsHTML(){
   }
   h+=cbScaleHTML(m.rows, m.years, m.lines);
   const exp=`<span class="inline"><button class="btn sm" data-act="export" data-what="cb" data-tbl="years" data-fmt="csv">Export CSV</button><button class="btn sm" data-act="export" data-what="cb" data-tbl="years" data-fmt="xlsx">Export XLSX</button></span>`;
-  h+=`<div class="blk-h"><p class="t2" style="flex:1 1 300px">Latest year first. Each year has three columns: ${esc(B)} on its own, the target, and the pro forma. A pro forma figure is n/d unless both sides have it for that year; a missing side is never counted as zero.${run.base.codes.length>1||run.target.codes.length>1?" A side of several companies has its dollars added up, and its loss, expense and combined ratios worked out across them as the pro forma's are.":""}</p>${exp}</div>`;
+  h+=`<div class="blk-h"><p class="t2" style="flex:1 1 300px">Latest year first. Each year has ${cbChgOn()?"four":"three"} columns: ${esc(B)} on its own, the target, ${cbChgOn()?"the pro forma, and the change":"and the pro forma"}. A pro forma figure is n/d unless both sides have it for that year; a missing side is never counted as zero.${run.base.codes.length>1||run.target.codes.length>1?" A side of several companies has its dollars added up, and its loss, expense and combined ratios worked out across them as the pro forma's are.":""}</p>${exp}</div>`;
+  h+=cbChgBarHTML();
   // a figure neither side has in any year is listed under its table with the reason, rather than as a row of n/d
   const has=r=>r.cells.some(c=>(c.b&&!c.b.why)||(c.t&&!c.t.why));
   for(const [sec,title] of CB_SECTIONS){
@@ -8269,7 +8347,7 @@ function cbResultsHTML(){
     const why=r=>{ const c=r.cells[0]||{}, b=c.b&&c.b.why, t=c.t&&c.t.why; return b===t ? b : `base: ${b}; target: ${t}`; };
     h+=`<section class="blk" id="cb_sec_${sec}"><div class="blk-h"><h3>${esc(title)} <span class="t2">added up</span></h3></div>${shown.length?cbTableHTML(sec, shown, m.years, run):""}${none.length?`<p class="t2" id="cb_none_${sec}">n/d on both sides in every year shown: ${esc(none.map(r=>`${r.label} (${why(r)})`).join(", "))}.</p>`:""}</section>`;
   }
-  h+=`<section class="blk" id="cb_sec_ratio"><div class="blk-h"><h3>Ratios <span class="t2">worked out, never added</span></h3></div>${cbTableHTML("ratio", m.rows.filter(r=>r.sec==="ratio"), m.years, run)}
+  h+=`<section class="blk" id="cb_sec_ratio"><div class="blk-h"><h3>Ratios <span class="t2">worked out, never added</span></h3></div>${cbTableHTML("ratio", m.rows.filter(r=>r.sec==="ratio"), m.years, run)}${cbChgOn()?`<p class="t2" id="cbChgKey"><span class="cbchg adv"><span class="cbarr" aria-hidden="true">▲</span></span> Magenta: worse, and <span class="cbchg fav"><span class="cbarr" aria-hidden="true">▼</span></span> teal: better, for the loss, loss and LAE, expense and combined ratios and the ratios to surplus, where lower is better. Every other change stays in the ordinary colour: bigger is not better or worse in itself.</p>`:""}
     <ul class="cbnotes" id="cbFormulas"><li>Loss ratio and loss and LAE ratio: each side's ratio weighted by its net premiums earned.</li><li>Expense ratio: each side's ratio weighted by its net premiums written.</li><li>Combined ratio: the weighted loss and LAE ratio plus the weighted expense ratio. Each side's own column shows the combined ratio it reported.</li><li>Net premiums written, net loss and LAE reserves and total liabilities to surplus: the added dollars over the added surplus.</li><li>Cession share: gross less net premiums written, over gross premiums written (gross as reported, or direct plus assumed when gross isn't there), from the added dollars.</li><li>n/d when either side lacks a figure, or what is divided by is missing, zero or negative.</li></ul></section>`;
   h+=`<section class="blk" id="cb_sec_never"><div class="blk-h"><h3>Never combined <span class="t2">each side's own figure</span></h3></div>${cbTableHTML("never", m.rows.filter(r=>r.sec==="never"), m.years, run)}</section>`;
   h+=cbMapHTML(m);   // the state map, above the mix tables
@@ -8322,12 +8400,24 @@ function cbExport(tbl){
   if(tbl==="years"){
     const how=r=>r.kind==="sum"?"Added":r.kind==="never"?"Not combined: "+r.note:r.id==="combined_ratio"?"Derived: weighted loss and LAE ratio plus weighted expense ratio":CB_WEIGHTED.some(x=>x[0]===r.id)?`Derived: weighted by ${CB_WORDS[CB_WEIGHTED.find(x=>x[0]===r.id)[2]]}`:"Derived: from the added dollars";
     const unit=r=>r.unit==="usd"?"US dollars":r.unit==="x"?"times":"%";
-    const rows=m.rows.map(r=>[r.label, how(r), unit(r), ...r.cells.flatMap(c=>[raw(c.b,r.unit), raw(c.t,r.unit), raw(c.p,r.unit)])]);
     const pad=n=>Array(n).fill("");
+    if(cbChgOn()){   // the change beside each pro forma column, its unit in the header of its own column ("Change in")
+      const cu=r=>r.kind==="never"?"":r.unit==="usd"?"Change %":r.unit==="x"?"Change x":"Change pts";
+      const chow=r=>r.kind==="never"?"":r.unit==="usd"?`. Change: (pro forma less ${B}) over ${B}, in percent; n/d when ${B}'s figure is zero or negative`:r.unit==="x"?`. Change: pro forma less ${B}, in x`:`. Change: pro forma less ${B}, in percentage points`;
+      const rows=m.rows.map(r=>[r.label, how(r)+chow(r), unit(r), cu(r), ...r.cells.flatMap(c=>[raw(c.b,r.unit), raw(c.t,r.unit), raw(c.p,r.unit), cbChgRaw(cbChange(c.b, c.p, r.unit))])]);
+      return {name, sheet:"Pro forma by year", cols:["Figure","How","Unit","Change in", ...m.years.flatMap(y=>[`${y} ${B}`, `${y} target`, `${y} pro forma`, `${y} change (see Change in)`])], rows:[...rows, pad(4), ...note.map(x=>[...x, ...pad(2)])]};
+    }
+    const rows=m.rows.map(r=>[r.label, how(r), unit(r), ...r.cells.flatMap(c=>[raw(c.b,r.unit), raw(c.t,r.unit), raw(c.p,r.unit)])]);
     return {name, sheet:"Pro forma by year", cols:["Figure","How","Unit", ...m.years.flatMap(y=>[`${y} ${B}`, `${y} target`, `${y} pro forma`])], rows:[...rows, pad(3), ...note.map(x=>[...x, ...pad(1)])]};
   }
   const mx=tbl==="lines"?m.lines:tbl==="states"?m.states:null; if(!mx || mx.why) return null;
   const n=v=>v===null?"":Math.round(v), s=v=>isNum(v)?Math.round(v*10)/10:"";
+  if(cbChgOn()){   // "Change %" after the pro forma, and how it is worked out
+    const who=x=>x.who==="both"?"Both":x.who==="base"?`${B} only`:x.who==="target"?"Target only":`${x.other} more`, p9=k=>Array(k).fill("");
+    return {name, sheet:tbl==="lines"?"By line":"By state", cols:[tbl==="lines"?"Line of business":"State", "Written by", `${B} US dollars`, `${B} share %`, "Target US dollars", "Target share %", "Pro forma US dollars", "Pro forma share %", "Change %"],
+      rows:[...mx.rows.map(x=>[x.name, who(x), n(x.b), x.b===null?"":s(x.bs), n(x.t), x.t===null?"":s(x.ts), n(x.p), s(x.ps), cbChgRaw(cbMixChg(x))]), p9(9), ["Year", String(mx.year), ...p9(7)],
+        ["Change", `The pro forma against ${B} standalone: (pro forma less ${B}) over ${B}, in percent. New: only the target writes it.`, ...p9(7)], ...note.map(x=>[...x, ...p9(7)])]};
+  }
   return {name, sheet:tbl==="lines"?"By line":"By state", cols:[tbl==="lines"?"Line of business":"State", "Written by", `${B} US dollars`, `${B} share %`, "Target US dollars", "Target share %", "Pro forma US dollars", "Pro forma share %"],
     rows:[...mx.rows.map(x=>[x.name, x.who==="both"?"Both":x.who==="base"?`${B} only`:x.who==="target"?"Target only":`${x.other} more`, n(x.b), x.b===null?"":s(x.bs), n(x.t), x.t===null?"":s(x.ts), n(x.p), s(x.ps)]), ["","","","","","","",""], ["Year", String(mx.year), "","","","","",""], ...note.map(x=>[...x,"","","","","",""])]};
 }
@@ -8519,7 +8609,7 @@ function cbmTipHTML(code){
   const L=cbmStateLines(vm, code);
   const lines = L.why ? `<p class="t2">Lines here: n/d, ${esc(L.why)}.</p>` : L.rows.length ? `<p class="t2">Largest lines here: ${esc(L.rows.slice(0,3).map(l=>`${l.name} ${usdM(l.p)}`).join(", "))}${L.rows.length>3?`, and ${count(L.rows.length-3)} more`:""}.</p>` : `<p class="t2">No premium in the lines in view in either side's figures.</p>`;
   const why=[c.b, c.t].map(x=>x.why).filter(Boolean);
-  return `<b>${esc(c.name)} (${esc(c.code)}), ${vm.y}</b><table><tbody>${row(vm.B0, c.b, c.bs)}${row("Target", c.t, c.ts)}${row("Pro forma", c.p, c.ps)}<tr><td>Target's share here</td><td class="num">${esc(cbmShareText(c.share))}</td><td></td></tr></tbody></table>
+  return `<b>${esc(c.name)} (${esc(c.code)}), ${vm.y}</b><table><tbody>${row(vm.B0, c.b, c.bs)}${row("Target", c.t, c.ts)}${row("Pro forma", c.p, c.ps)}${cbChgOn()?`<tr class="cbmtchg"><td>Change on ${esc(vm.B0)}</td><td class="num">${cbmChgHTML(c)}</td><td></td></tr>`:""}<tr><td>Target's share here</td><td class="num">${esc(cbmShareText(c.share))}</td><td></td></tr></tbody></table>
     ${why.length?`<p class="t2">n/d: ${esc([...new Set(why)].join("; "))}.</p>`:""}${lines}<p class="t2">Click, or press Enter, to pin.</p>`;
 }
 function cbmFacts(vm){
@@ -8599,10 +8689,25 @@ function cbmPinHTML(vm){
   else if(!L.rows.length) lines=`<p class="t2" id="cbmPinLinesWhy">Neither side's figures have premium in ${esc(c.name)} in the lines in view.</p>`;
   else lines=`<div class="tbl-wrap"><table class="cbtbl" id="cbmPinLines"><thead><tr><th>Line of business</th><th class="num">${esc(vm.B0)} $M</th><th class="num">Target $M</th><th class="num">Pro forma $M</th></tr></thead><tbody>${L.rows.map(l=>`<tr><td>${esc(l.name)}</td><td class="num">${l.b?esc(usdM(l.b)):"None"}</td><td class="num">${l.t?esc(usdM(l.t)):"None"}</td><td class="num cbpf">${esc(usdM(l.p))}</td></tr>`).join("")}</tbody></table></div>`;
   return `<section class="cbmpin" id="cbmPin" aria-labelledby="cbmPinH"><div class="blk-h"><h4 id="cbmPinH">${esc(c.name)} (${esc(c.code)}), ${vm.y}</h4><button type="button" class="btn sm" id="cbmUnpin" data-act="cbm-unpin">Unpin</button></div>
-    <div class="tbl-wrap"><table class="cbtbl" id="cbmPinTab"><thead><tr><th></th><th class="num">$M</th><th class="num">Share of its total</th></tr></thead><tbody><tr><td>${esc(vm.B0)}</td>${cell(c.b, c.bs)}</tr><tr><td>Target</td>${cell(c.t, c.ts)}</tr><tr><td>Pro forma</td>${cell(c.p, c.ps)}</tr><tr><td>Target's share here</td><td class="num">${esc(cbmShareText(c.share))}</td><td></td></tr></tbody></table></div>${lines}</section>`;
+    <div class="tbl-wrap"><table class="cbtbl" id="cbmPinTab"><thead><tr><th></th><th class="num">$M</th><th class="num">Share of its total</th></tr></thead><tbody><tr><td>${esc(vm.B0)}</td>${cell(c.b, c.bs)}</tr><tr><td>Target</td>${cell(c.t, c.ts)}</tr><tr><td>Pro forma</td>${cell(c.p, c.ps)}</tr><tr><td>Target's share here</td><td class="num">${esc(cbmShareText(c.share))}</td><td></td></tr></tbody></table></div>${cbChgOn()?`<p class="t2" id="cbmPinChg">Change on ${esc(vm.B0)} (the pro forma against ${esc(vm.B0)} alone): ${cbmChgHTML(c, "text")}.</p>`:""}${lines}</section>`;
+}
+/* A state's change: its pro forma against ours, "New" where we write nothing there and the target does. */
+const cbmChg = c => cbChange(c.b.why ? c.b : {v:c.b.v||0}, c.p, "usd", true);
+function cbmChgHTML(c, why){
+  const x=cbmChg(c), h=cbChgHTML(x, "");
+  if(!x.why || !why) return h;
+  return why==="text" ? `${h} (${esc(x.why)})` : `${h}<span class="cbwhy">${esc(x.why)}</span>`;
+}
+/* The table sorted by change: "New" counts as the largest rise, n/d always last; ties and n/d by name, so the order is stable. */
+function cbmByChg(list, d){
+  const key=c=>{ const x=cbmChg(c); return x.isNew ? Infinity : x.why ? null : Math.round(x.v*10)/10; };
+  return list.map(c=>({c, k:key(c)})).sort((a,b)=>{
+    if(a.k===null || b.k===null) return a.k===null&&b.k===null ? a.c.name.localeCompare(b.c.name) : a.k===null ? 1 : -1;
+    return (a.k===b.k ? 0 : a.k<b.k ? -1 : 1)*d || a.c.name.localeCompare(b.c.name); }).map(x=>x.c);
 }
 function cbmRows(vm){
-  const ms=cbmState(), k=ms.sort.k, d=ms.sort.d;
+  const ms=cbmState(), k=ms.sort.k==="c"&&!cbChgOn()?"p":ms.sort.k, d=ms.sort.d;
+  if(k==="c") return cbmByChg([...vm.cells.values()].filter(c=>(c.b.v||0)!==0 || (c.t.v||0)!==0), d);
   const key=c=>k==="name"?c.name:k==="share"?(c.share.why||c.share.none?null:c.share.v):(k==="b"?c.b:k==="t"?c.t:c.p).why?null:(k==="b"?c.b:k==="t"?c.t:c.p).v;
   return [...vm.cells.values()].filter(c=>(c.b.v||0)!==0 || (c.t.v||0)!==0).sort((a,c)=>{ const x=key(a), y=key(c);
     if(x===null || y===null) return x===null&&y===null ? a.name.localeCompare(c.name) : x===null ? 1 : -1;
@@ -8614,8 +8719,8 @@ function cbmTableHTML(vm){
   const who=c=>c.who==="both"?"Both":c.who==="base"?`${B} only`:c.who==="target"?"Target only":c.who===null?"n/d":"Neither";
   const cell=(x, s, cls)=>`<td class="num${cls||""}">${esc(x.why?"n/d":x.none?"None":usdM(x.v))}${x.why?`<span class="cbwhy">${esc(x.why)}</span>`:""}</td><td class="num${cls||""}">${s===null||x.none?"":esc(pct(s))}</td>`;
   if(!rows.length) return `<p class="t2" id="cbmTabNone">Neither side's figures for ${vm.y} have premium in the lines in view${vm.B.why||vm.T.why?`, and ${esc([vm.B.why?`${B}: ${vm.B.why}`:"", vm.T.why?`target: ${vm.T.why}`:""].filter(Boolean).join("; "))}`:""}. That doesn't mean nothing is written there.</p>`;
-  return `<div class="tbl-wrap" data-keep id="cbmTabWrap"><table class="cbtbl" id="cbTab_map"><caption class="sr">Direct premiums written by state, ${vm.y}, the lines in view</caption><thead><tr>${th("name","State")}<th>Written by</th>${th("b",`${B} $M`,1)}<th class="num">Share</th>${th("t","Target $M",1)}<th class="num">Share</th>${th("p","Pro forma $M",1)}<th class="num">Share</th>${th("share","Target's share here",1)}</tr></thead>
-    <tbody>${rows.map(c=>`<tr data-s="${esc(c.code)}"><td>${c.onMap?`<button type="button" class="lnk" data-act="cbm-pin" data-s="${esc(c.code)}" aria-pressed="${ms.pin===c.code}">${esc(c.name)} (${esc(c.code)})</button>`:esc(c.name)}</td><td>${esc(who(c))}</td>${cell(c.b, c.bs, " cbfirst")}${cell(c.t, c.ts, " cbfirst")}${cell(c.p, c.ps, " cbfirst cbpf")}<td class="num">${esc(cbmShareText(c.share))}</td></tr>`).join("")}</tbody></table></div>`;
+  return `<div class="tbl-wrap" data-keep id="cbmTabWrap"><table class="cbtbl" id="cbTab_map"><caption class="sr">Direct premiums written by state, ${vm.y}, the lines in view</caption><thead><tr>${th("name","State")}<th>Written by</th>${th("b",`${B} $M`,1)}<th class="num">Share</th>${th("t","Target $M",1)}<th class="num">Share</th>${th("p","Pro forma $M",1)}<th class="num">Share</th>${th("share","Target's share here",1)}${cbChgOn()?th("c",`Change on ${B}`,1):""}</tr></thead>
+    <tbody>${rows.map(c=>`<tr data-s="${esc(c.code)}"><td>${c.onMap?`<button type="button" class="lnk" data-act="cbm-pin" data-s="${esc(c.code)}" aria-pressed="${ms.pin===c.code}">${esc(c.name)} (${esc(c.code)})</button>`:esc(c.name)}</td><td>${esc(who(c))}</td>${cell(c.b, c.bs, " cbfirst")}${cell(c.t, c.ts, " cbfirst")}${cell(c.p, c.ps, " cbfirst cbpf")}<td class="num">${esc(cbmShareText(c.share))}</td>${cbChgOn()?`<td class="num cbchgc">${cbmChgHTML(c, true)}</td>`:""}</tr>`).join("")}</tbody></table></div>`;
 }
 function cbMapHTML(m){
   const run=S.cb.run; if(!run.sl) run.sl={base:{}, target:{}};
@@ -8648,6 +8753,11 @@ function cbmExport(){
   const pad=k=>Array(k).fill("");
   const about=[["Year", String(vm.y)], ["Lines", vm.keys.length?vm.shownLines.join("; "):"All lines"], ["From", vm.keys.length?"Premiums by state and line (dpw_by_state_line)":"Premiums by state (dpw_by_state)"], ["Shown on the map", shown],
     ["Note", CB_WHAT], ["Base", `${B}: ${run.base.label} (${run.base.kind==="group"?"NAIC group":"NAIC"} ${run.base.codes.join(", ")})`], ["Target", `${run.target.label} (${run.target.kind==="group"?"NAIC group":"NAIC"} ${run.target.codes.join(", ")})`]];
+  if(cbChgOn()){   // "Change %" as the last column, and how it is worked out
+    about.splice(4, 0, ["Change", `The pro forma against ${B} standalone: (pro forma less ${B}) over ${B}, in percent. New: only the target writes there.`]);
+    return {name:`snl-combination-map-${TODAY()}`, sheet:"By state", cols:["State","Code","Written by",`${B} US dollars`,`${B} share %`,"Target US dollars","Target share %","Pro forma US dollars","Pro forma share %","Target's share of the state %","Change %"],
+      rows:[...cbmRows(vm).map((c,i)=>[...rows[i], cbChgRaw(cbmChg(c))]), pad(11), ...about.map(x=>[...x, ...pad(9)])]};
+  }
   return {name:`snl-combination-map-${TODAY()}`, sheet:"By state", cols:["State","Code","Written by",`${B} US dollars`,`${B} share %`,"Target US dollars","Target share %","Pro forma US dollars","Pro forma share %","Target's share of the state %"],
     rows:[...rows, pad(10), ...about.map(x=>[...x, ...pad(8)])]};
 }
@@ -8699,6 +8809,10 @@ document.addEventListener("click", e=>{
     case "cbm-retry": { const w=t.dataset.w==="base"?"base":"target", y=+t.dataset.y; delete S.cb.run.sl[w][y]; cbmFetch(w, y); break; }
     case "cbm-stop": { const x=S.cb.run.sl[t.dataset.w==="base"?"base":"target"][+t.dataset.y]; if(x && x.busy && x.ctl) x.ctl.stop(); break; }
   }
+});
+document.addEventListener("change", e=>{   // "Show change": every table on the view, in this page's memory only
+  if(e.target.id!=="cb_chg" || !isCorpDev()) return;
+  S.cb.hideChg=!e.target.checked; render(); document.getElementById("cb_chg")?.focus();
 });
 document.addEventListener("change", e=>{
   if(e.target.id!=="cbm_year" || !S.cb.run || !isCorpDev()) return;
