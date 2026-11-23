@@ -78,6 +78,7 @@
  "web/bigsearch.test.cjs": 62,
  "web/cfsignon.test.cjs": 16,
  "web/combination.test.cjs": 45,
+ "web/combochange.test.cjs": 40,
  "web/combomap.test.cjs": 60,
  "web/compare.test.cjs": 61,
  "web/connection.test.cjs": 11,
