@@ -1,0 +1,15 @@
+{
+  "_about": "Made-up statutory figures for tests/web/combochange.test.cjs, in $M, added to combination_figures.json so the change on our company can be checked against hand-worked numbers: realized gains go down (40 to 28, down 30.0%), cash and invested assets start from zero on our side (a percent change from zero means nothing), cash and short-term investments barely move (2,000 to 2,000.5, up 0.025%, which rounds to 0.0%). Keyed by NAIC code as there. No real company, code or figure.",
+  "codes": {
+    "9001": {
+      "realized_gains": {"2025": 40},
+      "cash_invested": {"2025": 0},
+      "cash_short_term": {"2025": 2000}
+    },
+    "90107": {
+      "realized_gains": {"2025": -12},
+      "cash_invested": {"2025": 50},
+      "cash_short_term": {"2025": 0.5}
+    }
+  }
+}
