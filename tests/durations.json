@@ -76,6 +76,7 @@
  "web/ask.test.cjs": 50,
  "web/bigsearch.test.cjs": 62,
  "web/cfsignon.test.cjs": 16,
+ "web/combination.test.cjs": 45,
  "web/compare.test.cjs": 61,
  "web/connection.test.cjs": 11,
  "web/deck.test.cjs": 1,
