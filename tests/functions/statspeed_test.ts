@@ -9,7 +9,7 @@ const statutory = await import(new URL("../../supabase/functions/snl-statutory/i
 const profile = await import(new URL("../../supabase/functions/snl-profile/index.ts", import.meta.url).href);
 const chat = await import(new URL("../../supabase/functions/snl-chat/index.ts", import.meta.url).href);
 import { Snowflake, SnowflakeError, snowflakeCreds } from "../../supabase/functions/_shared/snowflake.ts";
-import { figureStoreId, type Mapping, NOT_RUN, runStatutory, savedOrFreshStatutory, STAT_FIELDS, STAT_MIN_MS, STAT_POOL, type StatFieldId, type StatQuery } from "../../supabase/functions/_shared/statutory.ts";
+import { figureStoreId, MAP_ONLY_FIELDS, type Mapping, NOT_RUN, runStatutory, savedOrFreshStatutory, STAT_FIELDS, STAT_MIN_MS, STAT_POOL, type StatFieldId, type StatQuery } from "../../supabase/functions/_shared/statutory.ts";
 import { NOTES } from "../../supabase/functions/_shared/profile.ts";
 import { forgetTokens } from "../../supabase/functions/_shared/spgmi.ts";
 import { checks, type Clock, corpdev, env, fakeAnthropic, fakeClock, fakeSpgmi, memoryDb, req, say, toolResults, toolUse } from "./helpers/fakes.ts";
@@ -24,7 +24,8 @@ let unhandled = 0;
 globalThis.addEventListener("unhandledrejection", (e) => { unhandled++; e.preventDefault(); });
 
 const PAT = { SNOWFLAKE_ACCOUNT: "ab12345", SNOWFLAKE_USER: "svc_snl", SNOWFLAKE_WAREHOUSE: "WH_TEST", SNOWFLAKE_PAT: "test-pat-not-a-secret" };
-const ALL = STAT_FIELDS.map((f) => f.id) as StatFieldId[];
+// Every figure a profile asks for (the Combination map's figure by state and line is asked for only by that map).
+const ALL = STAT_FIELDS.map((f) => f.id).filter((id) => !MAP_ONLY_FIELDS.includes(id)) as StatFieldId[];
 const viewOf = (id: string) => `V_${id.toUpperCase()}`;
 // Every figure in its own made-up view, so a statement says which figure it is for.
 const MAPPING: Mapping = { fields: Object.fromEntries(STAT_FIELDS.map((f) => [f.id, {

@@ -17,7 +17,7 @@ import { STEP_ROWS } from "./filings.ts";
 import type { Env } from "./http.ts";
 import { credsReady, Snowflake, snowflakeCreds, SnowflakeError } from "./snowflake.ts";
 import { type Gate, makeGate, NOT_CONFIGURED, planLimits, Spgmi, SpgmiError } from "./spgmi.ts";
-import { getMapping, parseStatQuery, savedOrFreshStatutory, STAT_FIELDS } from "./statutory.ts";
+import { getMapping, MAP_ONLY_FIELDS, parseStatQuery, savedOrFreshStatutory, STAT_FIELDS } from "./statutory.ts";
 import { cutPages, openPdf, originalPage, rangeText } from "./pdf.ts";
 import { SET_MEMBERS } from "./filings.ts";
 import { afterAnswerPrompt, buildDigest, checkDigest, DIGEST, type Digest, digestOf, jsonIn, mergeRanges, metaFrom, pagesIn, type PageRange, readText, saveDigest, savedDigests, summaryDocument } from "./digest.ts";
@@ -108,6 +108,9 @@ export const TABLE_SCHEMA = {
   required: ["needs_table", "title", "columns", "rows", "notes"],
   additionalProperties: false,
 };
+
+/** The statutory field ids Claude may ask for: every figure but those only the Combination view's map asks for. */
+export const CLAUDE_STAT_IDS: string[] = STAT_FIELDS.map((f) => f.id as string).filter((id) => !(MAP_ONLY_FIELDS as string[]).includes(id));
 
 export const TOOLS: Anthropic.Beta.BetaTool[] = [
   {
@@ -219,7 +222,7 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
         to_year: { type: "integer" },
         // Plain text, not an enum: 49 ids in a strict enum made the tools' grammar larger (Anthropic refused a profile's
         // shape as too large on 23 Nov 2026). Each id is checked in code, and a wrong one is answered with the valid ids.
-        fields: { type: "array", items: { type: "string" }, description: `Field ids, exactly as written here, or [] for the default eight: ${STAT_FIELDS.map((f) => f.id).join(", ")}` },
+        fields: { type: "array", items: { type: "string" }, description: `Field ids, exactly as written here, or [] for the default eight: ${CLAUDE_STAT_IDS.join(", ")}` },
       },
       required: ["kind", "naic_codes", "from_year", "to_year", "fields"],
       additionalProperties: false,
@@ -235,7 +238,7 @@ export const toolsFor = (st: Pick<ChatState, "looseTools">): Anthropic.Beta.Beta
 /** Field ids Claude wrote for query_statutory, as the ids the app knows (spacing and capitals ignored); bad holds the
     ones that match none. */
 export function statFieldsFrom(v: unknown): { fields: string[]; bad: string[] } {
-  const ids = STAT_FIELDS.map((f) => f.id as string), fields: string[] = [], bad: string[] = [];
+  const ids = CLAUDE_STAT_IDS, fields: string[] = [], bad: string[] = [];
   for (const x of Array.isArray(v) ? v : []) {
     const id = ids.find((i) => i === String(x).trim().toLowerCase());
     if (id) fields.push(id); else bad.push(String(x).slice(0, 60));
@@ -1278,7 +1281,7 @@ function makeTools(ctx: ChatCtx, st: ChatState, api: Spgmi | null, client: Anthr
     const sfCreds = snowflakeCreds(ctx.env);
     // field ids are plain text in the tool's shape, so they are checked here, and a wrong one is answered with the list
     const asked = statFieldsFrom(input.fields);
-    if (asked.bad.length) return fail(`These aren't field ids: ${asked.bad.join(", ")}. Use only these ids, exactly as written: ${STAT_FIELDS.map((f) => f.id).join(", ")}. Or pass [] for the default eight.`);
+    if (asked.bad.length) return fail(`These aren't field ids: ${asked.bad.join(", ")}. Use only these ids, exactly as written: ${CLAUDE_STAT_IDS.join(", ")}. Or pass [] for the default eight.`);
     const parsed = parseStatQuery({ kind: input.kind, codes: input.naic_codes, fromYear: input.from_year, toYear: input.to_year, fields: asked.fields.length ? asked.fields : undefined }, new Date(ctx.now()).getUTCFullYear());
     if (!parsed.ok) return fail(parsed.message);
     const mapping = await getMapping(db);
