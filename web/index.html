@@ -775,6 +775,26 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 .cbmsort{background:none;border:0;padding:0;color:inherit;font:inherit;font-weight:bold;cursor:pointer;text-align:inherit}
 .cbmgap{color:var(--ink);border-left:4px solid var(--orange);padding-left:8px}
 @media (max-width:820px){.cbmsvg text{display:none}}
+/* the line pies in the state map: two side by side, stacked when narrow */
+.cbpie{display:flex;flex-direction:column;gap:8px;min-width:0}
+.cbpie h4{margin:0;font-size:14px;overflow-wrap:anywhere}
+.cbpie>p{margin:0}
+.cbpgrid{position:relative;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:10px 18px;max-width:760px;min-width:0}
+.cbppie{margin:0;display:flex;flex-direction:column;gap:4px;min-width:0}
+.cbppie figcaption{font-weight:bold;font-size:13px;overflow-wrap:anywhere}
+.cbpsvg{display:block;width:100%;max-width:340px;height:auto}
+.cbpsvg .cbpsl{stroke:var(--surface);stroke-width:2;stroke-linejoin:round;cursor:pointer}
+.cbpsvg .cbpsl:hover{stroke:var(--ink)}
+.cbpsvg .cbpsl:focus{outline:none;stroke:var(--magenta);stroke-width:3}
+.cbpsvg .cbptex{pointer-events:none;stroke:none}
+.cbpsvg text{font:12px var(--font);fill:var(--ink);pointer-events:none}
+.cbpnone{margin:0;padding:18px 12px;border:1px dashed #A9ADBD;background:var(--surface);overflow-wrap:anywhere}
+.cbplow{margin:0;overflow-wrap:anywhere}
+.cbpname{display:inline-flex;align-items:flex-start;gap:6px;min-width:0;overflow-wrap:anywhere}
+.cbpname .sw{flex:none;width:14px;height:14px;display:inline-block;margin-top:2px}
+.sw.tex{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.55) 0 1.6px,transparent 1.6px 4.2px)}
+#cbpLegendWrap{max-width:760px}
+.cbplegend td:first-child{min-width:0;max-width:320px}
 @media (max-width:560px){.cbmgrid{grid-template-columns:minmax(0,1fr)}.cbmsmall{grid-template-columns:repeat(auto-fill,minmax(58px,1fr))}}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>
@@ -8394,6 +8414,7 @@ function renderCombination(){
 /* ----- export: the tables as on screen, with what this is ----- */
 function cbExport(tbl){
   if(tbl==="map") return cbmExport();   // the state map's table, as filtered
+  if(tbl==="pie") return cbpExport();   // the line pies' lines, all states or the pinned state
   const run=S.cb.run, m=cbModel(); if(!run || !m || !m.years.length) return null;
   const B=cbBaseName(), name=`snl-combination-${tbl}-${TODAY()}`, note=[["Note", CB_WHAT], ["Base", `${B}: ${run.base.label} (${run.base.kind==="group"?"NAIC group":"NAIC"} ${run.base.codes.join(", ")})`], ["Target", `${run.target.label} (${run.target.kind==="group"?"NAIC group":"NAIC"} ${run.target.codes.join(", ")})`]];
   const raw=(x, unit)=>!x ? "n/d" : x.never ? "Not combined" : x.why ? `n/d (${x.why})` : unit==="usd" ? Math.round(x.v) : Math.round(x.v*10000)/10000;
@@ -8689,7 +8710,7 @@ function cbmPinHTML(vm){
   else if(!L.rows.length) lines=`<p class="t2" id="cbmPinLinesWhy">Neither side's figures have premium in ${esc(c.name)} in the lines in view.</p>`;
   else lines=`<div class="tbl-wrap"><table class="cbtbl" id="cbmPinLines"><thead><tr><th>Line of business</th><th class="num">${esc(vm.B0)} $M</th><th class="num">Target $M</th><th class="num">Pro forma $M</th></tr></thead><tbody>${L.rows.map(l=>`<tr><td>${esc(l.name)}</td><td class="num">${l.b?esc(usdM(l.b)):"None"}</td><td class="num">${l.t?esc(usdM(l.t)):"None"}</td><td class="num cbpf">${esc(usdM(l.p))}</td></tr>`).join("")}</tbody></table></div>`;
   return `<section class="cbmpin" id="cbmPin" aria-labelledby="cbmPinH"><div class="blk-h"><h4 id="cbmPinH">${esc(c.name)} (${esc(c.code)}), ${vm.y}</h4><button type="button" class="btn sm" id="cbmUnpin" data-act="cbm-unpin">Unpin</button></div>
-    <div class="tbl-wrap"><table class="cbtbl" id="cbmPinTab"><thead><tr><th></th><th class="num">$M</th><th class="num">Share of its total</th></tr></thead><tbody><tr><td>${esc(vm.B0)}</td>${cell(c.b, c.bs)}</tr><tr><td>Target</td>${cell(c.t, c.ts)}</tr><tr><td>Pro forma</td>${cell(c.p, c.ps)}</tr><tr><td>Target's share here</td><td class="num">${esc(cbmShareText(c.share))}</td><td></td></tr></tbody></table></div>${cbChgOn()?`<p class="t2" id="cbmPinChg">Change on ${esc(vm.B0)} (the pro forma against ${esc(vm.B0)} alone): ${cbmChgHTML(c, "text")}.</p>`:""}${lines}</section>`;
+    <div class="tbl-wrap"><table class="cbtbl" id="cbmPinTab"><thead><tr><th></th><th class="num">$M</th><th class="num">Share of its total</th></tr></thead><tbody><tr><td>${esc(vm.B0)}</td>${cell(c.b, c.bs)}</tr><tr><td>Target</td>${cell(c.t, c.ts)}</tr><tr><td>Pro forma</td>${cell(c.p, c.ps)}</tr><tr><td>Target's share here</td><td class="num">${esc(cbmShareText(c.share))}</td><td></td></tr></tbody></table></div>${cbChgOn()?`<p class="t2" id="cbmPinChg">Change on ${esc(vm.B0)} (the pro forma against ${esc(vm.B0)} alone): ${cbmChgHTML(c, "text")}.</p>`:""}${lines}${cbpHTML(vm)}</section>`;
 }
 /* A state's change: its pro forma against ours, "New" where we write nothing there and the target does. */
 const cbmChg = c => cbChange(c.b.why ? c.b : {v:c.b.v||0}, c.p, "usd", true);
@@ -8739,7 +8760,7 @@ function cbMapHTML(m){
   const off=[...vm.cells.values()].filter(c=>!c.onMap && ((c.b.v||0)!==0 || (c.t.v||0)!==0)).map(c=>c.name);
   if(off.length) h+=`<p class="t2" id="cbmOffMap">In the table only, as the map has no shape for them: ${esc(andList(off, 8))}.</p>`;
   for(const w of ["base","target"]){ const g=vm.gaps[w]; if(g.length) h+=`<p class="t2 cbmgap" id="cbmGap_${w}">${esc(`${w==="base"?B:"The target"}'s premiums by state and line for ${vm.y} don't add up to its premiums by state in ${andList(g.map(x=>`${x.st} (${usdM(x.sl)} against ${usdM(x.all)})`), 8)}. The map with all lines uses premiums by state; with lines chosen, premiums by state and line.`)}</p>`; }
-  h+=cbmPinHTML(vm)+cbmFacts(vm)+cbmTableHTML(vm);
+  const pinH=cbmPinHTML(vm); h+=pinH+(pinH?"":cbpHTML(vm))+cbmFacts(vm)+cbmTableHTML(vm);   // the line pies: in the pinned state's detail, or for all states
   h+=`<p class="t2">Shares are of each column's own total, under the lines in view (derived). "None" means that side's figures for ${vm.y} have no premium there in the lines in view; n/d means a side's figures are missing, and is never counted as zero.</p><p class="t2" id="cbmCost">${esc(CBM_COST)}</p></section>`;
   return h;
 }
@@ -8779,7 +8800,7 @@ async function cbmFetch(which, y){
 /* Asks for what the lines in view need for the year shown, each side once a year (force: the lines of a pinned state). */
 function cbmEnsure(force){
   const run=S.cb.run, vm=CBM_VM; if(!run || !run.sl || !vm || !cbmFigOn()) return;
-  if(!cbmState().lines.length && !force) return;
+  if(!cbmState().lines.length && !cbmState().pin && !force) return;   // a pinned state's lines need it too (the pies)
   for(const w of ["base","target"]) if(!run.sl[w][vm.y]) cbmFetch(w, vm.y);
 }
 function cbmTipShow(el, ev){
@@ -8802,7 +8823,7 @@ document.addEventListener("click", e=>{
     case "cbm-open": ms.open=!ms.open; render(); break;
     case "cbm-line": { if(!cbmFigOn()) break; const k=t.dataset.k, i=ms.lines.findIndex(l=>l.k===k); if(i>=0) ms.lines.splice(i,1); else ms.lines.push({k, name:t.dataset.name||k}); render(); cbmEnsure(); break; }
     case "cbm-clear": ms.lines=[]; ms.q=""; render(); document.getElementById("cbmPick")?.focus(); break;
-    case "cbm-pin": { const s=t.dataset.s; ms.pin=ms.pin===s?null:s; if(US_MAP[s]) ms.focus=s; render(); break; }
+    case "cbm-pin": { const s=t.dataset.s; ms.pin=ms.pin===s?null:s; if(US_MAP[s]) ms.focus=s; render(); if(ms.pin) cbmEnsure(true); break; }
     case "cbm-unpin": { const s=ms.pin; ms.pin=null; render(); document.getElementById("cbm_s_"+s)?.focus(); break; }
     case "cbm-sort": { const k=t.dataset.k; ms.sort = ms.sort.k===k ? {k, d:-ms.sort.d} : {k, d:k==="name"?1:-1}; render(); break; }
     case "cbm-fetch": cbmEnsure(true); break;
@@ -8839,8 +8860,179 @@ document.addEventListener("keydown", e=>{
   else if(e.key==="ArrowLeft" || e.key==="ArrowUp") j=(i-1+order.length)%order.length;
   else if(e.key==="Home") j=0; else if(e.key==="End") j=order.length-1;
   if(j!==null){ e.preventDefault(); el.tabIndex=-1; order[j].tabIndex=0; order[j].focus(); return; }
-  if(e.key==="Enter" || e.key===" "){ e.preventDefault(); const s=el.dataset.cbs, ms=S.cb.map; ms.pin=ms.pin===s?null:s; ms.focus=s; render(); }
+  if(e.key==="Enter" || e.key===" "){ e.preventDefault(); const s=el.dataset.cbs, ms=S.cb.map; ms.pin=ms.pin===s?null:s; ms.focus=s; render(); if(ms.pin) cbmEnsure(true); }
 });
+
+/* ---------- Combination: line-of-business pies in the state map (Corp Dev only) ----------
+   Two pies of direct premiums written by line, our company standalone and the pro forma, for the year and the lines
+   in view on the map. With no state pinned: all states, from premiums by line, already fetched with each side's
+   figures, so nothing more is asked. With a state pinned: that state, from premiums by state and line
+   (dpw_by_state_line, a figure the owner maps), which pinning asks for, for the year shown, one side at a time and
+   once a side a year (cbmEnsure). The same line has the same colour in both pies: the six largest by the pro forma
+   (by our company when the pro forma is n/d) take CBP_FILL in order (the page's own chart colours, the teal a step
+   stronger so colour-blind readers can tell it from magenta), every second one with a light texture for grey print;
+   the rest are "Other", always one neutral. A line at zero or below is listed under its pie, as a pie can't show it.
+   A side that is n/d, still coming or cut short is never drawn. All of it is worked out from the map's figures in
+   this page's memory: nothing is saved or sent. */
+const CBP_FILL=["#00539E","#C46A1B","#944599","#0081C3","#EB008C","#008A7E"], CBP_OTHER="#B8BCCB", CBP_MAX=6;
+const CBP_COST="Cost: with no state pinned, nothing more, as the pies use the premiums by line already fetched. Pinning a state adds one statutory look-up a side for the year shown, the first time, when premiums by state and line are mapped (about 0.02 Snowflake credit each; nothing when reopened). No Claude, and nothing that pairs the two is saved or sent.";
+let CBP_VM=null;   // the pies as last drawn, for the panel and the export (this page's memory only)
+/* One side's lines, for one state (premiums by state and line) or all states (premiums by line), under the filter:
+   {m: Map(key -> {name, v})} or {why}. */
+function cbpLinesOf(vm, which, state){
+  const on=vm.keys.length?new Set(vm.keys):null, m=new Map();
+  if(state){
+    const sl=(which==="base"?vm.B:vm.T).sl; if(!sl || sl.why) return {why:sl?sl.why:"not fetched yet"};
+    for(const r of sl.rows) if(r.state===state && (!on || on.has(r.k))){ const x=m.get(r.k)||{name:r.line, v:0}; x.v+=r.v; m.set(r.k, x); }
+    return {m};
+  }
+  const l=cbByName(S.cb.run[which], "dpw_by_line", "line", vm.y); if(l.why) return {why:l.why};
+  for(const [k,x] of l.m) if(!on || on.has(k)) m.set(k, {name:x.name, v:x.v});
+  return {m};
+}
+/* Both pies: which lines are named and their colours, each pie's slices, what is left out, and the legend's rows. */
+function cbpModel(vm){
+  const ms=cbmState(), c=ms.pin?vm.cells.get(ms.pin):null, state=c?c.code:null, B0=vm.B0;
+  const out={state, name:c?c.name:null, y:vm.y, keys:vm.keys, B0, where:c?c.name:"all states"};
+  if(state && !vm.on){ out.off=true; return out; }
+  const b=cbpLinesOf(vm, "base", state), t=cbpLinesOf(vm, "target", state);
+  let p;
+  if(b.why || t.why) p={why:[b.why?`${B0}: ${b.why}`:"", t.why?`target: ${t.why}`:""].filter(Boolean).join("; ")};
+  else { const m=new Map(); for(const X of [b, t]) for(const [k,x] of X.m){ const z=m.get(k)||{name:x.name, v:0}; z.v+=x.v; m.set(k, z); } p={m}; }
+  const by=p.m||b.m||null, sort=(a,z)=>z.v-a.v || a.name.localeCompare(z.name);
+  const named=by ? [...by.entries()].map(([k,x])=>({k, name:x.name, v:x.v})).filter(x=>x.v>0).sort(sort).slice(0, CBP_MAX).map(x=>x.k) : [];
+  const pie=X=>{
+    if(X.why) return {why:X.why};
+    const all=[...X.m.entries()].map(([k,x])=>({k, name:x.name, v:x.v})).sort(sort), pos=all.filter(x=>x.v>0), low=all.filter(x=>!(x.v>0));
+    const total=pos.reduce((a,x)=>a+x.v, 0), net=all.reduce((a,x)=>a+x.v, 0), slices=[];
+    named.forEach((k,i)=>{ const x=pos.find(z=>z.k===k); if(x) slices.push({...x, i, fill:CBP_FILL[i], tex:i%2===1}); });
+    const rest=pos.filter(x=>!named.includes(x.k));
+    if(rest.length) slices.push({k:"", name:"Other", other:rest.length, rest:rest.map(x=>x.k), v:rest.reduce((a,x)=>a+x.v, 0), i:-1, fill:CBP_OTHER, tex:false});
+    for(const s of slices) s.s=total>0 ? s.v/total*100 : null;
+    return {all, pos, low, total, net, slices, rest, empty:!all.length};
+  };
+  const PB=pie(b), PP=pie(p), restKeys=new Set([...(PB.rest||[]), ...(PP.rest||[])].map(x=>x.k));
+  // a line's (or Other's) figure and share in one pie: {v, s} | {why} | {none} (the pie has nothing) | {absent}
+  const at=(P, k)=>{
+    if(P.why) return {why:P.why};
+    if(!(P.total>0)) return {none:true, v:k?(P.all.find(x=>x.k===k)||{}).v:undefined};
+    const sl=P.slices.find(s=>s.k===k); if(sl) return {v:sl.v, s:sl.s};
+    if(!k) return {absent:true};
+    const x=P.all.find(z=>z.k===k); return x ? {v:x.v, left:x.v<=0, s:x.v>0?x.v/P.total*100:null} : {absent:true};
+  };
+  const rows=named.map((k,i)=>({k, name:(p.m||b.m).get(k).name, fill:CBP_FILL[i], tex:i%2===1, b:at(PB,k), p:at(PP,k)}));
+  if(restKeys.size) rows.push({k:"", name:"Other", other:restKeys.size, fill:CBP_OTHER, tex:false, b:at(PB,""), p:at(PP,"")});
+  return {...out, b:PB, p:PP, named, rows, gaps:state && !vm.keys.length ? ["base","target"].map(w=>({w, g:vm.gaps[w].find(x=>x.st===state)})).filter(x=>x.g) : []};
+}
+/* The change in share, in percentage points: the pro forma's share of its pie against ours. */
+function cbpChg(r){
+  const b=r.b, p=r.p;
+  if(p.why) return {why:p.why};
+  if(b.why) return {why:`base: ${b.why}`};
+  if(b.none) return p.v>0 ? {isNew:true} : {why:"no premium on either side"};
+  if(p.none) return {why:"no pro forma premium above zero"};
+  if(b.left || p.left) return {why:"left out of a pie: zero or below"};
+  return {v:(isNum(p.s)?p.s:0)-(isNum(b.s)?b.s:0), unit:"pts"};
+}
+const cbpMoney = x => x.why ? "n/d" : x.absent || x.v===undefined ? "None" : usdM(x.v);
+const cbpShare = x => x.why || x.none ? "" : x.left ? "Left out" : x.absent ? "0.0%" : pct(x.s);
+/* One pie, drawn: slices clockwise from the top, a 2px gap between them, shares beside slices of 4% or more. */
+function cbpSvgHTML(side, P, title){
+  const W=300, H=220, cx=150, cy=110, r=80, X=a=>(cx+r*Math.cos(a)).toFixed(2), Y=a=>(cy+r*Math.sin(a)).toFixed(2);
+  const desc=`${P.slices.map(s=>`${s.name}${s.other?` (${plural(s.other, "line")})`:""} ${pct(s.s)}`).join(", ")}. Total ${usdM(P.total)}.`;
+  let a=-Math.PI/2, paths="", tex="", labels="";
+  for(const s of P.slices){
+    const sw=s.v/P.total*2*Math.PI, a2=a+sw, mid=a+sw/2;
+    const d = P.slices.length===1 ? `M${cx} ${cy-r}A${r} ${r} 0 1 1 ${cx} ${cy+r}A${r} ${r} 0 1 1 ${cx} ${cy-r}Z` : `M${cx} ${cy}L${X(a)} ${Y(a)}A${r} ${r} 0 ${sw>Math.PI?1:0} 1 ${X(a2)} ${Y(a2)}Z`;
+    const say=`${s.name}${s.other?` (${plural(s.other, "line")})`:""}: ${usdM(s.v)}, ${pct(s.s)}`;
+    paths+=`<path d="${d}" fill="${s.fill}" class="cbpsl" data-cbp="${side}" data-k="${esc(s.k)}" data-v="${s.v}" tabindex="0" role="graphics-symbol" aria-label="${esc(say)}"></path>`;
+    if(s.tex) tex+=`<path d="${d}" fill="${side==="base"?"url(#cbpTex_base)":"url(#cbpTex_pf)"}" class="cbptex" aria-hidden="true"></path>`;
+    if(s.s>=4){ const lx=cx+(r+12)*Math.cos(mid), ly=cy+(r+12)*Math.sin(mid)+4, c=Math.cos(mid);
+      labels+=`<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${c>0.2?"start":c<-0.2?"end":"middle"}" aria-hidden="true">${esc(pct(s.s))}</text>`; }
+    a=a2;
+  }
+  return `<svg class="cbpsvg" id="cbpSvg_${side}" viewBox="0 0 ${W} ${H}" role="group" aria-labelledby="cbpT_${side}" aria-describedby="cbpD_${side}"><title id="cbpT_${side}">${esc(title)}</title><desc id="cbpD_${side}">${esc(desc)}</desc>
+    <defs><pattern id="cbpTex_${side}" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#FFFFFF" stroke-width="1.6" stroke-opacity="0.55"></line></pattern></defs>${paths}${tex}${labels}</svg>`;
+}
+/* One side's pie, or what is said in its place. */
+function cbpPieHTML(M, side){
+  const P=side==="base"?M.b:M.p, who=side==="base"?M.B0:"Pro forma", title=`${who}, ${M.where}, ${M.y}`;
+  const inView=M.keys.length?" in the lines in view":"";
+  let body;
+  if(P.why){
+    const coming=/still coming/.test(P.why), cut=/cut short/.test(P.why);
+    body=`<p class="cbpnone" id="cbpNone_${side}">n/d: ${esc(P.why)}.${coming?" The pie is drawn when the figures arrive.":""}${cut?" A part is never drawn as the whole.":""}</p>`;
+  } else if(P.empty) body=`<p class="cbpnone" id="cbpNone_${side}">${esc(side==="base" ? `${M.B0} writes nothing ${M.state?"here":"at all"}${inView} in ${M.y}.` : `Neither side writes anything ${M.state?"here":"at all"}${inView} in ${M.y}.`)}</p>`;
+  else if(!(P.total>0)) body=`<p class="cbpnone" id="cbpNone_${side}">No line ${M.state?"here ":""}is above zero${inView} in ${M.y}, so there is no pie.</p>`;
+  else body=cbpSvgHTML(side, P, title);
+  let low="";
+  if(!P.why && P.low.length) low=`<p class="t2 cbplow" id="cbpLow_${side}">Left out of the pie, as a pie can't show zero or below: ${esc(P.low.map(x=>`${x.name} ${usdM(x.v)}`).join(", "))}.${P.total>0?` Shares are of the lines above zero, ${esc(usdM(P.total))}; with the rest the total is ${esc(usdM(P.net))}.`:""}</p>`;
+  return `<figure class="cbppie" id="cbpPie_${side}"><figcaption id="cbpH_${side}">${esc(title)}</figcaption>${body}${low}</figure>`;
+}
+function cbpLegendHTML(M){
+  if(!M.rows.length) return "";
+  const chg=cbChgOn(), B=M.B0;
+  const sw=r=>`<span class="sw${r.tex?" tex":""}" aria-hidden="true" style="background-color:${r.fill}"></span>`;
+  const chgCell=r=>{ const x=cbpChg(r); return `<td class="num cbchgc">${cbChgHTML(x, "")}${x.why?`<span class="cbwhy">${esc(x.why)}</span>`:""}</td>`; };
+  return `<div class="tbl-wrap" data-keep id="cbpLegendWrap"><table class="cbtbl cbplegend" id="cbpLegend"><caption class="sr">Premiums by line, ${esc(M.where)}, ${M.y}: each line's colour, ${esc(B)}'s and the pro forma's $M and share${chg?", and the change in share":""}</caption>
+    <thead><tr><th>Line of business</th><th class="num cbfirst">${esc(B)} $M</th><th class="num">Share</th><th class="num cbfirst">Pro forma $M</th><th class="num">Share</th>${chg?`<th class="num cbchgh">Change in share<span class="cbhn">pts, on ${esc(B)}</span></th>`:""}</tr></thead>
+    <tbody>${M.rows.map(r=>`<tr data-k="${esc(r.k)}"><td><span class="cbpname">${sw(r)}<span>${esc(r.name)}${r.other?` <span class="t2">(${esc(plural(r.other, "line"))})</span>`:""}</span></span></td><td class="num cbfirst">${esc(cbpMoney(r.b))}</td><td class="num">${esc(cbpShare(r.b))}</td><td class="num cbfirst cbpf">${esc(cbpMoney(r.p))}</td><td class="num cbpf">${esc(cbpShare(r.p))}</td>${chg?chgCell(r):""}</tr>`).join("")}</tbody></table></div>`;
+}
+function cbpHTML(vm){
+  const M=CBP_VM=cbpModel(vm), lines=M.keys.length?`: ${andList(vm.shownLines, 6)} only`:"";
+  const head=`Premiums by line, ${M.where}, ${M.y}${lines}`;
+  const showing=M.state ? `Showing ${M.name} only. Unpin it to see all states.` : "Showing all states. Click a state on the map to see its lines.";
+  if(M.off) return `<section class="cbpie" id="cbPie" aria-labelledby="cbPieH"><h4 id="cbPieH">${esc(head)}</h4><div class="info" id="cbpOff" role="status"><span><b>A state's lines need premiums by state and line,</b> a figure that isn't mapped yet. A Corp Dev login can map <code>${CBM_FIG}</code> in Field set-up on the <a href="#statutory">Statutory view</a>. Unpin ${esc(M.name)} to see the pies for all states.</span></div></section>`;
+  const canExp=!M.b.why || !M.p.why;
+  const exp=canExp?`<span class="inline"><button class="btn sm" data-act="export" data-what="cb" data-tbl="pie" data-fmt="csv">Export lines CSV</button><button class="btn sm" data-act="export" data-what="cb" data-tbl="pie" data-fmt="xlsx">Export lines XLSX</button></span>`:"";
+  let h=`<section class="cbpie" id="cbPie" aria-labelledby="cbPieH"><div class="blk-h"><h4 id="cbPieH">${esc(head)}</h4>${exp}</div><p class="t2" id="cbpShowing">${esc(showing)}</p>`;
+  h+=`<div class="cbpgrid" id="cbpGrid">${cbpPieHTML(M, "base")}${cbpPieHTML(M, "pf")}<div class="cbmtip cbptip" id="cbpTip" aria-hidden="true" hidden></div></div>`;
+  h+=cbpLegendHTML(M);
+  for(const x of M.gaps) h+=`<p class="t2 cbmgap" id="cbpGap_${x.w}">${esc(`${x.w==="base"?M.B0:"The target"}'s lines in ${M.name} add up to ${usdM(x.g.sl)}, against ${usdM(x.g.all)} in its premiums by state. The pies show the lines.`)}</p>`;
+  h+=`<p class="t2">Each pie is ${M.state?`${esc(M.name)}'s`:"all states'"} direct premiums written by line in ${M.y}${M.keys.length?", the lines in view only":""}, from ${M.state?"premiums by state and line":"premiums by line"}; shares are of that pie's own total. The same line has the same colour in both pies: the six largest in the pro forma, then "Other".${cbChgOn()?` Change in share is the pro forma's share less ${esc(M.B0)}'s, in percentage points; "New" means only the target writes here.`:""}</p><p class="t2" id="cbpCost">${esc(CBP_COST)}</p></section>`;
+  return h;
+}
+/* The lines in the pies for the export: every line, with how it is shown, each side's dollars and share, and the change. */
+function cbpExport(){
+  const M=CBP_VM, run=S.cb.run; if(!M || M.off || !run || (M.b.why && M.p.why)) return null;
+  const B=M.B0, chg=cbChgOn(), keys=new Set([...(M.b.all||[]), ...(M.p.all||[])].map(x=>x.k));
+  const nameOf=k=>((M.p.all||[]).find(x=>x.k===k)||(M.b.all||[]).find(x=>x.k===k)).name, pv=k=>((M.p.all||[]).find(x=>x.k===k)||{v:-Infinity}).v;
+  const one=(P, k)=>{ if(P.why) return {why:P.why}; if(!(P.total>0)) return {none:true, v:(P.all.find(x=>x.k===k)||{}).v}; const x=P.all.find(z=>z.k===k); return x ? {v:x.v, left:x.v<=0, s:x.v>0?x.v/P.total*100:null} : {absent:true}; };
+  const n=x=>x.why?`n/d (${x.why})`:x.absent||x.v===undefined?"":Math.round(x.v), s=x=>x.absent?0:x.why||x.none||x.left?"":Math.round(x.s*10)/10;
+  const as=k=>M.named.includes(k) ? "Its own slice" : [M.b, M.p].some(P=>!P.why && P.rest.some(x=>x.k===k)) ? "Other" : "Left out: zero or below";
+  const rows=[...keys].sort((a,z)=>pv(z)-pv(a) || nameOf(a).localeCompare(nameOf(z))).map(k=>{ const r={b:one(M.b,k), p:one(M.p,k)}; const row=[nameOf(k), as(k), n(r.b), s(r.b), n(r.p), s(r.p)]; if(chg) row.push(cbChgRaw(cbpChg(r))); return row; });
+  const w=chg?7:6, pad=k=>Array(k).fill("");
+  const total=P=>P.why?`n/d (${P.why})`:String(Math.round(P.net));
+  const about=[["State", M.state?`${M.name} (${M.state})`:"All states"], ["Year", String(M.y)], ["Lines", M.keys.length?CBM_VM.shownLines.join("; "):"All lines"], ["From", M.state?"Premiums by state and line (dpw_by_state_line)":"Premiums by line (dpw_by_line)"],
+    [`${B} total US dollars`, total(M.b)], ["Pro forma total US dollars", total(M.p)],
+    ["Shares", "Of each side's lines above zero; a line at zero or below is left out of the pie"], ...(chg?[["Change", `The pro forma's share less ${B}'s, in percentage points. New: only the target writes here.`]]:[]),
+    ["Note", CB_WHAT], ["Base", `${B}: ${run.base.label} (${run.base.kind==="group"?"NAIC group":"NAIC"} ${run.base.codes.join(", ")})`], ["Target", `${run.target.label} (${run.target.kind==="group"?"NAIC group":"NAIC"} ${run.target.codes.join(", ")})`]];
+  return {name:`snl-combination-lines-${M.state?M.state.toLowerCase():"all-states"}-${M.y}-${TODAY()}`, sheet:"By line", cols:["Line of business", "In the pies as", `${B} US dollars`, `${B} share %`, "Pro forma US dollars", "Pro forma share %", ...(chg?["Change in share pts"]:[])],
+    rows:[...rows, pad(w), ...about.map(x=>[...x, ...pad(w-2)])]};
+}
+/* The small panel for a slice, on hover, focus or a tap: the line, its $M and its share. */
+function cbpTipShow(el, ev){
+  const tip=document.getElementById("cbpTip"), grid=document.getElementById("cbpGrid"), M=CBP_VM; if(!tip || !grid || !M || M.off) return;
+  const P=el.dataset.cbp==="base"?M.b:M.p, s=P.slices&&P.slices.find(x=>x.k===el.dataset.k); if(!s) return;
+  tip.innerHTML=`<b>${esc(s.name)}${s.other?` (${esc(plural(s.other, "line"))})`:""}</b> <p>${esc(el.dataset.cbp==="base"?M.B0:"Pro forma")}, ${esc(M.where)}, ${M.y}</p> <p>${esc(usdM(s.v))}, ${esc(pct(s.s))} of ${esc(usdM(P.total))}</p>`; tip.hidden=false;
+  const G=grid.getBoundingClientRect(), r=el.getBoundingClientRect(), tw=tip.offsetWidth, th=tip.offsetHeight, mouse=ev&&isNum(ev.clientX);
+  const ax=mouse?ev.clientX:r.left+r.width/2, ay=mouse?ev.clientY:r.top+r.height/2;
+  let x=ax-G.left+14, y=ay-G.top+14;
+  if(x+tw>G.width) x=Math.max(0, ax-G.left-tw-14);
+  if(x+tw>G.width) x=Math.max(0, G.width-tw);
+  if(y+th>G.height) y=Math.max(0, ay-G.top-th-14);
+  tip.style.left=x+"px"; tip.style.top=y+"px";
+}
+function cbpTipHide(){ const tip=document.getElementById("cbpTip"); if(tip) tip.hidden=true; }
+const cbpOf = e => e.target.closest && e.target.closest("[data-cbp]");
+document.addEventListener("mouseover", e=>{ const el=cbpOf(e); if(el) cbpTipShow(el, e); });
+document.addEventListener("mousemove", e=>{ const el=cbpOf(e); if(el) cbpTipShow(el, e); });
+document.addEventListener("mouseout", e=>{ const to=e.relatedTarget; if(cbpOf(e) && !cbmTouched() && !(to&&to.closest&&to.closest("[data-cbp]"))) cbpTipHide(); });   // by touch, a tap elsewhere hides it
+document.addEventListener("focusin", e=>{ const el=cbpOf(e); if(el) cbpTipShow(el, null); });
+document.addEventListener("focusout", e=>{ if(cbpOf(e)) cbpTipHide(); });
+document.addEventListener("click", e=>{ const el=cbpOf(e); if(el) cbpTipShow(el, e); });   // a tap, where there is no hover
+document.addEventListener("touchstart", e=>{ if(!cbpOf(e)) cbpTipHide(); }, {passive:true});
+document.addEventListener("keydown", e=>{ if(e.key==="Escape" && cbpOf(e)) cbpTipHide(); });
 
 /* ---------- routing ---------- */
 const VIEW_KEY="snl.view";
