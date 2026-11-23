@@ -94,7 +94,7 @@ const CO = { action: "filings_facts", kind: "company", institutionId: "6000001",
   const sent = String(w.ai.calls[0].body.messages[0].content);
   ok("the draft: Claude's text kept, the candidates returned to the page", r.status === 200 && r.body.text.by === "claude" && r.body.candidates.rate.length === 1);
   ok("Claude is sent the new figures but not the rows that could be summarised", sent.includes("\"exposure\"") && sent.includes("12500000") && !sent.includes("\"candidates\"") && !sent.includes("\"row\"") && !sent.includes("Made-up description"));
-  ok("the schema asks for the five new sections", ["rateMap", "exposure", "adequacy", "programs", "market"].every((k) => P.FP_TEXT_SCHEMA.required.includes(k)));
+  ok("the schema asks for the five new sections", ["rateMap", "exposure", "adequacy", "programs", "market"].every((k) => (P.FP_SECTIONS as readonly string[]).includes(k) &&P.FP_DRAFT_SYSTEM.includes(`in this order: ${[...P.FP_SECTIONS, "questions"].join(", ")}`)));
 }
 {
   const w = world();
