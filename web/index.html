@@ -8946,7 +8946,7 @@ function cbpSvgHTML(side, P, title){
     const d = P.slices.length===1 ? `M${cx} ${cy-r}A${r} ${r} 0 1 1 ${cx} ${cy+r}A${r} ${r} 0 1 1 ${cx} ${cy-r}Z` : `M${cx} ${cy}L${X(a)} ${Y(a)}A${r} ${r} 0 ${sw>Math.PI?1:0} 1 ${X(a2)} ${Y(a2)}Z`;
     const say=`${s.name}${s.other?` (${plural(s.other, "line")})`:""}: ${usdM(s.v)}, ${pct(s.s)}`;
     paths+=`<path d="${d}" fill="${s.fill}" class="cbpsl" data-cbp="${side}" data-k="${esc(s.k)}" data-v="${s.v}" tabindex="0" role="graphics-symbol" aria-label="${esc(say)}"></path>`;
-    if(s.tex) tex+=`<path d="${d}" fill="url(#cbpTex_${side})" class="cbptex" aria-hidden="true"></path>`;
+    if(s.tex) tex+=`<path d="${d}" fill="${side==="base"?"url(#cbpTex_base)":"url(#cbpTex_pf)"}" class="cbptex" aria-hidden="true"></path>`;
     if(s.s>=4){ const lx=cx+(r+12)*Math.cos(mid), ly=cy+(r+12)*Math.sin(mid)+4, c=Math.cos(mid);
       labels+=`<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${c>0.2?"start":c<-0.2?"end":"middle"}" aria-hidden="true">${esc(pct(s.s))}</text>`; }
     a=a2;
