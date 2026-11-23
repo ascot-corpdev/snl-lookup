@@ -1,0 +1,107 @@
+{
+  "_about": "Made-up statutory figures for tests/web/combination.test.cjs, in $M (the test multiplies by a million; ratios are percentages). Keyed by NAIC code; a group's figures are under its group code. by_year fields are {year: value}; a list is several rows for the same year (a group's member companies), added up. by_line, by_state and by_item fields are {year: {name: value}}. No real company, code or figure.",
+  "names": {
+    "9001": "Calloway Group",
+    "90001": "Calloway Insurance Co",
+    "90002": "Calloway Home Co",
+    "90107": "Tarrow Mutual Insurance Co",
+    "90108": "Nonesuch Casualty Co",
+    "5520": "Nonesuch Group"
+  },
+  "codes": {
+    "9001": {
+      "surplus": {"2021": 700, "2022": 760, "2023": 300, "2024": 900, "2025": [600, 400]},
+      "npe": {"2021": 600, "2022": 650, "2023": 700, "2024": 750, "2025": 800},
+      "gpw": {"2021": 800, "2022": 850, "2023": 900, "2024": 1000, "2025": 1100},
+      "net_reserves": {"2021": 500, "2022": 500, "2023": 500, "2024": 500, "2025": 600},
+      "total_liabilities": {"2021": 1400, "2022": 1400, "2023": 1400, "2024": 1400, "2025": 1500},
+      "net_income": {"2021": 60, "2022": 70, "2023": -20, "2024": 80, "2025": 90},
+      "unearned_premiums": {"2025": 300},
+      "loss_ratio": {"2021": 63, "2022": 62, "2023": 75, "2024": 61, "2025": 60},
+      "loss_lae_ratio": {"2021": 73, "2022": 72, "2023": 85, "2024": 71, "2025": 70},
+      "expense_ratio": {"2021": 26, "2022": 26, "2023": 27, "2024": 26, "2025": 25},
+      "combined_ratio": {"2021": 99, "2022": 98, "2023": 112, "2024": 97, "2025": 95},
+      "rbc_ratio": {"2025": 450},
+      "roae": {"2025": 9.5},
+      "investment_yield": {"2025": 3.1},
+      "commission_ratio": {"2025": 12},
+      "dpw_by_line": {
+        "2021": {"Homeowners": 450, "Commercial auto": 200, "Inland marine": 100},
+        "2022": {"Homeowners": 480, "Commercial auto": 210, "Inland marine": 110},
+        "2023": {"Homeowners": 500, "Commercial auto": 220, "Inland marine": 120},
+        "2024": {"Homeowners": 550, "Commercial auto": 240, "Inland marine": 140},
+        "2025": {"Homeowners": 600, "Commercial auto": 250, "Inland marine": 150}
+      },
+      "npw_by_line": {
+        "2021": {"Homeowners": 400, "Commercial auto": 170, "Inland marine": 80},
+        "2022": {"Homeowners": 430, "Commercial auto": 180, "Inland marine": 90},
+        "2023": {"Homeowners": 450, "Commercial auto": 180, "Inland marine": 100},
+        "2024": {"Homeowners": 480, "Commercial auto": 190, "Inland marine": 110},
+        "2025": {"Homeowners": 500, "Commercial auto": 200, "Inland marine": 120}
+      },
+      "dpw_by_state": {
+        "2025": {"TX": 400, "FL": 200, "LA": 100, "OK": 80, "AR": 70, "MS": 60, "AL": 50, "NM": 40}
+      }
+    },
+    "90107": {
+      "surplus": {"2022": 260, "2023": -400, "2024": 280, "2025": 300},
+      "npe": {"2021": 160, "2022": 170, "2023": 180, "2024": 0, "2025": 200},
+      "gpw": {"2021": 210, "2022": 220, "2023": 230, "2024": 240, "2025": 260},
+      "net_reserves": {"2021": 140, "2022": 140, "2023": 140, "2024": 140, "2025": 150},
+      "total_liabilities": {"2021": 380, "2022": 380, "2023": 380, "2024": 380, "2025": 400},
+      "net_income": {"2021": 10, "2022": 12, "2023": -30, "2024": 15},
+      "unearned_premiums": {"2025": 70},
+      "loss_ratio": {"2021": 65, "2022": 66, "2023": 68, "2024": 72, "2025": 70},
+      "loss_lae_ratio": {"2021": 75, "2022": 76, "2023": 78, "2024": 82, "2025": 80},
+      "expense_ratio": {"2021": 30, "2022": 30, "2023": 29, "2024": 31, "2025": 30},
+      "combined_ratio": {"2021": 105, "2022": 106, "2023": 107, "2024": 113, "2025": 110},
+      "rbc_ratio": {"2025": 300},
+      "roae": {"2025": 4},
+      "investment_yield": {"2025": 2.5},
+      "commission_ratio": {"2025": 15},
+      "dpw_by_line": {
+        "2025": {"Homeowners": 150, "Farmowners": 100}
+      },
+      "npw_by_line": {
+        "2021": {"Homeowners": 80, "Farmowners": 60},
+        "2022": {"Homeowners": 85, "Farmowners": 65},
+        "2023": {"Homeowners": 90, "Farmowners": 70},
+        "2024": {"Homeowners": 95, "Farmowners": 75},
+        "2025": {"Homeowners": 100, "Farmowners": 80}
+      },
+      "dpw_by_state": {
+        "2025": {"FL": 150, "GA": 100}
+      },
+      "ceded_by_reinsurer": {"2025": {"Nonesuch Re": 40, "Nonesuch Specialty Re": 10}},
+      "recoverable_by_reinsurer": {"2025": {"Nonesuch Re": 60}}
+    },
+    "90108": {
+      "npe": {"2025": 50},
+      "gpw": {"2025": 70},
+      "loss_ratio": {"2025": 90},
+      "loss_lae_ratio": {"2025": 95},
+      "expense_ratio": {"2025": 35},
+      "dpw_by_line": {"2025": {"Homeowners": 60}},
+      "npw_by_line": {"2025": {"Homeowners": 40}}
+    },
+    "90001": {
+      "surplus": {"2025": 500},
+      "npe": {"2025": 400},
+      "dpw_by_line": {"2025": {"Homeowners": 300}},
+      "ceded_by_reinsurer": {"2025": {"Nonesuch Re": 50, "Tarrow Re": 30}},
+      "recoverable_by_reinsurer": {"2025": {"Nonesuch Re": 100}}
+    },
+    "90002": {
+      "surplus": {"2025": 200},
+      "npe": {"2025": 100},
+      "dpw_by_line": {"2025": {"Homeowners": 120}},
+      "ceded_by_reinsurer": {"2025": {"Nonesuch Re": 20}},
+      "recoverable_by_reinsurer": {"2025": {"Nonesuch Re": 25}}
+    },
+    "5520": {
+      "surplus": {"2025": 200},
+      "npe": {"2025": 100},
+      "dpw_by_line": {"2025": {"Homeowners": 90}}
+    }
+  }
+}

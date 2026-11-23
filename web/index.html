@@ -691,6 +691,23 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
   .si td[data-l]::before{content:attr(data-l) ": ";color:var(--muted)}
   .si .si-when{white-space:normal}
 }
+/* Combination (Corp Dev only): our company standalone, a target and the pro forma, three columns for each year */
+.cbwhat{margin:0;max-width:110ch}
+.cbbase{flex-direction:row;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;min-width:0}
+.cbbase>div{min-width:0;flex:1 1 260px;overflow-wrap:anywhere}
+.cbtiles{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+@media (max-width:1100px){.cbtiles{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:560px){.cbtiles{grid-template-columns:repeat(2,minmax(0,1fr))}.cbtiles .sntile b{font-size:20px}}
+.cbtbl{font-size:12px}
+.cbtbl th,.cbtbl td{padding:5px 8px}
+.cbtbl td:first-child{min-width:190px}
+.cbtbl th.cbyr{text-align:center;border-left:2px solid var(--headInk)}
+.cbtbl td.cbfirst,.cbtbl th.cbfirst{border-left:2px solid var(--grid)}
+.cbtbl td.cbpf{font-weight:bold}
+.cbwhy{display:block;font-size:11px;font-weight:normal;color:var(--muted);white-space:normal;max-width:22ch;margin-left:auto}
+.cbnotes{margin:0;padding-left:18px;font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:3px}
+.cbmix ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:3px;font-size:13px}
+.cbmix li{overflow-wrap:anywhere}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
@@ -717,6 +734,7 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
       <a href="#market" data-view="market">Market</a>
       <a href="#earnings" data-view="earnings">Earnings</a>
       <a href="#statutory" data-view="statutory">Statutory</a>
+      <a href="#combination" data-view="combination" hidden>Combination</a>
       <a href="#profile" data-view="profile">Profile</a>
     </nav>
   </div>
@@ -6984,8 +7002,9 @@ function render(){
   if(!on){ v.innerHTML=loginHTML(); keep(); renderDrawer(); renderAsk(); renderConn(); renderLive(); renderSignins(); renderDigest(); return; }
   const tab = S.view==="forms" ? "compare" : S.view;   // Programs and forms is the Compare tab's second page
   document.querySelectorAll("nav.tabs a").forEach(a=>a.setAttribute("aria-current", a.dataset.view===tab ? "page" : "false"));
+  cbTab();   // the Combination tab shows for Corp Dev logins only
   document.getElementById("stripIn").innerHTML=stripHTML();
-  v.innerHTML = S.view==="statutory" ? renderStatutory() : S.view==="profile" ? renderProfile() : S.view==="snapshot" ? renderSnapshot() : S.view==="forms" ? renderForms() : S.view==="compare" ? renderCompare() : S.view==="market" ? renderMarket() : S.view==="earnings" ? renderEarnings() : renderFilings();
+  v.innerHTML = S.view==="combination" ? renderCombination() : S.view==="statutory" ? renderStatutory() : S.view==="profile" ? renderProfile() : S.view==="snapshot" ? renderSnapshot() : S.view==="forms" ? renderForms() : S.view==="compare" ? renderCompare() : S.view==="market" ? renderMarket() : S.view==="earnings" ? renderEarnings() : renderFilings();
   keep(); renderDrawer(); renderAsk();
   renderConn();
   renderLive();
@@ -7750,6 +7769,555 @@ document.addEventListener("click", e=>{
   }
 });
 
+/* ---------- Combination (Corp Dev only): our company standalone + a target = pro forma ----------
+   The base is the organisation's own company or group, saved once as the setting "combination_base" (snl_settings:
+   {kind, codes, label}); every login can read settings, Corp Dev logins change it here. The target is chosen on the
+   page. Each side's figures come from its own ordinary statutory look-up (the statutory function's query action, saved
+   per company or group as the Statutory view's are), and the two are added up here in the browser. Nothing that pairs
+   the base with a target is ever saved or sent anywhere: no saved or recent combinations, nothing in browser storage,
+   nothing to Claude (askScreen gives Claude nothing about this view). Dollars are added; ratios are worked out from the
+   added dollars or weighted, never added; four ratios are never combined. */
+VIEWS.push("combination");
+const CB_SETTING = "combination_base", CB_QUERY_YEARS = 6, CB_YEARS = 5, CB_MAX_LABEL = 80;
+const cbBaseName = () => ORG || "Our company";
+/* Dollars by year, added up: [id, label, section]. dpw and npw are the totals of the by-line figures (dpw from the
+   by-state figures when by line can't be used, as the profile does). */
+const CB_SUMS = [
+  ["dpw","Direct premiums written","prem"],["assumed_pw","Assumed premiums written","prem"],["gpw","Gross premiums written","prem"],["ceded_pw","Ceded premiums written","prem"],["npw","Net premiums written","prem"],["npe","Net premiums earned","prem"],
+  ["losses_incurred","Net losses and LAE incurred","earn"],["uw_gain","Net underwriting gain","earn"],["net_inv_income","Net investment income earned","earn"],["realized_gains","Net realized capital gains","earn"],["net_income","Net income","earn"],["cash_from_ops","Net cash from operations","earn"],
+  ["total_assets","Total assets","bal"],["cash_invested","Cash and invested assets","bal"],["bonds","Bonds","bal"],["stocks","Common stocks","bal"],["cash_short_term","Cash and short-term investments","bal"],["premiums_receivable","Premiums receivable","bal"],["total_liabilities","Total liabilities","bal"],["unearned_premiums","Unearned premiums","bal"],
+  ["surplus","Policyholder surplus","cap"],["paid_in_capital","Paid-in capital","cap"],["surplus_notes","Surplus notes","cap"],["unassigned_funds","Unassigned funds","cap"],["dividends_paid","Dividends to stockholders","cap"],["capital_contributed","Capital and surplus paid in during the year","cap"],["rbc_tac","Total adjusted capital","cap"],["rbc_acl","Authorized control level risk-based capital","cap"],
+  ["net_reserves","Net loss and LAE reserves","res"],["pyd","One-year development (positive is adverse)","res"],["pyd_two_year","Two-year development (positive is adverse)","res"],["reins_recoverable","Reinsurance recoverables","res"]
+];
+const CB_SECTIONS = [["prem","Premiums"],["earn","Underwriting and earnings"],["bal","Balance sheet"],["cap","Capital"],["res","Reserves and reinsurance"]];
+/* Ratios that are weighted: [id, label, weight]. The combined ratio is the weighted loss and LAE ratio plus the weighted expense ratio. */
+const CB_WEIGHTED = [["loss_ratio","Loss ratio","npe"],["loss_lae_ratio","Loss and LAE ratio","npe"],["expense_ratio","Expense ratio","npw"]];
+/* Ratios never combined, and why. */
+const CB_NEVER = [
+  ["rbc_ratio","Risk-based capital ratio","A combined company's risk-based capital is worked out afresh from its own risks, so two ratios can't be added up."],
+  ["roae","Return on average equity","Each is a return on that company's own equity; two returns can't be added up."],
+  ["investment_yield","Net yield on invested assets","Each is the yield on that company's own portfolio; two yields can't be added up."],
+  ["commission_ratio","Commission ratio","Each is reported on that company's own basis, so two can't be added up."]
+];
+const CB_WORDS = {npe:"net premiums earned", npw:"net premiums written", surplus:"surplus", gross:"gross premiums written"};
+/* The figures each side asks for: every dollar figure above, premiums by line and state, the ratios, and (company
+   look-ups only) the two by-reinsurer figures. */
+function cbFields(kind){
+  const f=[...CB_SUMS.map(x=>x[0]).filter(id=>id!=="dpw"&&id!=="npw"), "dpw_by_line", "npw_by_line", "dpw_by_state", "loss_ratio", "loss_lae_ratio", "expense_ratio", "combined_ratio", ...CB_NEVER.map(x=>x[0])];
+  if(kind==="company") f.push("ceded_by_reinsurer", "recoverable_by_reinsurer");
+  return f;
+}
+function cbPick(){ return {kind:"company", codes:"", names:{}, find:{q:"", asked:"", matches:null, busy:false, err:"", note:""}}; }
+function freshCb(){
+  return {base:{loaded:false, loading:false, err:"", doc:null, bad:false}, edit:null, saving:false, saveErr:"", msg:"",
+    target:cbPick(), toYear:String(new Date().getFullYear()-1), formErr:"", run:null};
+}
+S.cb=freshCb();
+const cbTab = () => { const a=document.querySelector('nav.tabs a[data-view="combination"]'); if(a) a.hidden=!isCorpDev(); };
+/* ----- the saved base ----- */
+function cbCleanBase(d){
+  if(!d || typeof d!=="object") return null;
+  const kind=d.kind==="group"?"group":d.kind==="company"?"company":null, codes=Array.isArray(d.codes)?[...new Set(d.codes.map(c=>String(c??"").trim()))]:[];
+  const label=String(d.label??"").replace(/\s+/g," ").trim().slice(0,CB_MAX_LABEL);
+  if(!kind || !codes.length || codes.some(c=>!naicOk(c)) || (kind==="group"?codes.length!==1:codes.length>MAX_CODES) || !label) return null;
+  return {kind, codes, label};
+}
+async function cbLoadBase(){
+  const cb=S.cb; if(cb.base.loading || !isCorpDev()) return;
+  cb.base.loading=true; cb.base.err=""; render();
+  let data=null, error=null;
+  try{ ({data, error}=await S.sb.from("snl_settings").select("doc").eq("id",CB_SETTING).maybeSingle()); }catch(e){ error=e; }
+  if(!S.session || S.cb!==cb) return;
+  cb.base.loading=false;
+  if(error){ cb.base.err="Couldn't read the base company. Check your connection and try again."; render(); return; }
+  cb.base.loaded=true; cb.base.doc=cbCleanBase(data&&data.doc); cb.base.bad=!!(data&&data.doc)&&!cb.base.doc;
+  render();
+}
+function enterCombination(){
+  if(!S.session || !isCorpDev()) return;   // other logins see no tab and the view asks for nothing
+  if(!S.st.status && !S.st.loading) loadStatStatus();
+  if(!S.cb.base.loaded && !S.cb.base.loading) cbLoadBase();
+}
+/* ----- choosing codes: the base's (when it is set or changed) and the target's ----- */
+const cbCodes = pk => [...new Set(String(pk.codes||"").split(/[\s,;]+/).map(s=>s.trim()).filter(Boolean))];
+function cbPickProblem(pk, who){
+  const codes=cbCodes(pk), group=pk.kind==="group";
+  if(!codes.length) return `Type the ${who}'s NAIC ${group?"group code":"company code"}, or find it by name.`;
+  if(codes.some(c=>!naicOk(c))) return "NAIC codes are numbers of up to 6 digits, like 90001. Separate them with commas.";
+  if(group && codes.length>1) return "A group look-up takes one NAIC group code.";
+  if(codes.length>MAX_CODES) return `Use at most ${MAX_CODES} NAIC company codes; their figures are added up.`;
+  return "";
+}
+const cbPickOf = which => which==="base" ? S.cb.edit : S.cb.target;
+function cbPickLabel(pk){
+  const codes=cbCodes(pk), names=codes.map(c=>pk.names[c]).filter(n=>!blank(n));
+  if(names.length===codes.length && names.length) return names.join(" + ");
+  return pk.kind==="group" ? `NAIC group ${codes.join(", ")}` : `NAIC ${codes.join(", ")}`;
+}
+function cbAdd(which, code, name){
+  const pk=cbPickOf(which); if(!pk) return;
+  code=String(code??"").trim(); if(!naicOk(code)) return;
+  const codes=cbCodes(pk);
+  if(pk.kind==="group") pk.codes=code;   // a group look-up is one group
+  else if(codes.includes(code)){ toast("That code is already in the list."); return; }
+  else if(codes.length>=MAX_CODES){ toast(`At most ${MAX_CODES} NAIC company codes. Remove one to add another.`); return; }
+  else pk.codes=codes.concat(code).join(", ");
+  if(!blank(name)) pk.names[code]=String(name);
+  if(which==="base" && blank(S.cb.edit.label) && !blank(name)) S.cb.edit.label=String(name).slice(0,CB_MAX_LABEL);
+  S.cb.formErr=""; render();
+}
+async function cbLookup(which){
+  const pk=cbPickOf(which); if(!pk) return;
+  const fd=pk.find, q=String(fd.q||"").trim();
+  if(!q){ fd.matches=null; fd.err="Type part of a company or group name, or a NAIC code."; render(); return; }
+  fd.busy=true; fd.err=""; fd.note=""; fd.matches=null; fd.asked=q; fd.nl=null; render();
+  const r=await callFn("snl-filings",{action:"resolve", q});   // the name typed, nothing else: the same look-up as the Statutory view's
+  if(!S.session || cbPickOf(which)!==pk || pk.find!==fd) return;
+  fd.busy=false;
+  if(r.data){ fd.matches=Array.isArray(r.data.matches)?r.data.matches.filter(m=>m&&typeof m==="object"):[]; fd.note=r.data.note||""; }
+  else if(r.err!=="signin") fd.err="Couldn't look that up. "+errText(r);
+  render();
+  if(r.data && statCodesOn()) naicFill(fd, ()=>cbPickOf(which)===pk && pk.find===fd && fd.asked===q);
+}
+function cbPickHTML(which){
+  const pk=cbPickOf(which), fd=pk.find, group=pk.kind==="group", codes=cbCodes(pk), idp=`cb_${which}`;
+  const calm=t=>`<div class="info" id="${idp}_findNote" role="status"><span>${t}</span></div>`;
+  let found="";
+  if(fd.busy) found=`<p class="t2" id="${idp}_finding" role="status">Looking for matches…${pbHTML("find-"+idp, {name:"Looking up companies", small:true})}</p>`;
+  else if(fd.matches!==null && !fd.matches.length) found=calm(`No company in the app's company list matches "${esc(fd.asked)}". Try a shorter part of the name, or type the NAIC ${group?"group":"company"} code.`);
+  else if(fd.matches!==null && group){
+    const groups=statGroups(fd.matches);
+    found = groups.length ? `<ul class="matches" id="${idp}_matches" aria-label="Matching groups">${groups.map(g=>{ const can=naicOk(g.code), on=can&&codes.includes(g.code);
+      const act=!can ? `<span class="t2 noadd">${fd.nl&&fd.nl.busy?"Looking up its NAIC group code…":"Can't be chosen: the company list has no NAIC group code for this group."}</span>`
+        : on ? `<button type="button" class="btn sm" disabled>Chosen</button>` : `<button type="button" class="btn sm" data-act="cb-add" data-w="${which}" data-code="${esc(g.code)}" data-name="${esc(g.name)}">Choose</button>`;
+      return `<li><div><div class="t1">${esc(g.name||`NAIC group ${g.code}`)}</div><div class="t2">${[can?`NAIC group ${esc(g.code)}`:"", plural(g.n,"matching company","matching companies")].filter(Boolean).join(" · ")}</div></div><span class="inline">${act}</span></li>`; }).join("")}</ul>`
+      : calm(`The companies that match "${esc(fd.asked)}" have no group in the company list. Type the NAIC group code, or look up by NAIC company code.`);
+  }
+  else if(fd.matches!==null){
+    found=`<ul class="matches" id="${idp}_matches" aria-label="Matching companies">${fd.matches.map(m=>{ const code=String(m.naicCompanyCode??"").trim(), can=naicOk(code), on=can&&codes.includes(code);
+      const meta=[can?`NAIC ${code}`:"", !blank(m.naicGroupName)?`group ${m.naicGroupName}`:""].filter(Boolean).join(" · ");
+      const act=!can ? naicRowNote(fd, m, `<span class="t2 noadd">Can't be added: the company list has no NAIC company code for it.</span>`)
+        : on ? `<button type="button" class="btn sm" disabled>Added</button>` : `<button type="button" class="btn sm" data-act="cb-add" data-w="${which}" data-code="${esc(code)}" data-name="${esc(m.companyName)}">Add</button>`;
+      return `<li><div><div class="t1">${esc(m.companyName||"n/d")}</div>${meta?`<div class="t2">${esc(meta)}</div>`:""}</div><span class="inline">${act}</span></li>`; }).join("")}</ul>`;
+  }
+  const chips=codes.map(c=>{ const n=pk.names[c]; return `<span class="cchip"><span><b>${esc(n||(group?`NAIC group ${c}`:`NAIC ${c}`))}</b>${n?` <span class="t2">${group?"NAIC group":"NAIC"} ${esc(c)}</span>`:""}</span><button type="button" data-act="cb-remove" data-w="${which}" data-code="${esc(c)}" aria-label="Remove ${esc(n||c)}">×</button></span>`; }).join("");
+  return `<div class="f"><span>Look up by</span><div class="seg"><button type="button" class="btn sm" data-act="cb-kind" data-w="${which}" data-k="company" aria-pressed="${!group}">NAIC company codes</button><button type="button" class="btn sm" data-act="cb-kind" data-w="${which}" data-k="group" aria-pressed="${group}">NAIC group code</button></div></div>
+    <label class="f"><span>${group?"NAIC group code <em>one group</em>":`NAIC company codes <em>up to ${MAX_CODES}, separated with commas; their figures are added up</em>`}</span><input type="text" id="${idp}_codes" data-bind="cb.${which==="base"?"edit":"target"}.codes" value="${esc(pk.codes)}" autocomplete="off" spellcheck="false" inputmode="numeric" placeholder="${group?"For example 4410":"For example 90107"}"></label>
+    <div class="chips" id="${idp}_named" aria-label="Chosen codes">${chips}</div>
+    <div class="f"><label for="${idp}_find">Find by name <em>part of a company or group name, or a NAIC code</em></label>
+      <div class="toolbar"><div class="grow"><input type="text" id="${idp}_find" data-bind="cb.${which==="base"?"edit":"target"}.find.q" value="${esc(fd.q)}" autocomplete="off" spellcheck="false" placeholder="For example Tarrow"></div>
+        <button type="button" class="btn" data-act="cb-find" data-w="${which}" ${fd.busy?"disabled":""}>Find</button></div>
+      ${fd.err?`<p class="err" id="${idp}_findErr" role="alert">${esc(fd.err)}</p>`:""}${found}${fd.matches&&fd.matches.length&&!fd.busy?naicNoteHTML(fd,idp):""}</div>`;
+}
+function cbEditStart(){
+  const d=S.cb.base.doc, pk=cbPick();
+  if(d){ pk.kind=d.kind; pk.codes=d.codes.join(", "); if(d.codes.length===1) pk.names[d.codes[0]]=d.label; }
+  pk.label=d?d.label:""; S.cb.edit=pk; S.cb.saveErr=""; S.cb.msg=""; render(); document.getElementById("cb_base_codes")?.focus();
+}
+async function cbSaveBase(){
+  const cb=S.cb, e=cb.edit; if(!e || cb.saving) return;
+  if(!isCorpDev()){ cb.saveErr="Only Corp Dev logins can set the base company."; render(); return; }
+  const problem=cbPickProblem(e, "base"), label=String(e.label??"").replace(/\s+/g," ").trim();
+  if(problem){ cb.saveErr=problem; render(); return; }
+  if(!label){ cb.saveErr="Give the base a name, as it should show on this page."; render(); return; }
+  if(label.length>CB_MAX_LABEL){ cb.saveErr=`Keep the name to ${CB_MAX_LABEL} characters.`; render(); return; }
+  const doc={kind:e.kind, codes:cbCodes(e), label};   // the base only: never anything about a target
+  cb.saving=true; cb.saveErr=""; render();
+  let error=null;
+  try{ ({error}=await S.sb.from("snl_settings").upsert({id:CB_SETTING, doc})); }catch(x){ error=x; }
+  if(!S.session || S.cb!==cb) return;
+  cb.saving=false;
+  if(error){ cb.saveErr="Couldn't save the base company. "+(/security|42501|permission/i.test(String(error.message||error.code||""))?"Only Corp Dev logins can change it.":"Check your connection and try again."); render(); return; }
+  cb.base.doc=doc; cb.base.bad=false; cb.base.loaded=true; cb.edit=null; cb.run=null;
+  cb.msg=`Saved. The base is now ${label}. Choose a target to see the pro forma.`;
+  render();
+}
+/* ----- fetching: one ordinary statutory look-up for each side, at the same time, never one call for both ----- */
+function cbProblem(){
+  const cb=S.cb, d=cb.base.doc, y=new Date().getFullYear();
+  if(!d) return "Set the base company first.";
+  const p=cbPickProblem(cb.target, "target"); if(p) return p;
+  const last=/^\d{4}$/.test(cb.toYear)?+cb.toYear:0;
+  if(!last || last<1990+CB_QUERY_YEARS || last>y) return `Choose a last year between ${1990+CB_QUERY_YEARS} and ${y}.`;
+  const tc=cbCodes(cb.target), same=cb.target.kind===d.kind ? tc.filter(c=>d.codes.includes(c)) : [];
+  if(same.length) return `NAIC ${same.join(", ")} is part of the base already, so adding it would count it twice. Choose a different target.`;
+  return "";
+}
+function cbRun(){
+  const cb=S.cb, problem=cbProblem();
+  if(problem){ cb.formErr=problem; render(); return; }
+  const d=cb.base.doc, to=+cb.toYear, from=to-(CB_QUERY_YEARS-1), tg=cb.target;
+  if(cb.run){ for(const w of ["base","target"]){ const sd=cb.run[w]; if(sd.ctl) sd.ctl.stop(); } }
+  cb.formErr="";
+  cb.run={fromYear:from, toYear:to,
+    base:{kind:d.kind, codes:[...d.codes], label:d.label, res:null, err:null, busy:false},
+    target:{kind:tg.kind, codes:cbCodes(tg), label:cbPickLabel(tg), res:null, err:null, busy:false}};
+  cbFetch("base", false); cbFetch("target", false);
+}
+async function cbFetch(which, refresh, carryOn){
+  const run=S.cb.run; if(!run) return; const sd=run[which]; if(sd.busy) return;
+  if(carryOn && !sd.res) return;
+  const payload={action:"query", kind:sd.kind, codes:sd.codes, fromYear:run.fromYear, toYear:run.toYear, fields:cbFields(sd.kind)};
+  const ctl=bsControl();
+  sd.busy=true; sd.err=null; sd.stopped=false; sd.ctl=ctl; sd.figs=carryOn?statFigs(sd.res):null; if(!carryOn && !refresh) sd.res=null; pbStart("cb-"+which); render();
+  const r=await statCarry(first=>{ const b={...payload}; if(first && refresh) b.refresh=true; return callFn("snl-statutory", b); }, statFigs,
+    {ctl, onPart:(f, data)=>{ if(S.cb.run!==run || sd.ctl!==ctl || !S.session) return; sd.figs=f; sd.res=data; takeUsage(data); render(); }});
+  if(S.cb.run!==run || sd.ctl!==ctl) return;
+  sd.busy=false; sd.ctl=null; sd.figs=null;
+  if(!S.session) return;
+  if(r.data){ sd.res=r.stalled?{...r.data, stalled:r.stalled}:r.data; takeUsage(r.data); }
+  else if(sd.res && r.err!=="signin") sd.res={...sd.res, stalled:{why:r.err==="stopped"?"stopped":"failed", err:r, figs:statFigs(sd.res)}};   // what had arrived stays
+  else if(r.err==="stopped") sd.stopped=true;
+  else if(r.err!=="signin") sd.err=r;
+  render();
+}
+/* ----- one side's figures, from its own answer ----- */
+/* Whether a figure of one side can be used: {f} or {why} in a few words. */
+function cbField(sd, id){
+  if(!sd.res) return {why: sd.busy ? "still to come" : sd.err ? "couldn't be fetched" : "not fetched"};
+  const f=(Array.isArray(sd.res.fields)?sd.res.fields:[]).find(x=>x&&x.id===id);
+  if(!f) return {why: sd.busy ? "still to come" : "not returned"};
+  if(f.mapped===false) return {why:"not mapped"};
+  if(/^Not run:/.test(String(f.error||""))) return {why: sd.busy ? "still to come" : "not fetched yet"};
+  if(!blank(f.error)) return {why:"couldn't be read"};
+  return {f};
+}
+const cbRows = f => (Array.isArray(f.rows)?f.rows:[]).filter(r=>r && isNum(r.value) && Number.isInteger(+r.year));
+/* Dollars of one code in one year, rows added up (a group's member companies, the lines of a by-line figure). */
+function cbByCode(f){
+  const m=new Map();
+  for(const r of cbRows(f)){ const c=String(r.code??""), y=+r.year; if(!m.has(c)) m.set(c, new Map()); m.get(c).set(y, (m.get(c).get(y)||0)+(+r.value)); }
+  return m;
+}
+/* Which figure gives direct premiums: by line, or by state when by line can't be used (as the profile does). */
+function cbDpwSource(sd){
+  const l=cbField(sd,"dpw_by_line"); if(l.f) return "dpw_by_line";
+  const s=cbField(sd,"dpw_by_state"); return s.f && (l.why==="not mapped" || l.why==="couldn't be read") ? "dpw_by_state" : "dpw_by_line";
+}
+/* One code's dollars (the side's own codes only). */
+function cbCodeVal(sd, id, code, y){
+  const src=id==="dpw" ? cbDpwSource(sd) : id==="npw" ? "npw_by_line" : id, st=cbField(sd, src); if(st.why) return st;
+  const v=cbByCode(st.f).get(code)?.get(y);
+  return v===undefined ? {why:"none returned"} : {v};
+}
+/* A side's dollars in one year: its codes added up, n/d unless every code has the figure. */
+function cbVal(sd, id, y){
+  let total=0;
+  for(const c of sd.codes){ const x=cbCodeVal(sd, id, c, y); if(x.why) return sd.codes.length>1 && x.why==="none returned" ? {why:`none for NAIC ${c}`} : x; total+=x.v; }
+  return {v:total};
+}
+/* A side's reported ratio for one code and year: one figure, or why not. */
+function cbCodePct(sd, id, code, y){
+  const st=cbField(sd, id); if(st.why) return st;
+  const vals=[...new Set(cbRows(st.f).filter(r=>String(r.code??"")===code && +r.year===y).map(r=>+r.value))];
+  if(!vals.length) return {why:"none returned"};
+  if(vals.length>1) return {why:"several figures for one year"};
+  return {v:vals[0]};
+}
+/* A weighted average, n/d when a ratio or a weight is missing, or a weight is zero or negative.
+   units: [{who, r: {v}|{why}, w: {v}|{why}}]; rName, wName: what the ratio and the weight are called. */
+function cbWeighted(units, rName, wName){
+  let num=0, den=0;
+  for(const u of units){
+    if(u.r.why) return {why:`${u.who} ${rName}: ${u.r.why}`};
+    if(u.w.why) return {why:`${u.who} ${wName}: ${u.w.why}`};
+    if(!(u.w.v>0)) return {why:`${u.who} ${wName} zero or negative`};
+    num+=u.r.v*u.w.v; den+=u.w.v;
+  }
+  return den>0 ? {v:num/den, derived:true} : {why:`${wName} zero or negative`};
+}
+/* A side's own loss, loss and LAE or expense ratio: as reported for one code; for several, weighted across them. */
+function cbSideRatio(sd, id, y){
+  const def=CB_WEIGHTED.find(x=>x[0]===id);
+  if(sd.codes.length===1) return cbCodePct(sd, id, sd.codes[0], y);
+  return cbWeighted(sd.codes.map(c=>({who:`NAIC ${c}`, r:cbCodePct(sd, id, c, y), w:cbCodeVal(sd, def[2], c, y)})), def[1].toLowerCase(), CB_WORDS[def[2]]);
+}
+const cbAddUp = (a, b) => a.why || b.why ? {why:a.why||b.why} : {v:a.v+b.v, derived:a.derived||b.derived};
+function cbSideCombined(sd, y){
+  if(sd.codes.length===1) return cbCodePct(sd, "combined_ratio", sd.codes[0], y);
+  return cbAddUp(cbSideRatio(sd, "loss_lae_ratio", y), cbSideRatio(sd, "expense_ratio", y));
+}
+/* Gross premiums written of a side: as reported, or direct plus assumed when gross isn't there (as the profile does). */
+function cbGross(sd, y){
+  const g=cbVal(sd, "gpw", y); if(g.v!==undefined) return g;
+  const d=cbVal(sd, "dpw", y), a=cbVal(sd, "assumed_pw", y);
+  return d.v!==undefined && a.v!==undefined ? {v:d.v+a.v} : g;
+}
+/* a / b, n/d when either is missing or b is zero or negative (the profile's rule). */
+function cbDiv(a, b, bName, scale){
+  if(a.why) return a; if(b.why) return {why:`${bName}: ${b.why}`};
+  if(!(b.v>0)) return {why:`${bName} zero or negative`};
+  return {v:a.v/b.v*(scale||1), derived:true};
+}
+/* ----- the pro forma ----- */
+/* Two sides added: n/d unless both have the figure, saying which side hasn't. */
+function cbSum(b, t){
+  if(b.why || t.why) return {why:[b.why?`base: ${b.why}`:"", t.why?`target: ${t.why}`:""].filter(Boolean).join("; ")};
+  return {v:b.v+t.v};
+}
+/* Every by-year row: {id, label, sec, unit ("usd" | "pct" | "x"), kind ("sum" | "ratio" | "never"), note, cells: [{b, t, p}]}. */
+function cbModelRows(B, T, years){
+  const rows=[];
+  for(const [id,label,sec] of CB_SUMS) rows.push({id, label, sec, unit:"usd", kind:"sum", cells:years.map(y=>{ const b=cbVal(B,id,y), t=cbVal(T,id,y); return {b, t, p:cbSum(b,t)}; })});
+  for(const [id,label,w] of CB_WEIGHTED) rows.push({id, label, sec:"ratio", unit:"pct", kind:"ratio", cells:years.map(y=>{ const b=cbSideRatio(B,id,y), t=cbSideRatio(T,id,y);
+    return {b, t, p:cbWeighted([{who:"base", r:b, w:cbVal(B,w,y)}, {who:"target", r:t, w:cbVal(T,w,y)}], label.toLowerCase(), CB_WORDS[w])}; })});
+  rows.push({id:"combined_ratio", label:"Combined ratio", sec:"ratio", unit:"pct", kind:"ratio", cells:years.map((y,i)=>{
+    const ll=rows.find(r=>r.id==="loss_lae_ratio").cells[i].p, ex=rows.find(r=>r.id==="expense_ratio").cells[i].p;
+    return {b:cbSideCombined(B,y), t:cbSideCombined(T,y), p:cbAddUp(ll, ex)}; })});
+  const over=(id, label, num, den, denName, unit, scale)=>rows.push({id, label, sec:"ratio", unit, kind:"ratio", cells:years.map(y=>{
+    const nb=num(B,y), nt=num(T,y), db=den(B,y), dt=den(T,y);
+    return {b:cbDiv(nb, db, denName, scale), t:cbDiv(nt, dt, denName, scale), p:cbDiv(cbSum(nb,nt), cbSum(db,dt), denName, scale)}; })});
+  const v=id=>(sd,y)=>cbVal(sd,id,y);
+  over("npw_to_surplus","Net premiums written to surplus", v("npw"), v("surplus"), "surplus", "x");
+  over("reserves_to_surplus","Net loss and LAE reserves to surplus", v("net_reserves"), v("surplus"), "surplus", "x");
+  over("liabilities_to_surplus","Total liabilities to surplus", v("total_liabilities"), v("surplus"), "surplus", "x");
+  over("cession_pct","Cession share (gross less net, over gross)", (sd,y)=>{ const g=cbGross(sd,y), n=cbVal(sd,"npw",y); return g.why ? {why:`gross premiums written: ${g.why}`} : n.why ? {why:`net premiums written: ${n.why}`} : {v:g.v-n.v}; }, cbGross, "gross premiums written", "pct", 100);
+  for(const [id,label,why] of CB_NEVER) rows.push({id, label, sec:"never", unit:"pct", kind:"never", note:why, cells:years.map(y=>({
+    b:B.codes.length>1?{why:"several companies: can't be added up"}:cbCodePct(B,id,B.codes[0],y), t:T.codes.length>1?{why:"several companies: can't be added up"}:cbCodePct(T,id,T.codes[0],y), p:{never:true}}))});
+  return rows;
+}
+/* Years: the latest five, within those asked for, in which either side has any figure (as the profile does), latest first. */
+function cbYears(run){
+  const ys=new Set();
+  for(const sd of [run.base, run.target]) for(const f of (sd.res&&Array.isArray(sd.res.fields)?sd.res.fields:[])) for(const r of cbRows(f||{})) if(+r.year>=run.fromYear && +r.year<=run.toYear) ys.add(+r.year);
+  return [...ys].sort((a,b)=>b-a).slice(0,CB_YEARS);
+}
+/* Premiums by name (line, state or reinsurer) of one side in one year, its codes added up: {m: Map(key -> {name, v})} or {why}. */
+function cbByName(sd, id, key, y){
+  const st=cbField(sd, id); if(st.why) return st;
+  const m=new Map(), seen=new Set();
+  for(const r of cbRows(st.f)){
+    if(+r.year!==y) continue;
+    let name=String(r[key]??"").replace(/[\u0000-\u001f\u007f]+/g," ").replace(/\s+/g," ").trim(); if(!name) continue;
+    if(key==="state" && /^[a-z]{2}$/i.test(name)) name=name.toUpperCase();
+    const k=name.toLowerCase(), x=m.get(k)||{name, v:0}; x.v+=+r.value; m.set(k, x); seen.add(String(r.code??""));
+  }
+  if(!m.size) return {why:"none returned"};
+  const gap=sd.codes.find(c=>!seen.has(c)); if(sd.codes.length>1 && gap) return {why:`none for NAIC ${gap}`};
+  return {m};
+}
+const cbShare = (v, total) => isNum(v) && total>0 ? v/total*100 : null;
+const cbTotal = m => [...m.values()].reduce((a,x)=>a+x.v, 0);
+/* The mix in the latest year both sides have it: by name, each side's share and the pro forma share, the largest and
+   the top five before (the base alone) and after, what only one side writes, and the overlap. */
+function cbMix(B, T, years, id, key){
+  let y=null, bx=null, tx=null;
+  for(const yr of years){ const b=cbByName(B,id,key,yr), t=cbByName(T,id,key,yr); if(b.m && t.m){ y=yr; bx=b.m; tx=t.m; break; } }
+  if(y===null){ const yr=years[0], b=yr===undefined?{why:"not fetched"}:cbByName(B,id,key,yr), t=yr===undefined?{why:"not fetched"}:cbByName(T,id,key,yr); return {why:[b.why?`base: ${b.why}`:"", t.why?`target: ${t.why}`:""].filter(Boolean).join("; ")||"no year has both sides' figures"}; }
+  const bt=cbTotal(bx), tt=cbTotal(tx), pt=bt+tt, keys=[...new Set([...bx.keys(), ...tx.keys()])];
+  const all=keys.map(k=>{ const b=bx.get(k), t=tx.get(k), bv=b?b.v:null, tv=t?t.v:null, pv=(bv||0)+(tv||0);
+    return {name:(b||t).name, b:bv, t:tv, p:pv, bs:cbShare(bv,bt), ts:cbShare(tv,tt), ps:cbShare(pv,pt), who:b&&t?"both":b?"base":"target"}; })
+    .sort((a,c)=>c.p-a.p || a.name.localeCompare(c.name));
+  const top=(list, get, total)=>{ const s=[...list].filter(x=>isNum(get(x))).sort((a,c)=>get(c)-get(a)); return {first:s[0]||null, five:cbShare(s.slice(0,5).reduce((a,x)=>a+get(x),0), total)}; };
+  const before=top(all.filter(x=>x.b!==null), x=>x.b, bt), after=top(all, x=>x.p, pt);
+  const sumOf=list=>list.reduce((a,x)=>a+x.p,0), onlyB=all.filter(x=>x.who==="base"), onlyT=all.filter(x=>x.who==="target"), both=all.filter(x=>x.who==="both");
+  // top seven, then "Other" for the rest, when there are more than eight (as the profile does)
+  const rows = all.length>8 ? [...all.slice(0,7), (rest=>{ const b=rest.reduce((a,x)=>a+(x.b||0),0), t=rest.reduce((a,x)=>a+(x.t||0),0), p=b+t;
+    return {name:"Other", other:rest.length, b, t, p, bs:cbShare(b,bt), ts:cbShare(t,tt), ps:cbShare(p,pt), who:""}; })(all.slice(7))] : all;
+  return {year:y, key, rows, all, bt, tt, pt, before, after,
+    onlyB:{n:onlyB.length, v:sumOf(onlyB), s:cbShare(sumOf(onlyB),pt), names:onlyB.map(x=>x.name)},
+    onlyT:{n:onlyT.length, v:sumOf(onlyT), s:cbShare(sumOf(onlyT),pt), names:onlyT.map(x=>x.name)},
+    overlap:{n:both.length, v:sumOf(both), s:cbShare(sumOf(both),pt)}};
+}
+/* Reinsurers both sides use, latest year both have ceded premiums by reinsurer: company look-ups only. */
+function cbReins(B, T, years){
+  if(B.kind!=="company" || T.kind!=="company") return {group:true};
+  let y=null, bc=null, tc=null;
+  for(const yr of years){ const b=cbByName(B,"ceded_by_reinsurer","item",yr), t=cbByName(T,"ceded_by_reinsurer","item",yr); if(b.m && t.m){ y=yr; bc=b.m; tc=t.m; break; } }
+  if(y===null){ const b=cbField(B,"ceded_by_reinsurer"), t=cbField(T,"ceded_by_reinsurer"); return {why:[b.why?`base: ${b.why}`:"", t.why?`target: ${t.why}`:""].filter(Boolean).join("; ")||"no year has both sides' ceded premiums by reinsurer"}; }
+  const br=cbByName(B,"recoverable_by_reinsurer","item",y), tr=cbByName(T,"recoverable_by_reinsurer","item",y);
+  const rec=(x,k)=>x.m ? (x.m.has(k) ? {v:x.m.get(k).v} : {why:"none returned"}) : {why:x.why};
+  const both=[...bc.keys()].filter(k=>tc.has(k)).map(k=>{ const b={v:bc.get(k).v}, t={v:tc.get(k).v}, rb=rec(br,k), rt=rec(tr,k);
+    return {name:bc.get(k).name, b, t, p:cbSum(b,t), rb, rt, rp:cbSum(rb,rt)}; }).sort((a,c)=>c.p.v-a.p.v || a.name.localeCompare(c.name));
+  return {year:y, both, onlyB:[...bc.keys()].filter(k=>!tc.has(k)).length, onlyT:[...tc.keys()].filter(k=>!bc.has(k)).length};
+}
+/* ----- showing it ----- */
+function cbFmt(x, unit){
+  if(!x) return "n/d";
+  if(x.never) return "Not combined";
+  if(x.why) return "n/d";
+  return unit==="usd" ? usdM(x.v) : unit==="x" ? pfX(x.v) : pct(x.v);
+}
+const cbCell = (x, unit, s, y, extra) => `<td class="num${extra||""}" data-s="${s}" data-y="${y}">${esc(cbFmt(x, unit))}${x&&x.why?`<span class="cbwhy">${esc(x.why)}</span>`:""}</td>`;
+function cbTableHTML(id, rows, years, run){
+  const B=cbBaseName();
+  return `<div class="tbl-wrap" data-keep id="cbWrap_${id}"><table class="cbtbl" id="cbTab_${id}"><thead><tr><th rowspan="2">${id==="never"||id==="ratio"?"Ratio":"$M unless shown"}</th>${years.map(y=>`<th colspan="3" class="cbyr">${esc(y)}</th>`).join("")}</tr>
+    <tr>${years.map(()=>`<th class="num cbfirst">${esc(B)}</th><th class="num">Target</th><th class="num">Pro forma</th>`).join("")}</tr></thead>
+    <tbody>${rows.map(r=>`<tr data-row="${esc(r.id)}"><td>${esc(r.label)}${r.unit==="pct"?" (%)":""}${r.kind==="ratio"?` <span class="t2">(derived)</span>`:""}${r.note?`<span class="cbwhy" style="margin:2px 0 0;max-width:40ch">${esc(r.note)}</span>`:""}</td>${r.cells.map((c,i)=>cbCell(c.b, r.unit, "b", years[i], " cbfirst")+cbCell(c.t, r.unit, "t", years[i])+cbCell(c.p, r.unit, "p", years[i], " cbpf")).join("")}</tr>`).join("")}</tbody></table></div>`;
+}
+const CB_WHAT = "What this is: a simple sum of two sets of statutory figures, as each company filed them. It has no purchase accounting, no price, no synergies and no financing. It doesn't take out business the two already do with each other, such as reinsurance between them or pooling, and it doesn't change reinsurance or capital as a transaction would. Surplus in particular is not what a combined company would report.";
+const CB_COST = "Cost: two statutory look-ups, one for each side, each saved for that company or group as on the Statutory view, so looking again reads the saved figures. No S&P filing requests and no Claude. The two are added up in this browser: nothing that pairs them is saved or sent anywhere.";
+function cbSideStatusHTML(which){
+  const run=S.cb.run, sd=run[which], who=which==="base"?cbBaseName():"the target", key=which==="base"?"Base":"Target", id="cb"+key;
+  if(sd.busy && !sd.figs) return `<div class="banner" id="${id}Busy" role="status"><span>Fetching ${esc(who)}'s figures (${esc(sd.label)})… This can take a minute. They are added in as soon as they arrive.</span>${pbHTML("cb-"+which, {name:`${key} figures`})}<button type="button" class="btn sm" data-act="cb-stop" data-w="${which}">Stop</button></div>`;
+  if(sd.busy) return `<div class="banner" id="${id}Carry" role="status"><span><b>Getting the rest of ${esc(who)}'s figures…</b> ${statFigsText(sd.figs)} so far. The ones that came back are shown below and kept.</span>${pbHTML("cb-"+which, {name:`${key} figures`, done:sd.figs.done, of:sd.figs.of, say:statFigsText(sd.figs)})}<button type="button" class="btn sm" data-act="cb-stop" data-w="${which}">Stop</button></div>`;
+  if(sd.err) return problemHTML(sd.err, `Couldn't fetch ${who}'s figures (${sd.label}). They show as n/d below.`, "cb-retry-"+which).replace('<div class="', `<div id="${id}Err" class="`);
+  if(sd.stopped) return `<div class="banner" id="${id}Stopped" role="status"><span>You stopped fetching ${esc(who)}'s figures before any came back. They show as n/d below.</span><button type="button" class="btn sm" data-act="cb-retry-${which}">Fetch them</button></div>`;
+  const res=sd.res; if(!res) return "";
+  let h="";
+  if(isNum(res.pending) && +res.pending>0) h+=statPendingHTML(res.stalled||{why:"stuck", figs:statFigs(res)}, id+"Pending", "cb-carry-"+which, `${who}'s show as n/d below`);
+  if(res.truncated) h+=`<div class="banner" id="${id}Truncated" role="alert"><span><b>${esc(who[0].toUpperCase()+who.slice(1))}'s figures are incomplete.</b> Snowflake returned more rows than one request allows. Use fewer codes.</span></div>`;
+  return h;
+}
+function cbScaleHTML(rows, years, mixL){
+  const row=id=>rows.find(r=>r.id===id), at=(id,k)=>row(id).cells[0]?row(id).cells[0][k]:null, y=years[0];
+  const tile=(k, label, x, sub)=>`<div class="sntile" data-k="${k}"><span class="t2">${label}</span><b>${esc(x&&!x.why&&!x.never?(k.endsWith("share")?pct(x.v):usdM(x.v)):"n/d")}</b><span class="t2">${esc(x&&x.why?x.why:sub)}</span></div>`;
+  const share=id=>{ const t=at(id,"t"), p=at(id,"p"); if(!t || !p) return null; if(t.why) return {why:`target: ${t.why}`}; if(p.why) return p; return p.v>0 ? {v:t.v/p.v*100} : {why:"pro forma zero or negative"}; };
+  return `<div class="cbtiles" id="cbScale">${tile("dpw","Pro forma direct premiums written",at("dpw","p"),`${y}, added`)}${tile("npw","Pro forma net premiums written",at("npw","p"),`${y}, added`)}${tile("surplus","Pro forma surplus",at("surplus","p"),`${y}, added`)}${tile("dpwshare","Target's share of direct premiums",share("dpw"),"of the pro forma (derived)")}${tile("surplusshare","Target's share of surplus",share("surplus"),"of the pro forma (derived)")}</div>`;
+}
+function cbMixHTML(mx, what, idp){
+  const B=cbBaseName(), plural2=what==="line"?["line","lines"]:["state","states"];
+  const head=`<div class="blk-h"><div><h3>${what==="line"?"Direct premiums by line":"Direct premiums by state"}${mx.year?`, ${esc(mx.year)}`:""}</h3></div>${mx.why?"":`<span class="inline"><button class="btn sm" data-act="export" data-what="cb" data-tbl="${idp}" data-fmt="csv">Export CSV</button><button class="btn sm" data-act="export" data-what="cb" data-tbl="${idp}" data-fmt="xlsx">Export XLSX</button></span>`}</div>`;
+  if(mx.why) return `<section class="blk cbmix" id="cb_${idp}">${head}<p class="t2" id="cb_${idp}_none">The ${plural2[0]} mix can't be added up: ${esc(mx.why)}. That doesn't mean there are none.</p></section>`;
+  const who=x=>x.who==="both"?"Both":x.who==="base"?`${B} only`:x.who==="target"?"Target only":`${x.other} more`;
+  const name=x=>x?`${x.name}`:"n/d";
+  const facts=[
+    `Largest ${plural2[0]}: before, ${name(mx.before.first)} at ${pct(mx.before.first?cbShare(mx.before.first.b,mx.bt):null)} of ${B}; after, ${name(mx.after.first)} at ${pct(mx.after.first?mx.after.first.ps:null)} of the pro forma.`,
+    `Top five ${plural2[1]}: ${pct(mx.before.five)} of ${B} before, ${pct(mx.after.five)} of the pro forma after.`,
+    `Only the target writes ${plural(mx.onlyT.n, plural2[0], plural2[1])}${mx.onlyT.n?`: ${usdM(mx.onlyT.v)}, ${pct(mx.onlyT.s)} of the pro forma (${mx.onlyT.names.slice(0,6).join(", ")}${mx.onlyT.n>6?" and more":""})`:""}.`,
+    `Only ${B} writes ${plural(mx.onlyB.n, plural2[0], plural2[1])}${mx.onlyB.n?`: ${usdM(mx.onlyB.v)}, ${pct(mx.onlyB.s)} of the pro forma (${mx.onlyB.names.slice(0,6).join(", ")}${mx.onlyB.n>6?" and more":""})`:""}.`,
+    `Overlap, the ${plural2[1]} both write: ${plural(mx.overlap.n, plural2[0], plural2[1])}, ${usdM(mx.overlap.v)} of pro forma premium, ${pct(mx.overlap.s)}.`];
+  return `<section class="blk cbmix" id="cb_${idp}">${head}<ul id="cb_${idp}_facts">${facts.map(f=>`<li>${esc(f)}</li>`).join("")}</ul>
+    <div class="tbl-wrap"><table class="cbtbl" id="cbTab_${idp}"><thead><tr><th>${what==="line"?"Line of business":"State"}</th><th>Written by</th><th class="num cbfirst">${esc(B)} $M</th><th class="num">Share</th><th class="num cbfirst">Target $M</th><th class="num">Share</th><th class="num cbfirst">Pro forma $M</th><th class="num">Share</th></tr></thead>
+    <tbody>${mx.rows.map(x=>`<tr data-name="${esc(x.name)}"><td>${esc(x.name)}</td><td>${esc(who(x))}</td><td class="num cbfirst">${x.b===null?"None":esc(usdM(x.b))}</td><td class="num">${x.b===null?"":esc(pct(x.bs))}</td><td class="num cbfirst">${x.t===null?"None":esc(usdM(x.t))}</td><td class="num">${x.t===null?"":esc(pct(x.ts))}</td><td class="num cbfirst cbpf">${esc(usdM(x.p))}</td><td class="num cbpf">${esc(pct(x.ps))}</td></tr>`).join("")}</tbody></table></div>
+    <p class="t2">Shares are of each column's own total (derived). "None" means that side's figures for ${esc(mx.year)} have no premium in that ${plural2[0]}. ${mx.rows.some(x=>x.name==="Other"&&x.other)?`"Other" adds up the ${plural2[1]} after the largest seven.`:""}</p></section>`;
+}
+function cbReinsHTML(re){
+  const head=`<div class="blk-h"><div><h3>Reinsurers both use${re.year?`, ${esc(re.year)}`:""}</h3></div></div>`;
+  if(re.group) return `<section class="blk" id="cb_reins">${head}<p class="t2" id="cb_reins_none">The reinsurer panel is shown for company look-ups only: figures by reinsurer are looked up for companies, not groups. Look up both sides by NAIC company code to see it.</p></section>`;
+  if(re.why) return `<section class="blk" id="cb_reins">${head}<p class="t2" id="cb_reins_none">Reinsurers can't be compared: ${esc(re.why)}. That doesn't mean there are none.</p></section>`;
+  const B=cbBaseName();
+  const note=`${plural(re.both.length,"reinsurer")} both use; ${plural(re.onlyB,"reinsurer")} only ${B} uses and ${plural(re.onlyT,"reinsurer")} only the target uses, in ${re.year}.`;
+  if(!re.both.length) return `<section class="blk" id="cb_reins">${head}<p class="t2" id="cb_reins_note">${esc(note)}</p></section>`;
+  return `<section class="blk" id="cb_reins">${head}<p class="t2" id="cb_reins_note">${esc(note)} Ceded premiums and recoverables are added (as filed; business between the two isn't taken out).</p>
+    <div class="tbl-wrap"><table class="cbtbl" id="cbTab_reins"><thead><tr><th>Reinsurer</th><th class="num cbfirst">${esc(B)} ceded $M</th><th class="num">Target ceded $M</th><th class="num">Pro forma ceded $M</th><th class="num cbfirst">${esc(B)} recoverables $M</th><th class="num">Target recoverables $M</th><th class="num">Pro forma recoverables $M</th></tr></thead>
+    <tbody>${re.both.slice(0,15).map(x=>`<tr data-name="${esc(x.name)}"><td>${esc(x.name)}</td>${cbCell(x.b,"usd","b",re.year," cbfirst")}${cbCell(x.t,"usd","t",re.year)}${cbCell(x.p,"usd","p",re.year," cbpf")}${cbCell(x.rb,"usd","rb",re.year," cbfirst")}${cbCell(x.rt,"usd","rt",re.year)}${cbCell(x.rp,"usd","rp",re.year," cbpf")}</tr>`).join("")}</tbody></table></div>
+    ${re.both.length>15?`<p class="t2">The largest 15 of ${count(re.both.length)} are shown.</p>`:""}</section>`;
+}
+/* Everything the tables show, worked out once a render. */
+function cbModel(){
+  const run=S.cb.run; if(!run) return null;
+  const years=cbYears(run), B=run.base, T=run.target;
+  return {years, rows:cbModelRows(B, T, years), lines:cbMix(B, T, years, "dpw_by_line", "line"), states:cbMix(B, T, years, "dpw_by_state", "state"), reins:cbReins(B, T, years)};
+}
+function cbResultsHTML(){
+  const cb=S.cb, run=cb.run; if(!run) return "";
+  const B=cbBaseName();
+  let h=`<h2 class="sec">${esc(B)} with the target</h2>`;
+  h+=`<p class="t2" id="cbWho"><b>${esc(B)}:</b> ${esc(run.base.label)} (${run.base.kind==="group"?"NAIC group":"NAIC"} ${esc(run.base.codes.join(", "))}). <b>Target:</b> ${esc(run.target.label)} (${run.target.kind==="group"?"NAIC group":"NAIC"} ${esc(run.target.codes.join(", "))}).</p>`;
+  h+=cbSideStatusHTML("base")+cbSideStatusHTML("target");
+  const fs=[run.base, run.target].filter(sd=>sd.res&&sd.res.fromStore&&!sd.busy);
+  if(fs.length && !run.base.busy && !run.target.busy) h+=`<div class="info" id="cbFromStore" role="status"><span>${fs.map(sd=>`${esc(sd===run.base?B:"The target")}'s figures are from the last fetch on ${fmtAt(sd.res.fetchedAt)}.`).join(" ")}</span><button type="button" class="btn sm" data-act="cb-refresh">Refresh both</button></div>`;
+  const m=cbModel();
+  if(!m.years.length){
+    const waiting=run.base.busy||run.target.busy;
+    return h+`<div class="empty" id="cbNoYears"><p>${waiting?"The figures are on their way. The tables fill in as each side's figures arrive.":`S&amp;P returned no figures for either side in ${run.fromYear} to ${run.toYear}. That doesn't prove there are none: check the codes, or choose another last year.`}</p></div>`;
+  }
+  h+=cbScaleHTML(m.rows, m.years, m.lines);
+  const exp=`<span class="inline"><button class="btn sm" data-act="export" data-what="cb" data-tbl="years" data-fmt="csv">Export CSV</button><button class="btn sm" data-act="export" data-what="cb" data-tbl="years" data-fmt="xlsx">Export XLSX</button></span>`;
+  h+=`<div class="blk-h"><p class="t2" style="flex:1 1 300px">Latest year first. Each year has three columns: ${esc(B)} on its own, the target, and the pro forma. A pro forma figure is n/d unless both sides have it for that year; a missing side is never counted as zero.${run.base.codes.length>1||run.target.codes.length>1?" A side of several companies has its dollars added up, and its loss, expense and combined ratios worked out across them as the pro forma's are.":""}</p>${exp}</div>`;
+  // a figure neither side has in any year is listed under its table with the reason, rather than as a row of n/d
+  const has=r=>r.cells.some(c=>(c.b&&!c.b.why)||(c.t&&!c.t.why));
+  for(const [sec,title] of CB_SECTIONS){
+    const rs=m.rows.filter(r=>r.sec===sec), shown=rs.filter(has), none=rs.filter(r=>!has(r));
+    const why=r=>{ const c=r.cells[0]||{}, b=c.b&&c.b.why, t=c.t&&c.t.why; return b===t ? b : `base: ${b}; target: ${t}`; };
+    h+=`<section class="blk" id="cb_sec_${sec}"><div class="blk-h"><h3>${esc(title)} <span class="t2">added up</span></h3></div>${shown.length?cbTableHTML(sec, shown, m.years, run):""}${none.length?`<p class="t2" id="cb_none_${sec}">n/d on both sides in every year shown: ${esc(none.map(r=>`${r.label} (${why(r)})`).join(", "))}.</p>`:""}</section>`;
+  }
+  h+=`<section class="blk" id="cb_sec_ratio"><div class="blk-h"><h3>Ratios <span class="t2">worked out, never added</span></h3></div>${cbTableHTML("ratio", m.rows.filter(r=>r.sec==="ratio"), m.years, run)}
+    <ul class="cbnotes" id="cbFormulas"><li>Loss ratio and loss and LAE ratio: each side's ratio weighted by its net premiums earned.</li><li>Expense ratio: each side's ratio weighted by its net premiums written.</li><li>Combined ratio: the weighted loss and LAE ratio plus the weighted expense ratio. Each side's own column shows the combined ratio it reported.</li><li>Net premiums written, net loss and LAE reserves and total liabilities to surplus: the added dollars over the added surplus.</li><li>Cession share: gross less net premiums written, over gross premiums written (gross as reported, or direct plus assumed when gross isn't there), from the added dollars.</li><li>n/d when either side lacks a figure, or what is divided by is missing, zero or negative.</li></ul></section>`;
+  h+=`<section class="blk" id="cb_sec_never"><div class="blk-h"><h3>Never combined <span class="t2">each side's own figure</span></h3></div>${cbTableHTML("never", m.rows.filter(r=>r.sec==="never"), m.years, run)}</section>`;
+  h+=cbMixHTML(m.lines, "line", "lines")+cbMixHTML(m.states, "state", "states")+cbReinsHTML(m.reins);
+  const loaded=[run.base, run.target].flatMap(sd=>sd.res&&Array.isArray(sd.res.loaded)?sd.res.loaded:[]).filter((l,i,a)=>l&&a.findIndex(x=>x&&x.view===l.view)===i);
+  h+=`<p class="source" id="cbSource">${loaded.map(l=>`S&amp;P last updated ${esc(l.view)} on ${fmtAt(l.at)!=="n/d"?fmtAt(l.at):esc(blank(l.at)?"n/d":l.at)}.`).join(" ")} Source: S&amp;P Global Market Intelligence statutory data, as filed. US dollars are shown in $M. Added up in this browser.</p>`;
+  return h;
+}
+function cbBaseHTML(){
+  const cb=S.cb, b=cb.base, d=b.doc, B=cbBaseName();
+  if(cb.edit) return `<section class="tcard" id="cbBaseEdit" aria-label="Set the base company"><h3>${d?"Change":"Set"} the base company</h3>
+    <p class="t2">The company or group whose figures every combination starts from: ${ORG?`${esc(ORG)}'s own`:"your own"} US statutory figures. It is saved once for the team; any Corp Dev login can change it.</p>
+    ${cbPickHTML("base")}
+    <label class="f"><span>Name to show <em>for example the group's name, up to ${CB_MAX_LABEL} characters</em></span><input type="text" id="cb_base_label" data-bind="cb.edit.label" value="${esc(cb.edit.label||"")}" maxlength="${CB_MAX_LABEL}" autocomplete="off"></label>
+    ${cb.saveErr?`<p class="err" id="cbSaveErr" role="alert">${esc(cb.saveErr)}</p>`:""}
+    <div class="toolbar"><button type="button" class="btn primary" id="cbSave" data-act="cb-save" ${cb.saving?"disabled":""}>${cb.saving?"Saving…":"Save the base"}</button><button type="button" class="btn" data-act="cb-cancel" ${cb.saving?"disabled":""}>Cancel</button></div></section>`;
+  if(b.loading && !b.loaded) return `<div class="banner" id="cbBaseLoading" role="status"><span>Checking which company is the base…</span></div>`;
+  if(b.err) return `<div class="banner" id="cbBaseErr" role="alert"><span>${esc(b.err)}</span><button type="button" class="btn sm" data-act="cb-base-retry">Try again</button></div>`;
+  if(!d) return `<div class="info" id="cbBaseNone" role="status"><span><b>Set the base company first.</b> ${b.bad?"The saved base can't be read, so set it again. ":""}Choose ${ORG?`${esc(ORG)}'s`:"your company's"} NAIC group code, or up to ${MAX_CODES} NAIC company codes, and give it a name. It is saved once for the team, and every combination starts from it.</span><button type="button" class="btn sm primary" id="cbSet" data-act="cb-edit">Set the base company</button></div>`;
+  return `<section class="tcard cbbase" id="cbBase"><div><div class="kicker">${esc(B)}, the base</div><div class="t1" id="cbBaseLabel">${esc(d.label)}</div><div class="t2">${d.kind==="group"?"NAIC group":"NAIC company codes"} ${esc(d.codes.join(", "))}. Saved for the team.</div></div><button type="button" class="btn sm" id="cbChange" data-act="cb-edit">Change the base</button></section>`;
+}
+function renderCombination(){
+  const B=cbBaseName();
+  const head=`<div><h2 class="action-title">Combination: ${esc(B)} with a target, as a pro forma</h2>
+    <p class="sub">${esc(B)}'s US statutory figures beside a target's, added up year by year, with the ratios worked out from the added figures. For Corp Dev only.</p></div>`;
+  if(!isCorpDev()) return `<div class="info" id="cbOnly" role="status"><span>This view is for Corp Dev logins.</span></div>`;
+  const s=S.st.status, cb=S.cb;
+  let h=head+`<p class="cbwhat" id="cbWhat">${esc(CB_WHAT)}</p>`;
+  if(!s) return h+(S.st.statusErr ? problemHTML(S.st.statusErr, "Couldn't check the statutory data.", "stat-status-retry") : `<div class="banner" role="status"><span>Checking whether statutory data is set up…</span></div>`);
+  if(!s.configured) return h+`<div class="info" id="cbOff" role="status"><span><b>Statutory data isn't set up yet,</b> so there is nothing to add up. It needs a Snowflake reader account from S&amp;P (README, step 7).</span></div>`;
+  if(!s.mapped) return h+`<div class="info" id="cbUnmapped" role="status"><span><b>Snowflake is connected, but the statutory fields aren't mapped yet.</b> Map them in the field set-up on the <a href="#statutory">Statutory view</a>.</span></div>`;
+  h+=cbBaseHTML();
+  if(cb.msg) h+=`<div class="info" id="cbMsg" role="status"><span>${esc(cb.msg)}</span></div>`;
+  if(!cb.base.doc || cb.edit) return h;
+  const run=cb.run, busy=!!run&&(run.base.busy||run.target.busy);
+  h+=`<form class="tcard" id="cbForm" novalidate aria-label="Choose the target"><h3>The target</h3>${cbPickHTML("target")}
+    <div class="fgrid" style="align-items:end"><label class="f">Last year <em>the latest five years with figures up to it</em><input type="number" id="cb_to" data-bind="cb.toYear" value="${esc(cb.toYear)}" min="${1990+CB_QUERY_YEARS}" max="${new Date().getFullYear()}" step="1"></label></div>
+    ${cb.formErr?`<p class="err" id="cbErr" role="alert">${esc(cb.formErr)}</p>`:""}
+    <div class="toolbar"><button type="button" class="btn primary" id="cbGo" data-act="cb-go" ${busy?"disabled":""}>${busy?"Fetching…":"Show the pro forma"}</button></div>
+    <p class="t2" id="cbCost">${esc(CB_COST)}</p></form>`;
+  h+=`<div id="cbResults" style="display:flex;flex-direction:column;gap:18px;min-width:0" aria-live="polite">${cbResultsHTML()}</div>`;
+  return h;
+}
+/* ----- export: the tables as on screen, with what this is ----- */
+function cbExport(tbl){
+  const run=S.cb.run, m=cbModel(); if(!run || !m || !m.years.length) return null;
+  const B=cbBaseName(), name=`snl-combination-${tbl}-${TODAY()}`, note=[["Note", CB_WHAT], ["Base", `${B}: ${run.base.label} (${run.base.kind==="group"?"NAIC group":"NAIC"} ${run.base.codes.join(", ")})`], ["Target", `${run.target.label} (${run.target.kind==="group"?"NAIC group":"NAIC"} ${run.target.codes.join(", ")})`]];
+  const raw=(x, unit)=>!x ? "n/d" : x.never ? "Not combined" : x.why ? `n/d (${x.why})` : unit==="usd" ? Math.round(x.v) : Math.round(x.v*10000)/10000;
+  if(tbl==="years"){
+    const how=r=>r.kind==="sum"?"Added":r.kind==="never"?"Not combined: "+r.note:r.id==="combined_ratio"?"Derived: weighted loss and LAE ratio plus weighted expense ratio":CB_WEIGHTED.some(x=>x[0]===r.id)?`Derived: weighted by ${CB_WORDS[CB_WEIGHTED.find(x=>x[0]===r.id)[2]]}`:"Derived: from the added dollars";
+    const unit=r=>r.unit==="usd"?"US dollars":r.unit==="x"?"times":"%";
+    const rows=m.rows.map(r=>[r.label, how(r), unit(r), ...r.cells.flatMap(c=>[raw(c.b,r.unit), raw(c.t,r.unit), raw(c.p,r.unit)])]);
+    const pad=n=>Array(n).fill("");
+    return {name, sheet:"Pro forma by year", cols:["Figure","How","Unit", ...m.years.flatMap(y=>[`${y} ${B}`, `${y} target`, `${y} pro forma`])], rows:[...rows, pad(3), ...note.map(x=>[...x, ...pad(1)])]};
+  }
+  const mx=tbl==="lines"?m.lines:tbl==="states"?m.states:null; if(!mx || mx.why) return null;
+  const n=v=>v===null?"":Math.round(v), s=v=>isNum(v)?Math.round(v*10)/10:"";
+  return {name, sheet:tbl==="lines"?"By line":"By state", cols:[tbl==="lines"?"Line of business":"State", "Written by", `${B} US dollars`, `${B} share %`, "Target US dollars", "Target share %", "Pro forma US dollars", "Pro forma share %"],
+    rows:[...mx.rows.map(x=>[x.name, x.who==="both"?"Both":x.who==="base"?`${B} only`:x.who==="target"?"Target only":`${x.other} more`, n(x.b), x.b===null?"":s(x.bs), n(x.t), x.t===null?"":s(x.ts), n(x.p), s(x.ps)]), ["","","","","","","",""], ["Year", String(mx.year), "","","","","",""], ...note.map(x=>[...x,"","","","","",""])]};
+}
+/* ----- events ----- */
+document.addEventListener("click", e=>{
+  const t=e.target.closest("[data-act]"); if(!t || !/^cb-/.test(t.dataset.act)) return;
+  const cb=S.cb, a=t.dataset.act, w=t.dataset.w==="base"?"base":"target";
+  if(!isCorpDev()) return;
+  switch(a){
+    case "cb-edit": cbEditStart(); break;
+    case "cb-cancel": cb.edit=null; cb.saveErr=""; render(); break;
+    case "cb-save": cbSaveBase(); break;
+    case "cb-base-retry": cbLoadBase(); break;
+    case "cb-kind": { const pk=cbPickOf(w); if(!pk) break; const k=t.dataset.k==="group"?"group":"company"; if(pk.kind!==k){ pk.kind=k; pk.codes=""; pk.find.matches=null; } render(); break; }
+    case "cb-find": cbLookup(w); break;
+    case "cb-add": cbAdd(w, t.dataset.code, t.dataset.name); break;
+    case "cb-remove": { const pk=cbPickOf(w); if(!pk) break; pk.codes=cbCodes(pk).filter(c=>c!==t.dataset.code).join(", "); render(); document.getElementById(`cb_${w}_codes`)?.focus(); break; }
+    case "cb-go": cbRun(); break;
+    case "cb-refresh": if(cb.run){ cbFetch("base", true); cbFetch("target", true); } break;
+    case "cb-stop": { const sd=cb.run&&cb.run[w]; if(sd && sd.busy && sd.ctl) sd.ctl.stop(); break; }
+    case "cb-retry-base": cbFetch("base", false); break;
+    case "cb-retry-target": cbFetch("target", false); break;
+    case "cb-carry-base": cbFetch("base", false, true); break;
+    case "cb-carry-target": cbFetch("target", false, true); break;
+  }
+});
+document.addEventListener("keydown", e=>{
+  if(e.key!=="Enter") return;
+  if(e.target.id==="cb_base_find" || e.target.id==="cb_target_find"){ e.preventDefault(); cbLookup(e.target.id==="cb_base_find"?"base":"target"); }
+  else if(e.target.id==="cb_target_codes" || e.target.id==="cb_to"){ e.preventDefault(); cbRun(); }
+});
+document.addEventListener("input", e=>{   // the chips beside the codes follow what is typed, without a rebuild
+  const id=e.target.id; if(id!=="cb_base_codes" && id!=="cb_target_codes") return;
+  const w=id==="cb_base_codes"?"base":"target", pk=cbPickOf(w), el=document.getElementById(`cb_${w}_named`); if(!pk || !el) return;
+  pk.codes=e.target.value;   // this runs before the page's own data-bind handler
+  const tmp=document.createElement("div"); tmp.innerHTML=cbPickHTML(w); const fresh=tmp.querySelector(`#cb_${w}_named`); if(fresh) el.innerHTML=fresh.innerHTML;
+});
+
 /* ---------- routing ---------- */
 const VIEW_KEY="snl.view";
 function enterView(){
@@ -7764,6 +8332,7 @@ function enterView(){
   if(!S.sets.loaded && !S.sets.loading) loadSets();
   if(S.view==="market") enterMarket();
   if(S.view==="earnings") enterEarnings();
+  if(S.view==="combination") enterCombination();
 }
 function route(){
   const h=location.hash.replace(/^#/,""); let v=VIEWS.includes(h)?h:null;
@@ -7788,6 +8357,7 @@ function exportOf(t){
   if(t.dataset.what==="snap") return snapExport(t.dataset.tbl);
   if(t.dataset.what==="forms") return fcExport(t.dataset.tbl);
   if(t.dataset.what==="cmp") return cmpExport(t.dataset.tbl);
+  if(t.dataset.what==="cb") return cbExport(t.dataset.tbl);
   return null;
 }
 document.addEventListener("click", e=>{
@@ -8098,6 +8668,7 @@ function resetState(){
   S.dg=freshDigests();
   resetMarket();
   resetEarnings();
+  S.cb=freshCb();
   pbReset();
 }
 async function onSignedIn(session){
