@@ -353,8 +353,9 @@ function answer(body, o={}){
   ok("390 by touch: no sideways scroll", await t.noScroll());
   await t.tap("TX");
   ok("a tap pins a state and shows its detail below the map", (await t.txt("#cbmPinH"))==="Texas (TX), 2025");
-  ok("its lines can be fetched from there, as with a line chosen", (await t.txt("#cbmPinLinesWhy"))==="The lines in Texas can't be shown: Our company: not fetched yet; target: not fetched yet. They come with premiums by state and line, one look-up a side for the year." && await p.isVisible("#cbmPinFetch"), await t.txt("#cbmPinLinesWhy"));
-  await p.tap("#cbmPinFetch"); await t.until(async()=>t.slQueries().length===2 && !(await p.$("#cbmSl_base")) && !(await p.$("#cbmSl_target")));
+  // pinning now fetches the state's lines itself, once a side for the year (the line pies need them; tests/web/combopie.test.cjs)
+  await t.until(async()=>t.slQueries().length===2 && !(await p.$("#cbmSl_base")) && !(await p.$("#cbmSl_target")));
+  ok("its lines are fetched from there, as with a line chosen: once a side, for the year", same(t.slQueries().map(q=>[q.codes, q.fromYear, q.toYear]).sort(),[[["9001"],2025,2025],[["90107"],2025,2025]]) && !(await p.$("#cbmPinFetch")), t.slQueries());
   ok("and then shows them", same(await p.$$eval("#cbmPinLines tbody tr td:first-child",e=>e.map(x=>x.textContent)),["Homeowners","Commercial auto","Inland marine"]));
   await p.tap("#cbm_b_RI"); await p.waitForTimeout(100);
   ok("by touch, no hover panel covers the map", !(await p.isVisible("#cbmTip")));
