@@ -22,6 +22,7 @@ import { cutPages, openPdf, originalPage, rangeText } from "./pdf.ts";
 import { SET_MEMBERS } from "./filings.ts";
 import { afterAnswerPrompt, buildDigest, checkDigest, DIGEST, type Digest, digestOf, jsonIn, mergeRanges, metaFrom, pagesIn, type PageRange, readText, saveDigest, savedDigests, summaryDocument } from "./digest.ts";
 import { askMarketIndex, CLAUDE_ROWS, marketIndexNote } from "./marketindex.ts";
+import { anthropicReason, askJsonPrompt, claudeProblem as digestProblem, schemaRefused } from "./digest.ts";
 
 
 
@@ -95,7 +96,7 @@ export const SYSTEM = systemPrompt();
 
 export const tableSystem = (org = ""): string => `You turn a finished answer into one comparison table for ${org ? org + "'s" : "an insurer's"} corporate development team. Use only facts stated in the answer and in the filings listed with it. Don't add facts. Use "n/d" for a cell the material doesn't give. Keep cells short. Choose columns that fit the question; for a comparison of filed forms use: Company, Form number, Product, Segment, Effective date, Source filing (the tracking number and state). Use the segment names the answer uses, or "n/d". Put caveats the reader needs in notes. If the answer has nothing to compare (for example it only says nothing was found), set needs_table to false and leave the rest empty.`;
 
-const TABLE_SCHEMA = {
+export const TABLE_SCHEMA = {
   type: "object",
   properties: {
     needs_table: { type: "boolean" },
@@ -216,13 +217,31 @@ export const TOOLS: Anthropic.Beta.BetaTool[] = [
         naic_codes: { type: "array", items: { type: "string" }, description: "1 to 8 NAIC company codes or group codes" },
         from_year: { type: "integer" },
         to_year: { type: "integer" },
-        fields: { type: "array", items: { type: "string", enum: STAT_FIELDS.map((f) => f.id) } },
+        // Plain text, not an enum: 49 ids in a strict enum made the tools' grammar larger (Anthropic refused a profile's
+        // shape as too large on 23 Nov 2026). Each id is checked in code, and a wrong one is answered with the valid ids.
+        fields: { type: "array", items: { type: "string" }, description: `Field ids, exactly as written here, or [] for the default eight: ${STAT_FIELDS.map((f) => f.id).join(", ")}` },
       },
       required: ["kind", "naic_codes", "from_year", "to_year", "fields"],
       additionalProperties: false,
     },
   },
 ];
+
+/** The same tools with strict off, for an answer whose strict tools Anthropic refused (schemaRefused in digest.ts).
+    Each tool still checks its own input in code, as it always has. */
+export const LOOSE_TOOLS: Anthropic.Beta.BetaTool[] = TOOLS.map(({ strict: _strict, ...t }) => t);
+/** The tools an answer sends on every step: strict unless Anthropic has refused them in this answer. */
+export const toolsFor = (st: Pick<ChatState, "looseTools">): Anthropic.Beta.BetaTool[] => (st.looseTools ? LOOSE_TOOLS : TOOLS);
+/** Field ids Claude wrote for query_statutory, as the ids the app knows (spacing and capitals ignored); bad holds the
+    ones that match none. */
+export function statFieldsFrom(v: unknown): { fields: string[]; bad: string[] } {
+  const ids = STAT_FIELDS.map((f) => f.id as string), fields: string[] = [], bad: string[] = [];
+  for (const x of Array.isArray(v) ? v : []) {
+    const id = ids.find((i) => i === String(x).trim().toLowerCase());
+    if (id) fields.push(id); else bad.push(String(x).slice(0, 60));
+  }
+  return { fields, bad };
+}
 
 // ---------- what an answer keeps between steps ----------
 
@@ -268,6 +287,9 @@ export type ChatState = {
   /** When the latest step of the answer came back, so the summaries made after it are only asked for while the
       documents are still in Anthropic's prompt cache (5 minutes). */
   cachedAt?: number;
+  /** Anthropic refused the strict tools' grammar once in this answer, so every later step (and the summaries after
+      it) sends the same tools with strict off: the same tools on every step keeps the prompt cache. */
+  looseTools?: boolean;
 };
 export type Turn = { question: string; answer: string };
 
@@ -544,6 +566,14 @@ export async function referenceText(db: Db, api: Spgmi | null, now: number): Pro
     : "S&P's reference id lists aren't saved yet. Search without type filters and pick out the rows you need from their typeOfInsurance and filingType text.";
 }
 
+/** Ask Claude's words for a request Anthropic refused over its shape (claudeProblem in digest.ts adds the reason). */
+export const CHAT_REFUSED = {
+  busy: "Claude is busy. Wait a minute and ask again.", key: "The Anthropic API key on Supabase is missing or invalid (README, step 6).",
+  unreachable: "Couldn't reach Claude. Try again shortly.", overloaded: "Claude is unavailable. Try again shortly.",
+  refused: "Claude's API didn't accept the request, so there is no answer. This is a fault in the site, not in your question: tell the site owner.",
+  fault: "The answer failed because of a fault in the site. Tell the site owner.",
+};
+
 function claudeProblem(e: unknown): string {
   if (e instanceof Plain) return e.message;
   if (e instanceof SpgmiError || e instanceof SnowflakeError) return e.message;
@@ -551,6 +581,8 @@ function claudeProblem(e: unknown): string {
   if (e instanceof Anthropic.APIError) console.error(`Anthropic API error ${e.status ?? "(no status)"}: ${e.message}`);
   if (e instanceof Anthropic.RateLimitError) return "Claude is busy. Wait a minute and ask again.";
   if (e instanceof Anthropic.AuthenticationError) return "The Anthropic API key on Supabase is missing or invalid (README, step 6).";
+  // Refused twice over the tools' shape (strict, then strict off): asking again won't help, so say whose fault it is.
+  if (schemaRefused(e)) return digestProblem(e, CHAT_REFUSED);
   if (e instanceof Anthropic.BadRequestError) return "Claude couldn't read this conversation. Start a new conversation and ask again.";
   if (e instanceof Anthropic.APIConnectionError) return "Couldn't reach Claude. Try again shortly.";
   if (e instanceof Anthropic.APIError) return `Claude is unavailable (${e.status}). Try again shortly.`;
@@ -668,23 +700,36 @@ export async function runJob(jobId: string, ctx: ChatCtx): Promise<void> {
       stepsThisCall++;
       let partial = "", wrote = 0;
       const asked = ctx.now();
-      const stream = client.beta.messages.stream({
-        model, max_tokens: 32_000,
-        // If Claude's safety checks decline, the API re-runs the request on Anthropic's recommended fallback model.
-        betas: [FALLBACK_BETA], fallbacks: "default",
-        thinking: { type: "adaptive" },
-        output_config: { effort: "high" },
-        cache_control: { type: "ephemeral" },
-        system, tools: TOOLS, messages: st.messages,
-        // Once the lookup limit is reached the next reply must be the answer. Changing tool_choice would throw away
-        // the cached conversation, so with documents attached the tools stay offered and refuse to run instead.
-        ...(st.noTools && !st.docs.length ? { tool_choice: { type: "none" as const } } : {}),
-      });
-      stream.on("text", (delta) => {
-        partial += delta;
-        if (ctx.now() - wrote > 2000) { wrote = ctx.now(); db.updateJob(jobId, { partial }).catch(() => {}); }
-      });
-      const message = await stream.finalMessage();
+      const ask = () => {
+        const stream = client.beta.messages.stream({
+          model, max_tokens: 32_000,
+          // If Claude's safety checks decline, the API re-runs the request on Anthropic's recommended fallback model.
+          betas: [FALLBACK_BETA], fallbacks: "default",
+          thinking: { type: "adaptive" },
+          output_config: { effort: "high" },
+          cache_control: { type: "ephemeral" },
+          system, tools: toolsFor(st), messages: st.messages,
+          // Once the lookup limit is reached the next reply must be the answer. Changing tool_choice would throw away
+          // the cached conversation, so with documents attached the tools stay offered and refuse to run instead.
+          ...(st.noTools && !st.docs.length ? { tool_choice: { type: "none" as const } } : {}),
+        });
+        stream.on("text", (delta) => {
+          partial += delta;
+          if (ctx.now() - wrote > 2000) { wrote = ctx.now(); db.updateJob(jobId, { partial }).catch(() => {}); }
+        });
+        return stream.finalMessage();
+      };
+      let message: Anthropic.Beta.BetaMessage;
+      try { message = await ask(); }
+      catch (e) {
+        // Anthropic refused the strict tools' grammar (a 400, not billed): the same step once more with strict off,
+        // and strict stays off for the rest of the answer. Any other failure, or a second refusal, ends the answer.
+        if (st.looseTools || !schemaRefused(e)) throw e;
+        console.error(`Anthropic refused the strict tools, so this answer carries on with strict off: ${anthropicReason(e)}`);
+        st.looseTools = true;
+        await commit();
+        message = await ask();
+      }
       st.longestMs = Math.max(st.longestMs ?? 0, ctx.now() - asked);
       st.tries = 0;
       st.model = message.model;
@@ -824,7 +869,7 @@ export async function digestAfterAnswer(ctx: ChatCtx, st: ChatState, client: Ant
       thinking: { type: "adaptive" },
       output_config: { effort: "high" },
       cache_control: { type: "ephemeral" },
-      system, tools: TOOLS, messages,
+      system, tools: toolsFor(st), messages,
     });
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; stream.abort(); }, Math.max(1, Math.min(AFTER_ANSWER.maxMs, started + ctx.sliceMs + SPARE_MS - ctx.now())));
@@ -871,20 +916,30 @@ export async function buildTable(client: Anthropic, model: string, question: str
   const answer = st.final!.answer.map((s) => s.text + s.cites.map((n) => ` [${n}]`).join("")).join("\n");
   const sources = st.final!.sources.map((s) => `[${s.n}] ${s.title}${s.pages ? `, page ${s.pages}` : ""}`).join("\n");
   const filings = JSON.stringify(Object.values(st.seen).slice(0, 250)).slice(0, 200_000);
-  const stream = client.beta.messages.stream({
+  const content = `Question:\n${question}\n\nAnswer:\n${answer}\n\nSources cited:\n${sources || "none"}\n\nFilings the searches returned (JSON):\n${filings}`;
+  // shaped: the table's shape as structured output; otherwise (once, after Anthropic refused the shape) in the prompt
+  const ask = (shaped: boolean) => client.beta.messages.stream({
     model, max_tokens: 16_000,
     betas: [FALLBACK_BETA], fallbacks: "default",
-    output_config: { effort: "medium", format: { type: "json_schema", schema: TABLE_SCHEMA } },
+    output_config: shaped ? { effort: "medium", format: { type: "json_schema", schema: TABLE_SCHEMA } } : { effort: "medium" },
     system: tableSystem(org),
-    messages: [{ role: "user", content: `Question:\n${question}\n\nAnswer:\n${answer}\n\nSources cited:\n${sources || "none"}\n\nFilings the searches returned (JSON):\n${filings}` }],
-  });
-  const message = await stream.finalMessage();
+    messages: [{ role: "user", content: shaped ? content : content + askJsonPrompt(TABLE_SCHEMA) }],
+  }).finalMessage();
+  let message: Anthropic.Beta.BetaMessage, shaped = true;
+  try { message = await ask(true); }
+  catch (e) {
+    if (!schemaRefused(e)) throw e;
+    console.error(`Anthropic refused the table's shape, so it is asked for once more without it: ${anthropicReason(e)}`);
+    shaped = false;
+    message = await ask(false);
+  }
   addUsage(st, message.model, message.usage);
   // Anything other than a complete, readable reply is a failure the caller reports. Only "no table needed" is null.
   if (message.stop_reason !== "end_turn") throw new Plain(`The table request stopped early (${message.stop_reason}).`);
   const raw = message.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text").map((b) => b.text).join("");
   let doc: { needs_table?: unknown; title?: unknown; columns?: unknown; rows?: unknown; notes?: unknown };
-  try { doc = JSON.parse(raw); } catch { throw new Plain("The table came back unreadable."); }
+  if (shaped) { try { doc = JSON.parse(raw); } catch { throw new Plain("The table came back unreadable."); } }
+  else { const j = jsonIn(raw); if (!j) throw new Plain("The table came back unreadable."); doc = j as typeof doc; }
   if (!doc || typeof doc !== "object") throw new Plain("The table came back unreadable.");
   if (doc.needs_table !== true) return null;
   const columns = Array.isArray(doc.columns) ? doc.columns.map(String).slice(0, 12) : [];
@@ -1221,7 +1276,10 @@ function makeTools(ctx: ChatCtx, st: ChatState, api: Spgmi | null, client: Anthr
 
   async function statutory(input: Record<string, unknown>): Promise<ToolOut> {
     const sfCreds = snowflakeCreds(ctx.env);
-    const parsed = parseStatQuery({ kind: input.kind, codes: input.naic_codes, fromYear: input.from_year, toYear: input.to_year, fields: Array.isArray(input.fields) && input.fields.length ? input.fields : undefined }, new Date(ctx.now()).getUTCFullYear());
+    // field ids are plain text in the tool's shape, so they are checked here, and a wrong one is answered with the list
+    const asked = statFieldsFrom(input.fields);
+    if (asked.bad.length) return fail(`These aren't field ids: ${asked.bad.join(", ")}. Use only these ids, exactly as written: ${STAT_FIELDS.map((f) => f.id).join(", ")}. Or pass [] for the default eight.`);
+    const parsed = parseStatQuery({ kind: input.kind, codes: input.naic_codes, fromYear: input.from_year, toYear: input.to_year, fields: asked.fields.length ? asked.fields : undefined }, new Date(ctx.now()).getUTCFullYear());
     if (!parsed.ok) return fail(parsed.message);
     const mapping = await getMapping(db);
     const sf = credsReady(sfCreds) ? new Snowflake(sfCreds, { fetch: ctx.fetch, now: ctx.now, sleep: ctx.sleep }) : null;

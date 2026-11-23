@@ -57,6 +57,54 @@ function count(schemas: unknown[]) {
   ok("the filings profile's text shape is inside the limits", within(count([P.FP_TEXT_SCHEMA])), count([P.FP_TEXT_SCHEMA]));
 }
 
+// ---------- the size of each shape's grammar ----------
+// On 23 Nov 2026 every full profile was refused: "The compiled grammar is too large, which would cause performance
+// issues." The counts above can't see that limit. Anthropic says its grammar-size limits are internal and not published
+// ("Schema complexity limits": optional fields, unions, nesting and the number of tools interact), so the live limit is
+// NOT known and can't be tested here. What can be held is that no shape grows: each is measured (schema nodes, named
+// properties, enum values, unions, bounds such as minItems or maxLength) and pinned at or below its size at 6b3c1bd,
+// the last version before the detailed profile, whose profile draft was the last that could have worked live. The two
+// profile drafts, refused or at risk, are pinned far lower, at a size that no longer grows with the number of sections.
+// Every call also retries once without the shape when Anthropic refuses it (grammar_test.ts), so a limit met anyway
+// degrades to a check in code, not a fault.
+function size(schemas: unknown[]) {
+  let nodes = 0, props = 0, enumValues = 0, unions = 0, bounded = 0;
+  const walk = (s: any) => {
+    if (!s || typeof s !== "object") return;
+    nodes++;
+    if (Array.isArray(s.type)) unions++;
+    if (s.anyOf) { unions++; s.anyOf.forEach(walk); }
+    if (Array.isArray(s.enum)) enumValues += s.enum.length;
+    for (const k of ["minItems", "maxItems", "minLength", "maxLength", "pattern"]) if (k in s) bounded++;
+    if (s.properties) for (const v of Object.values(s.properties)) { props++; walk(v); }
+    if (s.items) walk(s.items);
+  };
+  schemas.forEach(walk);
+  return { nodes, props, enumValues, unions, bounded };
+}
+/** Each shape at 6b3c1bd, measured with size() on that commit's code (the table's shape is unchanged since). */
+const AT_6B3C1BD = {
+  profile: { nodes: 51, props: 42, enumValues: 0, unions: 0, bounded: 0 },
+  filingsProfile: { nodes: 75, props: 62, enumValues: 0, unions: 0, bounded: 0 },
+  digest: { nodes: 49, props: 38, enumValues: 20, unions: 8, bounded: 0 },
+  table: { nodes: 11, props: 6, enumValues: 0, unions: 0, bounded: 0 },
+  strictTools: { nodes: 56, props: 35, enumValues: 24, unions: 13, bounded: 0 },
+};
+{
+  const atMost = (a: Record<string, number>, b: Record<string, number>) => Object.keys(b).every((k) => a[k] <= b[k]);
+  ok("the size measure counts nodes, properties, enum values, unions and bounds", same(size([{ type: "object", properties: { a: { type: ["string", "null"] }, b: { type: "array", maxItems: 3, items: { type: "string", enum: ["x", "y"] } } } }]), { nodes: 4, props: 2, enumValues: 2, unions: 1, bounded: 1 }));
+  const now = {
+    profile: size([P.TEXT_SCHEMA]), filingsProfile: size([P.FP_TEXT_SCHEMA]), digest: size([D.DIGEST_SCHEMA]), table: size([C.TABLE_SCHEMA]),
+    strictTools: size((C.TOOLS as any[]).filter((t) => t.strict).map((t) => t.input_schema)),
+  };
+  for (const [k, v] of Object.entries(now)) ok(`${k}: no bigger than at 6b3c1bd in any measure`, atMost(v, (AT_6B3C1BD as any)[k]), { now: v, then: (AT_6B3C1BD as any)[k] });
+  ok("the full profile's draft shape is under a quarter of its size at 6b3c1bd, with no enum, union or bound", now.profile.nodes * 4 <= AT_6B3C1BD.profile.nodes && now.profile.props * 4 <= AT_6B3C1BD.profile.props && now.profile.enumValues + now.profile.unions + now.profile.bounded === 0, now.profile);
+  ok("the filings profile's draft shape is the same generic one, so its 11 sections cost the grammar nothing", P.FP_TEXT_SCHEMA === P.TEXT_SCHEMA && P.FP_SECTIONS.length === 11 && now.filingsProfile.nodes <= 12);
+  ok("the shape names no section: adding a section can't make it bigger", P.SECTIONS.every((s: string) => !JSON.stringify(P.TEXT_SCHEMA).includes(`"${s}"`)) && P.FP_SECTIONS.every((s: string) => !JSON.stringify(P.FP_TEXT_SCHEMA).includes(`"${s}"`)));
+  ok("the strict tools hold no long enum: query_statutory's 49 field ids are plain text, checked in code", now.strictTools.enumValues <= 6 && (C.TOOLS as any[]).every((t) => JSON.stringify(t.input_schema).match(/"enum":\[[^\]]*\]/g)?.every((e: string) => e.split(",").length <= 4) ?? true), now.strictTools);
+  ok("a summary's rate figure names are plain text too (the rules list them), so its shape is smaller than at 6b3c1bd", now.digest.enumValues < AT_6B3C1BD.digest.enumValues, now.digest);
+}
+
 // ---------- the smaller shape gives the same summary ----------
 const MORE = {
   indicatedPct: 12.4, maxPct: 15, minPct: -5, lossCostChangePct: 3.2, lossCostMultiplier: 1.25, targetLossRatio: 62.5, projectedLossRatio: 71.8, lossTrendPct: 6.5, expensePct: 27.4, profitPct: 5, exposures: 4380,
@@ -142,7 +190,8 @@ const ctx = (fetch: typeof globalThis.fetch) => ({ env: env({ ANTHROPIC_API_KEY:
     ["a bad key (401)", { error: { status: 401, type: "authentication_error", message: "no" } }, (p) => p === N.key],
   ];
   for (const [what, reply, right] of cases) {
-    const c = fakeAnthropic([reply as any]);
+    // twice: a refused shape is now asked for once more without it (grammar_test.ts), and refused again here
+    const c = fakeAnthropic([reply as any, reply as any]);
     const o: any = await quiet(() => D.makeDigest(front, meta, ctx(c.fetch)));
     ok(`${what}: no summary, the right plain reason, and the upload still deleted`, o.digest === null && right(o.problem) && c.deleted.length === 1, o.problem);
   }

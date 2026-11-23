@@ -396,7 +396,9 @@ const WIRE_PROPS = {
     properties: {
       overallPct: NULLABLE("number"), requestedPct: NULLABLE("number"), approvedPct: NULLABLE("number"), premium: NULLABLE("number"), policyholders: NULLABLE("integer"),
       effectiveNew: { type: "string" }, effectiveRenewal: { type: "string" }, basis: { type: "string" }, page: NULLABLE("integer"),
-      more: ITEMS({ name: { type: "string", enum: [...RATE_MORE_KEYS] }, value: { type: "number" }, page: { type: "integer" } }),
+      // name is plain text (WIRE_RULES lists the names): digestFromWire keeps only names it knows. No enum, so the
+      // shape's grammar is smaller (see the safety net below).
+      more: ITEMS({ name: { type: "string" }, value: { type: "number" }, page: { type: "integer" } }),
       lossCostRefs: ITEMS({ text: { type: "string" }, page: { type: "integer" } }),
     },
     required: ["overallPct", "requestedPct", "approvedPct", "premium", "policyholders", "effectiveNew", "effectiveRenewal", "basis", "page", "more", "lossCostRefs"], additionalProperties: false,
@@ -601,6 +603,32 @@ export function claudeProblem(e: unknown, notes: { busy: string; key: string; un
   return notes.fault;
 }
 
+// ---------- the safety net for a shape Anthropic won't compile ----------
+// Structured output (output_config.format) and strict tools are compiled by Anthropic into a grammar that constrains
+// Claude's reply. Anthropic refuses a request with a 400 when that grammar is too large or too complex ("The compiled
+// grammar is too large ...", 23 Nov 2026; "Schema is too complex for compilation."; and, on 18 Nov 2026, too many
+// optional or union-typed fields). Its internal limits aren't published, so no shape can be proved to fit. Every call
+// that sends a shape or strict tools therefore tries once more without the constraint when it gets this answer: a
+// json_schema call asks for the JSON in its prompt (askJsonPrompt) and checks it in code as before; Ask Claude sends
+// the same tools with strict off. A 400 is not billed, so the first try costs nothing; the second is counted as usual.
+
+/** Anthropic's reason in a refused request, or "". */
+export function anthropicReason(e: unknown): string {
+  if (!(e instanceof Anthropic.APIError)) return "";
+  const inner = (e.error as { error?: { message?: unknown } } | undefined)?.error?.message;
+  return String(typeof inner === "string" && inner ? inner : e.message ?? "");
+}
+/** Words of a 400 that complain about the shape or the strict tools, not about anything else in the request. */
+export const SCHEMA_REFUSAL = /grammar|schema|strict tool|too complex|compil|too many (?:optional|union|strict|tools|parameters)/i;
+/** True for a 400 that refuses the request's shape or strict tools: worth one more try without the constraint. */
+export function schemaRefused(e: unknown): boolean {
+  return e instanceof Anthropic.APIError && e.status === 400 && SCHEMA_REFUSAL.test(anthropicReason(e));
+}
+/** What the second try adds to its prompt in place of output_config.format: the same shape, as words. */
+export function askJsonPrompt(schema: unknown): string {
+  return `\n\nReply with only one JSON object, nothing before or after it and no code fence, in this JSON schema:\n${JSON.stringify(schema)}`;
+}
+
 /** One request to Claude over the front pages of a filing, with structured output, given up at ctx.timeMs. The file is
     uploaded for the request and deleted afterwards. Whatever goes wrong, the caller gets the usage so far and a reason. */
 export async function makeDigest(front: Extract<FrontPages, { ok: true }>, meta: FilingMeta, ctx: MakeCtx): Promise<MakeOut> {
@@ -617,29 +645,39 @@ export async function makeDigest(front: Extract<FrontPages, { ok: true }>, meta:
     const file = await client.files.upload({ file: await toFile(front.send, "filing.pdf", { type: "application/pdf" }) });
     fileId = file.id;
     const title = `Filing ${[name, meta.company, meta.state, meta.filingType].filter(Boolean).join(", ")}, ${readText(front.read, pages)}`;
-    const stream = client.beta.messages.stream({
-      model, max_tokens: 16_000,
-      betas: [FALLBACK_BETA], fallbacks: "default",
-      thinking: { type: "adaptive" },
-      output_config: { effort: "medium", format: { type: "json_schema", schema: DIGEST_SCHEMA } },
-      system: DIGEST_SYSTEM,
-      messages: [{ role: "user", content: [
-        { type: "document", source: { type: "file", file_id: file.id }, title: title.slice(0, 400) },
-        { type: "text", text: `The document is ${readText(front.read, pages)} of filing ${name}${front.read[0].to < pages ? `; the rest of the filing isn't attached, so don't describe it` : ""}. Page 1 of the document is page 1 of the filing. Summarise it in the JSON shape given.` },
-      ] }],
-    });
-    let timedOut = false;
-    const left = Math.max(1_000, ctx.timeMs - (ctx.now() - started));
-    const timer = setTimeout(() => { timedOut = true; stream.abort(); }, left);
-    let message: Anthropic.Beta.BetaMessage;
-    try { message = await stream.finalMessage(); }
+    const ask = async (shaped: boolean): Promise<Anthropic.Beta.BetaMessage | null> => {
+      const stream = client.beta.messages.stream({
+        model, max_tokens: 16_000,
+        betas: [FALLBACK_BETA], fallbacks: "default",
+        thinking: { type: "adaptive" },
+        output_config: shaped ? { effort: "medium", format: { type: "json_schema", schema: DIGEST_SCHEMA } } : { effort: "medium" },
+        system: DIGEST_SYSTEM,
+        messages: [{ role: "user", content: [
+          { type: "document", source: { type: "file", file_id: file.id }, title: title.slice(0, 400) },
+          { type: "text", text: `The document is ${readText(front.read, pages)} of filing ${name}${front.read[0].to < pages ? `; the rest of the filing isn't attached, so don't describe it` : ""}. Page 1 of the document is page 1 of the filing. Summarise it in the JSON shape given.${shaped ? "" : askJsonPrompt(DIGEST_SCHEMA)}` },
+        ] }],
+      });
+      let timedOut = false;
+      // one time limit for both tries: the second gets what the first left
+      const left = Math.max(1_000, ctx.timeMs - (ctx.now() - started));
+      const timer = setTimeout(() => { timedOut = true; stream.abort(); }, left);
+      try { return await stream.finalMessage(); }
+      catch (e) {
+        // Tokens of a reply cut off part way are billed but can't be counted fully, so the cost shows as n/d.
+        const part = stream.currentMessage;
+        if (part?.usage) { addUsage(st, part.model, part.usage); st.model = part.model; st.unpriced = true; }
+        if (timedOut) return null;
+        throw e;
+      } finally { clearTimeout(timer); }
+    };
+    let message: Anthropic.Beta.BetaMessage | null;
+    try { message = await ask(true); }
     catch (e) {
-      // Tokens of a reply cut off part way are billed but can't be counted fully, so the cost shows as n/d.
-      const part = stream.currentMessage;
-      if (part?.usage) { addUsage(st, part.model, part.usage); st.model = part.model; st.unpriced = true; }
-      if (timedOut) return out(MAKE_NOTES.timeout);
-      throw e;
-    } finally { clearTimeout(timer); }
+      if (!schemaRefused(e)) throw e;
+      console.error(`Anthropic refused the summary's shape, so it is asked for once more without it: ${anthropicReason(e)}`);
+      message = await ask(false);
+    }
+    if (!message) return out(MAKE_NOTES.timeout);
     st.model = message.model;
     addUsage(st, message.model, message.usage);
     if (message.stop_reason === "refusal") return out(MAKE_NOTES.refusal);
