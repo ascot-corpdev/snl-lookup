@@ -708,6 +708,51 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 .cbnotes{margin:0;padding-left:18px;font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:3px}
 .cbmix ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:3px;font-size:13px}
 .cbmix li{overflow-wrap:anywhere}
+/* Combination: the state map (blues for dollars, oranges for the target's share: both read in grey and with colour blindness) */
+.cbmap{gap:10px}
+.cbmctl{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:end;min-width:0}
+.cbmseg{flex-wrap:wrap;max-width:100%}
+.cbmseg .btn{white-space:normal}
+#cbmInView{margin:0;overflow-wrap:anywhere}
+.cbmlinebox{display:flex;flex-direction:column;gap:6px;min-width:0;max-width:640px}
+.cbmlinelist{max-height:240px;overflow-y:auto;border:1px solid var(--grid);display:flex;flex-direction:column;min-width:0}
+.cbmline{display:flex;align-items:center;gap:8px;padding:5px 8px;border-bottom:1px solid var(--grid);font-size:13px;min-width:0;cursor:pointer}
+.cbmline:last-child{border-bottom:0}
+.cbmline span:nth-of-type(1){flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+.cbmline input{flex:none;margin:0}
+.cbmgrid{position:relative;display:grid;grid-template-columns:minmax(0,900px) auto;justify-content:start;gap:10px 14px;align-items:start;min-width:0}
+.cbmwrap{min-width:0}
+.cbmpin .cbtbl td:first-child,#cbTab_map td:first-child{min-width:0}
+.cbmsvg{display:block;width:100%;height:auto}
+.cbmsvg path{fill:#FFFFFF;stroke:#FFFFFF;stroke-width:1;stroke-linejoin:round;cursor:pointer}
+.cbmsvg path.zero{fill:#FFFFFF;stroke:#A9ADBD}
+.cbmsvg path.miss{fill:url(#cbmHatch);stroke:#666666}
+.cbmsvg path:hover{stroke:var(--ink);stroke-width:2}
+.cbmsvg path:focus{outline:none;stroke:var(--magenta);stroke-width:3}
+.cbmsvg path.pin{stroke:var(--magenta);stroke-width:4}
+.cbmsvg text{font:bold 14px var(--font);fill:var(--ink);text-anchor:middle;pointer-events:none}
+.cbmsvg text.lt{fill:#FFFFFF}
+.cbmsmall{display:grid;grid-template-columns:repeat(2,minmax(0,auto));gap:4px;align-content:start}
+.cbmbox{display:flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid var(--grid);background:var(--surface);color:var(--ink);font:inherit;font-size:12px;font-weight:bold;cursor:pointer;min-width:0}
+.cbmbox:hover{border-color:var(--ink)}
+.cbmbox[aria-pressed="true"]{outline:3px solid var(--magenta);outline-offset:-1px}
+.cbmbox .sw,.cbmkey .sw{flex:none;width:14px;height:14px;display:inline-block;border:1px solid transparent}
+.sw.zero{background:#FFFFFF;border:1px solid #A9ADBD!important}
+.sw.miss{background:repeating-linear-gradient(45deg,#666666 0 2px,#FFFFFF 2px 5px);border:1px solid #666666!important}
+.cbmkey{display:flex;flex-direction:column;gap:4px;min-width:0}
+.cbmkey p{margin:0}
+.cbmtip{position:absolute;z-index:5;width:max-content;max-width:min(300px,100%);background:var(--surface);border:1px solid var(--grid);box-shadow:var(--shadow);padding:8px 10px;font-size:12px;pointer-events:none;display:flex;flex-direction:column;gap:4px}
+.cbmtip table{font-size:12px}
+.cbmtip td{padding:1px 8px 1px 0;border:0}
+.cbmtip p{margin:0}
+.cbmpin{border-left:4px solid var(--magenta);background:var(--alt);padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.cbmpin h4{margin:0;font-size:14px}
+.cbmfacts{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:3px;font-size:13px}
+.cbmfacts li{overflow-wrap:anywhere}
+.cbmsort{background:none;border:0;padding:0;color:inherit;font:inherit;font-weight:bold;cursor:pointer;text-align:inherit}
+.cbmgap{color:var(--ink);border-left:4px solid var(--orange);padding-left:8px}
+@media (max-width:820px){.cbmsvg text{display:none}}
+@media (max-width:560px){.cbmgrid{grid-template-columns:minmax(0,1fr)}.cbmsmall{grid-template-columns:repeat(auto-fill,minmax(58px,1fr))}}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
@@ -3225,6 +3270,7 @@ function suHelpHTML(){
       <li>For group lookups: a join or a where entry with <code>"when": "group"</code> is used only when looking up by NAIC group code, and <code>"when": "company"</code> only by company code, so a company lookup never goes through a group's member list. <b>entity.groupName</b> is the group's name column. <b>distinct</b> (true) removes the repeated rows a member list brings; it can't be used with <b>sum</b>.</li>
       <li><b>plus</b> adds up to 4 more columns of the same row to the value, such as two parts of paid-in capital; an empty one counts as zero. <b>stateStrip</b> takes text off the front of each state, so <code>"Reported:FL"</code> shows as FL.</li>
       <li><b>yearIsDate</b> takes the year from a date. <b>latest</b> keeps only the row with the highest value in that column, such as a sequence number, for each company and year. <b>sum</b> adds up rows that share everything else, such as many rows for one reinsurer.</li>
+      <li><b>dpw_by_state_line</b> (direct premiums written by state and line together, for the Combination view's map): name both a <b>state</b> and a <b>line</b> column. Only that map asks for it, one year at a time.</li>
       <li><b>tag</b> (figures by reinsurer only, beside <b>item</b>): a column that describes each reinsurer, such as whether it is authorized or affiliated. The profile uses it to show how much is owed by reinsurers that aren't authorized.</li>
       <li><b>loaded</b> (optional, beside <b>fields</b>): the view each schema has with S&amp;P's run dates, and its date column. The results then say when S&amp;P last updated each schema a figure came from.</li>
     </ul>
@@ -7947,11 +7993,11 @@ function cbRun(){
   const cb=S.cb, problem=cbProblem();
   if(problem){ cb.formErr=problem; render(); return; }
   const d=cb.base.doc, to=+cb.toYear, from=to-(CB_QUERY_YEARS-1), tg=cb.target;
-  if(cb.run){ for(const w of ["base","target"]){ const sd=cb.run[w]; if(sd.ctl) sd.ctl.stop(); } }
-  cb.formErr="";
+  if(cb.run){ for(const w of ["base","target"]){ const sd=cb.run[w]; if(sd.ctl) sd.ctl.stop(); for(const e of Object.values((cb.run.sl||{})[w]||{})) if(e.ctl) e.ctl.stop(); } }
+  cb.formErr=""; cb.map=cbmFresh();   // the state map starts afresh for each pair
   cb.run={fromYear:from, toYear:to,
     base:{kind:d.kind, codes:[...d.codes], label:d.label, res:null, err:null, busy:false},
-    target:{kind:tg.kind, codes:cbCodes(tg), label:cbPickLabel(tg), res:null, err:null, busy:false}};
+    target:{kind:tg.kind, codes:cbCodes(tg), label:cbPickLabel(tg), res:null, err:null, busy:false}, sl:{base:{}, target:{}}};
   cbFetch("base", false); cbFetch("target", false);
 }
 async function cbFetch(which, refresh, carryOn){
@@ -8226,6 +8272,7 @@ function cbResultsHTML(){
   h+=`<section class="blk" id="cb_sec_ratio"><div class="blk-h"><h3>Ratios <span class="t2">worked out, never added</span></h3></div>${cbTableHTML("ratio", m.rows.filter(r=>r.sec==="ratio"), m.years, run)}
     <ul class="cbnotes" id="cbFormulas"><li>Loss ratio and loss and LAE ratio: each side's ratio weighted by its net premiums earned.</li><li>Expense ratio: each side's ratio weighted by its net premiums written.</li><li>Combined ratio: the weighted loss and LAE ratio plus the weighted expense ratio. Each side's own column shows the combined ratio it reported.</li><li>Net premiums written, net loss and LAE reserves and total liabilities to surplus: the added dollars over the added surplus.</li><li>Cession share: gross less net premiums written, over gross premiums written (gross as reported, or direct plus assumed when gross isn't there), from the added dollars.</li><li>n/d when either side lacks a figure, or what is divided by is missing, zero or negative.</li></ul></section>`;
   h+=`<section class="blk" id="cb_sec_never"><div class="blk-h"><h3>Never combined <span class="t2">each side's own figure</span></h3></div>${cbTableHTML("never", m.rows.filter(r=>r.sec==="never"), m.years, run)}</section>`;
+  h+=cbMapHTML(m);   // the state map, above the mix tables
   h+=cbMixHTML(m.lines, "line", "lines")+cbMixHTML(m.states, "state", "states")+cbReinsHTML(m.reins);
   const loaded=[run.base, run.target].flatMap(sd=>sd.res&&Array.isArray(sd.res.loaded)?sd.res.loaded:[]).filter((l,i,a)=>l&&a.findIndex(x=>x&&x.view===l.view)===i);
   h+=`<p class="source" id="cbSource">${loaded.map(l=>`S&amp;P last updated ${esc(l.view)} on ${fmtAt(l.at)!=="n/d"?fmtAt(l.at):esc(blank(l.at)?"n/d":l.at)}.`).join(" ")} Source: S&amp;P Global Market Intelligence statutory data, as filed. US dollars are shown in $M. Added up in this browser.</p>`;
@@ -8268,6 +8315,7 @@ function renderCombination(){
 }
 /* ----- export: the tables as on screen, with what this is ----- */
 function cbExport(tbl){
+  if(tbl==="map") return cbmExport();   // the state map's table, as filtered
   const run=S.cb.run, m=cbModel(); if(!run || !m || !m.years.length) return null;
   const B=cbBaseName(), name=`snl-combination-${tbl}-${TODAY()}`, note=[["Note", CB_WHAT], ["Base", `${B}: ${run.base.label} (${run.base.kind==="group"?"NAIC group":"NAIC"} ${run.base.codes.join(", ")})`], ["Target", `${run.target.label} (${run.target.kind==="group"?"NAIC group":"NAIC"} ${run.target.codes.join(", ")})`]];
   const raw=(x, unit)=>!x ? "n/d" : x.never ? "Not combined" : x.why ? `n/d (${x.why})` : unit==="usd" ? Math.round(x.v) : Math.round(x.v*10000)/10000;
@@ -8316,6 +8364,368 @@ document.addEventListener("input", e=>{   // the chips beside the codes follow w
   const w=id==="cb_base_codes"?"base":"target", pk=cbPickOf(w), el=document.getElementById(`cb_${w}_named`); if(!pk || !el) return;
   pk.codes=e.target.value;   // this runs before the page's own data-bind handler
   const tmp=document.createElement("div"); tmp.innerHTML=cbPickHTML(w); const fresh=tmp.querySelector(`#cb_${w}_named`); if(fresh) el.innerHTML=fresh.innerHTML;
+});
+
+/* ---------- Combination: the state map (Corp Dev only) ----------
+   The pro forma's direct premiums written on a map of the US states and DC (US_MAP, the outlines already on this page),
+   with a choice of what is shown (the pro forma, either side, the target's share, who writes it), a line-of-business
+   filter, the year, a panel for each state on hover or focus, a state pinned below the map, a sortable table of the
+   same figures and its export. With all lines it uses premiums by state (dpw_by_state), fetched with each side's
+   figures, so it costs nothing more. Narrowing by line needs premiums by state and line together (dpw_by_state_line,
+   a figure the owner maps), asked for one year at a time, each side in its own ordinary statutory look-up and saved
+   for that company or group alone. As with the rest of the view, nothing that pairs the two is saved or sent: the
+   map's choices live in this page's memory only. */
+const CBM_FIG="dpw_by_state_line", CBM_SMALL=["VT","NH","MA","RI","CT","NJ","DE","MD","DC"], CBM_SEARCH_FROM=8;
+const CBM_USD_FILL=["#C6DBEF","#9ECAE1","#4292C6","#2171B5","#08306B"], CBM_SHARE_FILL=["#FDD0A2","#FDAE6B","#F16913","#D94801","#7F2704"];
+const CBM_SHARE_BINS=["Under 20.0%","20.0% to under 40.0%","40.0% to under 60.0%","60.0% to under 80.0%","80.0% or more"];
+const CBM_WHO={both:"#08306B", base:"#9ECAE1", target:"#F16913"}, CBM_DARK=new Set(["#4292C6","#2171B5","#08306B","#F16913","#D94801","#7F2704"]);
+const CBM_COST="Cost: with all lines, nothing more, as the map uses the premiums by state already fetched. Choosing a line adds one statutory look-up a side for the year shown (about 0.02 Snowflake credit each the first time, nothing when reopened). No Claude, and nothing that pairs the two is saved or sent.";
+let CBM_VM=null;   // the map as last drawn, for the hover panel and the export (this page's memory only)
+function cbmFresh(){ return {show:"pf", lines:[], q:"", year:null, pin:null, focus:null, open:false, sort:{k:"p", d:-1}}; }
+function cbmState(){ if(!S.cb.map) S.cb.map=cbmFresh(); return S.cb.map; }
+/* Whether premiums by state and line are mapped (the statutory status lists every figure). */
+function cbmFigOn(){ const f=S.st.status&&Array.isArray(S.st.status.fields)?S.st.status.fields.find(x=>x&&x.id===CBM_FIG):null; return !!(f&&f.mapped); }
+const cbmText = s => String(s??"").replace(/[\u0000-\u001f\u007f]+/g," ").replace(/\s+/g," ").trim();
+const cbmStateOf = s => { const n=cbmText(s); return /^[a-z]{2}$/i.test(n) ? n.toUpperCase() : n; };
+const cbmName = c => US_MAP[c] ? US_MAP[c][1] : c;
+const cbmWho = w => w==="base" ? cbBaseName() : "the target";
+/* One side's premiums by state and line for one year, as fetched: {rows: [{state, line, k, v}]} or {why}. */
+function cbmSlRows(sd, e, y){
+  if(!e) return {why:"not fetched yet"};
+  if(!e.res) return {why: e.busy ? "still coming" : e.err ? "couldn't be fetched" : e.stopped ? "not fetched: stopped" : "not fetched yet"};
+  if(e.res.truncated) return {why:"cut short at the row limit"};
+  const f=(Array.isArray(e.res.fields)?e.res.fields:[]).find(x=>x&&x.id===CBM_FIG);
+  if(!f) return {why: e.busy ? "still coming" : "not returned"};
+  if(f.mapped===false) return {why: blank(f.error) ? "not mapped" : `not mapped for a ${sd.kind} look-up`};
+  if(/^Not run:/.test(String(f.error||""))) return {why: e.busy ? "still coming" : "didn't come back in time"};
+  if(!blank(f.error)) return {why:"couldn't be read"};
+  const rows=[], seen=new Set();
+  for(const r of cbRows(f)){
+    if(+r.year!==y) continue;
+    const state=cbmStateOf(r.state), line=cbmText(r.line); if(!state || !line) continue;
+    rows.push({state, line, k:line.toLowerCase(), v:+r.value}); seen.add(String(r.code??""));
+  }
+  if(!rows.length) return {why:"none returned"};
+  const gap=sd.codes.find(c=>!seen.has(c)); if(sd.codes.length>1 && gap) return {why:`none for NAIC ${gap}`};
+  return {rows};
+}
+/* One side's premiums in each state for the year and the lines in view: {m: Map(state -> {v, lines}), total, sl} or {why}.
+   All lines: premiums by state, as the by-state table has them (lines in each state from premiums by state and line
+   when those are in hand). Some lines: premiums by state and line, added up over the lines chosen. */
+function cbmSide(which, y, keys){
+  const run=S.cb.run, sd=run[which], sl=cbmSlRows(sd, run.sl[which][y], y), m=new Map();
+  const at=st=>{ if(!m.has(st)) m.set(st, {v:0, lines:new Map()}); return m.get(st); };
+  const addLine=(o, r)=>{ const l=o.lines.get(r.k)||{name:r.line, v:0}; l.v+=r.v; o.lines.set(r.k, l); };
+  if(!keys.length){
+    const b=cbByName(sd, "dpw_by_state", "state", y); if(b.why) return {why:b.why, sl};
+    for(const x of b.m.values()) at(cbmStateOf(x.name)).v+=x.v;
+    if(sl.rows) for(const r of sl.rows) if(m.has(r.state)) addLine(m.get(r.state), r);
+    return {m, total:cbTotal(m), sl};
+  }
+  if(sl.why) return {why:sl.why, sl};
+  const on=new Set(keys);
+  for(const r of sl.rows) if(on.has(r.k)){ const o=at(r.state); o.v+=r.v; addLine(o, r); }
+  return {m, total:cbTotal(m), sl};
+}
+/* States where premiums by state and line don't add up to premiums by state (more than a dollar a row apart). */
+function cbmGaps(which, y){
+  const run=S.cb.run, sd=run[which], sl=cbmSlRows(sd, run.sl[which][y], y), b=cbByName(sd, "dpw_by_state", "state", y);
+  if(sl.why || b.why) return [];
+  const by=new Map(); for(const r of sl.rows){ const x=by.get(r.state)||{v:0, n:0}; x.v+=r.v; x.n++; by.set(r.state, x); }
+  const out=[];
+  for(const x of b.m.values()){ const st=cbmStateOf(x.name), s=by.get(st)||{v:0, n:0}; by.delete(st); if(Math.abs(s.v-x.v)>Math.max(1, s.n)) out.push({st, sl:s.v, all:x.v}); }
+  for(const [st, s] of by) if(Math.abs(s.v)>Math.max(1, s.n)) out.push({st, sl:s.v, all:0});
+  return out.sort((a,c)=>a.st.localeCompare(c.st));
+}
+/* The lines either side writes in the year: from premiums by line and, when in hand, premiums by state and line; largest
+   first (by pro forma premiums by line where there are some); the lines chosen are always listed. */
+function cbmLines(y){
+  const run=S.cb.run, ms=cbmState(), all=new Map();
+  const add=(k, name, v, src)=>{ const x=all.get(k)||{k, name, bl:0, sl:0, inBl:false, inSl:false}; x[src]+=v; x[src==="bl"?"inBl":"inSl"]=true; all.set(k, x); };
+  for(const w of ["base","target"]){
+    const sd=run[w], l=cbByName(sd, "dpw_by_line", "line", y); if(l.m) for(const [k,x] of l.m) add(k, x.name, x.v, "bl");
+    const s=cbmSlRows(sd, run.sl[w][y], y); if(s.rows) for(const r of s.rows) add(r.k, r.line, r.v, "sl");
+  }
+  for(const l of ms.lines) if(!all.has(l.k)) all.set(l.k, {k:l.k, name:l.name, bl:0, sl:0, inBl:false, inSl:false});
+  return [...all.values()].map(x=>({...x, v:x.inBl?x.bl:x.sl})).sort((a,c)=>c.v-a.v || a.name.localeCompare(c.name));
+}
+/* Dollar classes: up to five, each holding about as many states, labelled with the lowest and highest figure in it. */
+function cbmBins(vals){
+  const s=[...vals].sort((a,b)=>a-b), n=s.length, out=[]; if(!n) return [];
+  const k=Math.min(5, n);
+  for(let i=0;i<k;i++){
+    const part=s.slice(Math.floor(i*n/k), Math.floor((i+1)*n/k)); if(!part.length) continue;
+    const lo=part[0], hi=part[part.length-1], last=out[out.length-1];
+    if(last && lo<=last.hi){ last.hi=Math.max(last.hi, hi); continue; }
+    out.push({lo, hi});
+  }
+  const fills=CBM_USD_FILL.slice(CBM_USD_FILL.length-out.length);
+  return out.map((b,i)=>({...b, fill:fills[i], label:usdM(b.lo)===usdM(b.hi) ? usdM(b.lo) : `${usdM(b.lo)} to ${usdM(b.hi)}`}));
+}
+/* Everything the map, its panel, its table and its export show, worked out once a render. */
+function cbmModel(m){
+  const run=S.cb.run, ms=cbmState(), B0=cbBaseName(), years=m.years;
+  const y = years.includes(+ms.year) ? +ms.year : (!m.states.why && years.includes(m.states.year) ? m.states.year : years[0]);
+  const on=cbmFigOn(), keys=on ? ms.lines.map(l=>l.k) : [];
+  const B=cbmSide("base", y, keys), T=cbmSide("target", y, keys), bt=B.why?null:B.total, tt=T.why?null:T.total, pt=bt!==null&&tt!==null?bt+tt:null;
+  const codes=[...new Set([...Object.keys(US_MAP), ...(B.m?B.m.keys():[]), ...(T.m?T.m.keys():[])])];
+  const side=(X, c)=>X.why ? {why:X.why} : X.m.has(c) ? {v:X.m.get(c).v} : {v:0, none:true};
+  const cells=new Map();
+  for(const c of codes){
+    const b=side(B, c), t=side(T, c), p=cbSum(b, t);
+    const share = p.why ? {why:p.why} : p.v>0 && t.v>=0 ? {v:t.v/p.v*100} : {none:true};
+    const who = p.why ? null : b.v>0&&t.v>0 ? "both" : b.v>0 ? "base" : t.v>0 ? "target" : "none";
+    cells.set(c, {code:c, name:cbmName(c), onMap:!!US_MAP[c], b, t, p, share, who, bs:b.why?null:cbShare(b.v, bt), ts:t.why?null:cbShare(t.v, tt), ps:p.why?null:cbShare(p.v, pt)});
+  }
+  const show=ms.show, val=c=>show==="b"?c.b:show==="t"?c.t:c.p;
+  const bins = show==="share"||show==="who" ? [] : cbmBins([...cells.values()].filter(c=>c.onMap && !val(c).why && val(c).v>0).map(c=>val(c).v));
+  const lines=cbmLines(y), shownLines=ms.lines.map(l=>(lines.find(x=>x.k===l.k)||l).name);
+  // the read-outs, before (the base alone) and after (the pro forma), both sides needed
+  let facts=null;
+  if(pt!==null){
+    const list=[...cells.values()], sum=a=>a.reduce((s,c)=>s+c.p.v,0), of=w=>list.filter(c=>c.who===w);
+    const top=(get, total)=>{ const s=list.filter(c=>get(c)>0).sort((a,c)=>get(c)-get(a)); return {first:s[0]||null, five:cbShare(s.slice(0,5).reduce((a,c)=>a+get(c),0), total)}; };
+    facts={both:of("both"), onlyB:of("base"), onlyT:of("target"), before:top(c=>c.b.v, bt), after:top(c=>c.p.v, pt)}; facts.sum=sum;
+  }
+  const gaps={base:cbmGaps("base", y), target:cbmGaps("target", y)};
+  return {y, on, keys, B, T, bt, tt, pt, cells, bins, show, val, lines, shownLines, facts, gaps, B0};
+}
+/* How a state is painted: a fill, or a class (zero: no premium in either side's figures; miss: a side is n/d, hatched). */
+function cbmPaint(vm, c){
+  if(vm.show==="share"){ if(c.share.why) return {cls:"miss"}; if(c.share.none) return {cls:"zero"}; return {fill:CBM_SHARE_FILL[Math.min(4, Math.floor(c.share.v/20))]}; }
+  if(vm.show==="who"){ if(!c.who) return {cls:"miss"}; if(c.who==="none") return {cls:"zero"}; return {fill:CBM_WHO[c.who]}; }
+  const x=vm.val(c); if(x.why) return {cls:"miss"}; if(!(x.v>0)) return {cls:"zero"};
+  return {fill:(vm.bins.find(b=>x.v<=b.hi)||vm.bins[vm.bins.length-1]).fill};
+}
+const cbmMoney = x => x.why ? `n/d (${x.why})` : x.none ? "none in its figures" : usdM(x.v);
+const cbmShareText = s => s.why ? "n/d" : s.none ? "no premium on either side" : pct(s.v);
+/* The accessible name of a state: its figures in words. */
+function cbmSay(vm, c, pinned){
+  return `${c.name} (${c.code}): ${vm.B0} ${cbmMoney(c.b)}; target ${cbmMoney(c.t)}; pro forma ${cbmMoney(c.p)}; target's share ${cbmShareText(c.share)}${pinned?". Pinned":""}`;
+}
+/* The lines in one state under the filter: {rows: [{name, b, t, p}]} or {why}. */
+function cbmStateLines(vm, c){
+  if(!vm.on) return {why:"premiums by state and line aren't mapped yet"};
+  const why=[];
+  for(const [w, X] of [["base", vm.B], ["target", vm.T]]){ const r=X.why||(X.sl&&X.sl.why); if(r) why.push(`${w==="base"?vm.B0:"target"}: ${r}`); }
+  if(why.length) return {why:why.join("; ")};
+  const all=new Map(), put=(X, k)=>{ const o=X.m.get(c); if(o) for(const [lk, l] of o.lines){ const x=all.get(lk)||{name:l.name, b:0, t:0}; x[k]+=l.v; all.set(lk, x); } };
+  put(vm.B, "b"); put(vm.T, "t");
+  return {rows:[...all.values()].map(x=>({...x, p:x.b+x.t})).sort((a,c)=>c.p-a.p || a.name.localeCompare(c.name))};
+}
+function cbmTipHTML(code){
+  const vm=CBM_VM, c=vm&&vm.cells.get(code); if(!c) return "";
+  const row=(label, x, s)=>`<tr><td>${esc(label)}</td><td class="num">${esc(x.why?"n/d":x.none?"None":usdM(x.v))}</td><td class="num">${s===null||s===undefined?"":esc(pct(s))}</td></tr>`;
+  const L=cbmStateLines(vm, code);
+  const lines = L.why ? `<p class="t2">Lines here: n/d, ${esc(L.why)}.</p>` : L.rows.length ? `<p class="t2">Largest lines here: ${esc(L.rows.slice(0,3).map(l=>`${l.name} ${usdM(l.p)}`).join(", "))}${L.rows.length>3?`, and ${count(L.rows.length-3)} more`:""}.</p>` : `<p class="t2">No premium in the lines in view in either side's figures.</p>`;
+  const why=[c.b, c.t].map(x=>x.why).filter(Boolean);
+  return `<b>${esc(c.name)} (${esc(c.code)}), ${vm.y}</b><table><tbody>${row(vm.B0, c.b, c.bs)}${row("Target", c.t, c.ts)}${row("Pro forma", c.p, c.ps)}<tr><td>Target's share here</td><td class="num">${esc(cbmShareText(c.share))}</td><td></td></tr></tbody></table>
+    ${why.length?`<p class="t2">n/d: ${esc([...new Set(why)].join("; "))}.</p>`:""}${lines}<p class="t2">Click, or press Enter, to pin.</p>`;
+}
+function cbmFacts(vm){
+  if(!vm.facts) return `<p class="t2" id="cbm_facts_none">The read-outs need both sides: ${esc([vm.B.why?`${vm.B0}: ${vm.B.why}`:"", vm.T.why?`target: ${vm.T.why}`:""].filter(Boolean).join("; "))}. That doesn't mean nothing is written there.</p>`;
+  const f=vm.facts, B=vm.B0, n=a=>plural(a.length, "state"), v=a=>usdM(f.sum(a)), s=a=>pct(cbShare(f.sum(a), vm.pt));
+  const name=c=>c?c.code:"n/d";
+  const li=[
+    `Written by both: ${n(f.both)}, ${v(f.both)} of pro forma premium (${s(f.both)}), the overlap.`,
+    `Only ${B}: ${n(f.onlyB)}, ${v(f.onlyB)} (${s(f.onlyB)}). Only the target: ${n(f.onlyT)}, ${v(f.onlyT)} (${s(f.onlyT)}).`,
+    `Largest state: before, ${name(f.before.first)} at ${pct(f.before.first?cbShare(f.before.first.b.v, vm.bt):null)} of ${B}; after, ${name(f.after.first)} at ${pct(f.after.first?f.after.first.ps:null)} of the pro forma.`,
+    `Top five states: ${pct(f.before.five)} of ${B} before, ${pct(f.after.five)} of the pro forma after.`,
+    `Total: ${B} ${usdM(vm.bt)}, target ${usdM(vm.tt)}, pro forma ${usdM(vm.pt)}.`];
+  return `<ul class="cbmfacts" id="cbm_facts">${li.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`;
+}
+/* The banner for one side's premiums by state and line, when they are coming, failed, stopped, cut short or late. */
+function cbmSideNote(which, y){
+  const e=S.cb.run.sl[which][y], who=cbmWho(which), Who=who[0].toUpperCase()+who.slice(1), id=`cbmSl_${which}`;
+  if(!e) return "";
+  const again=label=>`<button type="button" class="btn sm" data-act="cbm-retry" data-w="${which}" data-y="${y}">${label}</button>`;
+  if(e.busy) return `<div class="banner" id="${id}" role="status"><span>Fetching ${esc(who)}'s premiums by state and line for ${y}… The rest of the view stays as it is.</span>${pbHTML(`cbm-${which}-${y}`, {name:"Premiums by state and line", small:true})}<button type="button" class="btn sm" data-act="cbm-stop" data-w="${which}" data-y="${y}">Stop</button></div>`;
+  if(e.err) return `<div class="banner" id="${id}" role="alert"><span><b>Couldn't fetch ${esc(who)}'s premiums by state and line for ${y}.</b> ${esc(errText(e.err))} That side shows as n/d on the map.</span>${again("Try again")}</div>`;
+  if(e.stopped) return `<div class="banner" id="${id}" role="status"><span>You stopped fetching ${esc(who)}'s premiums by state and line for ${y}. That side shows as n/d on the map.</span>${again("Fetch them")}</div>`;
+  if(e.res && e.res.truncated) return `<div class="banner" id="${id}" role="alert"><span><b>${esc(Who)}'s premiums by state and line for ${y} were cut short.</b> Snowflake returned more rows than one request allows, so they show as n/d rather than as a part shown as the whole. Use fewer codes for that side.</span></div>`;
+  const s=cbmSlRows(S.cb.run[which], e, y);
+  if(s.why==="didn't come back in time") return `<div class="banner" id="${id}" role="alert"><span><b>${esc(Who)}'s premiums by state and line for ${y} didn't come back in time.</b> That side shows as n/d on the map.</span>${again("Try again")}</div>`;
+  return "";
+}
+function cbmLinesHTML(vm){
+  const ms=cbmState(), on=vm.on, chosen=new Set(ms.lines.map(l=>l.k)), q=cbmText(ms.q).toLowerCase();
+  const list=vm.lines.filter(l=>!q || l.name.toLowerCase().includes(q) || chosen.has(l.k));
+  const say = !ms.lines.length ? `all lines${vm.lines.length?` (${plural(vm.lines.length, "line")} either side writes)`:""}` : `${andList(vm.shownLines, 6)} (${count(ms.lines.length)} of ${plural(Math.max(vm.lines.length, ms.lines.length), "line")})`;
+  let h=`<p id="cbmInView"><b>Lines in view:</b> ${esc(say)}, ${vm.y}.${!ms.lines.length?" With all lines the map uses premiums by state, as in the table of states below.":""}</p>`;
+  if(!on) h+=`<div class="info" id="cbmLinesOff" role="status"><span><b>Narrowing by line is off.</b> It needs premiums by state and line together, a figure that isn't mapped yet. A Corp Dev login can map <code>${CBM_FIG}</code> in Field set-up on the <a href="#statutory">Statutory view</a>; until then the map shows all lines.</span></div>`;
+  h+=`<div class="toolbar"><button type="button" class="btn sm" id="cbmPick" data-act="cbm-open" aria-expanded="${ms.open}" aria-controls="cbmLineBox">${ms.open?"Hide the lines":"Choose lines"}</button>${ms.lines.length?`<button type="button" class="btn sm ghost" id="cbmClear" data-act="cbm-clear">Clear: all lines</button>`:""}</div>`;
+  if(!ms.open) return h;
+  const search = vm.lines.length>CBM_SEARCH_FROM ? `<input type="search" id="cbm_q" data-bind="cb.map.q" data-live value="${esc(ms.q)}" autocomplete="off" spellcheck="false" placeholder="Lines containing…" aria-label="Show only lines containing" ${on?"":"disabled"}>` : "";
+  const box = vm.lines.length ? list.map((l,i)=>`<label class="cbmline"><input type="checkbox" id="cbm_l_${i}" data-act="cbm-line" data-k="${esc(l.k)}" data-name="${esc(l.name)}" ${chosen.has(l.k)?"checked":""} ${on?"":"disabled"}><span>${esc(l.name)}</span><span class="t2 num">${l.v?esc(usdM(l.v)):""}</span></label>`).join("") || `<p class="t2">No line matches "${esc(ms.q)}".</p>`
+    : `<p class="t2">Neither side's premiums by line for ${vm.y} are in hand, so there are no lines to choose.</p>`;
+  return h+`<div class="cbmlinebox" id="cbmLineBox">${search}<p class="t2">Largest first, by pro forma premiums by line in ${vm.y}.</p><div class="cbmlinelist" role="group" aria-label="Lines of business" data-keep id="cbmLineList">${box}</div></div>`;
+}
+function cbmLegendHTML(vm){
+  const sw=(fill, cls)=>`<span class="sw${cls?" "+cls:""}" aria-hidden="true"${fill?` style="background:${fill}"`:""}></span>`;
+  const who=vm.show==="b"?`${vm.B0}'s figures`:vm.show==="t"?"the target's figures":"either side's figures";
+  let items = vm.show==="share" ? CBM_SHARE_BINS.map((l,i)=>[CBM_SHARE_FILL[i], "", `Target's share: ${l}`])
+    : vm.show==="who" ? [[CBM_WHO.both,"","Both write here"],[CBM_WHO.base,"",`Only ${vm.B0}`],[CBM_WHO.target,"","Only the target"]]
+    : vm.bins.map(b=>[b.fill, "", b.label]);
+  items.push(["", "zero", `No premium in ${who}`]);
+  const miss=[...vm.cells.values()].filter(c=>c.onMap && cbmPaint(vm, c).cls==="miss");
+  if(miss.length) items.push(["", "miss", `Hatched: n/d, ${[...new Set([vm.B.why?`${vm.B0}: ${vm.B.why}`:"", vm.T.why?`target: ${vm.T.why}`:""].filter(Boolean))].join("; ")||"a side is missing"}`]);
+  const head = vm.show==="share" ? "The target's share of the pro forma in each state" : vm.show==="who" ? "Who writes in each state" : `Direct premiums written, ${vm.show==="b"?vm.B0:vm.show==="t"?"the target":"pro forma"}, $M, in about equal groups of states`;
+  return `<div class="cbmkey"><p class="t2">${esc(head)}:</p><ul class="snlegend" id="cbmKey">${items.map(([f,cls,l])=>`<li>${sw(f,cls)}${esc(l)}</li>`).join("")}</ul></div>`;
+}
+function cbmSvgHTML(vm){
+  const ms=cbmState(), first=ms.focus&&US_MAP[ms.focus]?ms.focus:ms.pin&&US_MAP[ms.pin]?ms.pin:Object.keys(US_MAP)[0];
+  let shapes="", last="", labels="";
+  for(const code of Object.keys(US_MAP)){
+    const [d, , lx, ly]=US_MAP[code], c=vm.cells.get(code), pt=cbmPaint(vm, c), pin=ms.pin===code;
+    const path=`<path d="${d}" id="cbm_s_${code}" data-cbs="${code}" data-act="cbm-pin" data-s="${code}" role="button" tabindex="${code===first?0:-1}" aria-pressed="${pin}" aria-label="${esc(cbmSay(vm, c, pin))}" class="${[pt.cls||"", pin?"pin":""].join(" ").trim()}"${pt.fill?` style="fill:${pt.fill}"`:""}></path>`;
+    if(pin) last+=path; else shapes+=path;   // the pinned state last, so its outline shows whole
+    if(isNum(lx)) labels+=`<text x="${lx}" y="${ly+6}" class="${pt.fill&&CBM_DARK.has(pt.fill)?"lt":""}" aria-hidden="true">${code}</text>`;
+  }
+  const what=vm.show==="share"?"the target's share of the pro forma":vm.show==="who"?"who writes premium":`${vm.show==="b"?vm.B0+"'s":vm.show==="t"?"the target's":"pro forma"} direct premiums written`;
+  return `<svg class="cbmsvg" id="cbmSvg" viewBox="0 0 975 610" role="group" aria-label="${esc(`Map of ${what} in each state, ${vm.y}. Use the arrow keys to move between states and Enter to pin one. The same figures are in the table below.`)}">
+    <defs><pattern id="cbmHatch" patternUnits="userSpaceOnUse" width="7" height="7" patternTransform="rotate(45)"><rect width="7" height="7" fill="#FFFFFF"></rect><line x1="0" y1="0" x2="0" y2="7" stroke="#666666" stroke-width="3"></line></pattern></defs>${shapes}${last}${labels}</svg>`;
+}
+function cbmSmallHTML(vm){
+  const ms=cbmState();
+  return `<div class="cbmsmall" id="cbmSmall" role="group" aria-label="Small states">${CBM_SMALL.map(code=>{ const c=vm.cells.get(code), pt=cbmPaint(vm, c), pin=ms.pin===code;
+    return `<button type="button" class="cbmbox" id="cbm_b_${code}" data-cbs="${code}" data-act="cbm-pin" data-s="${code}" aria-pressed="${pin}" aria-label="${esc(cbmSay(vm, c, pin))}"><span class="sw${pt.cls?" "+pt.cls:""}" aria-hidden="true"${pt.fill?` style="background:${pt.fill}"`:""}></span>${code}</button>`; }).join("")}</div>`;
+}
+function cbmPinHTML(vm){
+  const ms=cbmState(), c=ms.pin&&vm.cells.get(ms.pin); if(!c) return "";
+  const cell=(x, s)=>`<td class="num">${esc(x.why?"n/d":x.none?"None":usdM(x.v))}${x.why?`<span class="cbwhy">${esc(x.why)}</span>`:""}</td><td class="num">${s===null||s===undefined?"":esc(pct(s))}</td>`;
+  const L=cbmStateLines(vm, c.code);
+  let lines;
+  if(L.why) lines=`<p class="t2" id="cbmPinLinesWhy">The lines in ${esc(c.name)} can't be shown: ${esc(L.why)}.${vm.on && !vm.keys.length?" They come with premiums by state and line, one look-up a side for the year.":""}</p>${vm.on && !vm.keys.length && [vm.B, vm.T].some(X=>X.sl && X.sl.why==="not fetched yet")?`<button type="button" class="btn sm" id="cbmPinFetch" data-act="cbm-fetch">Fetch the lines for ${vm.y}</button>`:""}`;
+  else if(!L.rows.length) lines=`<p class="t2" id="cbmPinLinesWhy">Neither side's figures have premium in ${esc(c.name)} in the lines in view.</p>`;
+  else lines=`<div class="tbl-wrap"><table class="cbtbl" id="cbmPinLines"><thead><tr><th>Line of business</th><th class="num">${esc(vm.B0)} $M</th><th class="num">Target $M</th><th class="num">Pro forma $M</th></tr></thead><tbody>${L.rows.map(l=>`<tr><td>${esc(l.name)}</td><td class="num">${l.b?esc(usdM(l.b)):"None"}</td><td class="num">${l.t?esc(usdM(l.t)):"None"}</td><td class="num cbpf">${esc(usdM(l.p))}</td></tr>`).join("")}</tbody></table></div>`;
+  return `<section class="cbmpin" id="cbmPin" aria-labelledby="cbmPinH"><div class="blk-h"><h4 id="cbmPinH">${esc(c.name)} (${esc(c.code)}), ${vm.y}</h4><button type="button" class="btn sm" id="cbmUnpin" data-act="cbm-unpin">Unpin</button></div>
+    <div class="tbl-wrap"><table class="cbtbl" id="cbmPinTab"><thead><tr><th></th><th class="num">$M</th><th class="num">Share of its total</th></tr></thead><tbody><tr><td>${esc(vm.B0)}</td>${cell(c.b, c.bs)}</tr><tr><td>Target</td>${cell(c.t, c.ts)}</tr><tr><td>Pro forma</td>${cell(c.p, c.ps)}</tr><tr><td>Target's share here</td><td class="num">${esc(cbmShareText(c.share))}</td><td></td></tr></tbody></table></div>${lines}</section>`;
+}
+function cbmRows(vm){
+  const ms=cbmState(), k=ms.sort.k, d=ms.sort.d;
+  const key=c=>k==="name"?c.name:k==="share"?(c.share.why||c.share.none?null:c.share.v):(k==="b"?c.b:k==="t"?c.t:c.p).why?null:(k==="b"?c.b:k==="t"?c.t:c.p).v;
+  return [...vm.cells.values()].filter(c=>(c.b.v||0)!==0 || (c.t.v||0)!==0).sort((a,c)=>{ const x=key(a), y=key(c);
+    if(x===null || y===null) return x===null&&y===null ? a.name.localeCompare(c.name) : x===null ? 1 : -1;
+    return (typeof x==="string" ? x.localeCompare(y) : x-y)*d || a.name.localeCompare(c.name); });
+}
+function cbmTableHTML(vm){
+  const ms=cbmState(), rows=cbmRows(vm), B=vm.B0;
+  const th=(k, label, num)=>`<th class="${num?"num":""}" aria-sort="${ms.sort.k===k?(ms.sort.d>0?"ascending":"descending"):"none"}"><button type="button" class="cbmsort" data-act="cbm-sort" data-k="${k}">${esc(label)}${ms.sort.k===k?(ms.sort.d>0?" ▲":" ▼"):""}</button></th>`;
+  const who=c=>c.who==="both"?"Both":c.who==="base"?`${B} only`:c.who==="target"?"Target only":c.who===null?"n/d":"Neither";
+  const cell=(x, s, cls)=>`<td class="num${cls||""}">${esc(x.why?"n/d":x.none?"None":usdM(x.v))}${x.why?`<span class="cbwhy">${esc(x.why)}</span>`:""}</td><td class="num${cls||""}">${s===null||x.none?"":esc(pct(s))}</td>`;
+  if(!rows.length) return `<p class="t2" id="cbmTabNone">Neither side's figures for ${vm.y} have premium in the lines in view${vm.B.why||vm.T.why?`, and ${esc([vm.B.why?`${B}: ${vm.B.why}`:"", vm.T.why?`target: ${vm.T.why}`:""].filter(Boolean).join("; "))}`:""}. That doesn't mean nothing is written there.</p>`;
+  return `<div class="tbl-wrap" data-keep id="cbmTabWrap"><table class="cbtbl" id="cbTab_map"><caption class="sr">Direct premiums written by state, ${vm.y}, the lines in view</caption><thead><tr>${th("name","State")}<th>Written by</th>${th("b",`${B} $M`,1)}<th class="num">Share</th>${th("t","Target $M",1)}<th class="num">Share</th>${th("p","Pro forma $M",1)}<th class="num">Share</th>${th("share","Target's share here",1)}</tr></thead>
+    <tbody>${rows.map(c=>`<tr data-s="${esc(c.code)}"><td>${c.onMap?`<button type="button" class="lnk" data-act="cbm-pin" data-s="${esc(c.code)}" aria-pressed="${ms.pin===c.code}">${esc(c.name)} (${esc(c.code)})</button>`:esc(c.name)}</td><td>${esc(who(c))}</td>${cell(c.b, c.bs, " cbfirst")}${cell(c.t, c.ts, " cbfirst")}${cell(c.p, c.ps, " cbfirst cbpf")}<td class="num">${esc(cbmShareText(c.share))}</td></tr>`).join("")}</tbody></table></div>`;
+}
+function cbMapHTML(m){
+  const run=S.cb.run; if(!run.sl) run.sl={base:{}, target:{}};
+  const ms=cbmState(), vm=CBM_VM=cbmModel(m), B=vm.B0;
+  const shows=[["pf","Pro forma"],["b",B],["t","Target"],["share","Target's share"],["who","Who writes it"]];
+  const exp=`<span class="inline"><button class="btn sm" data-act="export" data-what="cb" data-tbl="map" data-fmt="csv">Export CSV</button><button class="btn sm" data-act="export" data-what="cb" data-tbl="map" data-fmt="xlsx">Export XLSX</button></span>`;
+  let h=`<section class="blk cbmap" id="cbMap" aria-labelledby="cbMapH"><div class="blk-h"><div><h3 id="cbMapH">Direct premiums by state, on a map, ${vm.y}</h3></div>${exp}</div>
+    <div class="cbmctl"><div class="f"><span>Show</span><div class="seg cbmseg" role="group" aria-label="Show on the map">${shows.map(([k,l])=>`<button type="button" class="btn sm" data-act="cbm-show" data-v="${k}" aria-pressed="${vm.show===k}">${esc(l)}</button>`).join("")}</div></div>
+      <label class="f">Year <select id="cbm_year">${m.years.map(y=>`<option value="${y}" ${y===vm.y?"selected":""}>${y}</option>`).join("")}</select></label></div>`;
+  h+=cbmLinesHTML(vm);
+  if(vm.keys.length || vm.B.sl.rows || vm.T.sl.rows || run.sl.base[vm.y] || run.sl.target[vm.y]) h+=cbmSideNote("base", vm.y)+cbmSideNote("target", vm.y);
+  const missing=vm.keys.length ? ms.lines.filter(l=>{ const x=vm.lines.find(z=>z.k===l.k); return x && x.inBl && !x.inSl && [vm.B, vm.T].every(X=>X.sl.rows); }) : [];
+  if(missing.length) h+=`<p class="t2" id="cbmNotInSl">Not in either side's premiums by state and line for ${vm.y}: ${esc(andList(missing.map(l=>l.name), 6))}. The two figures may name lines differently.</p>`;
+  h+=`<div class="cbmgrid" id="cbmGrid"><div class="cbmwrap" id="cbmWrap">${cbmSvgHTML(vm)}</div>${cbmSmallHTML(vm)}<div class="cbmtip" id="cbmTip" aria-hidden="true" hidden></div></div>`;
+  h+=cbmLegendHTML(vm);
+  const off=[...vm.cells.values()].filter(c=>!c.onMap && ((c.b.v||0)!==0 || (c.t.v||0)!==0)).map(c=>c.name);
+  if(off.length) h+=`<p class="t2" id="cbmOffMap">In the table only, as the map has no shape for them: ${esc(andList(off, 8))}.</p>`;
+  for(const w of ["base","target"]){ const g=vm.gaps[w]; if(g.length) h+=`<p class="t2 cbmgap" id="cbmGap_${w}">${esc(`${w==="base"?B:"The target"}'s premiums by state and line for ${vm.y} don't add up to its premiums by state in ${andList(g.map(x=>`${x.st} (${usdM(x.sl)} against ${usdM(x.all)})`), 8)}. The map with all lines uses premiums by state; with lines chosen, premiums by state and line.`)}</p>`; }
+  h+=cbmPinHTML(vm)+cbmFacts(vm)+cbmTableHTML(vm);
+  h+=`<p class="t2">Shares are of each column's own total, under the lines in view (derived). "None" means that side's figures for ${vm.y} have no premium there in the lines in view; n/d means a side's figures are missing, and is never counted as zero.</p><p class="t2" id="cbmCost">${esc(CBM_COST)}</p></section>`;
+  return h;
+}
+/* The map's table for the export, with the year, the lines and what is shown stated in the file. */
+function cbmExport(){
+  const vm=CBM_VM, run=S.cb.run; if(!vm || !run) return null;
+  const B=vm.B0, n=x=>x.why?`n/d (${x.why})`:x.none?"":Math.round(x.v), s=v=>isNum(v)?Math.round(v*10)/10:"";
+  const who=c=>c.who==="both"?"Both":c.who==="base"?`${B} only`:c.who==="target"?"Target only":c.who===null?"n/d":"Neither";
+  const shown={pf:"Pro forma direct premiums written", b:`${B}'s direct premiums written`, t:"The target's direct premiums written", share:"The target's share of the pro forma", who:"Who writes it"}[vm.show];
+  const rows=cbmRows(vm).map(c=>[c.name, c.code, who(c), n(c.b), c.b.why||c.b.none?"":s(c.bs), n(c.t), c.t.why||c.t.none?"":s(c.ts), n(c.p), c.p.why?"":s(c.ps), c.share.why?"n/d":c.share.none?"":s(c.share.v)]);
+  const pad=k=>Array(k).fill("");
+  const about=[["Year", String(vm.y)], ["Lines", vm.keys.length?vm.shownLines.join("; "):"All lines"], ["From", vm.keys.length?"Premiums by state and line (dpw_by_state_line)":"Premiums by state (dpw_by_state)"], ["Shown on the map", shown],
+    ["Note", CB_WHAT], ["Base", `${B}: ${run.base.label} (${run.base.kind==="group"?"NAIC group":"NAIC"} ${run.base.codes.join(", ")})`], ["Target", `${run.target.label} (${run.target.kind==="group"?"NAIC group":"NAIC"} ${run.target.codes.join(", ")})`]];
+  return {name:`snl-combination-map-${TODAY()}`, sheet:"By state", cols:["State","Code","Written by",`${B} US dollars`,`${B} share %`,"Target US dollars","Target share %","Pro forma US dollars","Pro forma share %","Target's share of the state %"],
+    rows:[...rows, pad(10), ...about.map(x=>[...x, ...pad(8)])]};
+}
+/* ----- fetching premiums by state and line: one side, one year, that figure only ----- */
+async function cbmFetch(which, y){
+  const run=S.cb.run; if(!run || !isCorpDev() || !cbmFigOn()) return;
+  const sd=run[which], e={busy:true, res:null, err:null, stopped:false, ctl:bsControl()}; run.sl[which][y]=e;
+  pbStart(`cbm-${which}-${y}`); render();
+  const body={action:"query", kind:sd.kind, codes:[...sd.codes], fromYear:y, toYear:y, fields:[CBM_FIG]};   // this side alone: never anything about the other
+  const r=await statCarry(()=>callFn("snl-statutory", {...body}), statFigs, {ctl:e.ctl, onPart:(f, data)=>{ if(S.cb.run!==run || run.sl[which][y]!==e || !S.session) return; e.res=data; takeUsage(data); render(); }});
+  if(S.cb.run!==run || run.sl[which][y]!==e) return;
+  e.busy=false; e.ctl=null;
+  if(!S.session) return;
+  if(r.data){ e.res=r.stalled?{...r.data, stalled:r.stalled}:r.data; takeUsage(r.data); }
+  else if(r.err==="stopped") e.stopped=true;
+  else if(r.err!=="signin") e.err=r;
+  render();
+}
+/* Asks for what the lines in view need for the year shown, each side once a year (force: the lines of a pinned state). */
+function cbmEnsure(force){
+  const run=S.cb.run, vm=CBM_VM; if(!run || !run.sl || !vm || !cbmFigOn()) return;
+  if(!cbmState().lines.length && !force) return;
+  for(const w of ["base","target"]) if(!run.sl[w][vm.y]) cbmFetch(w, vm.y);
+}
+function cbmTipShow(el, ev){
+  const tip=document.getElementById("cbmTip"), grid=document.getElementById("cbmGrid"); if(!tip || !grid || !CBM_VM) return;
+  tip.innerHTML=cbmTipHTML(el.dataset.cbs); tip.hidden=false;
+  const G=grid.getBoundingClientRect(), r=el.getBoundingClientRect(), tw=tip.offsetWidth, th=tip.offsetHeight, mouse=ev&&isNum(ev.clientX);
+  const ax=mouse?ev.clientX:r.left+r.width/2, ay=mouse?ev.clientY:r.top+r.height/2;
+  let x=ax-G.left+14, y=ay-G.top+14;
+  if(x+tw>G.width) x=Math.max(0, ax-G.left-tw-14);
+  if(x+tw>G.width) x=Math.max(0, G.width-tw);
+  if(y+th>G.height) y=Math.max(0, ay-G.top-th-14);
+  tip.style.left=x+"px"; tip.style.top=y+"px";
+}
+function cbmTipHide(){ const tip=document.getElementById("cbmTip"); if(tip) tip.hidden=true; }
+document.addEventListener("click", e=>{
+  const t=e.target.closest&&e.target.closest("[data-act]"); if(!t || !/^cbm-/.test(t.dataset.act) || !isCorpDev() || !S.cb.run) return;
+  const ms=cbmState(), a=t.dataset.act;
+  switch(a){
+    case "cbm-show": ms.show=["pf","b","t","share","who"].includes(t.dataset.v)?t.dataset.v:"pf"; render(); break;
+    case "cbm-open": ms.open=!ms.open; render(); break;
+    case "cbm-line": { if(!cbmFigOn()) break; const k=t.dataset.k, i=ms.lines.findIndex(l=>l.k===k); if(i>=0) ms.lines.splice(i,1); else ms.lines.push({k, name:t.dataset.name||k}); render(); cbmEnsure(); break; }
+    case "cbm-clear": ms.lines=[]; ms.q=""; render(); document.getElementById("cbmPick")?.focus(); break;
+    case "cbm-pin": { const s=t.dataset.s; ms.pin=ms.pin===s?null:s; if(US_MAP[s]) ms.focus=s; render(); break; }
+    case "cbm-unpin": { const s=ms.pin; ms.pin=null; render(); document.getElementById("cbm_s_"+s)?.focus(); break; }
+    case "cbm-sort": { const k=t.dataset.k; ms.sort = ms.sort.k===k ? {k, d:-ms.sort.d} : {k, d:k==="name"?1:-1}; render(); break; }
+    case "cbm-fetch": cbmEnsure(true); break;
+    case "cbm-retry": { const w=t.dataset.w==="base"?"base":"target", y=+t.dataset.y; delete S.cb.run.sl[w][y]; cbmFetch(w, y); break; }
+    case "cbm-stop": { const x=S.cb.run.sl[t.dataset.w==="base"?"base":"target"][+t.dataset.y]; if(x && x.busy && x.ctl) x.ctl.stop(); break; }
+  }
+});
+document.addEventListener("change", e=>{
+  if(e.target.id!=="cbm_year" || !S.cb.run || !isCorpDev()) return;
+  cbmState().year=+e.target.value; render(); cbmEnsure();
+});
+// by touch there is no hover: a tap pins, so the panel isn't shown for the mouse events and focus a tap brings with it
+let CBM_TOUCH=0; const cbmTouched = () => Date.now()-CBM_TOUCH<1500;
+document.addEventListener("touchstart", ()=>{ CBM_TOUCH=Date.now(); cbmTipHide(); }, {passive:true});
+document.addEventListener("mouseover", e=>{ const el=e.target.closest&&e.target.closest("[data-cbs]"); if(el && !cbmTouched()) cbmTipShow(el, e); });
+document.addEventListener("mousemove", e=>{ const el=e.target.closest&&e.target.closest("[data-cbs]"); if(el && !cbmTouched()) cbmTipShow(el, e); });
+document.addEventListener("mouseout", e=>{ const to=e.relatedTarget; if(e.target.closest&&e.target.closest("[data-cbs]") && !(to&&to.closest&&to.closest("[data-cbs]"))) cbmTipHide(); });
+document.addEventListener("focusin", e=>{ const el=e.target.closest&&e.target.closest("[data-cbs]"); if(el){ if(!cbmTouched()) cbmTipShow(el, null); if(S.cb.map && US_MAP[el.dataset.cbs]) S.cb.map.focus=el.dataset.cbs; } });
+document.addEventListener("focusout", e=>{ if(e.target.closest&&e.target.closest("[data-cbs]")) cbmTipHide(); });
+document.addEventListener("keydown", e=>{
+  if(!e.target.closest || !S.cb.map || S.view!=="combination") return;
+  if(e.key==="Escape" && e.target.closest("#cbMap")){
+    if(!S.cb.map.pin){ cbmTipHide(); return; }
+    e.preventDefault(); const s=S.cb.map.pin; S.cb.map.pin=null; render(); document.getElementById("cbm_s_"+s)?.focus(); return;
+  }
+  const el=e.target.closest("#cbmSvg [data-cbs]"); if(!el) return;
+  const order=Object.keys(US_MAP).map(c=>document.getElementById("cbm_s_"+c)).filter(Boolean), i=order.indexOf(el);
+  let j=null;
+  if(e.key==="ArrowRight" || e.key==="ArrowDown") j=(i+1)%order.length;
+  else if(e.key==="ArrowLeft" || e.key==="ArrowUp") j=(i-1+order.length)%order.length;
+  else if(e.key==="Home") j=0; else if(e.key==="End") j=order.length-1;
+  if(j!==null){ e.preventDefault(); el.tabIndex=-1; order[j].tabIndex=0; order[j].focus(); return; }
+  if(e.key==="Enter" || e.key===" "){ e.preventDefault(); const s=el.dataset.cbs, ms=S.cb.map; ms.pin=ms.pin===s?null:s; ms.focus=s; render(); }
 });
 
 /* ---------- routing ---------- */

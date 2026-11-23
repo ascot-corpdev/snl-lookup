@@ -1,0 +1,13 @@
+{
+  "_about": "Made-up direct premiums written by state and line for tests/web/combomap.test.cjs, in $M (the test multiplies by a million). Keyed by NAIC code, then year: a list of [state, line, value]. For 2025 they add up, state by state, to the by-state figures and, line by line, to the by-line figures the test uses (combination_figures.json with Rhode Island added to the target). No real company, code or figure.",
+  "codes": {
+    "9001": {
+      "2025": [["TX", "Homeowners", 250], ["TX", "Commercial auto", 100], ["TX", "Inland marine", 50], ["FL", "Homeowners", 150], ["FL", "Commercial auto", 50], ["LA", "Homeowners", 100], ["OK", "Commercial auto", 80], ["AR", "Homeowners", 50], ["AR", "Inland marine", 20], ["MS", "Homeowners", 50], ["MS", "Commercial auto", 10], ["AL", "Inland marine", 50], ["NM", "Commercial auto", 10], ["NM", "Inland marine", 30]],
+      "2024": [["TX", "Homeowners", 300]]
+    },
+    "90107": {
+      "2025": [["FL", "Homeowners", 90], ["FL", "Farmowners", 60], ["GA", "Homeowners", 50], ["GA", "Farmowners", 50], ["RI", "Homeowners", 20]],
+      "2024": [["FL", "Homeowners", 120]]
+    }
+  }
+}
