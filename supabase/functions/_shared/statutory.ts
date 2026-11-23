@@ -68,12 +68,19 @@ export const STAT_FIELDS = [
   // By accident year: item is the accident year, with one set of rows for each statement year.
   { id: "ay_loss_ratio", label: "Net loss and DCC ratio by accident year", unit: "pct", by: "item" },
   { id: "ay_npe", label: "Net premiums earned by accident year", unit: "usd", by: "item" },
+  // Added for the Combination view's state map: direct premiums by state and line together, one row for each state and
+  // line. App-level name only: "not mapped" until the owner maps it. Asked for only by that map, one year at a time
+  // (MAP_ONLY_FIELDS), never by default, by a profile or by Claude.
+  { id: "dpw_by_state_line", label: "Direct premiums written by state and line", unit: "usd", by: "state_line" },
 ] as const;
 export type StatFieldId = typeof STAT_FIELDS[number]["id"];
 export const MAPPING_ID = "statutory_mapping";
 /** The fields a query gets when it names none: the original seven, which the Statutory view shows. The fields
     added for company profiles are there when asked for by name. */
 export const DEFAULT_STAT_FIELDS: StatFieldId[] = ["dpw_by_line", "npw_by_line", "dpw_by_state", "surplus", "loss_ratio", "loss_lae_ratio", "expense_ratio", "combined_ratio"];
+/** Figures asked for by name by one view only (the Combination view's state map), never by a profile or by Claude:
+    by state and line together they can run to many thousands of rows, so the map asks for one year at a time. */
+export const MAP_ONLY_FIELDS: StatFieldId[] = ["dpw_by_state_line"];
 
 /** How one app field maps to Snowflake. Column names are whatever Discover shows for the account.
     scale multiplies the stored value: 1000 when the view holds thousands of dollars, 100 when a ratio is held
@@ -280,6 +287,10 @@ export function mapProblem(id: StatFieldId, m: unknown): string | null {
   if (by === "line" && f.line === undefined) return "line must be a column name";
   if (by === "state" && f.state === undefined) return "state must be a column name";
   if (by === "item" && f.item === undefined) return "item must be a column name";
+  // UNCONFIRMED: whether S&P's views hold premiums by state and line together is not known. A figure by state and
+  // line only needs the mapping to name both columns; buildSql already selects LINE and STATE side by side.
+  if (by === "state_line" && f.state === undefined) return "state must be a column name (a figure by state and line needs both a state and a line column)";
+  if (by === "state_line" && f.line === undefined) return "line must be a column name (a figure by state and line needs both a state and a line column)";
   if (by !== "item" && f.tag !== undefined) return "tag is only for a figure by counterparty (one with an item column)";
   return shapeProblem(f);
 }
@@ -517,7 +528,7 @@ export async function naicCodesFor(sf: Snowflake | null, db: Db, database: strin
 }
 
 export type StatRow = { code: string; year: number; line: string | null; state: string | null; value: number | null; item?: string | null; tag?: string | null };
-export type StatField = { id: StatFieldId; label: string; unit: "usd" | "pct"; by: "year" | "line" | "state" | "item"; mapped: boolean; error: string | null; rows: StatRow[] };
+export type StatField = { id: StatFieldId; label: string; unit: "usd" | "pct"; by: "year" | "line" | "state" | "item" | "state_line"; mapped: boolean; error: string | null; rows: StatRow[] };
 export type StatResult = {
   kind: "company" | "group"; codes: string[]; fromYear: number; toYear: number;
   entities: { code: string; name: string | null }[]; fields: StatField[]; loaded: { view: string; at: string }[]; truncated: boolean; source: string;

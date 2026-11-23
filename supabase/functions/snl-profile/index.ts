@@ -32,7 +32,7 @@
 import { adminClient, type Env, type Json, readBody, sleep, type WhoIs, whoIs, withCors } from "../_shared/http.ts";
 import { type Db, supabaseDb } from "../_shared/db.ts";
 import { credsReady, Snowflake, snowflakeCreds, SnowflakeError } from "../_shared/snowflake.ts";
-import { fieldStatus, getMapping } from "../_shared/statutory.ts";
+import { fieldStatus, getMapping, MAP_ONLY_FIELDS } from "../_shared/statutory.ts";
 import { companiesMapped } from "../_shared/statutory.ts";
 import { type Gate, makeGate, planLimits, Spgmi, SpgmiError } from "../_shared/spgmi.ts";
 import { answerLines, buildFacts, clean, DRAFT_TIME_MS, draftText, NOTES, plainText, PROFILE_CALL_MS, PROFILE_MAX_SP_REQUESTS, PROFILE_QUERY_YEARS, sampleFacts } from "../_shared/profile.ts";
@@ -113,7 +113,7 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
   const mapping = await getMapping(db);
 
   if (body.action === "status") {
-    const fields = fieldStatus(mapping);
+    const fields = fieldStatus(mapping).filter((f) => !MAP_ONLY_FIELDS.includes(f.id));   // the figures a profile asks for
     return json(200, { statutory: { configured: sfConfigured, mapped: fields.some((f) => f.mapped), fields: fields.map((f) => ({ id: f.id, label: f.label, mapped: f.mapped })), ...(companiesMapped(mapping) ? { codes: true } : {}) }, claude: { configured: claude }, filings: { configured: spConfigured } });
   }
   if (body.action === "filings_facts" || body.action === "filings_draft") return await serveFilings(body, { deps, json, db, who, clock, start, claude, spCreds, spConfigured });

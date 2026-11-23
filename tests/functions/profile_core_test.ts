@@ -41,7 +41,7 @@ const facts = (rows: Rows, over: Partial<typeof O> = {}, filings: P.FactsFilings
   const gap = facts({ surplus: yearly({ 2021: 11, 2023: 13, 2025: 15 }), net_income: yearly({ 2022: 2 }) });
   ok("a year counts when any field has a figure for it", same(gap.years, [2021, 2022, 2023, 2024, 2025].filter((y) => y !== 2024)) && same(gap.series.surplus, [11, null, 13, 15]), gap);
   const none = facts({});
-  ok("with no figures at all there are no years and no series, and every field is listed as missing", same(none.years, []) && same(none.series, {}) && none.missing.length === STAT_FIELDS.length && same(none.derived, {}));
+  ok("with no figures at all there are no years and no series, and every field is listed as missing", same(none.years, []) && same(none.series, {}) && none.missing.length === P.PROFILE_FIELDS.length && same(none.derived, {}));
 }
 
 // ---------- series and missing ----------
