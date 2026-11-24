@@ -10,7 +10,7 @@
 import { DatabaseSync } from "node:sqlite";
 const statutory = await import(new URL("../../supabase/functions/snl-statutory/index.ts", import.meta.url).href);
 import { buildScreenSql, type Mapping, type ScreenRequest } from "../../supabase/functions/_shared/statutory.ts";
-import { parseScreen, SCREEN_ODD_FLOOR, SCREEN_ODD_SHARE, SCREEN_TIMEOUT, SCREEN_WAIT_MS } from "../../supabase/functions/_shared/screen.ts";
+import { parseScreen, SCREEN_ODD_FLOOR, SCREEN_ODD_SHARE, SCREEN_FIRST_WAIT_MS, SCREEN_TIMEOUT, SCREEN_TIMEOUT_S } from "../../supabase/functions/_shared/screen.ts";
 import { checks, corpdev, env, fakeClock, memoryDb, reader, req } from "./helpers/fakes.ts";
 import { fakeSnowflake, type SfReply } from "./helpers/snowflake.ts";
 
@@ -205,7 +205,7 @@ const codes = (b: any) => (b.rows ?? []).map((r: any) => r.code);
   const s = w.sf.statements[0];
   ok("one statement, nothing after it", w.sf.statements.length === 1 && !s.statement.includes(";") && /^WITH /.test(s.statement));
   ok("the premium bounds are bound in the figure's own units ($50M and $300M over a scale of 1000)", s.bindings.some((b: any) => b.type === "REAL" && b.value === "50000") && s.bindings.some((b: any) => b.type === "REAL" && b.value === "300000"), s.bindings);
-  ok("it waits as long as the function's limits allow (Snowflake's statement timeout of 90 seconds, 100 seconds in all)", s.body.timeout === 90 && SCREEN_WAIT_MS === 100_000);
+  ok("it is submitted on Snowflake's asynchronous route, with Snowflake's own timeout at five minutes", s.body.timeout === 300 && SCREEN_TIMEOUT_S === 300 && w.sf.log.some((c) => c.method === "POST" && c.path === "/api/v2/statements" && c.query.async === "true") && SCREEN_FIRST_WAIT_MS === 20_000);
 }
 
 // ---------- states only: premiums by state over those states ----------
@@ -232,15 +232,19 @@ const codes = (b: any) => (b.rows ?? []).map((r: any) => r.code);
   ok("the owner's example: Florida homeowners $50M to $300M, combined ratio at most 100", same(b.body.rows.map((x: any) => [x.code, x.premium, x.combined_ratio]), [["92001", 250e6, 98], ["91001", 120e6, 95]]), b.body.rows);
   ok("a company with no combined ratio (null) is left out by a filter on it; one above 100 too", !codes(b.body).includes("93001") && !codes(b.body).includes("91002"));
   ok("focus with a state and a line takes its total from premiums by line, and the note says so", b.body.notes.includes("Focus is premium in view as a share of the company's total direct premiums written in 2025, from premiums by line over every line."), b.body.notes);
-  const sel = w.sf.statements[1].statement, pRead = sel.slice(sel.indexOf("P_ROWS AS ("), sel.indexOf("P_KEYS AS ("));
+  const sel = w.sf.statements[1].statement, pRead = sel.slice(sel.indexOf("P_ROWS AS ("), sel.indexOf("P_K AS ("));
   ok("the premium read itself has the state, the line and the year in its WHERE, all bound", /WHERE "P".NAIC_CD IS NOT NULL AND "P".STMT_YEAR IN \(\?\) AND "P".ST IN \(\?\) AND "P".LOB IN \(\?\)/.test(pRead) && !/BETWEEN/.test(pRead), pRead);
-  ok("the total for focus is its own small read of premiums by line for the year", /T_ROWS AS \(SELECT NAIC_CD AS CODE, MAX\(CO_NAME\) OVER \(PARTITION BY NAIC_CD\) AS NAME, STMT_YEAR AS YR, LOB AS LINE, NULL AS STATE, DPW_000 AS VAL FROM MI_XPRESSCLOUD.XPRESSFEED.IR_PREM_LINE WHERE NAIC_CD IS NOT NULL AND STMT_YEAR IN \(\?\)\)/.test(sel), sel.slice(sel.indexOf("T_ROWS"), sel.indexOf("T_KEYS")));
+  ok("the total for focus is its own small read of premiums by line for the year", /T_ROWS AS \(SELECT NAIC_CD AS CODE, NULL AS NAME, STMT_YEAR AS YR, LOB AS LINE, NULL AS STATE, DPW_000 AS VAL FROM MI_XPRESSCLOUD.XPRESSFEED.IR_PREM_LINE WHERE NAIC_CD IS NOT NULL AND STMT_YEAR IN \(\?\) AND NAIC_CD IN \(SELECT CODE FROM P_IN\)\)/.test(sel), sel.slice(sel.indexOf("T_ROWS"), sel.indexOf("T_KEYS")));
+  ok("no window function anywhere: the name comes from the premium read alone", !/ OVER \(/.test(sel) && /P_ROWS AS \(SELECT DISTINCT "P".NAIC_CD AS CODE, NULL AS NAME/.test(sel) && /F0_ROWS AS \(SELECT NAIC_CD AS CODE, NULL AS NAME/.test(sel));
+  ok("P_IN holds the bounds that depend on premium alone, and every other read is limited to its companies", /P_IN AS \(SELECT CODE, NAME, V FROM P WHERE V IS NOT NULL AND N <= 1 AND V >= \? AND V <= \?\)/.test(sel)
+    && ["T_ROWS", "F0_ROWS", "F1_ROWS", "F2_ROWS", "G_ROWS"].every((c) => { const at = sel.indexOf(`${c} AS (`); return at > sel.indexOf("P_IN AS (") && sel.slice(at).split(/\), [A-Z0-9_]+ AS \(/)[0].includes(" IN (SELECT CODE FROM P_IN)"); })
+    && /ALL_ROWS AS \(SELECT .* FROM P_IN AS P /.test(sel) && !/HITS AS \(SELECT \* FROM ALL_ROWS WHERE PREMIUM/.test(sel), sel);
   ok("the distinct mapping is de-duplicated before it is summed: 91001's rows, repeated by the join, count once", b.body.rows.find((x: any) => x.code === "91001").premium === 120e6);
   ok("focus for both: Florida homeowners over everything by state and line", b.body.rows.find((x: any) => x.code === "91001").focus === 60 && b.body.rows.find((x: any) => x.code === "92001").focus === 25, b.body.rows);
   const s = w.sf.statements[1];
   ok("the line and the bounds are bindings, never text in the statement", !s.statement.includes("Homeowners") && !s.statement.includes("50") && s.bindings.some((x: any) => x.value === "Homeowners") && s.bindings.some((x: any) => x.value === "300000" && x.type === "REAL"), s.statement);
   ok("the ratio bound is divided by the ratio's scale (100% is 1 as stored)", s.bindings.some((x: any) => x.type === "REAL" && x.value === "1"), s.bindings);
-  ok("DISTINCT sits inside the premium rows, then on (code, year, line, state, value) without the name, before the SUM", /P_ROWS AS \(SELECT DISTINCT /.test(s.statement) && /P_KEYS AS \(SELECT DISTINCT CODE, YR, LINE, STATE, VAL FROM P_ROWS\)/.test(s.statement) && s.statement.indexOf("P_KEYS AS") < s.statement.indexOf("SUM(CASE"));
+  ok("DISTINCT sits inside the premium rows, then on (code, year, line, state, value) without the name, before the SUM", /P_ROWS AS \(SELECT DISTINCT /.test(s.statement) && /P_K AS \(SELECT CODE, YR, LINE, STATE, MAX\(NAME\) AS NAME, MAX\(VAL\) AS VAL, COUNT\(DISTINCT VAL\) AS N FROM P_ROWS GROUP BY CODE, YR, LINE, STATE\)/.test(s.statement) && s.statement.indexOf("P_K AS") < s.statement.indexOf("SUM(CASE"));
   ok("the group-only where of the combined ratio is left out; the company one is used", s.bindings.filter((x: any) => x.value === "C").length === 1 && !s.bindings.some((x: any) => x.value === "G"));
   const f = await w.call(screen({ states: ["FL"], lines: ["Homeowners"], filters: [{ field: "focus", min: 50 }] }));
   ok("a focus filter keeps companies whose chosen premium is at least that share of all they write", same(codes(f.body), ["91001", "93001", "91002"]), f.body.rows);
@@ -332,7 +336,7 @@ const codes = (b: any) => (b.rows ?? []).map((r: any) => r.code);
   const all = await w.call(screen());
   ok("rows with no company code never reach a sum or the result", all.status === 200 && all.body.rows.every((x: any) => x.code) && all.body.total === 5 && all.body.rows[0].code === "92001" && all.body.rows[0].premium === 1000e6, all.body.rows);
   ok("a company whose name is spelled two ways is summed once, under one name", all.body.rows.find((x: any) => x.code === "91002").premium === 60e6 && all.body.rows.filter((x: any) => x.code === "91002").length === 1, all.body.rows);
-  ok("every figure's read leaves out rows with no code, the group look-up's too", (w.sf.statements[0].statement.match(/IS NOT NULL AND/g) ?? []).length >= 4 && /G_ROWS AS \(SELECT DISTINCT .* WHERE NAIC_CD IS NOT NULL\)/.test(w.sf.statements[0].statement));
+  ok("every figure's read leaves out rows with no code, the group look-up's too", (w.sf.statements[0].statement.match(/IS NOT NULL AND/g) ?? []).length >= 4 && /G_ROWS AS \(SELECT DISTINCT .* WHERE NAIC_CD IS NOT NULL AND NAIC_CD IN \(SELECT CODE FROM P_IN\)\)/.test(w.sf.statements[0].statement));
   const fl = await w.call(screen({ states: ["FL"], lines: ["Homeowners"] }));
   ok("a company whose premium rows disagree is left out, and the others are not held up", fl.status === 200 && !codes(fl.body).includes("95001") && same(codes(fl.body), ["92001", "91001", "93001", "91002"]), fl.body.rows);
   ok("the code-less Florida row is not added to anyone, and 91002's second spelling counts once", fl.body.rows.find((x: any) => x.code === "91002").premium === 60e6 && fl.body.rows.find((x: any) => x.code === "92001").premium === 250e6);
@@ -356,25 +360,58 @@ const codes = (b: any) => (b.rows ?? []).map((r: any) => r.code);
   const latest: Mapping = { fields: { ...MAPPING.fields, dpw_by_state: { ...MAPPING.fields.dpw_by_state!, latest: "SEQ_NO" } } };
   const s = buildScreenSql("MI_XPRESSCLOUD", "XPRESSFEED", latest, R);
   ok("a latest column keeps only the latest row per company, year and state, inside the premium rows", !("problem" in s) && /P_ROWS AS \(SELECT .* QUALIFY ROW_NUMBER\(\) OVER \(PARTITION BY NAIC_CD, YEAR|P_ROWS AS \(SELECT .* QUALIFY ROW_NUMBER\(\) OVER \(PARTITION BY NAIC_CD, STMT_YEAR, ST ORDER BY SEQ_NO DESC\) = 1\)/.test((s as any).statement), (s as any).statement);
-  ok("no company code is written into the statement: it reads every company", !("problem" in s) && !/NAIC_CD IN \(/.test((s as any).statement));
+  ok("no company code is written into the statement: it reads every company", !("problem" in s) && !/NAIC_CD IN \(\?/.test((s as any).statement));
   const bad = buildScreenSql("MI-X", "XPRESSFEED", MAPPING, R);
   ok("a bad database name is refused", "problem" in bad && bad.code === "sql");
   const yd = await world().call(screen({ filters: [{ field: "gpw", min: 100 }] }));
   ok("a figure whose year is a date (yearIsDate) reads the right year", same(codes(yd.body), ["92001", "91001"]) && yd.body.rows[1].gpw === 210e6, yd.body.rows);
 }
 
-// ---------- the wait, the timeout, and nothing saved ----------
+// ---------- submit, then read by handle: a screen can run longer than one function call ----------
 {
   const w = world();
   const storeBefore = JSON.stringify([...w.db.store.entries()]), settingsBefore = JSON.stringify([...w.db.settings.entries()]);
-  w.sf.slowNext = 100;   // still running after 100 seconds of checking every 2 seconds
-  const r = await w.call(screen({ states: ["FL"], lines: ["Homeowners"], filters: [{ field: "premium", min: 50 }] }));
-  ok("a screen that doesn't finish in time says so plainly, and gives no list", r.status === 504 && r.body.error === "timeout" && r.body.message === SCREEN_TIMEOUT && !("rows" in r.body), r.body);
-  ok("the statement was given up on and cancelled after about 100 seconds", w.sf.cancelled.length === 1 && w.clock.now - Date.parse("2026-11-13T12:00:00Z") >= 100_000);
-  const ok2 = await w.call(screen({ states: ["FL"], lines: ["Homeowners"], filters: [{ field: "premium", min: 50, max: 300 }, { field: "combined_ratio", max: 100 }] }));
-  ok("a screen that takes 25 seconds still answers", ok2.status === 200, ok2.body);
-  ok("nothing is saved: the store and the settings are as they were", JSON.stringify([...w.db.store.entries()]) === storeBefore && JSON.stringify([...w.db.settings.entries()]) === settingsBefore);
-  ok("the log says only that a screen ran, how many filters, how long and how many rows", w.logs.length === 1 && /^snl-statutory: a screen ran \(2 filters, \d+ ms, 2 rows\)$/.test(w.logs[0]), w.logs);
+  const Q = screen({ states: ["FL"], lines: ["Homeowners"], filters: [{ field: "premium", min: 50, max: 300 }, { field: "combined_ratio", max: 100 }] });
+  const first = await w.call(Q);
+  ok("a screen that finishes within the first call answers at once", first.status === 200 && same(codes(first.body), ["92001", "91001"]) && !("running" in first.body), first.body);
+  w.sf.slowNext = 11;   // finishes just after the first call's 20 seconds
+  const t0 = w.clock.now;
+  const a1 = await w.call(Q);
+  ok("still running after about 20 seconds: the call says so, with the handle, and leaves the statement running", a1.status === 200 && a1.body.running === true && /^[0-9a-f-]{36}$/.test(a1.body.handle) && a1.body.waitedMs >= 18_000 && a1.body.waitedMs <= 20_000 && w.sf.cancelled.length === 0 && !("rows" in a1.body), a1.body);
+  ok("the first call waited about 20 seconds, no more", w.clock.now - t0 <= 20_000);
+  const posts = () => w.sf.log.filter((c) => c.method === "POST" && c.path === "/api/v2/statements").length, before = posts();
+  const a2 = await w.call({ ...Q, handle: a1.body.handle });
+  ok("asked again with the handle, the finished screen answers as usual", a2.status === 200 && same(codes(a2.body), ["92001", "91001"]) && a2.body.total === 2, a2.body);
+  ok("asking again never resubmits the statement", posts() === before);
+  w.sf.slowNext = 12;
+  const b1 = await w.call(Q), b2 = await w.call({ ...Q, handle: b1.body.handle }), b3 = await w.call({ ...Q, handle: b1.body.handle });
+  ok("one that takes longer: running on the first and second calls, finished on the third", b1.body.running === true && b2.status === 200 && b2.body.running === true && b2.body.handle === b1.body.handle && b3.status === 200 && same(codes(b3.body), ["92001", "91001"]), [b1.body, b2.body]);
+  const bad = await w.call({ ...Q, handle: "01b0c0de; DROP TABLE x" });
+  ok("a handle that isn't the shape Snowflake gives is refused before it is used", bad.status === 400 && bad.body.error === "bad_handle" && /reference isn't one Snowflake gives/.test(bad.body.message));
+  const n = w.sf.log.length, bad2 = await w.call({ ...Q, handle: 42 });
+  ok("a handle that isn't text is refused too, and nothing is asked of Snowflake", bad2.status === 400 && bad2.body.error === "bad_handle" && w.sf.log.length === n);
+  const lines = await w.call({ action: "screen-lines", year: 2025 });
+  const linesHandle = w.sf.statements.length.toString().padStart(12, "0");
+  const other = await w.call({ ...Q, handle: `01b0c0de-0000-4000-8000-${linesHandle}` });
+  ok("a handle whose result has other columns (another statement's) is refused, and nothing of it is shown", lines.status === 200 && other.status === 400 && other.body.error === "handle" && other.body.message === "That screen can't be read: the result under its reference isn't this screen's. Run the screen again." && !("rows" in other.body), other.body);
+  const grown = await w.call({ ...Q, growth: { years: 3, min: 0 }, handle: a1.body.handle });
+  ok("so is this screen's handle read for a different screen (its columns differ)", grown.status === 400 && grown.body.error === "handle", grown.body);
+  const gone = await w.call({ ...Q, handle: "01b0c0de-0000-4000-8000-0000000009ff" });
+  ok("a handle Snowflake doesn't know: the screen is no longer running", gone.status === 410 && gone.body.error === "gone" && gone.body.message === "The screen is no longer running. Run it again.", gone.body);
+  w.sf.slowNext = 100;
+  const c1 = await w.call(Q);
+  const cx = await w.call({ action: "screen-cancel", handle: c1.body.handle });
+  ok("screen-cancel stops a running screen on Snowflake", cx.status === 200 && cx.body.cancelled === true && w.sf.cancelled.includes(c1.body.handle), cx.body);
+  ok("screen-cancel takes only a handle", (await w.call({ action: "screen-cancel", handle: c1.body.handle, year: 2025 })).status === 400 && (await w.call({ action: "screen-cancel" })).status === 400);
+  ok("screen-cancel refuses a bad handle", (await w.call({ action: "screen-cancel", handle: "x" })).body.error === "bad_handle");
+  w.sf.failNext.push({ status: 408, body: { message: "Statement reached its statement or warehouse timeout of 300 second(s) and was canceled." } });
+  const late = await w.call({ ...Q, handle: c1.body.handle });
+  ok("a screen that reaches Snowflake's five-minute timeout says so plainly, and gives no list", late.status === 504 && late.body.error === "timeout" && late.body.message === SCREEN_TIMEOUT && !("rows" in late.body), late.body);
+  const calls = w.sf.log.length;
+  const roles = [await w.call({ ...Q, handle: c1.body.handle }, { whoIs: reader }), await w.call({ action: "screen-cancel", handle: c1.body.handle }, { whoIs: reader }), await w.call({ ...Q, handle: "x" }, { whoIs: reader })];
+  ok("every screen call is Corp Dev only: asking again, cancelling, even with a bad handle", roles.every((x) => x.status === 403 && x.body.message === "Only Corp Dev logins can run the Screener.") && w.sf.log.length === calls, roles.map((x) => x.status));
+  ok("nothing is saved across any of these calls: the store and the settings are as they were", JSON.stringify([...w.db.store.entries()]) === storeBefore && JSON.stringify([...w.db.settings.entries()]) === settingsBefore);
+  ok("the log says only that a screen ran, how many filters, how long and how many rows", w.logs.length === 3 && w.logs.every((l) => /^snl-statutory: a screen ran \(2 filters, \d+ ms, 2 rows\)$/.test(l)), w.logs);
   ok("no criteria or company in any log line", !w.logs.some((l) => /FL|Homeowners|Calloway|Tarrow|300|combined/i.test(l)));
 }
 

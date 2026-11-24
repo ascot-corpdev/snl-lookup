@@ -160,7 +160,7 @@ const J200=o=>({status:200, body:o});
   // ===== running, Stop, took too long, failed, can't run, nothing matched =====
   t=await open({delay:b=>b.action==="screen"?1500:0}); p=t.p;
   await p.click("#scGo"); await p.waitForTimeout(300);
-  ok("while running: the read-back, up to a minute, a bar and Stop", (await t.txt("#scBusy")).startsWith("Running the screen across every company… A screen can take up to a minute.") && await p.isVisible('#scBusy [data-act="sc-stop"]') && (await t.txt("#scGo"))==="Running…");
+  ok("while running: how long so far, that it can take a minute or two, a bar and Stop", (await t.txt("#scBusy")).startsWith("Running for 0 seconds. A screen reads every company, so it can take a minute or two.") && await p.isVisible('#scBusy [data-act="sc-stop"]') && (await t.txt("#scGo"))==="Running…");
   await p.click('#scBusy [data-act="sc-stop"]'); await p.waitForTimeout(100);
   ok("Stop: nothing is shown from it, and it can run again", (await t.txt("#scStopped"))==="You stopped the screen before it came back, so nothing is shown from it.Run it again");
   await p.waitForTimeout(1600);
@@ -184,6 +184,66 @@ const J200=o=>({status:200, body:o});
   await t.go();
   ok("nothing matched is never 'no such company'", (await t.txt("#scNone"))==="S&P returned no company for this screen in 2025. That doesn't mean no such company exists. Loosen a filter, choose fewer, or check that 2025 has been filed: statements for a year come in during the spring after it.", await t.txt("#scNone"));
   ok("and the notes still show", await p.isVisible("#scNotes"));
+  await t.ctx.close();
+
+  // ===== a screen that runs longer than one call: asked again with its handle until it is done =====
+  const H="01b0c0de-0000-4000-8000-000000000007", RUNNING=()=>J200({running:true, handle:H, waitedMs:20000});
+  const T0=Date.parse("2026-11-13T12:00:00Z");
+  let polls=0;
+  t=await open({screen:b=>b.handle ? (++polls<2 ? RUNNING() : J200(copy(SC.answer))) : RUNNING()}); p=t.p;
+  await t.until(async()=>(await p.$$('[data-sc-pick="lines"]')).length===3);
+  await t.pick("states","FL"); await t.pick("lines","Homeowners"); await t.addFilter("premium", 50, 300);
+  await p.click("#scGo"); await t.until(async()=>t.screens().length===1); await p.waitForTimeout(150);
+  ok("still running after the first call: Running, with Stop, and no list", (await t.txt("#scElapsed"))==="Running for 0 seconds. A screen reads every company, so it can take a minute or two." && !(await p.$("#scTable")) && await p.isVisible('#scBusy [data-act="sc-stop"]'));
+  await p.clock.setFixedTime(new Date(T0+40000)); await p.waitForTimeout(1200);
+  ok("the time so far counts up while it runs", (await t.txt("#scElapsed"))==="Running for 40 seconds. A screen reads every company, so it can take a minute or two.", await t.txt("#scElapsed"));
+  await t.until(async()=>t.screens().length===2, 6000);
+  ok("a few seconds later the page asks again: the same request, plus the handle", same(t.screens()[1], {...t.screens()[0], handle:H}), t.screens()[1]);
+  ok("still running on the second call: still no list", !(await p.$("#scTable")) && await p.isVisible("#scBusy"));
+  await t.until(async()=>!!(await p.$("#scTable")), 8000);
+  ok("finished on the third call: the list, as usual", t.screens().length===3 && same(await t.names(), ["Tarrow Mutual Insurance Co","Calloway Insurance Co","Nonesuch Casualty Co"]));
+  ok("nothing was cancelled, and the handle is kept nowhere in browser storage", !t.calls.some(c=>c.body.action==="screen-cancel") && await p.evaluate(h=>!JSON.stringify({...localStorage}).includes(h) && !JSON.stringify({...sessionStorage}).includes(h), H));
+  await t.ctx.close();
+  // Stop while it runs: cancelled on Snowflake, nothing shown
+  t=await open({screen:RUNNING}); p=t.p;
+  await p.click("#scGo"); await t.until(async()=>t.screens().length===1); await p.waitForTimeout(150);
+  await p.click('#scBusy [data-act="sc-stop"]'); await t.until(async()=>t.calls.some(c=>c.body.action==="screen-cancel"));
+  ok("Stop cancels the screen on Snowflake, by its handle", same(t.calls.filter(c=>c.body.action==="screen-cancel").map(c=>c.body), [{action:"screen-cancel", handle:H}]) && !!(await p.$("#scStopped")));
+  await p.waitForTimeout(3500);
+  ok("and the page stops asking", t.screens().length===1);
+  await t.ctx.close();
+  // Stop before the first call has answered: cancelled as soon as the handle arrives
+  t=await open({screen:RUNNING, delay:b=>b.action==="screen"?1200:0}); p=t.p;
+  await p.click("#scGo"); await p.waitForTimeout(300); await p.click('#scBusy [data-act="sc-stop"]');
+  await t.until(async()=>t.calls.some(c=>c.body.action==="screen-cancel"), 4000);
+  ok("stopped before the handle was known: cancelled once it arrives", same(t.calls.filter(c=>c.body.action==="screen-cancel").map(c=>c.body.handle), [H]) && !!(await p.$("#scStopped")));
+  await t.ctx.close();
+  // the five-minute limit
+  t=await open({screen:RUNNING}); p=t.p;
+  await p.click("#scGo"); await t.until(async()=>t.screens().length===1); await p.waitForTimeout(150);
+  await p.clock.setFixedTime(new Date(T0+5*60000+1000));
+  await t.until(async()=>t.calls.some(c=>c.body.action==="screen-cancel"), 6000);
+  ok("past five minutes the page cancels it and says it took too long", (await t.txt("#scTimeout")).startsWith("The screen took too long. The screen didn't finish in five minutes, so it was stopped. Narrow it (add a state or a line) and run it again.") && t.screens().length===1, await t.txt("#scTimeout"));
+  await p.waitForTimeout(3500);
+  ok("and asks no more", t.screens().length===1);
+  await t.ctx.close();
+  // leaving the view
+  t=await open({screen:RUNNING}); p=t.p;
+  await p.click("#scGo"); await t.until(async()=>t.screens().length===1); await p.waitForTimeout(150);
+  await p.evaluate(()=>{ location.hash="#statutory"; }); await t.until(async()=>t.calls.some(c=>c.body.action==="screen-cancel"));
+  await p.waitForTimeout(3500);
+  ok("leaving the Screener cancels the screen and stops asking", t.calls.filter(c=>c.body.action==="screen-cancel").length===1 && t.screens().length===1);
+  await p.evaluate(()=>{ location.hash="#screener"; }); await p.waitForTimeout(300);
+  ok("coming back, the page says why nothing is shown", (await t.txt("#scStopped")).startsWith("The screen was stopped when you left the Screener, so nothing is shown from it."));
+  await t.ctx.close();
+  // a handle Snowflake no longer knows
+  t=await open({screen:b=>b.handle ? {status:410, body:{error:"gone", message:"The screen is no longer running. Run it again."}} : RUNNING()}); p=t.p;
+  await p.click("#scGo"); await t.until(async()=>!!(await p.$("#scGone")), 7000);
+  ok("a screen Snowflake no longer knows: plain words and Run it again", (await t.txt("#scGone"))==="The screen is no longer running. Run it again.Run it again", await t.txt("#scGone"));
+  // signing out cancels
+  await p.click("#scGo"); await t.until(async()=>t.screens().length===3); await p.waitForTimeout(150);
+  await p.evaluate(()=>signOut()); await p.waitForTimeout(300);
+  ok("signing out cancels a running screen first", t.calls.some(c=>c.body.action==="screen-cancel" && c.body.handle===H));
   await t.ctx.close();
 
   // ===== the line names fail, or aren't mapped: the rest of the form still works =====

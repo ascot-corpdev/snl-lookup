@@ -340,12 +340,15 @@ export function buildSql(database: string, schema: string, m: FieldMap, q: StatQ
 
 /** What a screen narrows one figure's read to (figureSelect with codes null): exactly these years, and the chosen
     states (with the mapping's stateStrip put back) and lines, as bindings on the mapping's own columns. */
-type ScreenRead = { years: number[]; states?: string[]; lines?: string[] };
+type ScreenRead = { years: number[]; states?: string[]; lines?: string[];
+  /** "plain": the name column as it is (with sum, its MAX, so it isn't grouped on); "none": no name is read. */
+  name: "plain" | "none";
+  /** A CTE whose CODE column limits the companies read: the mapping's company column IN (SELECT CODE FROM it). */
+  within?: string };
 /** buildSql's SELECT for one figure, without its ORDER BY and LIMIT. codes null leaves out the condition on the
     entity's code, so every company (or group) with rows in those years comes back: the Screener reads it that way,
-    with a ScreenRead. Then rows with no code are left out, and the name is the same on every row of a code (the
-    largest, over the rows read), so a company whose name is spelled two ways is never counted twice by distinct,
-    sum or latest. */
+    with a ScreenRead. Then rows with no code are left out, and the name never decides which rows latest keeps or
+    what a sum is grouped on (the screen itself reduces rows to distinct code, year, line, state and value). */
 function figureSelect(database: string, schema: string, m: FieldMap, kind: Kind, codes: string[] | null, fromYear: number, toYear: number, scr?: ScreenRead): { statement: string; bindings: Binding[] } | null {
   const q = { kind, codes: codes ?? [], fromYear, toYear };
   const entityRef = q.kind === "group" ? m.entity?.group : m.entity?.company;
@@ -364,7 +367,7 @@ function figureSelect(database: string, schema: string, m: FieldMap, kind: Kind,
   const adds = [m.value, ...(m.plus ?? [])].map(c);
   const value = adds.length === 1 ? adds[0] : `CASE WHEN ${adds.map((a) => `${a} IS NULL`).join(" AND ")} THEN NULL ELSE ${adds.map((a) => `COALESCE(${a}, 0)`).join(" + ")} END`;
   // in a screen the name takes no part in what makes a row distinct, in the grouping or in latest
-  const nameCol = name === null ? "NULL" : scr ? `MAX(${m.sum ? `MAX(${name})` : name}) OVER (PARTITION BY ${entityCol})` : name;
+  const nameCol = name === null || scr?.name === "none" ? "NULL" : scr && m.sum ? `MAX(${name})` : name;
   const cols = [`${m.distinct ? "DISTINCT " : ""}${entityCol} AS CODE`, `${nameCol} AS NAME`, `${year} AS YR`, `${line ?? "NULL"} AS LINE`, `${state ?? "NULL"} AS STATE`, `${m.sum ? `SUM(${value})` : value} AS VAL`];
   if (item !== null) cols.push(`${item} AS ITEM`);   // only fields by counterparty map an item column
   const tag = item !== null && m.tag !== undefined ? c(m.tag) : null;
@@ -374,7 +377,7 @@ function figureSelect(database: string, schema: string, m: FieldMap, kind: Kind,
   const bindings: Binding[] = q.codes.map((code) => ({ type: "TEXT", value: code }));
   let where: string;
   if (scr && codes === null) {
-    where = `${entityCol} IS NOT NULL AND ${year} IN (${scr.years.map(() => "?").join(", ")})`;
+    where = `${entityCol} IS NOT NULL AND ${year} IN (${scr.years.map(() => "?").join(", ")})${scr.within ? ` AND ${entityCol} IN (SELECT CODE FROM ${scr.within})` : ""}`;
     bindings.push(...scr.years.map((y) => ({ type: "FIXED" as const, value: String(y) })));
     if (scr.states?.length && state !== null) { where += ` AND ${state} IN (${scr.states.map(() => "?").join(", ")})`; bindings.push(...scr.states.map((v) => ({ type: "TEXT" as const, value: (m.stateStrip ?? "") + v }))); }
     if (scr.lines?.length && line !== null) { where += ` AND ${line} IN (${scr.lines.map(() => "?").join(", ")})`; bindings.push(...scr.lines.map((v) => ({ type: "TEXT" as const, value: v }))); }
@@ -434,7 +437,9 @@ export type ScreenSql = { statement: string; bindings: Binding[]; premium: Premi
       where one is expected: for premium in view (ODD_P, those companies are left out) and each yearly figure (n/d). */
   checks: { col: string; id: StatFieldId }[];
   /** Figures shown on every row when mapped, left out because their mapping can't be screened. */
-  left: { id: StatFieldId; why: string }[] };
+  left: { id: StatFieldId; why: string }[];
+  /** The statement's result columns, in order: a result read by handle must have exactly these. */
+  resultColumns: string[] };
 export type ScreenRefusal = { problem: string; code: "not_mapped" | "fans_out" | "group" | "sql"; figure?: StatFieldId };
 
 const labelOf = (id: StatFieldId) => STAT_FIELDS.find((f) => f.id === id)!.label;
@@ -458,20 +463,22 @@ export function screenFigureProblem(id: StatFieldId, m: FieldMap | undefined): S
   return null;
 }
 
-/** UNCONFIRMED until it runs on S&P's views: turns the saved mapping and a checked screen into ONE read-only
-    statement. One CTE for each figure used, each built from that figure's mapping in company mode by figureSelect
-    (the same view, joins, where, latest, distinct, sum, plus, yearIsDate as buildSql) without the company-code
-    condition, reading only rows with a company code and only the years needed; the premium read also has the chosen
-    states and lines in its WHERE. Each is reduced to one row per company: premium in view is the sum over distinct
-    (code, year, line, state, value) rows, the name taken apart from them; a company with two different figures for
-    one year, state and line is left out. A figure of one number a year is its single value, or none when the
-    company's rows disagree. Focus divides by the company's total direct premiums written from its own small read
-    (premiums by line, else by state), or is 100 when nothing is narrowed. They are joined on the company code,
-    filtered, sorted and cut at the limit, and one summary row comes back however many companies match: how many
-    matched, how many have premium in view, and for each figure how many companies' rows disagreed (the caller notes
-    them, and refuses the screen when that is widespread). Every request value, states and lines included, is a
-    binding; names come only from the checked mapping.
-    Bounds are compared in each figure's own units: a bound in $M or percent is divided by the mapping's scale. */
+/** Confirmed on live Snowflake for one state and one line (Nov 2026; CTEs, QUALIFY, scalar sub-selects, the summary row
+    joined ON 1 = 1, NULLS LAST): turns the saved mapping and a checked screen into ONE read-only statement.
+    - P_ROWS: premium in view, read by figureSelect from its mapping in company mode (the same view, joins, where,
+      latest, distinct, sum, plus, yearIsDate as buildSql) with the chosen states and lines, the screen's year (and
+      the growth year) and "code IS NOT NULL" in its own WHERE.
+    - P_K, P: one row per company, year, line and state (identical rows and two spellings of a name count once; N
+      counts the different figures), then per company. P_IN: the companies that can still be in the answer, with the
+      bounds that depend on premium alone (premium in view, growth); a company whose premium rows disagree is left out.
+    - T (the total for focus, premiums by line or else by state), each yearly figure (F0, F1, ...) and the group
+      look-up (G) are read only for the companies in P_IN ("company IN (SELECT CODE FROM P_IN)" in each read's WHERE),
+      with no name; a yearly figure whose rows disagree is none (n/d).
+    - ALL_ROWS joins them onto P_IN, HITS applies the other filters, and one summary row (TOTAL, IN_VIEW, ODD_P and
+      ODD_n) is joined to the sorted page, so it comes back however many companies match.
+    Every request value, states and lines included, is a binding; names come only from the checked mapping. Bounds are
+    compared in each figure's own units: a bound in $M or percent is divided by the mapping's scale.
+    UNCONFIRMED still: that a wide screen (many states or lines, or none) finishes within the five minutes allowed. */
 export function buildScreenSql(database: string, schema: string, mapping: Mapping, r: ScreenRequest): ScreenSql | ScreenRefusal {
   if (!ident(database) || !ident(schema)) return { code: "sql", problem: "SNOWFLAKE_DATABASE or SNOWFLAKE_SCHEMA isn't a valid name. Check those two secrets on Supabase." };
   const premium = premiumFigure(mapping, r.states, r.lines), pm = mapping.fields[premium];
@@ -499,82 +506,90 @@ export function buildScreenSql(database: string, schema: string, mapping: Mappin
   const add = (name: string, s: { statement: string; bindings: Binding[] }) => { ctes.push(`${name} AS (${s.statement})`); bindings.push(...s.bindings); };
   const rowsOf = (m: FieldMap, read: ScreenRead) => figureSelect(database, schema, { ...m, item: undefined, tag: undefined }, "company", null, r.year, r.year, read);
 
+  // how a bound in $M or percent compares with a figure in its own units
+  const scaleOf = (f: ScreenField) => (f === "premium" ? pm!.scale ?? 1 : f === "focus" ? 1 : mapping.fields[f]!.scale ?? 1);
+  const unitOf = (f: ScreenField) => (f === "focus" ? "pct" : f === "premium" ? "usd" : STAT_FIELDS.find((x) => x.id === f)!.unit);
+  const colOf = (f: string) => (f === "premium" ? "PREMIUM" : f === "focus" ? "FOCUS" : f === "growth" ? "GROWTH" : f === "name" ? "NAME" : f === "code" ? "CODE" : fcol(f as StatFieldId));
+  const fcol = (id: StatFieldId) => `F_${id.toUpperCase()}`;
+  const bounds = (conds: string[], col: string, min: number | null, max: number | null) => {
+    if (min !== null) conds.push(`${col} >= ${real(min)}`);
+    if (max !== null) conds.push(`${col} <= ${real(max)}`);
+  };
+  const boundsOf = (conds: string[], f: ScreenRequest["filters"][number], col: string) => {
+    const scale = scaleOf(f.field), toUnits = (v: number | null) => (v === null ? null : (unitOf(f.field) === "usd" ? v * 1e6 : v) / scale);
+    let lo = toUnits(f.min), hi = toUnits(f.max);
+    if (scale < 0) [lo, hi] = [hi, lo];   // a negative scale turns the order round
+    bounds(conds, col, lo, hi);
+  };
+
   // premium in view: only the chosen states and lines, and only the screen's year (and the growth year), are read
   const back = r.growth ? r.year - r.growth.years : null;
-  const pRows = rowsOf(pm!, { years: back === null ? [r.year] : [back, r.year], states: r.states, lines: r.lines });
+  const pRows = rowsOf(pm!, { years: back === null ? [r.year] : [back, r.year], states: r.states, lines: r.lines, name: "plain" });
   if (!pRows) return { code: "sql", problem: "Premium in view couldn't be turned into a statement. Check its mapping." };
   add("P_ROWS", pRows);
-  // identical rows count once; two different figures for one company, year, state and line leave that company out
-  ctes.push("P_KEYS AS (SELECT DISTINCT CODE, YR, LINE, STATE, VAL FROM P_ROWS)");
-  ctes.push("P_ODD AS (SELECT DISTINCT CODE FROM P_KEYS GROUP BY CODE, YR, LINE, STATE HAVING COUNT(*) > 1)");
+  // one row for each company, year, line and state: identical rows (and two spellings of one name) count once; N is
+  // how many different figures the rows give, and a company with N above 1 anywhere is left out
+  ctes.push("P_K AS (SELECT CODE, YR, LINE, STATE, MAX(NAME) AS NAME, MAX(VAL) AS VAL, COUNT(DISTINCT VAL) AS N FROM P_ROWS GROUP BY CODE, YR, LINE, STATE)");
   const pCols = [`SUM(CASE WHEN YR = ${fixed(r.year)} THEN VAL END) AS V`];
   if (back !== null) pCols.push(`SUM(CASE WHEN YR = ${fixed(back)} THEN VAL END) AS PREV_V`);
-  ctes.push(`P AS (SELECT CODE, ${pCols.join(", ")} FROM P_KEYS WHERE CODE NOT IN (SELECT CODE FROM P_ODD) GROUP BY CODE)`);
-  ctes.push("P_NAMES AS (SELECT CODE, MAX(NAME) AS NAME FROM P_ROWS GROUP BY CODE)");
+  ctes.push(`P AS (SELECT CODE, MAX(NAME) AS NAME, ${pCols.join(", ")}, MAX(N) AS N FROM P_K GROUP BY CODE)`);
+  // the companies that can still be in the answer: premium in view in the year, rows that agree, and the bounds that
+  // depend on premium alone (premium in view, growth). Every other read is limited to these companies.
+  const growthExpr = "CASE WHEN PREV_V > 0 THEN (V - PREV_V) / PREV_V * 100 END";
+  const inConds = ["V IS NOT NULL", "N <= 1"];
+  for (const f of r.filters) if (f.field === "premium") boundsOf(inConds, f, "V");
+  if (r.growth) bounds(inConds, growthExpr, r.growth.min, r.growth.max);
+  ctes.push(`P_IN AS (SELECT CODE, NAME, V${back !== null ? `, ${growthExpr} AS GROWTH` : ""} FROM P WHERE ${inConds.join(" AND ")})`);
 
   // the company's total direct premiums written, for focus: its own small read, unless premium in view is the total
   const narrowed = r.states.length > 0 || r.lines.length > 0;
   const totalFrom: StatFieldId | null = !narrowed ? null
     : !screenFigureProblem("dpw_by_line", mapping.fields.dpw_by_line) ? "dpw_by_line" : !screenFigureProblem("dpw_by_state", mapping.fields.dpw_by_state) ? "dpw_by_state" : premium;
   if (totalFrom) {
-    const tm = mapping.fields[totalFrom]!, t = rowsOf(tm, { years: [r.year] });
+    const tm = mapping.fields[totalFrom]!, t = rowsOf(tm, { years: [r.year], name: "none", within: "P_IN" });
     if (!t) return { code: "sql", problem: "The total of direct premiums written couldn't be turned into a statement. Check its mapping." };
     add("T_ROWS", t);
-    ctes.push("T_KEYS AS (SELECT DISTINCT CODE, LINE, STATE, VAL FROM T_ROWS)");
-    ctes.push("T_ODD AS (SELECT DISTINCT CODE FROM T_KEYS GROUP BY CODE, LINE, STATE HAVING COUNT(*) > 1)");
-    ctes.push("T AS (SELECT CODE, SUM(VAL) AS V FROM T_KEYS WHERE CODE NOT IN (SELECT CODE FROM T_ODD) GROUP BY CODE)");
+    ctes.push("T_K AS (SELECT CODE, LINE, STATE, MAX(VAL) AS VAL, COUNT(DISTINCT VAL) AS N FROM T_ROWS GROUP BY CODE, LINE, STATE)");
+    ctes.push("T AS (SELECT CODE, SUM(VAL) AS V, MAX(N) AS N FROM T_K GROUP BY CODE)");
   }
 
   // each figure of one number a year: its single value, or none (n/d) when the company's rows disagree
-  const fcol = (id: StatFieldId) => `F_${id.toUpperCase()}`;
   for (const [i, id] of figs.entries()) {
-    const s = rowsOf(mapping.fields[id]!, { years: [r.year] });
+    const s = rowsOf(mapping.fields[id]!, { years: [r.year], name: "none", within: "P_IN" });
     if (!s) return { code: "sql", problem: `${labelOf(id)} couldn't be turned into a statement. Check its mapping.`, figure: id };
     add(`F${i}_ROWS`, s);
-    ctes.push(`F${i} AS (SELECT CODE, MAX(NAME) AS NAME, CASE WHEN COUNT(DISTINCT VAL) > 1 THEN NULL ELSE MAX(VAL) END AS V, COUNT(DISTINCT VAL) AS N FROM F${i}_ROWS GROUP BY CODE)`);
+    ctes.push(`F${i} AS (SELECT CODE, CASE WHEN COUNT(DISTINCT VAL) > 1 THEN NULL ELSE MAX(VAL) END AS V, COUNT(DISTINCT VAL) AS N FROM F${i}_ROWS GROUP BY CODE)`);
   }
   // groups, from the company look-up: a company whose rows name two group codes is in a group, but which is unknown
   if (lookup) {
-    const g = companySelect(database, schema, lookup, null);
+    const g = companySelect(database, schema, lookup, null, "P_IN");
     if (!g) return { code: "sql", problem: "The company look-up couldn't be turned into a statement. Check it in Field set-up." };
     add("G_ROWS", g);
     ctes.push("G AS (SELECT CODE, MAX(NAME) AS NAME, CASE WHEN COUNT(DISTINCT GROUP_CODE) = 1 THEN MAX(GROUP_CODE) END AS GROUP_CODE, CASE WHEN COUNT(DISTINCT GROUP_CODE) = 1 THEN MAX(GROUP_NAME) END AS GROUP_NAME, COUNT(GROUP_CODE) AS IN_GROUP FROM G_ROWS GROUP BY CODE)");
   }
 
-  // every company with premium in view in the year, its figures beside it
-  const names = ["PN.NAME", ...(lookup ? ["G.NAME"] : []), ...figs.map((_, i) => `F${i}.NAME`)];
-  const cols = ["P.CODE AS CODE", `${names.length > 1 ? `COALESCE(${names.join(", ")})` : names[0]} AS NAME`, "P.V AS PREMIUM",
-    totalFrom ? `CASE WHEN T.V > 0 THEN (P.V * ${real(pm!.scale ?? 1)}) / (T.V * ${real(mapping.fields[totalFrom]!.scale ?? 1)}) * 100 END AS FOCUS` : "CASE WHEN P.V > 0 THEN 100 END AS FOCUS"];
-  if (back !== null) cols.push("CASE WHEN P.PREV_V > 0 THEN (P.V - P.PREV_V) / P.PREV_V * 100 END AS GROWTH");
+  // every company that can still be in the answer, its figures beside it
+  const cols = ["P.CODE AS CODE", `${lookup ? "COALESCE(P.NAME, G.NAME)" : "P.NAME"} AS NAME`, "P.V AS PREMIUM",
+    totalFrom ? `CASE WHEN T.N <= 1 AND T.V > 0 THEN (P.V * ${real(pm!.scale ?? 1)}) / (T.V * ${real(mapping.fields[totalFrom]!.scale ?? 1)}) * 100 END AS FOCUS` : "CASE WHEN P.V > 0 THEN 100 END AS FOCUS"];
+  if (back !== null) cols.push("P.GROWTH AS GROWTH");
   for (const [i, id] of figs.entries()) cols.push(`F${i}.V AS ${fcol(id)}`);
   if (lookup) cols.push("G.GROUP_CODE AS GROUP_CODE", "G.GROUP_NAME AS GROUP_NAME", "G.IN_GROUP AS IN_GROUP");
-  const joins = [" LEFT JOIN P_NAMES AS PN ON PN.CODE = P.CODE", ...(totalFrom ? [" LEFT JOIN T ON T.CODE = P.CODE"] : []), ...figs.map((_, i) => ` LEFT JOIN F${i} ON F${i}.CODE = P.CODE`), ...(lookup ? [" LEFT JOIN G ON G.CODE = P.CODE"] : [])].join("");
-  ctes.push(`ALL_ROWS AS (SELECT ${cols.join(", ")} FROM P${joins} WHERE P.V IS NOT NULL)`);
+  const joins = [...(totalFrom ? [" LEFT JOIN T ON T.CODE = P.CODE"] : []), ...figs.map((_, i) => ` LEFT JOIN F${i} ON F${i}.CODE = P.CODE`), ...(lookup ? [" LEFT JOIN G ON G.CODE = P.CODE"] : [])].join("");
+  ctes.push(`ALL_ROWS AS (SELECT ${cols.join(", ")} FROM P_IN AS P${joins})`);
 
-  // the filters: a company with no figure is left out by a filter on it (a comparison with null is never true)
-  const scaleOf = (f: ScreenField) => (f === "premium" ? pm!.scale ?? 1 : f === "focus" ? 1 : mapping.fields[f]!.scale ?? 1);
-  const unitOf = (f: ScreenField) => (f === "focus" ? "pct" : f === "premium" ? "usd" : STAT_FIELDS.find((x) => x.id === f)!.unit);
-  const colOf = (f: string) => (f === "premium" ? "PREMIUM" : f === "focus" ? "FOCUS" : f === "growth" ? "GROWTH" : f === "name" ? "NAME" : f === "code" ? "CODE" : fcol(f as StatFieldId));
+  // the other filters: a company with no figure is left out by a filter on it (a comparison with null is never true)
   const conds: string[] = [];
-  const bound = (col: string, min: number | null, max: number | null) => {
-    if (min !== null) conds.push(`${col} >= ${real(min)}`);
-    if (max !== null) conds.push(`${col} <= ${real(max)}`);
-  };
-  for (const f of r.filters) {
-    const scale = scaleOf(f.field), toUnits = (v: number | null) => (v === null ? null : (unitOf(f.field) === "usd" ? v * 1e6 : v) / scale);
-    let lo = toUnits(f.min), hi = toUnits(f.max);
-    if (scale < 0) [lo, hi] = [hi, lo];   // a negative scale turns the order round
-    bound(colOf(f.field), lo, hi);
-  }
-  if (r.growth) bound("GROWTH", r.growth.min, r.growth.max);
+  for (const f of r.filters) if (f.field !== "premium") boundsOf(conds, f, colOf(f.field));
   if (r.group === "in") conds.push("IN_GROUP > 0");
   if (r.group === "none") conds.push("IN_GROUP = 0");   // a company the look-up doesn't list is left out either way
   ctes.push(`HITS AS (SELECT * FROM ALL_ROWS${conds.length ? ` WHERE ${conds.join(" AND ")}` : ""})`);
 
-  // the summary: matches; companies with premium in view (in the year read); and, for each figure, the companies
-  // with premium in view whose rows disagree (left out, or that figure n/d)
+  // the summary: matches; companies with premium in view in the year read (before any bound); companies whose
+  // premium rows disagree (left out, counted among all with premium in view); and for each yearly figure, the
+  // companies among those still in the answer (P_IN) whose rows disagree (that figure n/d)
   const checks = [{ col: "ODD_P", id: premium as StatFieldId }, ...figs.map((id, i) => ({ col: `ODD_${i}`, id }))];
-  ctes.push(`SUMMARY AS (SELECT (SELECT COUNT(*) FROM HITS) AS TOTAL, (SELECT COUNT(DISTINCT CODE) FROM P_KEYS) AS IN_VIEW, (SELECT COUNT(*) FROM P_ODD) AS ODD_P${figs.map((_, i) => `, (SELECT COUNT(*) FROM F${i} JOIN P ON P.CODE = F${i}.CODE WHERE F${i}.N > 1) AS ODD_${i}`).join("")})`);
+  ctes.push(`SUMMARY AS (SELECT (SELECT COUNT(*) FROM HITS) AS TOTAL, (SELECT COUNT(*) FROM P) AS IN_VIEW, (SELECT COUNT(*) FROM P WHERE N > 1) AS ODD_P${figs.map((_, i) => `, (SELECT COUNT(*) FROM F${i} WHERE N > 1) AS ODD_${i}`).join("")})`);
+  const resultColumns = ["TOTAL", "IN_VIEW", ...checks.map((c) => c.col), "CODE", "NAME", "PREMIUM", "FOCUS", ...(back !== null ? ["GROWTH"] : []), ...figs.map(fcol), ...(lookup ? ["GROUP_CODE", "GROUP_NAME", "IN_GROUP"] : [])];
   // a negative scale turns the order of that figure round, so the direction asked for is kept
   const sortScale = ["premium", ...SCREEN_FIGURES].includes(r.sort.by) ? scaleOf(r.sort.by as ScreenField) : 1;
   const dir = (r.sort.dir === "asc") !== (sortScale < 0) ? "ASC" : "DESC", by = colOf(r.sort.by);
@@ -588,7 +603,7 @@ export function buildScreenSql(database: string, schema: string, mapping: Mappin
     ...(back !== null ? [{ id: "growth", label: `Growth in premium in view over ${r.growth!.years} year${r.growth!.years === 1 ? "" : "s"}`, unit: "pct" as const, col: "GROWTH", scale: 1 }] : []),
     ...figs.map((id) => ({ id, label: labelOf(id), unit: STAT_FIELDS.find((x) => x.id === id)!.unit, col: fcol(id), scale: mapping.fields[id]!.scale ?? 1 })),
   ];
-  return { statement, bindings, premium, totalFrom, columns, group: !!lookup, checks, left };
+  return { statement, bindings, premium, totalFrom, columns, group: !!lookup, checks, left, resultColumns };
 }
 
 /** UNCONFIRMED until it runs: the distinct line names of premiums by line for one year, for the Screener's line
@@ -596,7 +611,7 @@ export function buildScreenSql(database: string, schema: string, mapping: Mappin
 export function buildLinesSql(database: string, schema: string, mapping: Mapping, year: number): { statement: string; bindings: Binding[] } | null {
   const m = mapping.fields.dpw_by_line;
   if (!ident(database) || !ident(schema) || screenFigureProblem("dpw_by_line", m)) return null;
-  const s = figureSelect(database, schema, { ...m!, item: undefined, tag: undefined }, "company", null, year, year, { years: [year] });
+  const s = figureSelect(database, schema, { ...m!, item: undefined, tag: undefined }, "company", null, year, year, { years: [year], name: "none" });
   return s && { statement: `SELECT DISTINCT LINE FROM (${s.statement}) AS L WHERE LINE IS NOT NULL ORDER BY 1 LIMIT 1000`, bindings: s.bindings };
 }
 
@@ -657,7 +672,7 @@ export function buildCompanySql(database: string, schema: string, m: CompanyLook
 
 /** buildCompanySql's SELECT without its ORDER BY and LIMIT. ids null leaves out the condition on the institution id,
     so every company the look-up lists comes back: the Screener reads groups that way. */
-function companySelect(database: string, schema: string, m: CompanyLookupMap, ids: string[] | null): { statement: string; bindings: Binding[] } | null {
+function companySelect(database: string, schema: string, m: CompanyLookupMap, ids: string[] | null, within?: string): { statement: string; bindings: Binding[] } | null {
   if (!ident(database) || !ident(schema) || companiesProblem(m) !== null || m === undefined) return null;
   const c = (ref: string) => { const r = colRef(ref)!; return r.alias ? `"${r.alias}".${r.col}` : r.col; };
   const from = (ref: string) => { const r = viewRef(ref)!; return `${database}.${r.schema ?? schema}.${r.view}`; };
@@ -666,7 +681,7 @@ function companySelect(database: string, schema: string, m: CompanyLookupMap, id
   let source = from(m.view) + (m.as === undefined ? "" : ` AS "${m.as.toUpperCase()}"`);
   for (const j of m.joins ?? []) source += ` ${j.kind === "left" ? "LEFT JOIN" : "JOIN"} ${from(j.view)} AS "${j.as.toUpperCase()}" ON ${j.on.map((o) => `${c(o.left)} = ${c(o.right)}`).join(" AND ")}`;
   const bindings: Binding[] = (ids ?? []).map((value) => ({ type: "TEXT", value }));
-  let where = ids === null ? `${code} IS NOT NULL` : `${inst} IN (${ids.map(() => "?").join(", ")})`;
+  let where = ids === null ? `${code} IS NOT NULL${within ? ` AND ${code} IN (SELECT CODE FROM ${within})` : ""}` : `${inst} IN (${ids.map(() => "?").join(", ")})`;
   for (const w of m.where ?? []) {
     const col = c(w.column);
     if (w.equals !== undefined) { where += ` AND ${col} = ?`; bindings.push({ type: "TEXT", value: w.equals }); }
