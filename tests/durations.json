@@ -80,6 +80,7 @@
  "web/combination.test.cjs": 45,
  "web/combochange.test.cjs": 40,
  "web/combomap.test.cjs": 60,
+ "web/combopie.test.cjs": 50,
  "web/compare.test.cjs": 61,
  "web/connection.test.cjs": 11,
  "web/deck.test.cjs": 1,
