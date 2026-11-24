@@ -97,15 +97,19 @@ function sqlite(tables: Record<string, Row[]>) {
     const ins = d.prepare(`INSERT INTO XPRESSFEED.${name} (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`);
     for (const r of rows) ins.run(...cols.map((c) => r[c] ?? null));
   }
-  d.function("YEAR", (v: unknown) => (v === null ? null : Number(String(v).slice(0, 4))));
-  d.function("MONTH", (v: unknown) => (v === null ? null : Number(String(v).slice(5, 7))));
-  d.function("STARTSWITH", (a: unknown, b: unknown) => (a === null || b === null ? null : String(a).startsWith(String(b)) ? 1 : 0));
+  // Snowflake's YEAR, MONTH and STARTSWITH written in SQLite's own words (each argument used once, so the
+  // bindings keep their order). Rewritten in the text, not added as functions, so the suite also runs on
+  // runtimes whose SQLite handle can't register functions.
+  const inSqlite = (statement: string) => statement
+    .replace(/\bYEAR\(([^()]+)\)/g, "CAST(substr($1, 1, 4) AS INTEGER)")
+    .replace(/\bMONTH\(([^()]+)\)/g, "CAST(substr($1, 6, 2) AS INTEGER)")
+    .replace(/\bSTARTSWITH\(([^(),]+), ([^(),]+)\)/g, "(instr($1, $2) = 1)");
   return (statement: string, bindings: { type: string; value: string }[]): SfReply => {
     const holes = (statement.match(/\?/g) ?? []).length;
     if (holes !== bindings.length) return { error: { status: 422, message: `Bind variable ? not set (${holes} in the statement, ${bindings.length} bound).` } };
     if (statement.includes(";")) return { error: { status: 422, message: "Actual statement count 2 did not match the desired statement count 1." } };
     try {
-      const st = d.prepare(statement.replace(/MI_XPRESSCLOUD\./g, ""));
+      const st = d.prepare(inSqlite(statement.replace(/MI_XPRESSCLOUD\./g, "")));
       const rows = st.all(...bindings.map((b) => (b.type === "TEXT" ? b.value : Number(b.value)))) as Row[];
       const columns = (st as any).columns ? (st as any).columns().map((c: any) => c.name) : Object.keys(rows[0] ?? {});
       return { columns, rows: rows.map((r) => columns.map((c: string) => r[c] ?? null)) };
