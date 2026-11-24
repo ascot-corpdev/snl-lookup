@@ -19,6 +19,10 @@ export const SCREEN_MAX_STATES = 10, SCREEN_MAX_LINES = 10, SCREEN_MAX_FILTERS =
     signing in and answering. A live screen of one state and one line took about 25 seconds. */
 export const SCREEN_WAIT_MS = 100_000;
 export const SCREEN_TIMEOUT = "The screen didn't finish in time. Narrow it (add a state or a line) and run it again.";
+/** A figure whose rows disagree for more than this share of the companies with premium in view (and more than
+    SCREEN_ODD_FLOOR companies) points to a mapping fault, and the screen is refused; below it, those companies are
+    left out (premium) or shown n/d (a yearly figure), and a note says how many. */
+export const SCREEN_ODD_SHARE = 0.05, SCREEN_ODD_FLOOR = 10;
 export const SCREEN_ONLY_CORPDEV = "Only Corp Dev logins can run the Screener.";
 const SORTS = ["premium", "focus", "growth", "name", "code", ...SCREEN_FIGURES];
 const FIELDS: ScreenField[] = ["premium", "focus", ...SCREEN_FIGURES];
@@ -119,12 +123,20 @@ export async function runScreen(sf: Snowflake, database: string, schema: string,
   const started = opts.now();
   const res = await sf.query(built.statement, built.bindings as Binding[], opts.waitMs ?? SCREEN_WAIT_MS);
   const head = res.rows[0] ?? {};
+  const inView = num(head.IN_VIEW) ?? 0, limitOdd = Math.max(SCREEN_ODD_FLOOR, SCREEN_ODD_SHARE * inView);
+  const key = built.premium === "dpw_by_line" ? "line" : built.premium === "dpw_by_state" ? "state" : "state and line";
+  const odd: { premium: number; figures: Record<string, number> } = { premium: 0, figures: {} };
+  const oddNotes: string[] = [];
+  const many = (n: number) => `${n} ${n === 1 ? "company" : "companies"}`, them = (n: number) => (n === 1 ? "it" : "them");
   for (const c of built.checks) {
     const n = num(head[c.col]) ?? 0;
-    if (n > 0) {
-      const what = c.col === "DUP_P" ? "more than one row for the same state and line" : "more than one figure";
-      throw new ScreenError("fans_out", `${label(c.id)} can't be screened as it is mapped: S&P's rows give ${n} ${n === 1 ? "company" : "companies"} ${what} for ${r.year}, so adding them up would give a wrong figure. Check its mapping in Field set-up: it needs one figure for each company a year.`, c.id);
+    if (!n) continue;
+    const prem = c.col === "ODD_P";
+    if (n > limitOdd) {
+      throw new ScreenError("fans_out", `${label(c.id)} can't be screened as it is mapped: S&P's rows give ${many(n)} of the ${inView} with premium in view more than one ${prem ? `premium figure for the same ${key}` : "figure"} in ${r.year}. So many points to a fault in its mapping. Check it in Field set-up: it needs one figure for each company a year${prem ? `, ${key}` : ""}.`, c.id);
     }
+    if (prem) { odd.premium = n; oddNotes.push(`${many(n)} ${n === 1 ? "was" : "were"} left out: S&P's rows give ${them(n)} two premium figures for the same ${key} in ${r.year}.`); }
+    else { odd.figures[c.id] = n; oddNotes.push(`${label(c.id)} is n/d for ${many(n)}: S&P's rows give ${them(n)} two figures for ${r.year}.`); }
   }
   const rows: ScreenRow[] = res.rows.filter((x) => txt(x.CODE) !== null).map((x) => {
     const row: ScreenRow = { code: txt(x.CODE)!.replace(/\.0+$/, ""), name: txt(x.NAME) };
@@ -137,14 +149,16 @@ export async function runScreen(sf: Snowflake, database: string, schema: string,
   const notes = [
     built.premium === "dpw_by_line" && !r.lines.length ? "Premium in view is all direct premiums written: the total of premiums by line." : "",
     built.premium === "dpw_by_state" && !r.states.length ? "Premium in view is all direct premiums written: the total of premiums by state (premiums by line aren't mapped)." : "",
-    `Focus is premium in view as a share of the company's total direct premiums written in ${r.year}, from ${built.premium === "dpw_by_state_line" ? "premiums by state and line" : built.premium === "dpw_by_state" ? "premiums by state" : "premiums by line"} over every ${built.premium === "dpw_by_line" ? "line" : built.premium === "dpw_by_state" ? "state" : "state and line"}.`,
+    built.totalFrom === null ? "Focus is 100% for every company: with no state or line chosen, premium in view is all the company's direct premiums written."
+      : `Focus is premium in view as a share of the company's total direct premiums written in ${r.year}, from ${built.totalFrom === "dpw_by_line" ? "premiums by line over every line" : built.totalFrom === "dpw_by_state" ? "premiums by state over every state" : "premiums by state and line over every state and line"}.`,
     r.growth ? `Growth compares premium in view in ${r.year} with ${r.year - r.growth.years}. A company with nothing in ${r.year - r.growth.years} has no growth figure and doesn't pass the growth filter.` : "",
     r.group !== "any" ? "A company the company look-up doesn't list is left out by the group choice." : "",
+    ...oddNotes,
     ...built.left.map((l) => `${label(l.id)} isn't shown: ${l.why}`),
   ].filter(Boolean);
   return {
     year: r.year, premium: { figure: built.premium, states: r.states, lines: r.lines }, growth: r.growth, group: r.group, groupMapped: built.group,
-    columns: built.columns.map(({ id, label, unit }) => ({ id, label, unit })), rows, total, limit: r.limit, cut: total > rows.length, sort: r.sort, notes,
+    columns: built.columns.map(({ id, label, unit }) => ({ id, label, unit })), rows, total, limit: r.limit, cut: total > rows.length, sort: r.sort, notes, odd,
     source: "S&P Global Market Intelligence, SNL Insurance Regulatory Data (Snowflake)", fetchedAt: new Date(opts.now()).toISOString(),
   };
 }

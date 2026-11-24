@@ -10,7 +10,7 @@
 import { DatabaseSync } from "node:sqlite";
 const statutory = await import(new URL("../../supabase/functions/snl-statutory/index.ts", import.meta.url).href);
 import { buildScreenSql, type Mapping, type ScreenRequest } from "../../supabase/functions/_shared/statutory.ts";
-import { parseScreen, SCREEN_TIMEOUT, SCREEN_WAIT_MS } from "../../supabase/functions/_shared/screen.ts";
+import { parseScreen, SCREEN_ODD_FLOOR, SCREEN_ODD_SHARE, SCREEN_TIMEOUT, SCREEN_WAIT_MS } from "../../supabase/functions/_shared/screen.ts";
 import { checks, corpdev, env, fakeClock, memoryDb, reader, req } from "./helpers/fakes.ts";
 import { fakeSnowflake, type SfReply } from "./helpers/snowflake.ts";
 
@@ -68,7 +68,7 @@ const TABLES: Record<string, Row[]> = {
     { NAIC_CD: null, GRP_CD: "9100", KIND: "G", STMT_YEAR: 2025, CR: 0.99 },
   ],
   // two different gross premiums for 91001 in 2025: a mapping read this way can't give one figure
-  IR_TOTALS_TWICE: [{ NAIC_CD: "91001", STMT_YEAR: 2025, GPW_000: 210000 }, { NAIC_CD: "91001", STMT_YEAR: 2025, GPW_000: 999 }, { NAIC_CD: "92001", STMT_YEAR: 2025, GPW_000: 5 }],
+  IR_TOTALS_TWICE: [{ NAIC_CD: "91001", STMT_YEAR: 2025, GPW_000: 210000 }, { NAIC_CD: "91001", STMT_YEAR: 2025, GPW_000: 999 }, { NAIC_CD: "92001", STMT_YEAR: 2025, GPW_000: 5000 }],
   IR_COMPANIES: [
     { INST_ID: 5001, NAIC_CD: "91001", CO_NAME: "Calloway Insurance Co", GRP_CD: "9100", GRP_NAME: "Calloway Group" },
     { INST_ID: 5002, NAIC_CD: "91002", CO_NAME: "Calloway Home Co", GRP_CD: "9100", GRP_NAME: "Calloway Group" },
@@ -197,7 +197,8 @@ const codes = (b: any) => (b.rows ?? []).map((r: any) => r.code);
   ok("names come with the rows", r.body.rows[0].name === "Calloway Insurance Co");
   ok("surplus, combined ratio and gross premiums written are always shown when mapped", r.body.rows[0].surplus === 140e6 && r.body.rows[0].combined_ratio === 95 && r.body.rows[0].gpw === 210e6, r.body.rows[0]);
   ok("a company with no combined ratio at all (null) shows null, not zero, and is still listed when not filtered on", r.body.rows.find((x: any) => x.code === "93001").combined_ratio === null);
-  ok("the answer names the premium figure and says where focus comes from", r.body.premium.figure === "dpw_by_line" && r.body.notes.some((n: string) => n === "Premium in view is all direct premiums written: the total of premiums by line.") && r.body.notes.some((n: string) => /^Focus is premium in view as a share of the company's total direct premiums written in 2025, from premiums by line over every line\.$/.test(n)), r.body.notes);
+  ok("the answer names the premium figure and says where focus comes from", r.body.premium.figure === "dpw_by_line" && r.body.notes.some((n: string) => n === "Premium in view is all direct premiums written: the total of premiums by line.") && r.body.notes.includes("Focus is 100% for every company: with no state or line chosen, premium in view is all the company's direct premiums written."), r.body.notes);
+  ok("with nothing narrowed, premium in view is the total: premiums by line are read once, and no separate total", (w.sf.statements[0].statement.match(/IR_PREM_LINE/g) ?? []).length === 1 && !/T_ROWS/.test(w.sf.statements[0].statement));
   ok("the count and the cut flag", r.body.total === 3 && r.body.cut === false && r.body.limit === 100);
   ok("the columns say what each figure is and its unit", same(r.body.columns.map((c: any) => [c.id, c.unit]), [["premium", "usd"], ["focus", "pct"], ["surplus", "usd"], ["combined_ratio", "pct"], ["gpw", "usd"]]), r.body.columns);
   ok("group codes and names come with the rows when the look-up is mapped", r.body.groupMapped === true && r.body.rows[0].groupCode === "9100" && r.body.rows[0].groupName === "Calloway Group" && r.body.rows.find((x: any) => x.code === "93001").groupCode === null);
@@ -230,12 +231,16 @@ const codes = (b: any) => (b.rows ?? []).map((r: any) => r.code);
   ok("both: premiums by state and line over the chosen states and lines", b.body.premium.figure === "dpw_by_state_line");
   ok("the owner's example: Florida homeowners $50M to $300M, combined ratio at most 100", same(b.body.rows.map((x: any) => [x.code, x.premium, x.combined_ratio]), [["92001", 250e6, 98], ["91001", 120e6, 95]]), b.body.rows);
   ok("a company with no combined ratio (null) is left out by a filter on it; one above 100 too", !codes(b.body).includes("93001") && !codes(b.body).includes("91002"));
+  ok("focus with a state and a line takes its total from premiums by line, and the note says so", b.body.notes.includes("Focus is premium in view as a share of the company's total direct premiums written in 2025, from premiums by line over every line."), b.body.notes);
+  const sel = w.sf.statements[1].statement, pRead = sel.slice(sel.indexOf("P_ROWS AS ("), sel.indexOf("P_KEYS AS ("));
+  ok("the premium read itself has the state, the line and the year in its WHERE, all bound", /WHERE "P".NAIC_CD IS NOT NULL AND "P".STMT_YEAR IN \(\?\) AND "P".ST IN \(\?\) AND "P".LOB IN \(\?\)/.test(pRead) && !/BETWEEN/.test(pRead), pRead);
+  ok("the total for focus is its own small read of premiums by line for the year", /T_ROWS AS \(SELECT NAIC_CD AS CODE, MAX\(CO_NAME\) OVER \(PARTITION BY NAIC_CD\) AS NAME, STMT_YEAR AS YR, LOB AS LINE, NULL AS STATE, DPW_000 AS VAL FROM MI_XPRESSCLOUD.XPRESSFEED.IR_PREM_LINE WHERE NAIC_CD IS NOT NULL AND STMT_YEAR IN \(\?\)\)/.test(sel), sel.slice(sel.indexOf("T_ROWS"), sel.indexOf("T_KEYS")));
   ok("the distinct mapping is de-duplicated before it is summed: 91001's rows, repeated by the join, count once", b.body.rows.find((x: any) => x.code === "91001").premium === 120e6);
   ok("focus for both: Florida homeowners over everything by state and line", b.body.rows.find((x: any) => x.code === "91001").focus === 60 && b.body.rows.find((x: any) => x.code === "92001").focus === 25, b.body.rows);
   const s = w.sf.statements[1];
   ok("the line and the bounds are bindings, never text in the statement", !s.statement.includes("Homeowners") && !s.statement.includes("50") && s.bindings.some((x: any) => x.value === "Homeowners") && s.bindings.some((x: any) => x.value === "300000" && x.type === "REAL"), s.statement);
   ok("the ratio bound is divided by the ratio's scale (100% is 1 as stored)", s.bindings.some((x: any) => x.type === "REAL" && x.value === "1"), s.bindings);
-  ok("DISTINCT sits inside the premium rows, before the SUM over them", /P_ROWS AS \(SELECT DISTINCT /.test(s.statement) && s.statement.indexOf("SELECT DISTINCT") < s.statement.indexOf("SUM(CASE"));
+  ok("DISTINCT sits inside the premium rows, then on (code, year, line, state, value) without the name, before the SUM", /P_ROWS AS \(SELECT DISTINCT /.test(s.statement) && /P_KEYS AS \(SELECT DISTINCT CODE, YR, LINE, STATE, VAL FROM P_ROWS\)/.test(s.statement) && s.statement.indexOf("P_KEYS AS") < s.statement.indexOf("SUM(CASE"));
   ok("the group-only where of the combined ratio is left out; the company one is used", s.bindings.filter((x: any) => x.value === "C").length === 1 && !s.bindings.some((x: any) => x.value === "G"));
   const f = await w.call(screen({ states: ["FL"], lines: ["Homeowners"], filters: [{ field: "focus", min: 50 }] }));
   ok("a focus filter keeps companies whose chosen premium is at least that share of all they write", same(codes(f.body), ["91001", "93001", "91002"]), f.body.rows);
@@ -286,10 +291,13 @@ const codes = (b: any) => (b.rows ?? []).map((r: any) => r.code);
   ok("a one-a-year figure whose mapping names a line column fans out: refused before Snowflake", r3.status === 409 && r3.body.error === "fans_out" && /Policyholder surplus can't be screened: its mapping names a line column/.test(r3.body.message) && fan.sf.statements.length === 0, r3.body);
   const twice = world({ mapping: { ...MAPPING, fields: { ...MAPPING.fields, gpw: { view: "IR_TOTALS_TWICE", entity: { company: "NAIC_CD" }, year: "STMT_YEAR", value: "GPW_000", scale: 1000 } } } });
   const r4 = await twice.call(screen({ filters: [{ field: "gpw", min: 1 }] }));
-  ok("a figure whose rows give a company two different values in the year is refused, not summed or guessed", r4.status === 409 && r4.body.error === "fans_out" && r4.body.figure === "gpw" && /Gross premiums written can't be screened as it is mapped: S&P's rows give 1 company more than one figure for 2025/.test(r4.body.message), r4.body);
+  ok("a company whose yearly figure has two different values gets n/d for it, so a filter on it leaves the company out", r4.status === 200 && !codes(r4.body).includes("91001") && same(codes(r4.body), ["92001"]) && r4.body.odd.figures.gpw === 1, r4.body);
+  ok("and a note says so in plain words", r4.body.notes.includes("Gross premiums written is n/d for 1 company: S&P's rows give it two figures for 2025."), r4.body.notes);
+  const r4b = await twice.call(screen());
+  ok("unfiltered, that company is still listed, its figure n/d, and the total counts it", r4b.body.rows.find((x: any) => x.code === "91001").gpw === null && r4b.body.total === 5);
   const nodist = world({ mapping: { ...MAPPING, fields: { ...MAPPING.fields, dpw_by_state_line: { ...MAPPING.fields.dpw_by_state_line!, distinct: undefined } } } });
   const r5 = await nodist.call(screen({ states: ["FL"], lines: ["Homeowners"] }));
-  ok("without distinct the join repeats rows: the screen is refused rather than adding them up twice", r5.status === 409 && r5.body.error === "fans_out" && /S&P's rows give 1 company more than one row for the same state and line/.test(r5.body.message), r5.body);
+  ok("without distinct, rows a join repeats exactly still count once (distinct code, year, state, line and value before the sum)", r5.status === 200 && r5.body.rows.find((x: any) => x.code === "91001").premium === 120e6 && r5.body.odd.premium === 0, r5.body);
   const groupOnly = world({ mapping: { ...MAPPING, fields: { ...MAPPING.fields, combined_ratio: { ...MAPPING.fields.combined_ratio!, entity: { group: "GRP_CD" } } } } });
   const r6 = await groupOnly.call(screen({ filters: [{ field: "combined_ratio", max: 100 }] }));
   ok("a figure mapped for groups only is refused for a screen of companies", r6.status === 409 && /mapped for group look-ups only/.test(r6.body.message), r6.body);
@@ -304,6 +312,42 @@ const codes = (b: any) => (b.rows ?? []).map((r: any) => r.code);
   const byState = world({ mapping: { fields: { dpw_by_state: MAPPING.fields.dpw_by_state } } });
   const r10 = await byState.call(screen());
   ok("with no state or line chosen and premiums by line not mapped, the total of premiums by state is used, and the note says so", r10.status === 200 && r10.body.premium.figure === "dpw_by_state" && r10.body.rows[0].premium === 1000e6 && r10.body.notes.includes("Premium in view is all direct premiums written: the total of premiums by state (premiums by line aren't mapped)."), r10.body);
+}
+
+// ---------- rows with no code, two spellings of a name, companies whose rows disagree ----------
+{
+  const extra = structuredClone(TABLES);
+  // no company code: never grouped into a row of their own, never added to anything
+  extra.IR_PREM_LINE.push({ NAIC_CD: null, CO_NAME: "Nonesuch Pool (no code)", STMT_YEAR: 2025, LOB: "Homeowners", DPW_000: 900000 }, { NAIC_CD: null, CO_NAME: "Nonesuch Other (no code)", STMT_YEAR: 2025, LOB: "Homeowners", DPW_000: 700000 });
+  extra.IR_PREM_STLINE.push(stl(null as unknown as string, 2025, "FL", "Homeowners", 500000));
+  extra.IR_TOTALS.push({ NAIC_CD: null, STMT_YEAR: 2025, STMT_DATE: "2025-12-31", GPW_000: 5, PHS_000: 5 });
+  extra.IR_COMPANIES.push({ INST_ID: 5999, NAIC_CD: null, CO_NAME: "No code", GRP_CD: "9100", GRP_NAME: "Calloway Group" });
+  // 91002's name spelled two ways on otherwise identical rows: summed once
+  extra.IR_PREM_LINE.push({ NAIC_CD: "91002", CO_NAME: "Calloway Home Company", STMT_YEAR: 2025, LOB: "Homeowners", DPW_000: 60000 });
+  extra.IR_PREM_STLINE.push(stl("91002", 2025, "FL", "Homeowners", 60000));
+  // 95001: two different Florida homeowners figures for 2025 (a restated row with no latest column mapped)
+  extra.IR_PREM_STLINE.push(stl("95001", 2025, "FL", "Homeowners", 70000), stl("95001", 2025, "FL", "Homeowners", 75000));
+  extra.IR_MEMBERS.push({ NAIC_CD: "95001", PERIOD: "A" });
+  const w = world({ tables: extra });
+  const all = await w.call(screen());
+  ok("rows with no company code never reach a sum or the result", all.status === 200 && all.body.rows.every((x: any) => x.code) && all.body.total === 5 && all.body.rows[0].code === "92001" && all.body.rows[0].premium === 1000e6, all.body.rows);
+  ok("a company whose name is spelled two ways is summed once, under one name", all.body.rows.find((x: any) => x.code === "91002").premium === 60e6 && all.body.rows.filter((x: any) => x.code === "91002").length === 1, all.body.rows);
+  ok("every figure's read leaves out rows with no code, the group look-up's too", (w.sf.statements[0].statement.match(/IS NOT NULL AND/g) ?? []).length >= 4 && /G_ROWS AS \(SELECT DISTINCT .* WHERE NAIC_CD IS NOT NULL\)/.test(w.sf.statements[0].statement));
+  const fl = await w.call(screen({ states: ["FL"], lines: ["Homeowners"] }));
+  ok("a company whose premium rows disagree is left out, and the others are not held up", fl.status === 200 && !codes(fl.body).includes("95001") && same(codes(fl.body), ["92001", "91001", "93001", "91002"]), fl.body.rows);
+  ok("the code-less Florida row is not added to anyone, and 91002's second spelling counts once", fl.body.rows.find((x: any) => x.code === "91002").premium === 60e6 && fl.body.rows.find((x: any) => x.code === "92001").premium === 250e6);
+  ok("the total counts only companies returnable, never the one left out", fl.body.total === 4 && fl.body.cut === false && fl.body.odd.premium === 1);
+  ok("a note says how many were left out and why, in plain words", fl.body.notes.includes("1 company was left out: S&P's rows give it two premium figures for the same state and line in 2025."), fl.body.notes);
+  ok("the limits for a widespread fault are named: 5% of companies with premium in view, at least 10", SCREEN_ODD_SHARE === 0.05 && SCREEN_ODD_FLOOR === 10);
+  // widespread: 12 companies, each with two different figures, point to a mapping fault
+  const many = structuredClone(TABLES);
+  for (let i = 0; i < 12; i++) { const c = String(96000 + i); many.IR_PREM_LINE.push({ NAIC_CD: c, CO_NAME: `Nonesuch ${i} Co`, STMT_YEAR: 2025, LOB: "Homeowners", DPW_000: 1000 + i }, { NAIC_CD: c, CO_NAME: `Nonesuch ${i} Co`, STMT_YEAR: 2025, LOB: "Homeowners", DPW_000: 2000 + i }); }
+  const wide = await world({ tables: many }).call(screen());
+  ok("when it is widespread (12 of 17, above both limits) the whole screen is refused as a mapping fault", wide.status === 409 && wide.body.error === "fans_out" && wide.body.figure === "dpw_by_line" && /S&P's rows give 12 companies of the 17 with premium in view more than one premium figure for the same line in 2025\. So many points to a fault in its mapping/.test(wide.body.message), wide.body);
+  const ten = structuredClone(TABLES);
+  for (let i = 0; i < 10; i++) { const c = String(96000 + i); ten.IR_PREM_LINE.push({ NAIC_CD: c, CO_NAME: `Nonesuch ${i} Co`, STMT_YEAR: 2025, LOB: "Homeowners", DPW_000: 1000 + i }, { NAIC_CD: c, CO_NAME: `Nonesuch ${i} Co`, STMT_YEAR: 2025, LOB: "Homeowners", DPW_000: 2000 + i }); }
+  const atFloor = await world({ tables: ten }).call(screen());
+  ok("at the floor of 10 it still runs, leaving those 10 out", atFloor.status === 200 && atFloor.body.total === 5 && atFloor.body.odd.premium === 10 && atFloor.body.notes.includes("10 companies were left out: S&P's rows give them two premium figures for the same line in 2025."), atFloor.body);
 }
 
 // ---------- the statement's shape, straight from buildScreenSql ----------
