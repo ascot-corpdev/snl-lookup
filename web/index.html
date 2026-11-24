@@ -9073,7 +9073,7 @@ const SC_NOTES = [
   "Figures are statutory, by legal entity: a group's companies are listed separately, never added up.",
   "Premium in view is direct premiums written, in the states and lines chosen (all of them when none is chosen).",
   "A company missing a figure is left out by a filter on that figure, and shows n/d where it is listed.",
-  "Cost: one Snowflake statement a screen, about 0.02 Snowflake credit, more for wide screens. No S&P filing requests and no Claude. Nothing about a screen is saved or sent anywhere."
+  "Cost: one Snowflake statement a screen, about 0.02 Snowflake credit, more for wide screens. No S&P filing requests, and running a screen involves no Claude. Nothing about a screen is saved; only Fill in the form sends anything to Claude."
 ];
 function scFreshForm(){ return {year:String(new Date().getFullYear()-1), states:[], lines:[], filters:[], growth:{years:"", min:"", max:""}, group:"any", sort:"premium", dir:"desc", limit:"100", lineQ:""}; }
 function freshSc(){ return {form:scFreshForm(), formErr:"", lineCache:{}, linesBusy:"", linesErr:null, run:null, view:null}; }
@@ -9321,7 +9321,7 @@ function renderScreener(){
   if(!s.configured) return head+`<div class="info" id="scOff" role="status"><span><b>Statutory data isn't set up yet,</b> so there is nothing to screen. It needs a Snowflake reader account from S&amp;P (README, step 7).</span></div>`;
   if(!s.mapped) return head+`<div class="info" id="scUnmapped" role="status"><span><b>Snowflake is connected, but the statutory fields aren't mapped yet.</b> Map them in the field set-up on the <a href="#statutory">Statutory view</a>.</span></div>`;
   if(!s.screen) return head+`<div class="info" id="scNotDeployed" role="status"><span><b>The Screener needs the latest statutory function.</b> Run: supabase functions deploy snl-statutory --no-verify-jwt (see the README).</span></div>`;
-  return head+scFormHTML()+`<div id="scResults" style="display:flex;flex-direction:column;gap:14px;min-width:0" aria-live="polite">${scResultsHTML()}</div>`;
+  return head+scFillHTML()+scFormHTML()+`<div id="scResults" style="display:flex;flex-direction:column;gap:14px;min-width:0" aria-live="polite">${scResultsHTML()}</div>`;
 }
 /* ----- export: the result with its read-back, year and notes ----- */
 function scExport(){
@@ -9393,6 +9393,89 @@ document.addEventListener("input", e=>{   // the line list narrows while typing,
 document.addEventListener("keydown", e=>{
   if(e.key!=="Enter" || !e.target.id || !/^sc_(year|limit|gmin|gmax|f\d+_(min|max))$/.test(e.target.id)) return;
   e.preventDefault(); scRun();
+});
+/* ----- Fill in the form from a description (Claude): the reader describes the companies, Claude turns it into the
+   form's filters (snl-profile's screen-fill action), the page puts them in the form and shows Claude's notes as text.
+   It never runs the screen: the reader checks the form and presses Run screen. When the form already holds a screen it
+   is sent along, so a description can change it. The description is held in this page's memory only (never browser
+   storage) and goes to Claude only when Fill in the form is pressed, with S&P's line names for the year and the screen
+   now in the form; nothing about it is saved. Ask Claude still gets nothing about this view. ----- */
+const SCF_MAX = 600;
+const SCF_EXAMPLE = "Florida homeowners writers with $50M to $300M of direct premium, combined ratio under 100, not part of a big group";
+function scFreshFill(){ return {text:"", busy:false, err:null, outcome:null, notes:[], req:null, seq:0}; }
+const scFill = () => S.sc.fill || (S.sc.fill=scFreshFill());   // goes with S.sc, so a sign-out clears it
+const scFormBlank = f => !f.states.length && !f.lines.length && !f.filters.length && !f.growth.years && f.group==="any";
+const scFormKey = () => JSON.stringify({...S.sc.form, lineQ:""});
+/* Puts a checked request (parseScreen's shape) into the form. */
+function scApplyRequest(q){
+  const f=S.sc.form, s=v=>v===null||v===undefined?"":String(v), yearChanged=f.year!==String(q.year);
+  Object.assign(f, {year:String(q.year), states:[...q.states], lines:[...q.lines], filters:q.filters.map(x=>({field:x.field, min:s(x.min), max:s(x.max)})),
+    growth:q.growth?{years:String(q.growth.years), min:s(q.growth.min), max:s(q.growth.max)}:{years:"", min:"", max:""}, group:q.group, sort:q.sort.by, dir:q.sort.dir==="asc"?"asc":"desc", limit:String(q.limit), lineQ:""});
+  S.sc.formErr="";
+  if(yearChanged) scLoadLines();
+}
+const scReqOk = q => !!q && typeof q==="object" && Number.isInteger(q.year) && Array.isArray(q.states) && Array.isArray(q.lines) && Array.isArray(q.filters) && q.sort && typeof q.sort.by==="string" && Number.isInteger(q.limit) && typeof q.group==="string";
+async function scFillGo(){
+  const sc=S.sc, fl=scFill(), f=sc.form; if(fl.busy) return;
+  const text=fl.text.trim();
+  if(!text){ fl.err={err:"bad", msg:"Describe the company you are looking for first."}; fl.outcome=null; fl.notes=[]; render(); document.getElementById("scFillText")?.focus(); return; }
+  let current=null;
+  if(!scFormBlank(f)){
+    const c=scRequest();
+    if(c.err){ fl.err={err:"form", msg:`The form has a problem, so Claude can't build on it: ${c.err} Fix it, or choose Start over.`}; fl.outcome=null; fl.notes=[]; render(); return; }
+    const {action, ...rest}=c.req; current=rest;
+  }
+  const year=/^\d{4}$/.test(f.year)?+f.year:null, lc=year?sc.lineCache[f.year]:null;
+  const my=++fl.seq, key=scFormKey();
+  fl.busy=true; fl.err=null; fl.outcome=null; fl.notes=[]; fl.req=null; render();
+  const r=await callFn("snl-profile", {action:"screen-fill", text, ...(current?{current}:{}), ...(year?{year}:{}), lines:lc?[...lc.lines]:[]});
+  if(S.sc!==sc || sc.fill!==fl || fl.seq!==my || !S.session) return;   // Start over, a sign-out or a newer fill: dropped
+  fl.busy=false;
+  const notes=r.data && Array.isArray(r.data.notes) ? r.data.notes.filter(x=>typeof x==="string").slice(0,12) : [];
+  if(r.data && r.data.request===null){ fl.outcome="empty"; fl.notes=notes; }
+  else if(r.data && scReqOk(r.data.request)){
+    if(scFormKey()!==key){ fl.outcome="changed"; fl.notes=[]; }
+    else{ const q=r.data.request, b=x=>({...x, ...(x.min===null?{min:undefined}:{}), ...(x.max===null?{max:undefined}:{})});   // the read-back takes a missing bound as undefined
+      scApplyRequest(q); fl.req={...q, filters:q.filters.map(b), growth:q.growth?b(q.growth):null}; fl.outcome="filled"; fl.notes=notes; }
+  }
+  else if(r.data) fl.err={err:"bad", msg:"Claude's answer came back in a shape this page can't read. Try again."};
+  else if(r.err!=="signin"){ fl.err=r; fl.notes=Array.isArray(r.notes)?r.notes:[]; }
+  render();
+}
+function scFillReset(){
+  const sc=S.sc; sc.fill=scFreshFill(); sc.form=scFreshForm(); sc.formErr=""; render(); scLoadLines();
+  document.getElementById("scFillText")?.focus();
+}
+function scFillHTML(){
+  const fl=scFill(), off=!!(S.status&&S.status.claude&&S.status.claude.configured===false);
+  let say="";
+  if(off) say=`<div class="info" id="scFillOff"><span><b>Claude isn't connected yet,</b> so the form can't be filled in from a description. The owner sets ANTHROPIC_API_KEY on Supabase (README, step 6). The form below still works by hand.</span></div>`;
+  else if(fl.busy) say=`<div class="banner" id="scFillBusy"><span>Claude is turning your description into filters. This takes a few seconds. Nothing runs until you press Run screen.</span></div>`;
+  else if(fl.err && fl.err.err==="not_configured") say=`<div class="info" id="scFillOff"><span>${esc(errText(fl.err))}</span></div>`;
+  else if(fl.err && (fl.err.err==="bad" || fl.err.err==="form")) say=`<p class="err" id="scFillErr" role="alert">${esc(fl.err.msg)}</p>`;
+  else if(fl.err) say=`<div class="banner" id="scFillFailed"><span><b>The form wasn't filled in.</b> ${esc(errText(fl.err))} The form below still works by hand.</span><button type="button" class="btn sm" data-act="scf-go">Try again</button></div>`;
+  else if(fl.outcome==="filled") say=`<div class="info" id="scFillDone"><span><b>Claude filled in the form. Check it, then run the screen.</b></span></div><p class="scread" id="scFillReadBack"><b>Filled in:</b> ${esc(scReadBack(fl.req))}</p>`;
+  else if(fl.outcome==="empty") say=`<div class="info" id="scFillEmpty"><span><b>Claude couldn't turn that into a screen.</b> The form wasn't changed. Try other words, or fill in the form by hand.</span></div>`;
+  else if(fl.outcome==="changed") say=`<div class="info" id="scFillChanged"><span>You changed the form while Claude was working, so its filters weren't put in. Press Fill in the form again to use them.</span></div>`;
+  const notes=fl.notes.length&&!fl.busy ? `<ul class="cbnotes" id="scFillNotes" aria-label="Claude's notes">${fl.notes.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>` : "";
+  return `<section class="tcard" id="scFill" aria-labelledby="scFillH"><h3 id="scFillH">Ask Claude to fill in the form</h3>
+    <label class="f"><span>Describe the company you are looking for <em>up to ${SCF_MAX} characters</em></span><textarea id="scFillText" data-bind="sc.fill.text" maxlength="${SCF_MAX}" rows="3" placeholder="${esc(SCF_EXAMPLE)}" aria-describedby="scFillSent">${esc(fl.text)}</textarea></label>
+    <div class="toolbar"><button type="button" class="btn" id="scFillGo" data-act="scf-go" ${off||fl.busy?"disabled":""}>${fl.busy?"Filling in…":"Fill in the form"}</button><button type="button" class="lnk" id="scFillReset" data-act="scf-reset">Start over</button><span class="t2" id="scFillCount">${count(fl.text.length)} of ${SCF_MAX} characters</span></div>
+    <div id="scFillSay" role="status" aria-live="polite" style="display:flex;flex-direction:column;gap:8px;min-width:0">${say}${notes}</div>
+    <p class="t2" id="scFillSent">Claude only fills in the form; it doesn't run the screen. Your description goes to Claude (Anthropic) only when you press Fill in the form, with S&amp;P's line names for the year and the filters now in the form. Nothing else is sent, and nothing is saved. A fill costs a few cents and counts as one of your questions to Claude for the day.</p></section>`;
+}
+document.addEventListener("click", e=>{
+  const t=e.target.closest&&e.target.closest("[data-act]"); if(!t || !/^scf-/.test(t.dataset.act) || !isCorpDev()) return;
+  if(t.dataset.act==="scf-go") scFillGo();
+  if(t.dataset.act==="scf-reset") scFillReset();
+});
+document.addEventListener("input", e=>{   // the count of characters, without a rebuild while typing
+  if(e.target.id!=="scFillText") return;
+  const el=document.getElementById("scFillCount"); if(el) el.textContent=`${count(e.target.value.length)} of ${SCF_MAX} characters`;
+});
+document.addEventListener("keydown", e=>{   // Ctrl+Enter (or Cmd+Enter) in the box fills in the form
+  if(e.target.id!=="scFillText" || e.key!=="Enter" || !(e.ctrlKey||e.metaKey)) return;
+  e.preventDefault(); scFillGo();
 });
 
 /* ---------- routing ---------- */

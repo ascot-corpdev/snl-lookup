@@ -1,0 +1,30 @@
+{
+  "_about": "Made-up answers of snl-profile's screen-fill action, for tests/web/screenfill.test.cjs. The request is the screen tests/web/screener.test.cjs runs (Florida, Homeowners, $50M to $300M, combined ratio at most 100), here not in a group. Every name and figure is made up.",
+  "filled": {
+    "request": {
+      "year": 2025,
+      "states": ["FL"],
+      "lines": ["Homeowners"],
+      "filters": [
+        { "field": "premium", "min": 50, "max": 300 },
+        { "field": "combined_ratio", "min": null, "max": 100 }
+      ],
+      "growth": null,
+      "group": "none",
+      "sort": { "by": "premium", "dir": "desc" },
+      "limit": 100
+    },
+    "notes": [
+      "Read \"not part of a big group\" as not in a NAIC group: the size of a group can't be screened.",
+      "<b>Bold</b> <img src=x onerror=\"window.__pwned=1\"> stays text."
+    ],
+    "usage": { "inputTokens": 2400, "outputTokens": 300, "costUsd": 0.02 }
+  },
+  "empty": {
+    "request": null,
+    "empty": true,
+    "notes": [
+      "The screener can't tell whether a company is for sale or how strong its management is, so nothing could be filled in."
+    ]
+  }
+}

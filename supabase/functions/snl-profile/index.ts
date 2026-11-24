@@ -28,6 +28,12 @@
 //   The facts include what the saved filing summaries (migration 0005) and the market index (migration 0006) add, read
 //   from the database at no S&P cost; candidates lists the company's rate and form filings that have no current summary,
 //   newest first, for the page to offer to summarise (snl-digest "make", one at a time, only when the reader chooses).
+// The Screener's fill (Corp Dev only; _shared/screenfill.ts). Here because this function holds the single-shot Claude
+// call it reuses (askClaude in _shared/profile.ts, with its retry without the shape), the daily limit and the counting:
+//   screen-fill {text, current?, year?, lines}  -> {request, notes}: Claude's reading of the description as a screen
+//                 request for the form, checked by parseScreen; {request: null, notes, empty: true} when nothing could be
+//                 expressed; 422 when the checks refuse it; 502 when Claude fails. It never runs a screen. Counts as one
+//                 of the day's questions; nothing of the description, the request or the notes is kept or logged.
 
 import { adminClient, type Env, type Json, readBody, sleep, type WhoIs, whoIs, withCors } from "../_shared/http.ts";
 import { type Db, supabaseDb } from "../_shared/db.ts";
@@ -37,6 +43,9 @@ import { companiesMapped } from "../_shared/statutory.ts";
 import { type Gate, makeGate, planLimits, Spgmi, SpgmiError } from "../_shared/spgmi.ts";
 import { answerLines, buildFacts, clean, DRAFT_TIME_MS, draftText, NOTES, plainText, PROFILE_CALL_MS, PROFILE_MAX_SP_REQUESTS, PROFILE_QUERY_YEARS, sampleFacts } from "../_shared/profile.ts";
 import { buildFilingsFacts, draftFilingsText, filingsAnswerLines, filingsPlainText, filingsSampleFacts, FP_DRAFT_SEARCH_MS, FP_MAX_SP_REQUESTS, FP_SEARCH_MS, FpRefused, parseFilingsProfile } from "../_shared/profile.ts";
+import { FILL_JOB_TITLE, FILL_NOT_CONFIGURED, FILL_ONLY_CORPDEV, FILL_TIME_MS, fillJobResult, fillScreen, parseFill } from "../_shared/screenfill.ts";
+import { type Mapping } from "../_shared/statutory.ts";
+import { screenStatus } from "../_shared/screen.ts";
 
 export type Deps = {
   env: Env; fetch: typeof fetch; anthropicFetch?: typeof fetch; now?: () => number; whoIs?: WhoIs; db?: Db; gate?: Gate;
@@ -116,6 +125,7 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
     const fields = fieldStatus(mapping).filter((f) => !MAP_ONLY_FIELDS.includes(f.id));   // the figures a profile asks for
     return json(200, { statutory: { configured: sfConfigured, mapped: fields.some((f) => f.mapped), fields: fields.map((f) => ({ id: f.id, label: f.label, mapped: f.mapped })), ...(companiesMapped(mapping) ? { codes: true } : {}) }, claude: { configured: claude }, filings: { configured: spConfigured } });
   }
+  if (body.action === "screen-fill") return await serveScreenFill(body, { deps, json, db, who, clock, claude, mapping });
   if (body.action === "filings_facts" || body.action === "filings_draft") return await serveFilings(body, { deps, json, db, who, clock, start, claude, spCreds, spConfigured });
   if (body.action !== "facts" && body.action !== "draft") return json(400, { error: "bad", message: "Unknown action. Use status, sample, facts or draft, or for a filings profile filings_sample, filings_facts or filings_draft." });
 
@@ -260,6 +270,42 @@ async function serveFilings(body: Record<string, unknown>, c: FilingsCtx): Promi
   catch (e) { console.error("couldn't record the profile text", (e as Error)?.message); }
   try { await db.dropOldJobs(new Date(clock() - KEEP_DAYS * 86_400_000).toISOString()); } catch { /* housekeeping: tried again next time */ }
   return json(200, { facts, text: out.text, usage: out.usage, jobId, spRequests: used, search, candidates });
+}
+
+/** As limitMessage, for the Screener's fill. */
+export function fillLimitMessage(asked: number, limit: number, now: number): string {
+  const hours = (Date.parse(utcDay(now).resetsAt) - now) / 3_600_000, h = Math.round(hours);
+  const when = hours < 1 ? "in less than an hour" : `in about ${h} ${h === 1 ? "hour" : "hours"}`;
+  return `You've asked ${asked.toLocaleString("en-US")} ${asked === 1 ? "question" : "questions"} today, and the limit is ${limit.toLocaleString("en-US")} a day for each login. Filling in the Screener form counts as a question. `
+    + `You can ask again after midnight UTC, ${when}. Until then, fill in the form by hand.`;
+}
+
+type FillCtxIn = { deps: Deps; json: Json; db: Db; who: { id: string; role: string }; clock: () => number; claude: boolean; mapping: Mapping };
+/** The Screener's fill (Corp Dev only): Claude turns a description into a screen request for the form, checked in code
+    (_shared/screenfill.ts). One short call, answered in this call. It counts as one of the day's questions, as a
+    profile's text does, in a row holding only a fixed title and the usage. The description, the request and the notes
+    are never saved or logged: the log says only that a fill ran, how long it took and whether it gave filters. */
+async function serveScreenFill(body: Record<string, unknown>, c: FillCtxIn): Promise<Response> {
+  const { deps, json, db, who, clock } = c;
+  if (who.role !== "corpdev") return json(403, { error: "forbidden", message: FILL_ONLY_CORPDEV });
+  const started = clock(), thisYear = new Date(started).getUTCFullYear();
+  const parsed = parseFill(body, thisYear);
+  if (!parsed.ok) return json(400, { error: "bad", message: parsed.message });
+  if (!c.claude) return json(503, { error: "not_configured", message: FILL_NOT_CONFIGURED });
+  const limit = dailyLimit(deps.env);
+  if (limit !== null) {
+    const day = utcDay(started), asked = await db.countJobsSince(who.id, day.start);
+    if (asked >= limit) return json(429, { error: "limit", message: fillLimitMessage(asked, limit, started), askedToday: asked, dailyLimit: limit, resetsAt: day.resetsAt });
+  }
+  const out = await fillScreen(parsed.ask, { env: deps.env, anthropicFetch: deps.anthropicFetch, timeMs: deps.draftMs ?? FILL_TIME_MS, today: new Date(started).toISOString().slice(0, 10), thisYear, status: screenStatus(c.mapping) });
+  // counted as one of the day's questions, without the text
+  try {
+    const jobId = await db.createJob(who.id, FILL_JOB_TITLE);
+    if (jobId) { await db.claimJob(jobId, ["queued"]); await db.updateJob(jobId, { status: "done", partial: "", result: fillJobResult(out.usage, out.model) }); }
+  } catch (e) { console.error("couldn't count the Screener fill", (e as Error)?.message); }
+  try { await db.dropOldJobs(new Date(clock() - KEEP_DAYS * 86_400_000).toISOString()); } catch { /* housekeeping: tried again next time */ }
+  console.log(`snl-profile: a Screener fill ran (${clock() - started} ms, ${out.filled ? "filters filled in" : out.status === 200 ? "no filters" : `failed, ${out.status}`})`);
+  return json(out.status, out.body);
 }
 
 // Tests import handle() with this flag set; in Supabase the server always starts.
