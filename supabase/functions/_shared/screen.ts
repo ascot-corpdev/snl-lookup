@@ -14,10 +14,15 @@ import { type Binding, type Snowflake, SnowflakeError } from "./snowflake.ts";
 import { buildLinesSql, buildScreenSql, companiesMapped, type Mapping, premiumFigure, SCREEN_FIGURES, SCREEN_MAX_LIMIT, type ScreenField, type ScreenRequest, screenFigureProblem, STAT_FIELDS, type StatFieldId } from "./statutory.ts";
 
 export const SCREEN_MAX_STATES = 10, SCREEN_MAX_LINES = 10, SCREEN_MAX_FILTERS = 8, SCREEN_DEFAULT_LIMIT = 100;
-/** The longest a screen waits for Snowflake: the statutory function must answer inside Supabase's 150 seconds, and the
-    SQL API's own statement timeout is capped at 90 seconds (snowflake.ts), so 100 seconds of waiting leaves room for
-    signing in and answering. A live screen of one state and one line took about 25 seconds. */
-export const SCREEN_WAIT_MS = 100_000;
+/** A screen runs on Snowflake's asynchronous route: the first call submits it and waits up to SCREEN_FIRST_WAIT_MS;
+    if it hasn't finished, the page asks again with the handle every few seconds. Snowflake's own timeout for the
+    statement is SCREEN_TIMEOUT_S, the same five minutes the page allows in all (SC_MAX_MS in web/index.html). */
+export const SCREEN_FIRST_WAIT_MS = 20_000, SCREEN_TIMEOUT_S = 300;
+/** Snowflake's statement handles are UUID-like; anything else is refused before it is used. */
+export const SCREEN_HANDLE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const SCREEN_BAD_HANDLE = "That screen can't be read: its reference isn't one Snowflake gives. Run the screen again.";
+export const SCREEN_WRONG_HANDLE = "That screen can't be read: the result under its reference isn't this screen's. Run the screen again.";
+export const SCREEN_GONE = "The screen is no longer running. Run it again.";
 export const SCREEN_TIMEOUT = "The screen didn't finish in time. Narrow it (add a state or a line) and run it again.";
 /** A figure whose rows disagree for more than this share of the companies with premium in view (and more than
     SCREEN_ODD_FLOOR companies) points to a mapping fault, and the screen is refused; below it, those companies are
@@ -30,7 +35,7 @@ const label = (id: string) => id === "premium" ? "Premium in view" : id === "foc
 
 /** A plain message for anything a screen can't use. */
 export class ScreenError extends Error {
-  constructor(public code: "fans_out" | "not_mapped" | "group" | "sql", message: string, public figure?: string) { super(message); }
+  constructor(public code: "fans_out" | "not_mapped" | "group" | "sql" | "handle", message: string, public figure?: string) { super(message); }
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
@@ -40,7 +45,7 @@ const bound = (v: unknown): number | null | undefined => (v === undefined || v =
 /** Checks a screen. Every bad input is refused with a plain message; nothing is silently dropped. */
 export function parseScreen(b: Record<string, unknown>, thisYear: number): { ok: true; r: ScreenRequest } | { ok: false; message: string } {
   const bad = (message: string) => ({ ok: false as const, message });
-  const extra = extraKey(b, ["action", "year", "states", "lines", "filters", "growth", "group", "sort", "limit"]);
+  const extra = extraKey(b, ["action", "year", "states", "lines", "filters", "growth", "group", "sort", "limit", "handle"]);
   if (extra) return bad(`A screen doesn't take "${extra.slice(0, 40)}". It takes year, states, lines, filters, growth, group, sort and limit.`);
   const year = b.year === undefined ? thisYear - 1 : b.year;
   if (!Number.isInteger(year) || (year as number) < 1990 || (year as number) > thisYear) return bad(`The year must be a whole year from 1990 to ${thisYear}.`);
@@ -115,13 +120,22 @@ export type ScreenRow = { code: string; name: string | null; groupCode?: string 
 const num = (v: unknown) => { const n = v === null || v === undefined || v === "" ? NaN : Number(v); return Number.isFinite(n) ? n : null; };
 const txt = (v: unknown) => (v === null || v === undefined ? null : String(v).trim() || null);
 
-/** Runs a checked screen: ONE statement, waiting up to SCREEN_WAIT_MS. A screen that doesn't finish is a
-    SnowflakeError "timeout" (never a partial list); one whose figures don't reduce to one a company is a ScreenError. */
-export async function runScreen(sf: Snowflake, database: string, schema: string, mapping: Mapping, r: ScreenRequest, opts: { now: () => number; waitMs?: number; log?: (s: string) => void }) {
+/** Runs a checked screen: ONE statement, submitted on the first call (waiting up to SCREEN_FIRST_WAIT_MS) and read by
+    its handle on later calls; {running, handle} while it hasn't finished, never a partial list. A figure whose rows
+    disagree for many companies is a ScreenError; a result under a handle that isn't this screen's is refused. */
+export async function runScreen(sf: Snowflake, database: string, schema: string, mapping: Mapping, r: ScreenRequest, opts: { now: () => number; waitMs?: number; log?: (s: string) => void; handle?: string }) {
   const built = buildScreenSql(database, schema, mapping, r);
   if ("problem" in built) throw new ScreenError(built.code, built.problem, built.figure);
   const started = opts.now();
-  const res = await sf.query(built.statement, built.bindings as Binding[], opts.waitMs ?? SCREEN_WAIT_MS);
+  // the first call submits the statement and waits a little; later calls only look at the handle, never resubmit
+  const got = opts.handle !== undefined ? await sf.check(opts.handle)
+    : await sf.submit(built.statement, built.bindings as Binding[], { timeoutS: SCREEN_TIMEOUT_S, waitMs: opts.waitMs ?? SCREEN_FIRST_WAIT_MS });
+  if (got.running) return { running: true as const, handle: got.handle, waitedMs: opts.now() - started };
+  const res = got.result;
+  // a result read by handle must be this request's statement's: exactly its columns, in order
+  if (opts.handle !== undefined && JSON.stringify(res.columns.map((c) => c.name)) !== JSON.stringify(built.resultColumns)) {
+    throw new ScreenError("handle", SCREEN_WRONG_HANDLE);
+  }
   const head = res.rows[0] ?? {};
   const inView = num(head.IN_VIEW) ?? 0, limitOdd = Math.max(SCREEN_ODD_FLOOR, SCREEN_ODD_SHARE * inView);
   const key = built.premium === "dpw_by_line" ? "line" : built.premium === "dpw_by_state" ? "state" : "state and line";

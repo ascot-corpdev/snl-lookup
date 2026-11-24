@@ -24,6 +24,9 @@
 //   screen   {year?, states?, lines?, filters?, growth?, group?, sort?, limit?}   (Corp Dev only; _shared/screen.ts)
 //                                              -> {year, premium, columns, rows, total, limit, cut, sort, notes, ...}
 //            the companies that fit, across every statutory filer, in one statement; nothing is saved or logged
+//            not finished after about 20 seconds: {running: true, handle, waitedMs}; ask again with the same request
+//            plus handle (nothing is kept here between calls); 410 gone when Snowflake no longer knows the handle
+//   screen-cancel {handle}                     (Corp Dev only) -> {cancelled: true}: stops a running screen
 //   screen-lines {year?}                       (Corp Dev only) -> {year, lines, cut}: S&P's line names for that year
 
 import { adminClient, type Env, type Json, readBody, shortHash, sleep, type WhoIs, whoIs, withCors } from "../_shared/http.ts";
@@ -31,7 +34,7 @@ import { type Db, supabaseDb } from "../_shared/db.ts";
 import { credsReady, Snowflake, SNOWFLAKE_NOT_CONFIGURED, snowflakeCreds, SnowflakeError } from "../_shared/snowflake.ts";
 import { discoverColumns, discoverSchemas, discoverViews, fieldStatus, getMapping, isViewName, loadedProblem, NOT_MAPPED, parseStatQuery, savedOrFreshStatutory, storedName } from "../_shared/statutory.ts";
 import { companiesMapped, companiesProblem, MAX_CODE_IDS, naicCodesFor } from "../_shared/statutory.ts";
-import { parseScreen, runScreen, SCREEN_ONLY_CORPDEV, SCREEN_TIMEOUT, ScreenError, screenLines, screenStatus } from "../_shared/screen.ts";
+import { parseScreen, runScreen, SCREEN_BAD_HANDLE, SCREEN_GONE, SCREEN_HANDLE, SCREEN_ONLY_CORPDEV, SCREEN_TIMEOUT, ScreenError, screenLines, screenStatus } from "../_shared/screen.ts";
 
 export type Deps = { env: Env; fetch: typeof fetch; now?: () => number; whoIs?: WhoIs; db?: Db; sleep?: (ms: number) => Promise<void> };
 
@@ -101,6 +104,7 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
       }
 
       case "screen":
+      case "screen-cancel":
       case "screen-lines": {
         if (who.role !== "corpdev") return json(403, { error: "forbidden", message: SCREEN_ONLY_CORPDEV });
         const thisYear = new Date(now).getUTCFullYear();
@@ -110,14 +114,25 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
           if (!sf) return json(503, { error: "not_configured", message: SNOWFLAKE_NOT_CONFIGURED });
           return json(200, await screenLines(sf, creds.database, creds.schema, mapping, year as number));
         }
+        // a statement handle from an earlier call: only the shape Snowflake gives is ever used
+        const handle = body.handle === undefined ? undefined : typeof body.handle === "string" && SCREEN_HANDLE.test(body.handle) ? body.handle : null;
+        if (handle === null) return json(400, { error: "bad_handle", message: SCREEN_BAD_HANDLE });
+        if (body.action === "screen-cancel") {
+          if (handle === undefined || Object.keys(body).some((k) => k !== "action" && k !== "handle")) return json(400, { error: "bad", message: "To stop a screen, send its handle and nothing else." });
+          if (!sf) return json(503, { error: "not_configured", message: SNOWFLAKE_NOT_CONFIGURED });
+          try { await sf.cancel(handle); } catch (e) { if (!(e instanceof SnowflakeError) || e.code === "not_configured") throw e; }   // already gone is fine
+          return json(200, { cancelled: true });
+        }
         const parsed = parseScreen(body, thisYear);
         if (!parsed.ok) return json(400, { error: "bad", message: parsed.message });
         if (!sf) return json(503, { error: "not_configured", message: SNOWFLAKE_NOT_CONFIGURED });
         try {
-          return json(200, await runScreen(sf, creds.database, creds.schema, mapping, parsed.r, { now: nowFn }));
+          // finished: the answer; still running: {running, handle, waitedMs}, and the page asks again with the handle
+          return json(200, await runScreen(sf, creds.database, creds.schema, mapping, parsed.r, { now: nowFn, handle }));
         } catch (e) {
-          // never a partial list: a screen that didn't finish says so plainly
+          // never a partial list: a screen that didn't finish or is gone says so plainly
           if (e instanceof SnowflakeError && e.code === "timeout") return json(504, { error: "timeout", message: SCREEN_TIMEOUT });
+          if (e instanceof SnowflakeError && e.code === "gone") return json(410, { error: "gone", message: SCREEN_GONE });
           throw e;
         }
       }
@@ -128,7 +143,7 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
   } catch (e) {
     const answer = snowflakeAnswer(e);
     if (answer) return json(answer.status, answer.body);
-    if (e instanceof ScreenError) return json(e.code === "sql" ? 502 : 409, { error: e.code, message: e.message, ...(e.figure ? { figure: e.figure } : {}) });
+    if (e instanceof ScreenError) return json(e.code === "sql" ? 502 : e.code === "handle" ? 400 : 409, { error: e.code, message: e.message, ...(e.figure ? { figure: e.figure } : {}) });
     throw e;
   }
 }

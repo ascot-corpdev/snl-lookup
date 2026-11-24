@@ -39,7 +39,8 @@ export const snowflakeConfigured = (env: Env) => credsReady(snowflakeCreds(env))
 export const SNOWFLAKE_NOT_CONFIGURED = "Statutory data isn't set up yet. It needs a Snowflake reader account from S&P. When that exists, the owner sets the SNOWFLAKE secrets on Supabase (README, step 7) and this view goes live.";
 
 export class SnowflakeError extends Error {
-  constructor(public code: "not_configured" | "not_mapped" | "signin" | "sql" | "busy" | "timeout" | "server" | "network", message: string, public status = 0) { super(message); }
+  /** gone: a statement handle Snowflake no longer knows, or a statement that was cancelled (submit, check). */
+  constructor(public code: "not_configured" | "not_mapped" | "signin" | "sql" | "busy" | "timeout" | "server" | "network" | "gone", message: string, public status = 0) { super(message); }
 }
 
 const b64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -146,6 +147,11 @@ export class Snowflake {
       res = await this.send(`${this.base}/api/v2/statements/${handle}`, { method: "GET" });
       doc = await this.read(res);
     }
+    return this.collect(doc);
+  }
+
+  /** The rows of a finished statement's answer, with its further partitions fetched (up to MAX_ROWS). */
+  private async collect(doc: Record<string, unknown>): Promise<SqlResult> {
     const meta = (doc.resultSetMetaData ?? {}) as { rowType?: { name?: string; type?: string }[]; partitionInfo?: unknown[] };
     const columns = (meta.rowType ?? []).map((c) => ({ name: String(c.name ?? ""), type: String(c.type ?? "").toLowerCase() }));
     const handle = typeof doc.statementHandle === "string" ? doc.statementHandle : null;
@@ -160,6 +166,61 @@ export class Snowflake {
     if (data.length > MAX_ROWS) { data.length = MAX_ROWS; truncated = true; }
     const rows = data.map((r) => Object.fromEntries(columns.map((c, i) => [c.name, r[i] === undefined ? null : r[i]])));
     return { columns, rows, truncated, statementHandle: handle };
+  }
+
+  /** Submits one read-only statement that may run longer than a function call: Snowflake's own timeout is
+      timeoutS seconds (not query's 90), and this call waits at most waitMs. A statement still running then is left
+      running (never cancelled here) and its handle comes back, to be read later with check, or stopped with cancel.
+      It is sent with ?async=true, so Snowflake answers 202 with the handle at once and this call polls for the rest.
+      UNCONFIRMED: that a statement keeps running after the call that submitted it returns. */
+  async submit(statement: string, bindings: Binding[], opts: { timeoutS: number; waitMs: number }): Promise<{ running: true; handle: string } | { running: false; result: SqlResult }> {
+    if (!credsReady(this.c)) throw new SnowflakeError("not_configured", SNOWFLAKE_NOT_CONFIGURED);
+    const body = JSON.stringify({
+      statement, timeout: Math.max(5, Math.ceil(opts.timeoutS)), database: this.c.database, schema: this.c.schema, warehouse: this.c.warehouse, role: this.c.role,
+      parameters: OUTPUT,
+      ...(bindings.length ? { bindings: Object.fromEntries(bindings.map((b, i) => [String(i + 1), b])) } : {}),
+    });
+    const started = this.io.now();
+    let res = await this.send(`${this.base}/api/v2/statements?async=true`, { method: "POST", body });
+    let doc = await this.read(res);
+    while (res.status === 202) {
+      const handle = String(doc.statementHandle ?? "");
+      if (!handle) throw new SnowflakeError("server", "Snowflake said the query is still running but gave no way to check on it. Try again.");
+      if (this.io.now() - started + POLL_MS > opts.waitMs) return { running: true, handle };
+      await this.io.sleep(POLL_MS);
+      res = await this.send(`${this.base}/api/v2/statements/${handle}`, { method: "GET" });
+      doc = await this.readHandle(res);
+    }
+    return { running: false, result: await this.collect(doc) };
+  }
+
+  /** One look at a submitted statement: its result when it has finished, running while it hasn't. A handle
+      Snowflake doesn't know (expired) or a cancelled statement is SnowflakeError "gone". UNCONFIRMED: that a
+      result stays readable by its handle for the minutes a screen takes, and the answers for an unknown or
+      cancelled handle (taken as 404, or 422 that says cancelled or not found). */
+  async check(handle: string): Promise<{ running: true; handle: string } | { running: false; result: SqlResult }> {
+    if (!credsReady(this.c)) throw new SnowflakeError("not_configured", SNOWFLAKE_NOT_CONFIGURED);
+    const res = await this.send(`${this.base}/api/v2/statements/${encodeURIComponent(handle)}`, { method: "GET" });
+    const doc = await this.readHandle(res);
+    if (res.status === 202) return { running: true, handle };
+    return { running: false, result: await this.collect(doc) };
+  }
+
+  /** Asks Snowflake to stop a submitted statement. A handle it no longer knows is not an error. */
+  async cancel(handle: string): Promise<void> {
+    if (!credsReady(this.c)) throw new SnowflakeError("not_configured", SNOWFLAKE_NOT_CONFIGURED);
+    const res = await this.send(`${this.base}/api/v2/statements/${encodeURIComponent(handle)}/cancel`, { method: "POST" });
+    await res.body?.cancel();
+  }
+
+  /** read, where an unknown or cancelled statement is "gone" rather than a failure of the SQL. */
+  private async readHandle(res: Response): Promise<Record<string, unknown>> {
+    if (res.status === 404) { await res.body?.cancel(); throw new SnowflakeError("gone", "Snowflake no longer knows this statement.", 404); }
+    try { return await this.read(res); }
+    catch (e) {
+      if (e instanceof SnowflakeError && e.code === "sql" && /cancel|not found|does not exist/i.test(e.message)) throw new SnowflakeError("gone", "Snowflake no longer knows this statement.", 422);
+      throw e;
+    }
   }
 
   private async read(res: Response): Promise<Record<string, unknown>> {

@@ -9153,22 +9153,55 @@ function scReadBack(q){
 }
 const scSortWords = (by, dir) => `${by==="name"?"company name":by==="code"?"NAIC code":scFig(by)[1].toLowerCase()}, ${by==="name"||by==="code" ? (dir==="asc"?"A to Z":"Z to A") : (dir==="asc"?"smallest first":"largest first")}`;
 /* ----- running a screen: one call, with Stop; a late answer after Stop is dropped ----- */
+/* A screen runs on Snowflake's own asynchronous route: the first call waits about 20 seconds, and if the screen hasn't
+   finished it answers {running, handle}; the page then asks again with the same request and the handle every
+   SC_POLL_MS, up to SC_MAX_MS from the start (the statement's own Snowflake timeout is the same five minutes). Stop,
+   the time running out, leaving the view and signing out cancel it on Snowflake. The request and the handle are held
+   in this page's memory only; nothing is kept on the server between calls, and a partial list is never shown. */
+const SC_POLL_MS = 3000, SC_MAX_MS = 5*60*1000;
+const SC_TOO_LONG = "The screen didn't finish in five minutes, so it was stopped. Narrow it (add a state or a line) and run it again.";
+function scElapsed(ms){ const s=Math.max(0, Math.round(ms/1000)), m=Math.floor(s/60), r=s%60; return m ? plural(m,"minute")+(r?" "+plural(r,"second"):"") : plural(s,"second"); }
+/* Cancels a screen on Snowflake: at once when its handle is known, otherwise as soon as the first call answers with one. */
+function scCancel(run){
+  const send=h=>callFn("snl-statutory", {action:"screen-cancel", handle:h}).catch(()=>null);
+  if(run.handle){ const h=run.handle; run.handle=null; return send(h); }
+  if(run.pending) run.pending.then(x=>{ if(x && x.data && x.data.running && typeof x.data.handle==="string") send(x.data.handle); });
+  return Promise.resolve(null);
+}
+/* Stops a running screen when the reader leaves the view or signs out. */
+function scHalt(why){
+  const run=S.sc&&S.sc.run; if(!run || !run.busy) return Promise.resolve(null);
+  run.busy=false; run.stopped=true; run.left=why==="left"; if(run.ctl) run.ctl.stop();
+  return scCancel(run);
+}
 async function scRun(sortOver){
   const sc=S.sc; if(sc.run && sc.run.busy) return;
   if(sortOver){ sc.form.sort=sortOver.by; sc.form.dir=sortOver.dir; }
   const c=scRequest();
   if(c.err){ sc.formErr=c.err; render(); document.getElementById("scErr")?.focus?.(); return; }
-  const ctl=bsControl(), run={req:c.req, busy:true, ctl, res:null, err:null, stopped:false};
+  const ctl=bsControl(), run={req:c.req, busy:true, ctl, res:null, err:null, stopped:false, t0:Date.now(), handle:null, pending:null};
   sc.formErr=""; sc.run=run; sc.view=null; pbStart("sc"); render();
-  const r=await Promise.race([callFn("snl-statutory", c.req), ctl.wait]);
+  const mine=()=>S.sc===sc && sc.run===run && run.busy;
+  const busyText=()=>`Running for ${scElapsed(Date.now()-run.t0)}. A screen reads every company, so it can take a minute or two.`;
+  const tick=setInterval(()=>{ if(!mine()){ clearInterval(tick); return; } const el=document.getElementById("scElapsed"); if(el && el.textContent!==busyText()) el.textContent=busyText(); }, 1000);   // the time so far, without a rebuild
+  run.pending=callFn("snl-statutory", c.req);
+  let r=await Promise.race([run.pending, ctl.wait]);
+  while(mine() && !ctl.stopped && r.data && r.data.running===true && typeof r.data.handle==="string"){
+    run.handle=r.data.handle; run.pending=null; render();
+    await Promise.race([new Promise(res=>setTimeout(res, SC_POLL_MS)), ctl.wait]);
+    if(!mine() || ctl.stopped) break;
+    if(Date.now()-run.t0 > SC_MAX_MS){ run.busy=false; run.ctl=null; scCancel(run); run.err={err:"timeout", msg:SC_TOO_LONG}; render(); return; }
+    r=await Promise.race([callFn("snl-statutory", {...run.req, handle:run.handle}), ctl.wait]);
+  }
   if(S.sc!==sc || sc.run!==run) return;
-  run.busy=false; run.ctl=null;
-  if(ctl.stopped || r.err==="stopped"){ run.stopped=true; render(); return; }
+  if(ctl.stopped || r.err==="stopped"){ if(run.busy){ run.busy=false; run.stopped=true; scCancel(run); } run.ctl=null; render(); return; }
+  run.busy=false; run.ctl=null; run.handle=null;
   if(!S.session) return;
   if(r.data && Array.isArray(r.data.rows)) run.res=r.data;
   else if(r.err!=="signin") run.err=r.data ? {err:"bad", msg:"The screen came back in a shape this page can't read. Try again."} : r;
   render();
 }
+window.addEventListener("hashchange", ()=>{ if(location.hash.replace(/^#/,"")!=="screener") scHalt("left"); });   // leaving the view stops the screen
 /* ----- the results ----- */
 const scVal = (unit, v) => unit==="usd" ? usdM(v) : pct(v);
 function scRows(res){
@@ -9196,10 +9229,11 @@ function scShownText(res, run){
 function scResultsHTML(){
   const sc=S.sc, run=sc.run; if(!run) return "";
   const rb=`<p class="scread" id="scReadBack"><b>Screen:</b> ${esc(scReadBack(run.req))}</p>`;
-  if(run.busy) return rb+`<div class="banner" id="scBusy" role="status"><span>Running the screen across every company… A screen can take up to a minute.</span>${pbHTML("sc", {name:"Screen"})}<button type="button" class="btn sm" data-act="sc-stop">Stop</button></div>`;
-  if(run.stopped) return rb+`<div class="banner" id="scStopped" role="status"><span>You stopped the screen before it came back, so nothing is shown from it.</span><button type="button" class="btn sm" data-act="sc-retry">Run it again</button></div>`;
+  if(run.busy) return rb+`<div class="banner" id="scBusy" role="status"><span id="scElapsed">${esc(`Running for ${scElapsed(Date.now()-run.t0)}. A screen reads every company, so it can take a minute or two.`)}</span>${pbHTML("sc", {name:"Screen", time:false})}<button type="button" class="btn sm" data-act="sc-stop">Stop</button></div>`;
+  if(run.stopped) return rb+`<div class="banner" id="scStopped" role="status"><span>${run.left?"The screen was stopped when you left the Screener, so nothing is shown from it.":"You stopped the screen before it came back, so nothing is shown from it."}</span><button type="button" class="btn sm" data-act="sc-retry">Run it again</button></div>`;
   if(run.err){
     const e=run.err;
+    if(e.err==="gone") return rb+`<div class="banner" id="scGone" role="alert"><span>${esc(e.msg)}</span><button type="button" class="btn sm" data-act="sc-retry">Run it again</button></div>`;
     if(e.err==="timeout") return rb+`<div class="banner" id="scTimeout" role="alert"><span><b>The screen took too long.</b> ${esc(e.msg)}</span><button type="button" class="btn sm" data-act="sc-retry">Try again</button></div>`;
     if(e.err==="not_mapped" || e.err==="fans_out" || e.err==="group" || e.err==="not_configured") return rb+`<div class="info" id="scCant" role="status"><span><b>This screen can't run yet.</b> ${esc(e.msg)}</span></div>`;
     return rb+problemHTML(e, "The screen didn't run.", "sc-retry").replace('<div class="', '<div id="scFailed" class="');
@@ -9741,6 +9775,7 @@ async function doLogin(){
   await onSignedIn(data.session);
 }
 async function signOut(){
+  await scHalt();   // a screen still running on Snowflake is cancelled while the session can still ask
   if(CF_SIGNON){ cfSignOut(); return; }
   S.leaving=true; try{ await S.sb.auth.signOut(); }catch{} S.leaving=false;
   resetState(); S.loginErr=""; history.replaceState(null,"",location.pathname); render();
