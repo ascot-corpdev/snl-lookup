@@ -21,12 +21,17 @@
 //                                              -> {results: [{institutionId, status, naicCompanyCode, naicGroupCode, naicGroupName, codes?}], asked, saved}
 //            NAIC codes for companies the company list has with an institution id and no NAIC code: one statement
 //            for the ids not answered before; codes found are saved to the company list where it has none
+//   screen   {year?, states?, lines?, filters?, growth?, group?, sort?, limit?}   (Corp Dev only; _shared/screen.ts)
+//                                              -> {year, premium, columns, rows, total, limit, cut, sort, notes, ...}
+//            the companies that fit, across every statutory filer, in one statement; nothing is saved or logged
+//   screen-lines {year?}                       (Corp Dev only) -> {year, lines, cut}: S&P's line names for that year
 
 import { adminClient, type Env, type Json, readBody, shortHash, sleep, type WhoIs, whoIs, withCors } from "../_shared/http.ts";
 import { type Db, supabaseDb } from "../_shared/db.ts";
 import { credsReady, Snowflake, SNOWFLAKE_NOT_CONFIGURED, snowflakeCreds, SnowflakeError } from "../_shared/snowflake.ts";
 import { discoverColumns, discoverSchemas, discoverViews, fieldStatus, getMapping, isViewName, loadedProblem, NOT_MAPPED, parseStatQuery, savedOrFreshStatutory, storedName } from "../_shared/statutory.ts";
 import { companiesMapped, companiesProblem, MAX_CODE_IDS, naicCodesFor } from "../_shared/statutory.ts";
+import { parseScreen, runScreen, SCREEN_ONLY_CORPDEV, SCREEN_TIMEOUT, ScreenError, screenLines, screenStatus } from "../_shared/screen.ts";
 
 export type Deps = { env: Env; fetch: typeof fetch; now?: () => number; whoIs?: WhoIs; db?: Db; sleep?: (ms: number) => Promise<void> };
 
@@ -62,7 +67,7 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
     switch (body.action) {
       case "status":
         return json(200, { configured, mapped, message: !configured ? SNOWFLAKE_NOT_CONFIGURED : !mapped ? NOT_MAPPED : null, fields, loadedProblem: loadedProblem(mapping.loaded),
-          companies: { mapped: companiesMapped(mapping), problem: companiesProblem(mapping.companies) } });
+          companies: { mapped: companiesMapped(mapping), problem: companiesProblem(mapping.companies) }, screen: screenStatus(mapping) });
 
       case "query": {
         const parsed = parseStatQuery(body, new Date(now).getUTCFullYear());
@@ -95,12 +100,35 @@ async function serve(req: Request, deps: Deps, json: Json): Promise<Response> {
         return json(200, await naicCodesFor(sf, db, creds.database, creds.schema, mapping, ids, { now }));
       }
 
+      case "screen":
+      case "screen-lines": {
+        if (who.role !== "corpdev") return json(403, { error: "forbidden", message: SCREEN_ONLY_CORPDEV });
+        const thisYear = new Date(now).getUTCFullYear();
+        if (body.action === "screen-lines") {
+          const year = body.year === undefined ? thisYear - 1 : body.year;
+          if (!Number.isInteger(year) || (year as number) < 1990 || (year as number) > thisYear) return json(400, { error: "bad", message: `The year must be a whole year from 1990 to ${thisYear}.` });
+          if (!sf) return json(503, { error: "not_configured", message: SNOWFLAKE_NOT_CONFIGURED });
+          return json(200, await screenLines(sf, creds.database, creds.schema, mapping, year as number));
+        }
+        const parsed = parseScreen(body, thisYear);
+        if (!parsed.ok) return json(400, { error: "bad", message: parsed.message });
+        if (!sf) return json(503, { error: "not_configured", message: SNOWFLAKE_NOT_CONFIGURED });
+        try {
+          return json(200, await runScreen(sf, creds.database, creds.schema, mapping, parsed.r, { now: nowFn }));
+        } catch (e) {
+          // never a partial list: a screen that didn't finish says so plainly
+          if (e instanceof SnowflakeError && e.code === "timeout") return json(504, { error: "timeout", message: SCREEN_TIMEOUT });
+          throw e;
+        }
+      }
+
       default:
         return json(400, { error: "bad", message: "Unknown action. Use status, query or discover." });
     }
   } catch (e) {
     const answer = snowflakeAnswer(e);
     if (answer) return json(answer.status, answer.body);
+    if (e instanceof ScreenError) return json(e.code === "sql" ? 502 : 409, { error: e.code, message: e.message, ...(e.figure ? { figure: e.figure } : {}) });
     throw e;
   }
 }

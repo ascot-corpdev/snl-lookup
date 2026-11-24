@@ -1,0 +1,33 @@
+{
+  "_about": "Made-up answers of the statutory function's screen action and the screen part of its status, for tests/web/screener.test.cjs. Every company, code and figure is made up.",
+  "screenStatus": {
+    "premium": { "dpw_by_line": null, "dpw_by_state": null, "dpw_by_state_line": null },
+    "figures": {
+      "gpw": null, "npe": null, "surplus": null, "total_assets": null, "net_income": null, "combined_ratio": null, "loss_ratio": null,
+      "loss_lae_ratio": null, "expense_ratio": null, "rbc_ratio": "Risk-based capital ratio isn't mapped to S&P's data yet, so a screen can't use it.",
+      "roae": null, "uw_gain": null, "net_reserves": null
+    },
+    "group": true
+  },
+  "answer": {
+    "year": 2025,
+    "premium": { "figure": "dpw_by_state_line", "states": ["FL"], "lines": ["Homeowners"] },
+    "growth": null, "group": "any", "groupMapped": true,
+    "columns": [
+      { "id": "premium", "label": "Premium in view", "unit": "usd" },
+      { "id": "focus", "label": "Focus: premium in view as a share of all direct premiums written", "unit": "pct" },
+      { "id": "combined_ratio", "label": "Combined ratio", "unit": "pct" },
+      { "id": "surplus", "label": "Policyholder surplus", "unit": "usd" },
+      { "id": "gpw", "label": "Gross premiums written", "unit": "usd" }
+    ],
+    "rows": [
+      { "code": "92001", "name": "Tarrow Mutual Insurance Co", "premium": 1250000000, "focus": 25, "combined_ratio": 98, "surplus": 900000000, "gpw": 1100000000, "groupCode": null, "groupName": null },
+      { "code": "91001", "name": "Calloway Insurance Co", "premium": 120000000, "focus": 60, "combined_ratio": 95, "surplus": 140000000, "gpw": 210000000, "groupCode": "9100", "groupName": "Calloway Group" },
+      { "code": "93001", "name": "Nonesuch Casualty Co", "premium": 55000000, "focus": 100, "combined_ratio": null, "surplus": 50000000, "gpw": 90000000, "groupCode": null, "groupName": null }
+    ],
+    "total": 3, "limit": 100, "cut": false, "sort": { "by": "premium", "dir": "desc" },
+    "notes": ["Focus is premium in view as a share of the company's total direct premiums written in 2025, from premiums by state and line over every state and line."],
+    "source": "S&P Global Market Intelligence, SNL Insurance Regulatory Data (Snowflake)",
+    "fetchedAt": "2026-11-13T11:59:30Z"
+  }
+}

@@ -99,7 +99,7 @@ function answer(body, o={}){
 
   // ===== the base not set: the tab says what to do; Corp Dev sets it by name, as a group =====
   let t=await open({}); let p=t.p;
-  ok("Corp Dev sees the Combination tab, after Statutory", await p.isVisible('nav.tabs a[data-view="combination"]') && same(await p.$$eval("nav.tabs a:not([hidden])",as=>as.map(a=>a.dataset.view)),["filings","snapshot","compare","market","earnings","statutory","combination","profile"]));
+  ok("Corp Dev sees the Combination tab, after Statutory", await p.isVisible('nav.tabs a[data-view="combination"]') && same(await p.$$eval("nav.tabs a:not([hidden])",as=>as.map(a=>a.dataset.view)),["filings","snapshot","compare","market","earnings","statutory","combination","screener","profile"]));
   ok("the title is neutral without a company name setting", (await t.txt("#view .action-title"))==="Combination: Our company with a target, as a pro forma", await t.txt("#view .action-title"));
   ok("what it is, always above everything else", (await t.txt("#cbWhat")).startsWith("What this is: a simple sum of two sets of statutory figures, as each company filed them. It has no purchase accounting, no price, no synergies and no financing.") && (await t.txt("#cbWhat")).includes("Surplus in particular is not what a combined company would report."), await t.txt("#cbWhat"));
   ok("until the base is set, the tab says what to do and offers nothing else", (await t.txt("#cbBaseNone")).startsWith("Set the base company first. Choose your company's NAIC group code, or up to 8 NAIC company codes, and give it a name.") && !(await p.$("#cbForm")), await t.txt("#cbBaseNone"));
