@@ -1317,10 +1317,12 @@ export function draftText(facts: Facts, ctx: DraftCtx): Promise<DraftOut> {
 }
 
 type Drafted<T> = { text: T; usage: ReturnType<typeof answerUsage>; model: string };
+/** The words askClaude gives for each way a request can fail (NOTES for the profiles). */
+export type ClaudeNotes = Pick<typeof NOTES, "timeout" | "unusable" | "refusal" | "busy" | "key" | "unreachable" | "overloaded" | "refused" | "fault">;
 /** The request both kinds of profile make: a system prompt, the facts as the user message, a JSON schema for the
     answer, and a check that turns Claude's answer into text the slides can use (falling back section by section). */
-async function askClaude<T extends { by: "plain" | "claude"; note: string | null }>(ctx: DraftCtx, a: { plain: T; system: string; schema: Record<string, unknown>; prompt: string; asOf: string; check: (doc: unknown) => T }): Promise<Drafted<T>> {
-  const plain = a.plain;
+export async function askClaude<T extends { by: "plain" | "claude"; note: string | null }>(ctx: DraftCtx, a: { plain: T; system: string; schema: Record<string, unknown>; prompt: string; asOf: string; check: (doc: unknown) => T; notes?: ClaudeNotes; what?: string }): Promise<Drafted<T>> {
+  const plain = a.plain, notes = a.notes ?? NOTES;   // notes and what: another caller's own words (the Screener's fill)
   const st = newState("profile", [], a.asOf);
   st.spRequests = ctx.spRequests;
   const model = ctx.env("CLAUDE_MODEL") || DEFAULT_MODEL;
@@ -1354,25 +1356,25 @@ async function askClaude<T extends { by: "plain" | "claude"; note: string | null
     try { message = await ask(true); }
     catch (e) {
       if (timedOut || !schemaRefused(e)) throw e;
-      console.error(`Anthropic refused the profile text's shape, so it is asked for once more without it: ${anthropicReason(e)}`);
+      console.error(`Anthropic refused ${a.what ?? "the profile text"}'s shape, so it is asked for once more without it: ${anthropicReason(e)}`);
       shaped = false;
       message = await ask(false);
     }
   } catch (e) {
-    if (timedOut) return fallback(NOTES.timeout);
+    if (timedOut) return fallback(notes.timeout);
     if (e instanceof Anthropic.APIError) console.error(`Anthropic API error ${e.status ?? "(no status)"}: ${e.message}`);
     else console.error(e);
-    return fallback(claudeProblem(e, NOTES));
+    return fallback(claudeProblem(e, notes));
   }
   st.model = message.model;
   addUsage(st, message.model, message.usage);
-  if (message.stop_reason === "refusal") return fallback(NOTES.refusal);
-  if (message.stop_reason !== "end_turn") return fallback(NOTES.unusable);
+  if (message.stop_reason === "refusal") return fallback(notes.refusal);
+  if (message.stop_reason !== "end_turn") return fallback(notes.unusable);
   const raw = message.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === "text").map((b) => b.text).join("");
   let doc: unknown;
   // structured output is the JSON alone; a reply without it may have words or a code fence around the JSON
-  if (shaped) { try { doc = JSON.parse(raw); } catch { return fallback(NOTES.unusable); } }
-  else { doc = jsonIn(raw); if (doc === null) return fallback(NOTES.unusable); }
+  if (shaped) { try { doc = JSON.parse(raw); } catch { return fallback(notes.unusable); } }
+  else { doc = jsonIn(raw); if (doc === null) return fallback(notes.unusable); }
   return { text: a.check(doc), usage: answerUsage(st), model: message.model };
 }
 
