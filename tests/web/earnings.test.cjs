@@ -103,7 +103,7 @@ function results(q){
 
   // ----- the tab, the view, a reader -----
   let t=await open({role:"reader"}); let p=t.p;
-  ok("eight tabs for a Corp Dev login, Earnings after Market, and it is the one open", same(await t.all("nav.tabs a"),["Filings","Snapshot","Compare","Market","Earnings","Statutory","Combination","Profile"]) && (await p.getAttribute('nav.tabs a[data-view="earnings"]',"aria-current"))==="page" && (await t.txt(".action-title"))==="Earnings documents for a quarter");
+  ok("nine tabs for a Corp Dev login, Earnings after Market, and it is the one open", same(await t.all("nav.tabs a"),["Filings","Snapshot","Compare","Market","Earnings","Statutory","Combination","Screener","Profile"]) && (await p.getAttribute('nav.tabs a[data-view="earnings"]',"aria-current"))==="page" && (await t.txt(".action-title"))==="Earnings documents for a quarter");
   ok("on opening: status and the watchlist, then what was found before for the latest ended quarter", t.of("status").length===1 && t.of("list").length===1 && same(t.of("saved"),[{action:"saved", quarter:"3Q26"}]) && t.of("find").length===0);
   ok("the quarter: the latest ended first, eight to choose from", (await p.inputValue("#ea_q"))==="3Q26" && same((await p.$$eval("#ea_q option",o=>o.map(x=>x.value))).slice(0,5),["3Q26","2Q26","1Q26","4Q25","3Q25"]) && (await p.$$("#ea_q option")).length===8);
   ok("what it can't do is said once, plainly", (await p.$$("#eaLimits")).length===1 && (await t.txt("#eaLimits")).includes("Investor sites that block automated tools show as refused") && (await t.txt("#eaLimits")).includes("The desktop script remains the way to get everything.") && (await t.txt("main")).split("desktop script remains").length===2);

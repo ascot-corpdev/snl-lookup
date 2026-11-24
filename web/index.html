@@ -794,6 +794,22 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
 .cbpname .sw{flex:none;width:14px;height:14px;display:inline-block;margin-top:2px}
 .sw.tex{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.55) 0 1.6px,transparent 1.6px 4.2px)}
 #cbpLegendWrap{max-width:760px}
+/* Screener (Corp Dev only) */
+.scpicks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 14px;min-width:0}
+.scpick{border:0;padding:0;margin:0;min-width:0;display:flex;flex-direction:column;gap:6px}
+.scpick legend,#sc_filters legend{padding:0;font-weight:bold;font-size:13px}
+.scbox{max-height:200px;overflow-y:auto;border:1px solid var(--grid);padding:6px 8px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.scbox input[type=search]{margin-bottom:4px}
+.scopt{display:flex;align-items:center;gap:6px;font-size:13px;overflow-wrap:anywhere;min-width:0}
+#sc_filters{border:0;padding:0;margin:0;min-width:0;display:flex;flex-direction:column;gap:8px}
+.scfrow{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) auto;gap:8px 10px;align-items:end;min-width:0}
+.scfrow .scfwhy{grid-column:1/-1;margin:0}
+.scread{margin:0;overflow-wrap:anywhere}
+#scWrap{position:relative}   /* keeps the column's screen-reader label inside the box that scrolls */
+.sctbl td:first-child{min-width:180px}
+.sctbl .scgrp{display:block}
+.scopen{display:inline-flex;gap:4px;flex-wrap:nowrap}
+@media (max-width:560px){.scpicks{grid-template-columns:minmax(0,1fr)}.scfrow{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.scfrow .f:first-child{grid-column:1/-1}}
 .cbplegend td:first-child{min-width:0;max-width:320px}
 @media (max-width:560px){.cbmgrid{grid-template-columns:minmax(0,1fr)}.cbmsmall{grid-template-columns:repeat(auto-fill,minmax(58px,1fr))}}
 </style>
@@ -823,6 +839,7 @@ textarea.code{font-family:Consolas,Menlo,monospace;font-size:12px;min-height:220
       <a href="#earnings" data-view="earnings">Earnings</a>
       <a href="#statutory" data-view="statutory">Statutory</a>
       <a href="#combination" data-view="combination" hidden>Combination</a>
+      <a href="#screener" data-view="screener" hidden>Screener</a>
       <a href="#profile" data-view="profile">Profile</a>
     </nav>
   </div>
@@ -7092,8 +7109,9 @@ function render(){
   const tab = S.view==="forms" ? "compare" : S.view;   // Programs and forms is the Compare tab's second page
   document.querySelectorAll("nav.tabs a").forEach(a=>a.setAttribute("aria-current", a.dataset.view===tab ? "page" : "false"));
   cbTab();   // the Combination tab shows for Corp Dev logins only
+  scTab();   // and so does the Screener tab
   document.getElementById("stripIn").innerHTML=stripHTML();
-  v.innerHTML = S.view==="combination" ? renderCombination() : S.view==="statutory" ? renderStatutory() : S.view==="profile" ? renderProfile() : S.view==="snapshot" ? renderSnapshot() : S.view==="forms" ? renderForms() : S.view==="compare" ? renderCompare() : S.view==="market" ? renderMarket() : S.view==="earnings" ? renderEarnings() : renderFilings();
+  v.innerHTML = S.view==="screener" ? renderScreener() : S.view==="combination" ? renderCombination() : S.view==="statutory" ? renderStatutory() : S.view==="profile" ? renderProfile() : S.view==="snapshot" ? renderSnapshot() : S.view==="forms" ? renderForms() : S.view==="compare" ? renderCompare() : S.view==="market" ? renderMarket() : S.view==="earnings" ? renderEarnings() : renderFilings();
   keep(); renderDrawer(); renderAsk();
   renderConn();
   renderLive();
@@ -9034,6 +9052,315 @@ document.addEventListener("click", e=>{ const el=cbpOf(e); if(el) cbpTipShow(el,
 document.addEventListener("touchstart", e=>{ if(!cbpOf(e)) cbpTipHide(); }, {passive:true});
 document.addEventListener("keydown", e=>{ if(e.key==="Escape" && cbpOf(e)) cbpTipHide(); });
 
+/* ---------- Screener (Corp Dev only): every company that fits a description, across all statutory filers ----------
+   A plain form, no Claude. The statutory function's "screen" action runs it as one Snowflake statement and returns the
+   ranked list; its "screen-lines" action gives S&P's own line names for a year, kept in this page for the session.
+   Nothing about a screen is kept: the last result stays in this page's memory only (never browser storage), the form
+   starts afresh each visit, and Ask Claude is told nothing about this view (askScreen gives null). The request is small
+   plain JSON, so a later stage can fill it in from a question. */
+VIEWS.push("screener");
+const SC_MAX_STATES = 10, SC_MAX_LINES = 10, SC_MAX_FILTERS = 8, SC_MAX_LIMIT = 500;
+/* The figures a filter can use: [id, label, unit]. Premium in view and focus first, then the one-a-year figures. */
+const SC_FIGS = [
+  ["premium","Premium in view","usd"],["focus","Focus: share of all direct premiums written","pct"],
+  ["gpw","Gross premiums written","usd"],["npe","Net premiums earned","usd"],["surplus","Policyholder surplus","usd"],["total_assets","Total assets","usd"],
+  ["net_income","Net income","usd"],["uw_gain","Net underwriting gain","usd"],["net_reserves","Net loss and LAE reserves","usd"],
+  ["combined_ratio","Combined ratio","pct"],["loss_ratio","Loss ratio","pct"],["loss_lae_ratio","Loss and LAE ratio","pct"],["expense_ratio","Expense ratio","pct"],
+  ["rbc_ratio","Risk-based capital ratio","pct"],["roae","Return on average equity","pct"]
+];
+const scFig = id => SC_FIGS.find(f=>f[0]===id) || (id==="growth" ? ["growth","Growth in premium in view","pct"] : [id, id, "usd"]);
+const SC_NOTES = [
+  "Figures are statutory, by legal entity: a group's companies are listed separately, never added up.",
+  "Premium in view is direct premiums written, in the states and lines chosen (all of them when none is chosen).",
+  "A company missing a figure is left out by a filter on that figure, and shows n/d where it is listed.",
+  "Cost: one Snowflake statement a screen, about 0.02 Snowflake credit, more for wide screens. No S&P filing requests and no Claude. Nothing about a screen is saved or sent anywhere."
+];
+function scFreshForm(){ return {year:String(new Date().getFullYear()-1), states:[], lines:[], filters:[], growth:{years:"", min:"", max:""}, group:"any", sort:"premium", dir:"desc", limit:"100", lineQ:""}; }
+function freshSc(){ return {form:scFreshForm(), formErr:"", lineCache:{}, linesBusy:"", linesErr:null, run:null, view:null}; }
+S.sc=freshSc();
+const scTab = () => { const a=document.querySelector('nav.tabs a[data-view="screener"]'); if(a) a.hidden=!isCorpDev(); };
+const scStateName = c => US_MAP[c] ? US_MAP[c][1] : c;
+const scStates = () => Object.keys(US_MAP).sort((a,b)=>scStateName(a).localeCompare(scStateName(b)));
+function enterScreener(){
+  if(!S.session || !isCorpDev()) return;   // other logins see no tab and the view asks for nothing
+  if(!S.st.status && !S.st.loading) Promise.resolve(loadStatStatus()).then(()=>{ if(S.view==="screener") scLoadLines(); });
+  else scLoadLines();
+}
+/* What the status says a screen can use: the premium figure for the states and lines chosen, and each figure. */
+const scInfo = () => (S.st.status && S.st.status.screen) || null;
+function scPremiumId(f){ const i=scInfo(); return f.states.length&&f.lines.length ? "dpw_by_state_line" : f.states.length ? "dpw_by_state" : f.lines.length ? "dpw_by_line" : i && i.premium.dpw_by_line && !i.premium.dpw_by_state ? "dpw_by_state" : "dpw_by_line"; }
+const SC_PREM_WORDS = {dpw_by_line:"Direct premiums written by line", dpw_by_state:"Direct premiums written by state", dpw_by_state_line:"Direct premiums written by state and line"};
+function scPremiumProblem(f){ const i=scInfo(); if(!i) return ""; const id=scPremiumId(f), p=i.premium[id];
+  return p ? `${SC_PREM_WORDS[id]} isn't mapped yet, so ${f.states.length&&f.lines.length?"a screen with both a state and a line":f.states.length?"a screen by state":"a screen"} can't run. ${isCorpDev()?`Map ${id} in Field set-up on the Statutory view.`:""}`.trim() : ""; }
+const scFigProblem = id => { const i=scInfo(); return i && i.figures && i.figures[id] ? i.figures[id] : ""; };
+const scGroupOn = () => { const i=scInfo(); return !!(i && i.group); };
+/* ----- the line names: S&P's own, one statement for a year, kept in this page for the session ----- */
+async function scLoadLines(force){
+  const sc=S.sc, y=sc.form.year, i=scInfo();
+  if(!/^\d{4}$/.test(y) || !i || i.premium.dpw_by_line || sc.linesBusy===y) return;
+  if(sc.lineCache[y] && !force) return;
+  sc.linesBusy=y; sc.linesErr=null; render();
+  const r=await callFn("snl-statutory", {action:"screen-lines", year:+y});
+  if(S.sc!==sc || !S.session) return;
+  sc.linesBusy="";
+  if(r.data && Array.isArray(r.data.lines)) sc.lineCache[y]={lines:r.data.lines.map(String), cut:!!r.data.cut};
+  else if(r.err!=="signin") sc.linesErr={...r, year:y};
+  render();
+}
+/* ----- the form, checked, as the request the function takes ----- */
+const scNum = v => { const s=String(v??"").trim().replace(/[$,%\s]/g,"").replace(/M$/i,""); return s==="" ? null : isFinite(+s) ? +s : NaN; };
+function scRequest(){
+  const f=S.sc.form, y=new Date().getFullYear(), year=/^\d{4}$/.test(f.year)?+f.year:0;
+  if(!year || year<1990 || year>y) return {err:`Choose a year between 1990 and ${y}.`};
+  const pp=scPremiumProblem(f); if(pp) return {err:pp};
+  const filters=[];
+  for(const x of f.filters){
+    const [id,label]=scFig(x.field), min=scNum(x.min), max=scNum(x.max);
+    if(scFigProblem(id)) return {err:scFigProblem(id)};
+    if(Number.isNaN(min) || Number.isNaN(max)) return {err:`${label}: type numbers only, like 50 or 12.5.`};
+    if(min===null && max===null) return {err:`${label}: type a minimum, a maximum or both, or remove the filter.`};
+    if(min!==null && max!==null && min>max) return {err:`${label}: the minimum is above the maximum.`};
+    if(filters.some(z=>z.field===id)) return {err:`${label} is in two filters. Keep one, with a minimum and a maximum.`};
+    filters.push({field:id, ...(min!==null?{min}:{}), ...(max!==null?{max}:{})});
+  }
+  let growth=null;
+  if(f.growth.years){
+    const min=scNum(f.growth.min), max=scNum(f.growth.max);
+    if(Number.isNaN(min) || Number.isNaN(max)) return {err:"Growth: type percentages only, like 10 or -5."};
+    if(min===null && max===null) return {err:"Growth: type a minimum, a maximum or both, or choose no growth filter."};
+    if(min!==null && max!==null && min>max) return {err:"Growth: the minimum is above the maximum."};
+    growth={years:+f.growth.years, ...(min!==null?{min}:{}), ...(max!==null?{max}:{})};
+  }
+  const limit=/^\d+$/.test(String(f.limit).trim())?+f.limit:0;
+  if(!limit || limit>SC_MAX_LIMIT) return {err:`Show between 1 and ${SC_MAX_LIMIT} companies.`};
+  if(f.sort==="growth" && !growth) return {err:"Sort by growth needs a growth filter. Choose one, or sort by something else."};
+  const req={action:"screen", year, states:[...f.states], lines:[...f.lines], filters, ...(growth?{growth}:{}), group:scGroupOn()?f.group:"any", sort:{by:f.sort, dir:f.dir==="asc"?"asc":"desc"}, limit};
+  return {req};
+}
+/* ----- the read-back: the screen in one plain line, written from what was asked ----- */
+function scBound(unit, min, max){
+  const v=x=>unit==="usd" ? usdM(x*1e6) : pct(x);
+  return min!==undefined&&max!==undefined ? `between ${v(min)} and ${v(max)}` : min!==undefined ? `at least ${v(min)}` : `at most ${v(max)}`;
+}
+function scReadBack(q){
+  const list=a=>a.length<2 ? a.join("") : a.slice(0,-1).join(", ")+" and "+a[a.length-1];
+  let head="Direct premiums written"+(q.states.length?` in ${list(q.states.map(scStateName))}`:"")+(q.lines.length?`, ${q.lines.join(", ")}`:"")+`, ${q.year}`;
+  const prem=q.filters.find(x=>x.field==="premium"); if(prem) head+=`, ${scBound("usd", prem.min, prem.max)}`;
+  const rest=q.filters.filter(x=>x.field!=="premium").map(x=>{ const [id,label,unit]=scFig(x.field); return `${id==="focus"?"focus (share of all direct premiums written)":label.toLowerCase()} ${scBound(unit, x.min, x.max)}`; });
+  if(q.growth) rest.push(`growth over ${plural(q.growth.years,"year")} ${scBound("pct", q.growth.min, q.growth.max)}`);
+  if(q.group==="in") rest.push("in a NAIC group"); else if(q.group==="none") rest.push("not in a NAIC group");
+  return head+(rest.length?"; "+rest.join("; "):"; every company with premium in view")+".";
+}
+const scSortWords = (by, dir) => `${by==="name"?"company name":by==="code"?"NAIC code":scFig(by)[1].toLowerCase()}, ${by==="name"||by==="code" ? (dir==="asc"?"A to Z":"Z to A") : (dir==="asc"?"smallest first":"largest first")}`;
+/* ----- running a screen: one call, with Stop; a late answer after Stop is dropped ----- */
+async function scRun(sortOver){
+  const sc=S.sc; if(sc.run && sc.run.busy) return;
+  if(sortOver){ sc.form.sort=sortOver.by; sc.form.dir=sortOver.dir; }
+  const c=scRequest();
+  if(c.err){ sc.formErr=c.err; render(); document.getElementById("scErr")?.focus?.(); return; }
+  const ctl=bsControl(), run={req:c.req, busy:true, ctl, res:null, err:null, stopped:false};
+  sc.formErr=""; sc.run=run; sc.view=null; pbStart("sc"); render();
+  const r=await Promise.race([callFn("snl-statutory", c.req), ctl.wait]);
+  if(S.sc!==sc || sc.run!==run) return;
+  run.busy=false; run.ctl=null;
+  if(ctl.stopped || r.err==="stopped"){ run.stopped=true; render(); return; }
+  if(!S.session) return;
+  if(r.data && Array.isArray(r.data.rows)) run.res=r.data;
+  else if(r.err!=="signin") run.err=r.data ? {err:"bad", msg:"The screen came back in a shape this page can't read. Try again."} : r;
+  render();
+}
+/* ----- the results ----- */
+const scVal = (unit, v) => unit==="usd" ? usdM(v) : pct(v);
+function scRows(res){
+  const v=S.sc.view, run=S.sc.run, by=v?v.k:run.req.sort.by, dir=v?v.d:(run.req.sort.dir==="asc"?1:-1);
+  if(!v) return res.rows;   // as the function sorted them
+  return sortRows(res.rows, r=>by==="name"?(blank(r.name)?null:String(r.name).toLowerCase()):by==="code"?Number(r.code):(isNum(r[by])?+r[by]:null), dir);
+}
+function scTableHTML(res){
+  const cols=res.columns||[], v=S.sc.view, run=S.sc.run, k=v?v.k:run.req.sort.by, d=v?v.d:(run.req.sort.dir==="asc"?1:-1), grp=!!res.groupMapped;
+  const th=(key, label, num)=>`<th class="${num?"num":""}" aria-sort="${k===key?(d>0?"ascending":"descending"):"none"}"><button type="button" class="cbmsort" data-act="sc-sort" data-k="${esc(key)}" aria-label="Sort by ${esc(label)}">${esc(label)}${k===key?(d>0?" ▲":" ▼"):""}</button></th>`;
+  const head=`<tr>${th("name","Company")}${th("code","NAIC code",true)}${cols.map(c=>th(c.id, c.id==="focus"?"Focus %":c.unit==="usd"?`${c.id==="premium"?"Premium in view":c.label} $M`:`${c.id==="growth"?"Growth":c.label} %`, true)).join("")}<th><span class="sr">Open in another view</span></th></tr>`;
+  const body=scRows(res).map(r=>{
+    const name=blank(r.name)?`NAIC ${r.code}`:r.name;
+    const g=grp ? (r.groupCode ? `<span class="t2 scgrp">NAIC group ${esc(r.groupCode)}${r.groupName?` · ${esc(r.groupName)}`:""}</span>` : `<span class="t2 scgrp">No NAIC group</span>`) : "";
+    const open=`<span class="scopen"><button type="button" class="btn sm" data-act="sc-open" data-to="statutory" data-code="${esc(r.code)}" data-name="${esc(r.name||"")}" aria-label="Open ${esc(name)} in Statutory">Statutory</button><button type="button" class="btn sm" data-act="sc-open" data-to="profile" data-code="${esc(r.code)}" data-name="${esc(r.name||"")}" aria-label="Open ${esc(name)} in Profile">Profile</button><button type="button" class="btn sm" data-act="sc-open" data-to="combination" data-code="${esc(r.code)}" data-name="${esc(r.name||"")}" aria-label="Use ${esc(name)} as the Combination target">As target</button></span>`;
+    return `<tr data-code="${esc(r.code)}"><td><span class="t1">${esc(name)}</span>${g}</td><td class="num">${esc(r.code)}</td>${cols.map(c=>`<td class="num" data-c="${esc(c.id)}">${esc(scVal(c.unit, r[c.id]))}</td>`).join("")}<td>${open}</td></tr>`;
+  }).join("");
+  return `<div class="tbl-wrap" data-keep id="scWrap"><table class="cbtbl sctbl" id="scTable"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+}
+function scShownText(res, run){
+  const n=res.rows.length, by=scSortWords(run.req.sort.by, run.req.sort.dir);
+  const which=run.req.sort.by==="name"||run.req.sort.by==="code" ? "first" : run.req.sort.dir==="asc" ? "smallest" : "largest";
+  return res.cut ? `Showing the ${which} ${count(n)} of ${count(res.total)} by ${by.replace(/, .*$/,"")}.` : `${plural(res.total,"company matches","companies match")} this screen, sorted by ${by}.`;
+}
+function scResultsHTML(){
+  const sc=S.sc, run=sc.run; if(!run) return "";
+  const rb=`<p class="scread" id="scReadBack"><b>Screen:</b> ${esc(scReadBack(run.req))}</p>`;
+  if(run.busy) return rb+`<div class="banner" id="scBusy" role="status"><span>Running the screen across every company… A screen can take up to a minute.</span>${pbHTML("sc", {name:"Screen"})}<button type="button" class="btn sm" data-act="sc-stop">Stop</button></div>`;
+  if(run.stopped) return rb+`<div class="banner" id="scStopped" role="status"><span>You stopped the screen before it came back, so nothing is shown from it.</span><button type="button" class="btn sm" data-act="sc-retry">Run it again</button></div>`;
+  if(run.err){
+    const e=run.err;
+    if(e.err==="timeout") return rb+`<div class="banner" id="scTimeout" role="alert"><span><b>The screen took too long.</b> ${esc(e.msg)}</span><button type="button" class="btn sm" data-act="sc-retry">Try again</button></div>`;
+    if(e.err==="not_mapped" || e.err==="fans_out" || e.err==="group" || e.err==="not_configured") return rb+`<div class="info" id="scCant" role="status"><span><b>This screen can't run yet.</b> ${esc(e.msg)}</span></div>`;
+    return rb+problemHTML(e, "The screen didn't run.", "sc-retry").replace('<div class="', '<div id="scFailed" class="');
+  }
+  const res=run.res; if(!res) return rb;
+  let h=rb;
+  if(!res.rows.length) return h+`<div class="empty" id="scNone"><p><b>S&amp;P returned no company for this screen in ${esc(res.year)}.</b> That doesn't mean no such company exists. Loosen a filter, choose fewer, or check that ${esc(res.year)} has been filed: statements for a year come in during the spring after it.</p></div>`+scNotesHTML(res);
+  const exp=`<span class="inline"><button type="button" class="btn sm" data-act="sc-export" data-fmt="csv">Export CSV</button><button type="button" class="btn sm" data-act="sc-export" data-fmt="xlsx">Export XLSX</button></span>`;
+  h+=`<div class="blk-h"><p class="t2" id="scShown" style="flex:1 1 300px;margin:0">${esc(scShownText(res, run))}</p>${exp}</div>`;
+  const v=sc.view, resorted=v && !(v.k===run.req.sort.by && (v.d>0?"asc":"desc")===run.req.sort.dir);
+  if(res.cut) h+=`<div class="info" id="scCut" role="status"><span>The list was cut at ${count(res.rows.length)} companies, so sorting the table only reorders these ${count(res.rows.length)}, not all ${count(res.total)} that match.${resorted?` To see the first ${count(res.rows.length)} of all ${count(res.total)} sorted by ${esc(scSortWords(v.k, v.d>0?"asc":"desc"))}, run it again.`:""}</span>${resorted?`<button type="button" class="btn sm" id="scAgain" data-act="sc-again">Run again sorted this way</button>`:""}</div>`;
+  h+=scTableHTML(res)+scNotesHTML(res);
+  return h;
+}
+function scNotesHTML(res){
+  const notes=[...SC_NOTES.slice(0,3), ...(Array.isArray(res&&res.notes)?res.notes.map(String):[]), SC_NOTES[3]];
+  return `<ul class="cbnotes" id="scNotes">${notes.map(n=>`<li>${esc(n)}</li>`).join("")}</ul>${res&&res.fetchedAt?`<p class="source" id="scSource">Source: S&amp;P Global Market Intelligence statutory data, as filed, fetched ${esc(fmtAt(res.fetchedAt))}. US dollars are shown in $M.</p>`:""}`;
+}
+/* ----- the form ----- */
+function scPickHTML(kind){
+  const f=S.sc.form, chosen=kind==="states"?f.states:f.lines, max=kind==="states"?SC_MAX_STATES:SC_MAX_LINES, full=chosen.length>=max;
+  const chips=chosen.map(x=>`<span class="cchip"><span><b>${esc(kind==="states"?scStateName(x):x)}</b>${kind==="states"?` <span class="t2">${esc(x)}</span>`:""}</span><button type="button" data-act="sc-unpick" data-kind="${kind}" data-v="${esc(x)}" aria-label="Remove ${esc(kind==="states"?scStateName(x):x)}">×</button></span>`).join("");
+  let list="";
+  if(kind==="states") list=scStates().map(c=>{ const on=chosen.includes(c); return `<label class="scopt"><input type="checkbox" data-sc-pick="states" value="${c}" ${on?"checked":""} ${!on&&full?"disabled":""}> ${esc(scStateName(c))}</label>`; }).join("");
+  else{
+    const i=scInfo(), y=f.year, c=S.sc.lineCache[y], e=S.sc.linesErr;
+    if(i && i.premium.dpw_by_line) list=`<p class="t2" id="scLinesOff">Lines can't be chosen: direct premiums written by line isn't mapped yet${isCorpDev()?" (map dpw_by_line in Field set-up on the Statutory view)":""}. The rest of the form still works.</p>`;
+    else if(S.sc.linesBusy===y) list=`<p class="t2" id="scLinesBusy" role="status">Getting S&amp;P's line names for ${esc(y)}…</p>`;
+    else if(e && e.year===y) list=`<div class="banner" id="scLinesErr" role="alert"><span>S&amp;P's line names for ${esc(y)} couldn't be loaded. ${esc(errText(e))} The rest of the form still works.</span><button type="button" class="btn sm" data-act="sc-lines-retry">Try again</button></div>`;
+    else if(!c) list=`<p class="t2" id="scLinesNone">Choose a year to see S&amp;P's line names for it.</p>`;
+    else if(!c.lines.length) list=`<p class="t2" id="scLinesEmpty">S&amp;P returned no line names for ${esc(y)}. Choose another year.</p>`;
+    else{
+      const q=f.lineQ.trim().toLowerCase(), shown=c.lines.filter(l=>!q||l.toLowerCase().includes(q));
+      list=`<input type="search" id="sc_lineQ" data-bind="sc.form.lineQ" data-sc-live value="${esc(f.lineQ)}" placeholder="Filter the lines" aria-label="Filter the line names" autocomplete="off">`
+        +shown.map(l=>{ const on=chosen.includes(l); return `<label class="scopt"><input type="checkbox" data-sc-pick="lines" value="${esc(l)}" ${on?"checked":""} ${!on&&full?"disabled":""}> ${esc(l)}</label>`; }).join("")
+        +(shown.length?"":`<p class="t2">No line name contains "${esc(f.lineQ)}".</p>`);
+    }
+  }
+  const title=kind==="states"?"States":"Lines of business", em=kind==="states"?`up to ${SC_MAX_STATES}; none means all states`:`up to ${SC_MAX_LINES}, as S&amp;P names them; none means all lines`;
+  return `<fieldset class="f scpick" id="sc_${kind}"><legend>${title} <em>${em}</em></legend><div class="chips" aria-label="Chosen ${kind}">${chips}</div><div class="scbox" id="sc_${kind}_box" data-keep>${list}</div>${full?`<p class="t2">That is the most a screen takes. Remove one to choose another.</p>`:""}</fieldset>`;
+}
+function scFilterRowHTML(x, i){
+  const [id,,unit]=scFig(x.field), prob=scFigProblem(id), u=unit==="usd"?"$M":"%";
+  const opts=SC_FIGS.map(([fid,label])=>{ const p=scFigProblem(fid); return `<option value="${fid}" ${fid===x.field?"selected":""} ${p&&fid!==x.field?"disabled":""}>${esc(label)}${p?" (not mapped)":""}</option>`; }).join("");
+  return `<div class="scfrow" data-i="${i}"><label class="f"><span>Figure</span><select id="sc_f${i}_field" data-bind="sc.form.filters.${i}.field" data-sc-render>${opts}</select></label>
+    <label class="f"><span>At least <em>${u}</em></span><input type="text" inputmode="decimal" id="sc_f${i}_min" data-bind="sc.form.filters.${i}.min" value="${esc(x.min)}" autocomplete="off" placeholder="${unit==="usd"?"For example 50":"For example 10"}"></label>
+    <label class="f"><span>At most <em>${u}</em></span><input type="text" inputmode="decimal" id="sc_f${i}_max" data-bind="sc.form.filters.${i}.max" value="${esc(x.max)}" autocomplete="off" placeholder="${unit==="usd"?"For example 300":"For example 100"}"></label>
+    <button type="button" class="btn sm" data-act="sc-filter-remove" data-i="${i}" aria-label="Remove the ${esc(scFig(id)[1].toLowerCase())} filter">Remove</button>
+    ${prob?`<p class="t2 scfwhy" id="sc_f${i}_why">${esc(prob)}</p>`:""}</div>`;
+}
+function scFormHTML(){
+  const sc=S.sc, f=sc.form, busy=!!(sc.run&&sc.run.busy), y=new Date().getFullYear(), pp=scPremiumProblem(f);
+  const used=new Set(f.filters.map(x=>x.field));
+  const sorts=[["premium","Premium in view"],["focus","Focus"],...(f.growth.years?[["growth","Growth"]]:[]),["name","Company name"],["code","NAIC code"],
+    ...SC_FIGS.filter(([id])=>id!=="premium"&&id!=="focus"&&(used.has(id)||["surplus","combined_ratio","gpw"].includes(id))&&!scFigProblem(id)).map(([id,l])=>[id,l])];
+  if(!sorts.some(s=>s[0]===f.sort)) f.sort="premium";
+  return `<form class="tcard" id="scForm" novalidate aria-label="Screen"><h3>Describe the companies you are looking for</h3>
+    <div class="fgrid three" style="align-items:end"><label class="f">Statement year<input type="number" id="sc_year" data-bind="sc.form.year" value="${esc(f.year)}" min="1990" max="${y}" step="1"></label></div>
+    <div class="scpicks">${scPickHTML("states")}${scPickHTML("lines")}</div>
+    ${pp?`<div class="info" id="scPremOff" role="status"><span>${esc(pp)}</span></div>`:""}
+    <fieldset class="f" id="sc_filters"><legend>Filters <em>up to ${SC_MAX_FILTERS}; dollars in $M, ratios and shares in percent</em></legend>
+      ${f.filters.map(scFilterRowHTML).join("")||`<p class="t2" id="scNoFilters">No filters yet: every company with premium in view is listed, largest first.</p>`}
+      <div><button type="button" class="btn sm" id="scAddFilter" data-act="sc-filter-add" ${f.filters.length>=SC_MAX_FILTERS?"disabled":""}>Add a filter</button></div></fieldset>
+    <div class="fgrid three" style="align-items:end">
+      <label class="f"><span>Growth in premium in view</span><select id="sc_growth" data-bind="sc.form.growth.years" data-sc-render><option value="" ${!f.growth.years?"selected":""}>No growth filter</option>${[1,3,5].map(n=>`<option value="${n}" ${String(f.growth.years)===String(n)?"selected":""}>Over ${plural(n,"year")}</option>`).join("")}</select></label>
+      ${f.growth.years?`<label class="f"><span>Growth at least <em>%</em></span><input type="text" inputmode="decimal" id="sc_gmin" data-bind="sc.form.growth.min" value="${esc(f.growth.min)}" autocomplete="off"></label><label class="f"><span>Growth at most <em>%</em></span><input type="text" inputmode="decimal" id="sc_gmax" data-bind="sc.form.growth.max" value="${esc(f.growth.max)}" autocomplete="off"></label>`:""}
+    </div>
+    ${f.growth.years?`<p class="t2" id="scGrowthNote">A company with nothing in the earlier year has no growth figure, so it doesn't pass a growth filter.</p>`:""}
+    <div class="fgrid three" style="align-items:end">
+      ${scGroupOn()?`<label class="f"><span>NAIC group</span><select id="sc_group" data-bind="sc.form.group"><option value="any" ${f.group==="any"?"selected":""}>In a group or not</option><option value="in" ${f.group==="in"?"selected":""}>In a NAIC group</option><option value="none" ${f.group==="none"?"selected":""}>Not in a NAIC group</option></select></label>`:""}
+      <label class="f"><span>Sort by</span><select id="sc_sort" data-bind="sc.form.sort">${sorts.map(([id,l])=>`<option value="${id}" ${f.sort===id?"selected":""}>${esc(l)}</option>`).join("")}</select></label>
+      <label class="f"><span>Order</span><select id="sc_dir" data-bind="sc.form.dir"><option value="desc" ${f.dir!=="asc"?"selected":""}>Largest first (Z to A)</option><option value="asc" ${f.dir==="asc"?"selected":""}>Smallest first (A to Z)</option></select></label>
+      <label class="f"><span>Companies to show <em>up to ${SC_MAX_LIMIT}</em></span><input type="number" id="sc_limit" data-bind="sc.form.limit" value="${esc(f.limit)}" min="1" max="${SC_MAX_LIMIT}" step="1"></label>
+    </div>
+    ${scGroupOn()?"":`<p class="t2" id="scGroupOff">Choosing by NAIC group needs the company look-up, with its group code column, mapped in Field set-up on the Statutory view.</p>`}
+    ${sc.formErr?`<p class="err" id="scErr" role="alert" tabindex="-1">${esc(sc.formErr)}</p>`:""}
+    <div class="toolbar"><button type="button" class="btn primary" id="scGo" data-act="sc-go" ${busy?"disabled":""}>${busy?"Running…":"Run screen"}</button></div></form>`;
+}
+function renderScreener(){
+  const head=`<div><h2 class="action-title">Screener: find companies that fit a description</h2>
+    <p class="sub">Every company that files a US statutory statement, ranked by direct premiums written in the states and lines you choose, with filters on their figures. For Corp Dev only.</p></div>`;
+  if(!isCorpDev()) return head+`<div class="info" id="scOnly" role="status"><span>This view is for Corp Dev logins.</span></div>`;
+  const s=S.st.status;
+  if(!s) return head+(S.st.statusErr ? problemHTML(S.st.statusErr, "Couldn't check the statutory data.", "stat-status-retry") : `<div class="banner" role="status"><span>Checking whether statutory data is set up…</span></div>`);
+  if(!s.configured) return head+`<div class="info" id="scOff" role="status"><span><b>Statutory data isn't set up yet,</b> so there is nothing to screen. It needs a Snowflake reader account from S&amp;P (README, step 7).</span></div>`;
+  if(!s.mapped) return head+`<div class="info" id="scUnmapped" role="status"><span><b>Snowflake is connected, but the statutory fields aren't mapped yet.</b> Map them in the field set-up on the <a href="#statutory">Statutory view</a>.</span></div>`;
+  if(!s.screen) return head+`<div class="info" id="scNotDeployed" role="status"><span><b>The Screener needs the latest statutory function.</b> Run: supabase functions deploy snl-statutory --no-verify-jwt (see the README).</span></div>`;
+  return head+scFormHTML()+`<div id="scResults" style="display:flex;flex-direction:column;gap:14px;min-width:0" aria-live="polite">${scResultsHTML()}</div>`;
+}
+/* ----- export: the result with its read-back, year and notes ----- */
+function scExport(){
+  const run=S.sc.run, res=run&&run.res; if(!res || !res.rows.length) return null;
+  const cols=res.columns||[], grp=!!res.groupMapped;
+  const head=["NAIC company code","Company", ...(grp?["NAIC group code","NAIC group"]:[]), ...cols.map(c=>c.unit==="usd"?`${c.id==="premium"?"Premium in view":c.label} US dollars`:`${c.id==="focus"?"Focus":c.id==="growth"?"Growth":c.label} %`)];
+  const out=v=>isNum(v)?Math.round(+v*10000)/10000:"n/d";
+  const rows=scRows(res).map(r=>[r.code, r.name||"", ...(grp?[r.groupCode||"", r.groupName||""]:[]), ...cols.map(c=>c.unit==="usd"&&isNum(r[c.id])?Math.round(+r[c.id]):out(r[c.id]))]);
+  const pad=n=>Array(Math.max(0,n)).fill(""), w=head.length-2;
+  const notes=[...SC_NOTES.slice(0,3), ...(Array.isArray(res.notes)?res.notes.map(String):[]), SC_NOTES[3]];
+  return {name:`snl-screen-${TODAY()}`, sheet:"Screen", cols:head, rows:[...rows, pad(head.length), ["Screen", scReadBack(run.req), ...pad(w)], ["Year", String(res.year), ...pad(w)], ["Shown", scShownText(res, run), ...pad(w)],
+    ...notes.map(n=>["Note", n, ...pad(w)]), ["Source", "S&P Global Market Intelligence statutory data, as filed", ...pad(w)]]};
+}
+/* ----- opening a company elsewhere, the way Find by name hands a code to each view ----- */
+function scOpen(to, code, name){
+  if(!naicOk(code)) return;
+  const year=S.sc.run&&S.sc.run.res ? +S.sc.run.res.year : new Date().getFullYear()-1;
+  if(to==="statutory"){
+    const st=S.st; st.kind="company"; st.codes=String(code); st.toYear=String(year); st.fromYear=String(year-4); st.formErr="";
+    if(!blank(name)) statFind().names.company[code]=String(name);
+    location.hash="#statutory"; runStat(false);
+  } else if(to==="profile"){
+    S.pf.kind="company"; S.pf.find.matches=null; location.hash="#profile"; pfChoose(code, name);
+  } else if(to==="combination"){
+    const pk=cbPick(); pk.codes=String(code); if(!blank(name)) pk.names[code]=String(name);
+    S.cb.target=pk; S.cb.formErr=""; location.hash="#combination";
+    setTimeout(()=>document.getElementById("cbGo")?.focus(), 400);
+  }
+}
+/* ----- events ----- */
+document.addEventListener("click", e=>{
+  const t=e.target.closest&&e.target.closest("[data-act]"); if(!t || !/^sc-/.test(t.dataset.act) || !isCorpDev()) return;
+  const sc=S.sc, f=sc.form;
+  switch(t.dataset.act){
+    case "sc-go": scRun(); break;
+    case "sc-retry": scRun(); break;
+    case "sc-stop": if(sc.run && sc.run.busy && sc.run.ctl) sc.run.ctl.stop(); break;
+    case "sc-again": if(sc.view) scRun({by:sc.view.k, dir:sc.view.d>0?"asc":"desc"}); break;
+    case "sc-sort": { const k=t.dataset.k, run=sc.run; if(!run||!run.res) break; const cur=sc.view||{k:run.req.sort.by, d:run.req.sort.dir==="asc"?1:-1};
+      sc.view={k, d:cur.k===k ? -cur.d : (k==="name"||k==="code"?1:-1)}; render(); document.querySelector(`#scTable [data-k="${CSS.escape(k)}"]`)?.focus(); break; }
+    case "sc-export": exportTable(scExport(), t.dataset.fmt); break;
+    case "sc-open": scOpen(t.dataset.to, t.dataset.code, t.dataset.name); break;
+    case "sc-filter-add": if(f.filters.length<SC_MAX_FILTERS){ const free=SC_FIGS.find(([id])=>!f.filters.some(x=>x.field===id)&&!scFigProblem(id)); f.filters.push({field:free?free[0]:"premium", min:"", max:""}); render(); document.getElementById(`sc_f${f.filters.length-1}_field`)?.focus(); } break;
+    case "sc-filter-remove": f.filters.splice(+t.dataset.i,1); render(); document.getElementById("scAddFilter")?.focus(); break;
+    case "sc-unpick": { const k=t.dataset.kind==="lines"?"lines":"states"; f[k]=f[k].filter(x=>x!==t.dataset.v); render(); break; }
+    case "sc-lines-retry": scLoadLines(true); break;
+  }
+});
+document.addEventListener("change", e=>{
+  const el=e.target; if(!isCorpDev() || S.view!=="screener") return;
+  if(el.dataset && el.dataset.scPick){
+    const k=el.dataset.scPick==="lines"?"lines":"states", f=S.sc.form, max=k==="states"?SC_MAX_STATES:SC_MAX_LINES;
+    if(el.checked && !f[k].includes(el.value) && f[k].length<max) f[k].push(el.value);
+    if(!el.checked) f[k]=f[k].filter(x=>x!==el.value);
+    const id=el.id; render(); const again=[...document.querySelectorAll(`[data-sc-pick="${k}"]`)].find(x=>x.value===el.value); again?.focus();
+    return;
+  }
+  if(el.id==="sc_year") scLoadLines();
+  if(el.dataset && "scRender" in el.dataset){ if(el.id==="sc_growth" && !el.value && S.sc.form.sort==="growth") S.sc.form.sort="premium"; render(); el.id && document.getElementById(el.id)?.focus(); }
+});
+document.addEventListener("input", e=>{   // the line list narrows while typing, without a rebuild of the form
+  if(e.target.id!=="sc_lineQ") return;
+  S.sc.form.lineQ=e.target.value;
+  const box=document.getElementById("sc_lines"); if(!box) return;
+  const tmp=document.createElement("div"); tmp.innerHTML=scPickHTML("lines");
+  const fresh=tmp.querySelector("#sc_lines_box"), mine=document.getElementById("sc_lines_box");
+  if(fresh && mine){ [...mine.children].forEach(c=>{ if(c.id!=="sc_lineQ") c.remove(); }); [...fresh.children].forEach(c=>{ if(c.id!=="sc_lineQ") mine.appendChild(c); }); }
+});
+document.addEventListener("keydown", e=>{
+  if(e.key!=="Enter" || !e.target.id || !/^sc_(year|limit|gmin|gmax|f\d+_(min|max))$/.test(e.target.id)) return;
+  e.preventDefault(); scRun();
+});
+
 /* ---------- routing ---------- */
 const VIEW_KEY="snl.view";
 function enterView(){
@@ -9049,6 +9376,7 @@ function enterView(){
   if(S.view==="market") enterMarket();
   if(S.view==="earnings") enterEarnings();
   if(S.view==="combination") enterCombination();
+  if(S.view==="screener") enterScreener();
 }
 function route(){
   const h=location.hash.replace(/^#/,""); let v=VIEWS.includes(h)?h:null;
@@ -9385,6 +9713,7 @@ function resetState(){
   resetMarket();
   resetEarnings();
   S.cb=freshCb();
+  S.sc=freshSc();   // the last screen, held in memory only, goes with the session
   pbReset();
 }
 async function onSignedIn(session){

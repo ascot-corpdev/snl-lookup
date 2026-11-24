@@ -83,7 +83,8 @@ export async function keyPairJwt(c: SnowflakeCreds, nowMs: number): Promise<stri
   return `${head}.${claims}.${b64url(new Uint8Array(sig))}`;
 }
 
-export type Binding = { type: "TEXT" | "FIXED"; value: string };
+/** REAL: a number that may have a fraction (the Screener's bounds); Snowflake's SQL API lists it beside FIXED and TEXT. */
+export type Binding = { type: "TEXT" | "FIXED" | "REAL"; value: string };
 export type SqlResult = { columns: { name: string; type: string }[]; rows: Record<string, string | null>[]; truncated: boolean; statementHandle: string | null };
 export type SnowflakeIo = { fetch: typeof fetch; now: () => number; sleep: (ms: number) => Promise<void> };
 
