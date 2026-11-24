@@ -189,3 +189,6 @@ export async function screenLines(sf: Snowflake, database: string, schema: strin
 }
 
 export { premiumFigure };
+/** The figures a filter takes, the sorts and the labels parseScreen uses, for the Screener's fill (screenfill.ts), so
+    what Claude is told is built from the same constants and never from a second list. */
+export { FIELDS as SCREEN_FIELDS, label as screenLabel, SORTS as SCREEN_SORTS };

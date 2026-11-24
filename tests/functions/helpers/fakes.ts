@@ -514,6 +514,8 @@ export function fakeAnthropic(script: (Reply | ((body: any, n: number) => Reply)
 export const toolUse = (id: string, name: string, input: Record<string, unknown>): Block => ({ type: "tool_use", id, name, input });
 export const thinking = (): Block => ({ type: "thinking", thinking: "", signature: "sig-test" });
 export const say = (text: string, citations?: Block[]): Block => ({ type: "text", text, ...(citations ? { citations } : {}) });
+/** A finished reply whose text is this JSON, as structured output gives it (the Screener's fill). */
+export const jsonReply = (o: unknown, extra: Partial<Extract<Reply, { content: Block[] }>> = {}): Reply => ({ content: [say(JSON.stringify(o))], ...extra });
 export const pageCite = (document_index: number, start: number, endExclusive: number, cited_text: string, document_title = "doc"): Block =>
   ({ type: "page_location", cited_text, document_index, document_title, start_page_number: start, end_page_number: endExclusive, file_id: null });
 
